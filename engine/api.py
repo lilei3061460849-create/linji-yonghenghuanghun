@@ -1608,11 +1608,9 @@ class GameEngine:
         living_rivals = [entity for entity in enemies if entity.entity_type == "轮回者"]
         if world.final_duel_complete:
             return {"active": False, "complete": True, "winner": world.final_duel_winner}
-        living_allies = [entity for group_name in ("friends", "employees", "temp_friends")
-                         for entity in (getattr(self.state, group_name, []) or [])
-                         if entity.is_alive and not entity.is_departed]
-        # 最终死斗以剩余轮回者人数判定；地图怪物仍然存在时，仍会在会合期间继续构成威胁。
-        eligible = (player is not None and player.is_alive and not living_allies
+        # 最终死斗以剩余轮回者人数判定，不要求玩家先抛弃朋友/员工/造物；
+        # 怪物仍然存在时，也会在两名轮回者自然会合期间继续构成威胁。
+        eligible = (player is not None and player.is_alive
                     and len(living_rivals) == 1)
         if not world.final_duel_search and eligible:
             world.final_duel_search = True
