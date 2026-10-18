@@ -32,6 +32,7 @@ class WorldMap:
     height: int
     terrain: dict[str, str] = field(default_factory=dict)
     opaque_terrain: set[str] = field(default_factory=lambda: {"wall", "building"})
+    locations: dict[str, dict[str, Any]] = field(default_factory=dict)
     version: int = 1
 
     @staticmethod
@@ -102,6 +103,27 @@ class WorldMap:
                 queue.append(nxt)
         return None
 
+    def add_location(self, location_id: str, location: dict[str, Any]) -> None:
+        if not location_id or location_id in self.locations:
+            raise ValueError("地点ID必须非空且唯一")
+        pos = (int(location.get("x", -1)), int(location.get("y", -1)))
+        if not self.is_passable(pos):
+            raise ValueError("地点必须位于可通行格")
+        if any((int(existing.get("x", -1)), int(existing.get("y", -1))) == pos
+               for existing in self.locations.values()):
+            raise ValueError("同一格不能放置多个特殊地点")
+        value = dict(location)
+        value.update({"x": pos[0], "y": pos[1]})
+        value.setdefault("discovered", False)
+        value.setdefault("active", True)
+        self.locations[location_id] = value
+
+    def location_at(self, pos: Coord) -> tuple[str, dict[str, Any]] | None:
+        for location_id, location in self.locations.items():
+            if (int(location.get("x", -1)), int(location.get("y", -1))) == pos:
+                return location_id, location
+        return None
+
     def adjacent_vision(self, pos: Coord) -> list[Coord]:
         """只看上下左右一格；斜角不算。相邻障碍本身可见，但不会透视其后方。"""
         visible = []
@@ -116,6 +138,7 @@ class WorldMap:
             "width": self.width, "height": self.height,
             "terrain": dict(self.terrain),
             "opaque_terrain": sorted(self.opaque_terrain),
+            "locations": {key: dict(value) for key, value in self.locations.items()},
             "version": self.version,
         }
 
@@ -125,6 +148,7 @@ class WorldMap:
             width=int(data["width"]), height=int(data["height"]),
             terrain={str(k): str(v) for k, v in data.get("terrain", {}).items()},
             opaque_terrain=set(data.get("opaque_terrain", ["wall", "building"])),
+            locations={str(k): dict(v) for k, v in data.get("locations", {}).items()},
             version=int(data.get("version", 1)),
         )
 
