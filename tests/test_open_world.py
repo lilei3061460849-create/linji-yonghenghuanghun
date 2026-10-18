@@ -316,3 +316,54 @@ def test_timed_action_is_interrupted_by_hostile_encounter_before_reward(tmp_path
     assert engine.state.attribute_points == 0
     assert any(encounter["active"] for encounter in WorldState.from_dict(
         engine.state.world_state).encounters.values())
+
+
+def test_world_interact_attack_registers_real_encounter_but_does_not_fake_battle(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "interact-attack.db"),
+                        save_dir=str(tmp_path), rng_seed=61)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.enemies = [Entity("R", "轮回者", blood_limit=30, current_hp=30)]
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    world = WorldState.from_dict(engine.state.world_state)
+    player_id = engine.state.player.runtime_id
+    target_id = engine.state.enemies[0].runtime_id
+    world.actors[player_id].x, world.actors[player_id].y = 1, 1
+    world.actors[target_id].x, world.actors[target_id].y = 2, 1
+    world.actors[target_id].mode = "manual"
+    engine.state.world_state = world.to_dict()
+
+    result = engine.execute_action("world_interact", {
+        "target_actor_id": target_id, "choice": "attack",
+    })
+    assert result["success"], result
+    assert result["result"]["battle_started"] is False
+    restored = WorldState.from_dict(engine.state.world_state)
+    assert restored.encounters[result["result"]["encounter_id"]].active
+
+
+def test_world_interact_trade_requires_actual_adjacency(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "interact-trade.db"),
+                        save_dir=str(tmp_path), rng_seed=67)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.merchant = Entity("过路商人", "特殊角色", is_neutral=True, shards=20)
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    world = WorldState.from_dict(engine.state.world_state)
+    player_id = engine.state.player.runtime_id
+    merchant_id = engine.state.merchant.runtime_id
+    world.actors[player_id].x, world.actors[player_id].y = 1, 1
+    world.actors[merchant_id].x, world.actors[merchant_id].y = 4, 4
+    world.actors[merchant_id].mode = "manual"
+    engine.state.world_state = world.to_dict()
+    far = engine.execute_action("world_interact", {
+        "target_actor_id": merchant_id, "choice": "trade",
+    })
+    assert not far["success"]
+    assert engine.event_pool.current is None
