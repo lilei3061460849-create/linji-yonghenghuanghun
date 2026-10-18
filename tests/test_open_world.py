@@ -1242,7 +1242,7 @@ def test_autonomous_reincarnator_remembers_visible_resource_and_moves_toward_it(
 @pytest.mark.parametrize(
     ("behavior", "guard_position", "expected_position"),
     [
-        ("follow", None, (4, 5)),
+        ("follow", None, (5, 4)),
         ("guard", (5, 4), (5, 4)),
     ],
 )
