@@ -563,7 +563,12 @@ class GameEngine:
                     "x": "guard模式可选整数坐标", "y": "guard模式可选整数坐标"}},
                 {"action_type": "world_interact", "params_schema": {
                     "target_actor_id": "actor_id from visible_actors",
-                    "choice": ["talk", "trade", "cooperate", "intimidate", "attack"]}},
+                    "choice": ["talk", "trade", "cooperate", "intimidate", "attack"],
+                    "offer_shards": "trade时可选：你支付的碎片",
+                    "request_shards": "trade时可选：你索取的碎片",
+                    "give_relic": "trade时可选：你交出的遗物名称",
+                    "request_relic": "trade时可选：你索取的遗物名称",
+                    "trade_rule": "NPC按每件遗物10碎片估值；只接受对其价值不亏的报价"}},
             ])
         if getattr(self.state, "world_state", {}):
             world = WorldState.from_dict(self.state.world_state)
