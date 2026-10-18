@@ -401,6 +401,37 @@ class WorldState:
             result["boundary_shrunk"] = shrink
         return result
 
+    def _find_known_path(self, actor_id: str, start: Coord, goal: Coord) -> list[Coord] | None:
+        """只在该单位已知的可通行格中寻路，不读取迷雾里的地形。"""
+        actor = self.actors.get(actor_id)
+        if actor is None:
+            return None
+        known = {self.map.parse(key) for key in actor.known_cells}
+        known.add(start)
+        if goal not in known or not self.map.is_passable(goal):
+            return None
+        queue = deque([start])
+        previous: dict[Coord, Coord | None] = {start: None}
+        while queue:
+            current = queue.popleft()
+            if current == goal:
+                break
+            x, y = current
+            for nxt in ((x, y - 1), (x, y + 1), (x - 1, y), (x + 1, y)):
+                if (nxt in known and nxt not in previous
+                        and self.map.is_passable(nxt)):
+                    previous[nxt] = current
+                    queue.append(nxt)
+        if goal not in previous:
+            return None
+        path = []
+        current: Coord | None = goal
+        while current is not None:
+            path.append(current)
+            current = previous[current]
+        path.reverse()
+        return path
+
     def _run_autonomous_units(self) -> list[dict[str, Any]]:
         """推进当前世界回合的NPC行动；每个单位只使用自己的可见信息。"""
         generated: list[dict[str, Any]] = []
@@ -502,24 +533,25 @@ class WorldState:
                     goal_pos = tuple(goal.get("position", []))
                     if len(goal_pos) != 2 or goal_pos == actor.position:
                         continue
-                    path = self.map.find_path(actor.position, goal_pos)
-                    if not path or len(path) < 2:
-                        continue
-                    preferred = path[1]
-                    if preferred in candidates:
-                        destination = preferred
-                        break
-                    # 若最短路被占位阻挡，选择一个可走且更接近目标的格。
-                    shorter = []
-                    for candidate in candidates:
-                        route = self.map.find_path(candidate, goal_pos)
-                        if route is not None and len(route) < len(path):
-                            shorter.append(candidate)
-                    if shorter:
+                    path = self._find_known_path(actor_id, actor.position, goal_pos)
+                    if path and len(path) > 1:
+                        preferred = path[1]
+                        if preferred in candidates:
+                            destination = preferred
+                            break
+                    # 没有已知路线时只按相邻格和已知目标坐标做局部推断；
+                    # 不使用完整地图的寻路结果猜测迷雾中的墙体分布。
+                    current_distance = abs(goal_pos[0] - actor.x) + abs(goal_pos[1] - actor.y)
+                    closer = [candidate for candidate in candidates
+                              if abs(goal_pos[0] - candidate[0])
+                              + abs(goal_pos[1] - candidate[1]) < current_distance]
+                    if closer:
                         destination = min(
-                            shorter,
-                            key=lambda pos: (len(self.map.find_path(pos, goal_pos) or []),
-                                             pos[1], pos[0]))
+                            closer,
+                            key=lambda pos: (
+                                abs(goal_pos[0] - pos[0]) + abs(goal_pos[1] - pos[1]),
+                                self.map.key(pos) in actor.visited_cells,
+                                pos[1], pos[0]))
                         break
             if actor.kind == "friend" and actor.owner_actor_id:
                 owner = self.actors.get(actor.owner_actor_id)
