@@ -1863,6 +1863,24 @@ class GameEngine:
                 owner.known_cells.update(new_cells)
                 world.record("created_being_map_report", owner.actor_id,
                              scout_actor_id=scout.actor_id, new_known_cells=new_cells)
+            # 造物看见的地点标记会报告给主人；未被玩家/造物视野触及的地点仍保持隐藏。
+            scout_known = set(scout.known_cells)
+            for location_id, location in world.map.locations.items():
+                location_key = world.map.key((int(location.get("x", -1)),
+                                               int(location.get("y", -1))))
+                if location_key not in scout_known:
+                    continue
+                known_by = location.setdefault("discovered_by", [])
+                newly_reported = owner.actor_id not in known_by
+                if scout.actor_id not in known_by:
+                    known_by.append(scout.actor_id)
+                if owner.actor_id not in known_by:
+                    known_by.append(owner.actor_id)
+                if not location.get("discovered", False) or newly_reported:
+                    location["discovered"] = True
+                    world.record("created_being_location_reported", owner.actor_id,
+                                 scout_actor_id=scout.actor_id, location_id=location_id,
+                                 name=location.get("name", location_id))
             known_reports = {
                 (item.get("reported_by"), item.get("actor_id"), item.get("turn"))
                 for item in owner.memory if item.get("reported_by")
