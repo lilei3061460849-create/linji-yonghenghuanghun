@@ -1299,3 +1299,28 @@ def test_repeated_sightings_in_one_turn_do_not_duplicate_memory_around_location_
     sightings = [entry for entry in world.actors["p"].memory
                  if entry.get("actor_id") == "m" and entry.get("turn") == world.clock.turn]
     assert len(sightings) == 1
+
+
+def test_entity_death_is_synchronized_to_world_actor_and_prevents_future_movement(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-death-sync.db"),
+                        save_dir=str(tmp_path), rng_seed=157, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    rival = Entity("R", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.player = player
+    engine.state.enemies = [rival]
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(
+        player.runtime_id, "P", "player", 1, 1, faction="player", mode="manual"))
+    world.add_actor(WorldActorState(
+        rival.runtime_id, "R", "enemy", 3, 3, faction="enemy", mode="autonomous"))
+
+    rival.is_alive = False
+    rival.current_hp = 0
+    engine._sync_world_entity_positions(world)
+
+    assert world.actors[rival.runtime_id].alive is False
+    with pytest.raises(ValueError, match="不存在或已经死亡"):
+        world.move_actor(rival.runtime_id, (3, 2))
