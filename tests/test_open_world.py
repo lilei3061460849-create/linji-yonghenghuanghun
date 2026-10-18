@@ -629,3 +629,23 @@ def test_player_picks_up_resonance_relic_only_by_entering_its_cell(tmp_path):
     assert move["result"]["relic_collected"]["name"] == "测试遗物"
     assert any(relic.name == "测试遗物" for relic in engine.state.relics)
     assert engine.state.world_state["map"]["locations"]["test-relic"]["active"] is False
+
+
+
+def test_final_survivors_converge_to_a_marked_final_encounter():
+    world = WorldState(clock=WorldClock(), map=_open_map(),
+                       final_duel_search=True,
+                       final_duel_finalists=["p", "e"])
+    world.add_actor(WorldActorState("p", "玩家", "player", 2, 2,
+                                    faction="player", mode="manual"))
+    world.add_actor(WorldActorState("e", "最后的轮回者", "reincarnator", 3, 2,
+                                    faction="enemy", mode="manual"))
+    encounter_ids = world.detect_adjacent_encounters()
+    assert len(encounter_ids) == 1
+    encounter = world.encounters[encounter_ids[0]]
+    assert encounter.final_duel is True
+    assert world.final_duel_started is True
+    restored = WorldState.from_dict(world.to_dict())
+    assert restored.final_duel_search is True
+    assert restored.final_duel_finalists == ["p", "e"]
+    assert restored.encounters[encounter.encounter_id].final_duel is True
