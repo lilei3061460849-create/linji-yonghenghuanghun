@@ -7078,6 +7078,64 @@ class GameEngine:
 
     def _action_battle_end(self, params: dict) -> dict:
         """战终；仍有未移出的存活敌人时不得跳过战斗直接结算（统一判定见 GameState.battle_won）。"""
+        if self.state.event_modifiers.get("world_final_duel"):
+            try:
+                world = self._world_from_state()
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
+            finalists = list(world.final_duel_finalists)
+            entities = ([self.state.player] if self.state.player else [])
+            for group_name in ("friends", "employees", "temp_friends", "enemies"):
+                entities.extend(getattr(self.state, group_name, []) or [])
+            entity_by_id = {entity.runtime_id: entity for entity in entities}
+            alive_finalists = [
+                actor_id for actor_id in finalists
+                if actor_id in entity_by_id and entity_by_id[actor_id].is_alive
+                and not entity_by_id[actor_id].is_departed
+            ]
+            if len(alive_finalists) != 1:
+                return {"success": False,
+                        "error": "最终死斗必须且只能有一名最终候选存活后才能结算战终"}
+            winner_id = alive_finalists[0]
+            winner_entity = entity_by_id[winner_id]
+            player_id = self.state.player.runtime_id if self.state.player else ""
+            outcome = "player_won" if winner_id == player_id else "opponent_won"
+            for actor_id in finalists:
+                actor = world.actors.get(actor_id)
+                entity = entity_by_id.get(actor_id)
+                if actor is None:
+                    continue
+                if entity is None or not entity.is_alive or entity.is_departed:
+                    actor.alive = False
+                else:
+                    if entity.world_x is not None and entity.world_y is not None:
+                        actor.x, actor.y = int(entity.world_x), int(entity.world_y)
+                    actor.alive = True
+            encounter_id = self.state.world_encounter_id
+            encounter = world.encounters.get(encounter_id) if encounter_id else None
+            if encounter is not None and encounter.active:
+                world.finish_encounter(encounter_id, "final_duel_" + outcome)
+            world.final_duel_search = False
+            world.final_duel_started = True
+            world.final_duel_complete = True
+            world.final_duel_winner = winner_id
+            world.record("final_duel_completed", winner_id, winner=winner_id,
+                         winner_name=winner_entity.name, outcome=outcome,
+                         finalists=finalists)
+            self.state.world_state = world.to_dict()
+            self.state.world_enemy_reserve = []
+            self.state.world_encounter_entities = []
+            self.state.world_encounter_id = ""
+            self.state.enemies = [] if winner_id == player_id else [winner_entity]
+            self.state.in_final_duel = False
+            self.state.event_modifiers.pop("world_final_duel", None)
+            self.state.phase = "pre_battle"
+            return {"success": True, "action": "最终生存结算",
+                    "result": {"winner": winner_entity.name, "winner_id": winner_id,
+                               "outcome": outcome, "finalists": finalists,
+                               "world_turn": world.clock.turn},
+                    "instruction": f"最终死斗结束，最后存活者为{winner_entity.name}；开放世界最终生存阶段已结算"}
+
         world_battle = bool(getattr(self.state, "world_encounter_id", ""))
         living = [e.name for e in self.state.active_enemies()]
         escaping = self.state.event_modifiers.pop("escape_at_battle_end", False)
