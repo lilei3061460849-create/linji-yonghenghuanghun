@@ -306,6 +306,13 @@ def test_timed_action_is_interrupted_by_hostile_encounter_before_reward(tmp_path
     engine.state.enemies = [Entity("M", "怪物", blood_limit=10, current_hp=10)]
     engine.state.phase = "pre_battle"
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    world = WorldState.from_dict(engine.state.world_state)
+    player_id = engine.state.player.runtime_id
+    enemy_id = engine.state.enemies[0].runtime_id
+    world.actors[player_id].x, world.actors[player_id].y = 1, 1
+    world.actors[enemy_id].x, world.actors[enemy_id].y = 2, 1
+    world.actors[enemy_id].mode = "manual"
+    engine.state.world_state = world.to_dict()
     result = engine.execute_action("pre_battle_action", {
         "sub_action": "修行", "tier": 1,
         "allocations": {"blood_points": 1, "speed_points": 0, "mana_points": 0},
