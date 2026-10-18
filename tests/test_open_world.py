@@ -1493,3 +1493,22 @@ def test_trade_does_not_count_temporary_transfer_balance_as_shard_peak(tmp_path)
     assert rival.shards == 10
     assert engine.state.shards_peak == 10
     assert rival.shards_peak == 10
+
+
+def test_final_duelist_explores_known_frontiers_after_reaching_center():
+    world = WorldState(clock=WorldClock(), map=_open_map(9, 9))
+    world.add_actor(WorldActorState(
+        "player", "玩家", "轮回者", 1, 1, faction="player", mode="manual"))
+    world.add_actor(WorldActorState(
+        "rival", "最后的对手", "轮回者", 4, 4, faction="enemy", mode="autonomous"))
+    world.final_duel_search = True
+    world.final_duel_finalists = ["player", "rival"]
+
+    for _ in range(12):
+        world.clock.advance(1)
+        world._run_autonomous_units()
+
+    rival = world.actors["rival"]
+    # 搜索不应在中心周围循环；它应持续扩展自己的已知地图并走访更多格子。
+    assert len(rival.visited_cells) > 8
+    assert max(abs(rival.x - 4), abs(rival.y - 4)) > 1
