@@ -81,7 +81,7 @@ def test_boundary_shrink_invalidates_npcs_stale_location_memories():
     assert result is not None
     assert world.map.locations["edge-relic"]["active"] is False
     assert world.actors["npc"].memory[0]["active"] is False
-    assert world.actors["npc"].memory[0]["removed_by_shrink"] is True
+    assert world.actors["npc"].memory[0]["inactive_reason"] == "removed_by_shrink"
 
 
 def test_vision_is_four_orthogonal_cells_and_private_per_actor():
