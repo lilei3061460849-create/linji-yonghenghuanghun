@@ -1324,3 +1324,41 @@ def test_entity_death_is_synchronized_to_world_actor_and_prevents_future_movemen
     assert world.actors[rival.runtime_id].alive is False
     with pytest.raises(ValueError, match="不存在或已死亡"):
         world.move_actor(rival.runtime_id, (3, 2))
+
+
+def test_merchant_trade_checks_the_payer_balance_not_the_wrong_side(tmp_path):
+    from engine.api import GameEngine
+    from engine.events import resolve_option_effect
+    from engine.models import Entity, Relic
+
+    engine = GameEngine(db_path=str(tmp_path / "merchant-payer.db"),
+                        save_dir=str(tmp_path), rng_seed=163, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.shards = 20
+    engine.state.relics = []
+    merchant = Entity("过路商人", "特殊角色", shards=0,
+                      relics=[Relic(name="商人遗物", effect="测试效果")])
+    engine.state.merchant = merchant
+
+    bought = resolve_option_effect("遗物交易：买入", engine, event_name="过路商人",
+                                   params={"trade_direction": "buy", "relic_name": "商人遗物",
+                                           "price": 15, "confirmed": True})
+    assert "error" not in bought
+    assert engine.state.shards == 5
+    assert merchant.shards == 15
+    assert [relic.name for relic in engine.state.relics] == ["商人遗物"]
+    assert merchant.relics == []
+
+    merchant.relics.append(Relic(name="第二件遗物", effect="测试效果"))
+    engine.state.shards = 10
+    cannot_buy = resolve_option_effect("遗物交易：买入", engine, event_name="过路商人",
+                                       params={"trade_direction": "buy", "relic_name": "第二件遗物",
+                                               "price": 15, "confirmed": True})
+    assert "error" in cannot_buy and "你没有足够碎片" in cannot_buy["error"]
+
+    engine.state.relics.append(Relic(name="待售遗物", effect="测试效果"))
+    merchant.shards = 5
+    cannot_sell = resolve_option_effect("遗物交易：卖出", engine, event_name="过路商人",
+                                        params={"trade_direction": "sell", "relic_name": "待售遗物",
+                                                "price": 10, "confirmed": True})
+    assert "error" in cannot_sell and "商人碎片不足" in cannot_sell["error"]
