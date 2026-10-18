@@ -1741,6 +1741,42 @@ class GameEngine:
                                      position=[x, y])
                         result["resource_collected"] = {"name": location.get("name", "碎片残留"),
                                                         "shards": amount}
+                    elif location.get("kind") == "relic":
+                        actor_entity = None
+                        entity_candidates = ([self.state.player] if self.state.player else [])
+                        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+                            entity_candidates.extend(getattr(self.state, group_name, []) or [])
+                        if getattr(self.state, "merchant", None) is not None:
+                            entity_candidates.append(self.state.merchant)
+                        actor_entity = next((entity for entity in entity_candidates
+                                             if getattr(entity, "runtime_id", "") == actor_id), None)
+                        if actor_entity is not None:
+                            is_player = actor_entity is self.state.player
+                            owned_relics = self.state.relics if is_player else actor_entity.relics
+                            capacity = (actor_entity.relic_capacity if is_player
+                                        else getattr(actor_entity, "relic_capacity", 10**9))
+                            owned_names = {relic.name for relic in owned_relics}
+                            if location.get("relic_name") not in owned_names and len(owned_names) < capacity:
+                                relic = Relic(name=location["relic_name"],
+                                              effect=location.get("relic_effect", ""))
+                                owned_relics.append(relic)
+                                location["active"] = False
+                                location["collected"] = True
+                                location["collected_by"] = actor_id
+                                location["collected_turn"] = world.clock.turn
+                                world.record("resonance_relic_collected", actor_id,
+                                             location_id=location_id, relic_name=relic.name,
+                                             position=[x, y])
+                                result["relic_collected"] = {"name": relic.name, "effect": relic.effect}
+                            else:
+                                location["discovered"] = True
+                                location.setdefault("discovered_by", [])
+                                if actor_id not in location["discovered_by"]:
+                                    location["discovered_by"].append(actor_id)
+                                world.record("resonance_relic_discovered", actor_id,
+                                             location_id=location_id,
+                                             relic_name=location.get("relic_name"),
+                                             position=[x, y])
                     else:
                         event_name = location.get("event_name", location.get("name", location_id))
                         if (self.event_pool.current is None and event_name in self.event_pool.events
@@ -2107,6 +2143,75 @@ class GameEngine:
         if any(encounter.active and player_id in encounter.participants
                for encounter in world.encounters.values()):
             return {"success": False, "error": "正在遭遇中，不能开始耗时行动；应先处理遭遇"}
+
+        # 开放世界共鸣：耗时一回合，把一件真实遗物投放到可通行路径距离10以内。
+        # 发动者知道坐标但不直接获得遗物；遭遇打断时不会消耗遗物池。
+        if action == "共鸣":
+            self._init_relic_pool()
+            if not self.state.relics_pool:
+                return {"success": False, "error": "遗物池为空，无法投放共鸣遗物"}
+            player_actor = world.actors[player_id]
+            from collections import deque
+            distances = {player_actor.position: 0}
+            queue = deque([player_actor.position])
+            while queue:
+                pos = queue.popleft()
+                if distances[pos] >= 10:
+                    continue
+                for nxt in world.map.neighbors(pos):
+                    if nxt not in distances:
+                        distances[nxt] = distances[pos] + 1
+                        queue.append(nxt)
+            candidates = [
+                pos for pos, distance in distances.items()
+                if 0 < distance <= 10 and world.map.is_passable(pos)
+                and world.map.location_at(pos) is None
+            ]
+            if not candidates:
+                return {"success": False, "error": "玩家周围10格路径范围内没有可投放的空地点"}
+            start_turn = world.clock.turn
+            world.record("world_action_started", player_id, action=action, duration=1)
+            world.wait(player_id, 1)
+            elapsed = world.clock.turn - start_turn
+            active_encounter = next((encounter for encounter in world.encounters.values()
+                                     if encounter.active and player_id in encounter.participants), None)
+            self._sync_world_entity_positions(world)
+            if active_encounter is not None:
+                world.record("world_action_interrupted", player_id, action=action,
+                             elapsed_turns=elapsed, encounter_id=active_encounter.encounter_id)
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_action_interrupted",
+                        "result": {"sub_action": action, "elapsed_turns": elapsed,
+                                   "required_turns": 1, "encounter_id": active_encounter.encounter_id,
+                                   "reward_applied": False},
+                        "instruction": "共鸣被遭遇打断，未投放遗物；请先处理地图遭遇"}
+            relic_names = [relic.name for relic in self.state.relics_pool]
+            relic_roll = self.dice.auto_roll("world_resonance_relic", relic_names,
+                                             context="开放世界共鸣：选择投放遗物")
+            relic_name = relic_roll["selected"]
+            relic_index = next(i for i, relic in enumerate(self.state.relics_pool)
+                               if relic.name == relic_name)
+            relic = self.state.relics_pool.pop(relic_index)
+            location_roll = self.dice.auto_roll("world_resonance_location", candidates,
+                                                context="开放世界共鸣：遗物投放坐标")
+            position = tuple(location_roll["selected"])
+            location_id = f"resonance_relic_{world.clock.turn}_{len(world.map.locations) + 1}"
+            world.map.add_location(location_id, {
+                "kind": "relic", "name": relic.name, "relic_name": relic.name,
+                "relic_effect": relic.effect, "x": position[0], "y": position[1],
+                "discovered": True, "discovered_by": [player_id], "active": True,
+            })
+            world.record("resonance_relic_dropped", player_id, location_id=location_id,
+                         relic_name=relic.name, position=list(position))
+            world.record("world_action_completed", player_id, action=action, elapsed_turns=elapsed)
+            self._sync_world_entity_positions(world)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "共鸣·投放遗物",
+                    "result": {"relic": relic.name, "effect": relic.effect,
+                               "location_id": location_id, "position": list(position),
+                               "path_distance": distances[position], "acquired": False,
+                               "world_turn": world.clock.turn},
+                    "instruction": "遗物已投放到地图，发动者知道准确位置但未获得；进入该格才会拾取，其他单位也可抢先取得"}
 
         # 在隔离快照里先执行一次旧结算器作参数/资源预检；回滚状态与随机源，不产生真实收益。
         state_before = copy.deepcopy(self.state)
