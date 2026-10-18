@@ -1282,3 +1282,20 @@ def test_autonomous_reincarnator_can_buy_one_finite_stock_relic_from_merchant(tm
     assert [relic.name for relic in rival.relics] == ["测试遗物"]
     assert merchant.relics == []
     assert any(event["type"] == "npc_merchant_trade" for event in world.event_log)
+
+
+def test_repeated_sightings_in_one_turn_do_not_duplicate_memory_around_location_notes():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState("p", "玩家", "player", 1, 1, faction="player"))
+    world.add_actor(WorldActorState("m", "流浪者", "enemy", 2, 1, faction="enemy"))
+    world.visible_cells("p")
+    world.actors["p"].memory.append({
+        "kind": "location_sighting", "location_id": "cache",
+        "position": [1, 2], "turn": world.clock.turn,
+    })
+
+    world.visible_cells("p")
+
+    sightings = [entry for entry in world.actors["p"].memory
+                 if entry.get("actor_id") == "m" and entry.get("turn") == world.clock.turn]
+    assert len(sightings) == 1
