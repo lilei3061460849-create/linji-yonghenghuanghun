@@ -81,6 +81,8 @@ def test_merchant_can_buy_and_sell_relics_at_confirmed_price():
     sell_engine = _engine(seed=32)
     merchant = sell_engine._initialize_merchant_inventory()
     assert len(merchant.relics) == 5
+    assert "过路商人" not in sell_engine.event_pool.build_pool("扭曲都市")
+    assert len(sell_engine._initialize_merchant_inventory().relics) == 5, "重复初始化不得刷新库存"
     relic_name = sell_engine.state.relics[0].name
     _stage(sell_engine, "过路商人", "遗物交易：自由买入或卖出遗物")
     sold = sell_engine.execute_action("resolve_event", {
