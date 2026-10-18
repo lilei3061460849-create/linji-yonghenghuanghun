@@ -1045,3 +1045,43 @@ def test_final_survivors_converge_to_a_marked_final_encounter():
     assert restored.final_duel_search is True
     assert restored.final_duel_finalists == ["p", "e"]
     assert restored.encounters[encounter.encounter_id].final_duel is True
+
+
+def test_multiple_hostiles_sharing_a_cell_join_one_encounter():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState("p", "玩家", "轮回者", 2, 2,
+                                    faction="player", mode="manual"))
+    world.add_actor(WorldActorState("m1", "怪物一", "怪物", 2, 2,
+                                    faction="monster", mode="manual"))
+    world.add_actor(WorldActorState("m2", "怪物二", "怪物", 2, 2,
+                                    faction="monster", mode="manual"))
+
+    encounter_ids = world.detect_adjacent_encounters("p")
+
+    assert len(encounter_ids) == 1
+    encounter = world.encounters[encounter_ids[0]]
+    assert set(encounter.participants) == {"p", "m1", "m2"}
+    assert world.detect_adjacent_encounters("p") == []
+    assert sum(
+        encounter.active and "p" in encounter.participants
+        for encounter in world.encounters.values()
+    ) == 1
+
+
+def test_adjacent_hostile_waits_until_current_encounter_finishes():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState("p", "玩家", "轮回者", 2, 2,
+                                    faction="player", mode="manual"))
+    world.add_actor(WorldActorState("m1", "怪物一", "怪物", 2, 2,
+                                    faction="monster", mode="manual"))
+    world.add_actor(WorldActorState("m2", "怪物二", "怪物", 3, 2,
+                                    faction="monster", mode="manual"))
+
+    first = world.detect_adjacent_encounters("p")
+    assert len(first) == 1
+    assert set(world.encounters[first[0]].participants) == {"p", "m1"}
+
+    world.finish_encounter(first[0], "resolved")
+    second = world.detect_adjacent_encounters("p")
+    assert len(second) == 1
+    assert set(world.encounters[second[0]].participants) == {"p", "m2"}
