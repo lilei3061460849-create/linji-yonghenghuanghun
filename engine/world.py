@@ -561,19 +561,27 @@ class WorldState:
                 elif actor.behavior == "guard":
                     target_position = actor.guard_position or actor.position
                 if target_position is not None and target_position != actor.position:
-                    path = self.map.find_path(actor.position, target_position)
+                    path = self._find_known_path(actor_id, actor.position, target_position)
                     if path and len(path) > 1:
                         preferred = path[1]
-                        if preferred not in occupied or preferred == target_position:
+                        if preferred in candidates or preferred == target_position:
                             destination = preferred
-                        else:
-                            alternatives = [pos for pos in candidates
-                                            if (route := self.map.find_path(pos, target_position)) is not None]
-                            if alternatives:
-                                destination = min(
-                                    alternatives,
-                                    key=lambda pos: (len(self.map.find_path(pos, target_position) or []),
-                                                     pos[1], pos[0]))
+                    if destination is None:
+                        # 主人位置/守卫点是已知目标，但未知地形不能直接参与寻路。
+                        # 仅根据当前可见的相邻格尝试接近，遇墙后再探索新的可见区域。
+                        current_distance = (abs(target_position[0] - actor.x)
+                                            + abs(target_position[1] - actor.y))
+                        closer = [candidate for candidate in candidates
+                                  if abs(target_position[0] - candidate[0])
+                                  + abs(target_position[1] - candidate[1]) < current_distance]
+                        if closer:
+                            destination = min(
+                                closer,
+                                key=lambda pos: (
+                                    abs(target_position[0] - pos[0])
+                                    + abs(target_position[1] - pos[1]),
+                                    self.map.key(pos) in actor.visited_cells,
+                                    pos[1], pos[0]))
                 if (actor.behavior in {"follow", "guard"}
                         and target_position == actor.position):
                     continue
