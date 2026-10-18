@@ -3097,6 +3097,15 @@ class GameEngine:
                                    "required_turns": 1, "encounter_id": active_encounter.encounter_id,
                                    "reward_applied": False},
                         "instruction": "共鸣被遭遇打断，未投放遗物；请先处理地图遭遇"}
+            if world.final_duel_complete:
+                world.record("world_action_interrupted", player_id, action=action,
+                             elapsed_turns=elapsed, reason="final_duel_completed")
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_action_interrupted",
+                        "result": {"sub_action": action, "elapsed_turns": elapsed,
+                                   "required_turns": 1, "reward_applied": False,
+                                   "reason": "final_duel_completed"},
+                        "instruction": "最终死斗已结算，耗时行动未获得奖励"}
             # 等待期间边界可能收缩；投放范围必须按结算后的真实地图重新计算。
             player_actor = world.actors[player_id]
             distances = {player_actor.position: 0}
@@ -3197,6 +3206,16 @@ class GameEngine:
                                "encounter_id": active_encounter.encounter_id,
                                "reward_applied": False},
                     "instruction": "行动被遭遇打断，未结算本次收益；请先处理地图遭遇"}
+
+        if world.final_duel_complete:
+            world.record("world_action_interrupted", player_id, action=action,
+                         elapsed_turns=elapsed, reason="final_duel_completed")
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_action_interrupted",
+                    "result": {"sub_action": action, "elapsed_turns": elapsed,
+                               "required_turns": duration, "reward_applied": False,
+                               "reason": "final_duel_completed"},
+                    "instruction": "最终死斗已结算，耗时行动未获得奖励"}
 
         if action == "雇佣":
             player_actor = world.actors[player_id]
