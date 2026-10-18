@@ -757,6 +757,30 @@ def test_hiring_signal_fails_instead_of_remaining_pending_when_map_has_no_walkab
     assert world.hiring_signals[0]["resolved_turn"] == world.clock.turn
 
 
+def test_hiring_signal_records_failure_if_successful_settlement_creates_no_employee(tmp_path, monkeypatch):
+    from engine.api import GameEngine
+
+    engine = GameEngine(db_path=str(tmp_path / "missing-hire.db"),
+                        save_dir=str(tmp_path), rng_seed=103, autosave=False)
+    world = WorldState.create(width=7, height=7, seed=1)
+    world.hiring_signals.append({
+        "signal_id": "signal-missing-employee", "status": "pending",
+        "arrival_turn": 0, "position": [3, 3],
+        "params": {"name": "缺失实体员工"},
+    })
+    monkeypatch.setattr(engine, "_pre_battle_guyong", lambda params: {"success": True})
+
+    result = engine._resolve_world_hiring_signals(world)
+
+    assert result == [{
+        "signal_id": "signal-missing-employee", "status": "failed",
+        "reason": "雇佣结算未生成员工实体",
+    }]
+    assert world.hiring_signals[0]["status"] == "failed"
+    assert any(event["event_type"] == "hiring_signal_failed"
+               for event in world.event_log)
+
+
 def test_hiring_signal_persists_while_player_moves_and_resolves_on_arrival(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
