@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>战局回放</title>
+<style>
+:root{color-scheme:dark;--bg:#101216;--panel:#1a1e25;--panel2:#222833;--line:#343c49;--text:#edf1f7;--muted:#aab4c3;--blue:#78aaff;--red:#ff7777;--gold:#f3c86a;--green:#7ed6a5}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{width:min(980px,100%);margin:0 auto;padding:14px 12px calc(24px + env(safe-area-inset-bottom));display:grid;gap:12px}
+header,.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+h1{font-size:20px;margin:0 0 3px}h2{font-size:15px;margin:0 0 10px}
+.muted{color:var(--muted);font-size:12px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button,.file-button,select{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:10px;min-height:42px;padding:8px 12px}
+button{cursor:pointer;touch-action:manipulation}button:disabled{opacity:.4;cursor:default}
+.file-button{display:inline-flex;align-items:center;cursor:pointer}
+input[type=file]{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+input[type=range]{width:100%;accent-color:var(--blue);min-height:30px}
+.arena{display:grid;grid-template-columns:minmax(0,1fr) 42px minmax(0,1fr);align-items:stretch;gap:8px}
+.fighter{min-width:0;border:1px solid var(--line);background:var(--panel2);border-radius:12px;padding:12px 8px;text-align:center;transition:border-color .12s,transform .12s}
+.fighter.active{border-color:var(--gold);box-shadow:inset 0 0 0 1px #f3c86a55}
+.fighter .sigil{width:46px;height:46px;border:2px solid currentColor;border-radius:10px;margin:0 auto 8px;display:grid;place-items:center;font-size:22px;font-weight:800}
+.fighter.player{color:var(--blue)}.fighter.enemy{color:var(--red)}.fighter.unknown{color:var(--gold)}
+.fighter .name{color:var(--text);font-weight:700;overflow-wrap:anywhere}
+.fighter .kind{color:var(--muted);font-size:11px;min-height:16px}
+.fighter .stats{font-size:12px;color:var(--muted);margin-top:7px;overflow-wrap:anywhere}
+.vs{display:grid;place-items:center;color:var(--muted);font-weight:800}
+.attack-line{height:3px;background:var(--line);position:relative;width:100%;border-radius:4px}
+.attack-line.on{background:var(--gold);box-shadow:0 0 12px #f3c86a88}
+.attack-line.on:after{content:"";position:absolute;right:-1px;top:-4px;border-left:8px solid var(--gold);border-top:5px solid transparent;border-bottom:5px solid transparent}
+.event-title{font-size:17px;font-weight:750;margin:0 0 4px;overflow-wrap:anywhere}
+.event-detail{white-space:pre-wrap;overflow-wrap:anywhere;background:#0d1014;border:1px solid var(--line);border-radius:10px;padding:10px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;max-height:240px;overflow:auto}
+.list{display:grid;gap:6px;max-height:320px;overflow:auto}
+.event-row{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px;text-align:left;width:100%;padding:9px 10px;min-height:0;border-radius:9px}
+.event-row.selected{border-color:var(--blue);background:#263449}
+.event-row .event-round{color:var(--muted);font-size:11px}
+.event-row .event-summary{overflow-wrap:anywhere;font-size:13px}
+.empty{padding:22px 10px;text-align:center;color:var(--muted)}
+.status{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+@media(min-width:700px){main{padding:22px 18px}.arena{grid-template-columns:minmax(0,1fr) 72px minmax(0,1fr)}.fighter{padding:18px}.fighter .sigil{width:58px;height:58px;font-size:26px}.fighter .name{font-size:17px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>战局回放</h1>
+  <div class="muted">极简战术视图 · 回放已结算事件，不重新运行战斗</div>
+  <div class="toolbar" style="margin-top:12px">
+    <label class="file-button" for="file">打开 replay.json</label>
+    <input id="file" type="file" accept=".json,application/json">
+    <button id="demo" type="button">载入演示</button>
+    <span id="status" class="status">请选择从引擎导出的回放 JSON。</span>
+  </div>
+</header>
+
+<section class="panel">
+  <div class="toolbar" style="justify-content:space-between;margin-bottom:10px">
+    <div><h2 id="battle-title">尚未载入战局</h2><div id="round-label" class="muted">第 0 / 0 个事件</div></div>
+    <div class="toolbar"><button id="prev" aria-label="上一个事件" disabled>◀ 上一事件</button><button id="next" aria-label="下一个事件" disabled>下一事件 ▶</button></div>
+  </div>
+  <div class="arena">
+    <div id="left" class="fighter player"><div class="sigil">A</div><div class="name">角色 A</div><div class="kind">等待回放</div><div class="stats"></div></div>
+    <div class="vs"><div id="vs-label">VS</div><div id="attack-line" class="attack-line"></div></div>
+    <div id="right" class="fighter enemy"><div class="sigil">B</div><div class="name">角色 B</div><div class="kind">等待回放</div><div class="stats"></div></div>
+  </div>
+  <div style="margin-top:14px">
+    <div id="event-title" class="event-title">载入回放文件开始查看</div>
+    <div id="event-summary" class="muted" style="margin-bottom:8px">当前事件的实际结算数据会显示在这里。</div>
+    <div class="toolbar">
+      <button id="play" disabled>▶ 播放</button>
+      <button id="restart" disabled>↺ 回到开头</button>
+      <label class="muted" for="speed">速度</label>
+      <select id="speed"><option value="1200">0.5×</option><option value="700" selected>1×</option><option value="350">2×</option><option value="150">4×</option></select>
+    </div>
+    <input id="timeline" type="range" min="0" max="0" value="0" disabled aria-label="回放事件时间轴">
+  </div>
+</section>
+
+<section class="panel">
+  <h2>当前事件详情</h2>
+  <div id="detail" class="event-detail">等待载入数据。</div>
+</section>
+
+<section class="panel">
+  <div class="toolbar" style="justify-content:space-between">
+    <h2>事件列表</h2><span id="event-count" class="muted">0 个事件</span>
+  </div>
+  <div id="events" class="list"><div class="empty">尚无回放数据</div></div>
+</section>
+</main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const labels = {
+    battle_start:"战斗开始",round_start:"回合开始",action_declared:"行动声明",
+    dodge_declared:"声明闪避",before_damage:"伤害结算前",damage_applied:"造成伤害",
+    heal_applied:"恢复生命",blood_limit_changed:"血限变化",status_applied:"施加状态",
+    status_expired:"状态结束",entity_retreated:"角色撤退",entity_died:"角色死亡",
+    round_end:"回合结束",battle_end:"战斗结束",consumable_zi_yu:"消耗品触发"
+  };
+  const dataLabels = {
+    amount:"数值",damage:"伤害",actual_damage:"实际伤害",actual_life_loss:"实际失血",
+    hp_before:"生命（前）",hp_after:"生命（后）",actual_heal:"实际恢复",
+    heal_amount:"恢复量",overheal:"过量恢复",status:"状态",status_name:"状态",
+    source:"来源",reason:"原因",note:"说明",dodge:"闪避",success:"成功"
+  };
+  let replay = null, index = 0, timer = null;
+  const events = () => replay?.events || [];
+  const stop = () => { if (timer !== null) clearInterval(timer); timer = null; $("play").textContent = "▶ 播放"; };
+  const eventLabel = event => labels[event?.event_type] || event?.event_type || "未知事件";
+  const participants = () => replay?.participants || [];
+  const findParticipant = name => participants().find(p => p.name === name);
+  const sideClass = p => p?.side === "enemy" ? "enemy" : p?.side === "player" ? "player" : "unknown";
+  const sigil = p => (p?.name || "?").trim().slice(0,1) || "?";
+  const finalStats = p => {
+    const s = p?.final_state || {};
+    const out = [];
+    if (s.hp !== undefined && s.hp !== null) out.push("生命 " + s.hp + (s.blood_limit != null ? "/" + s.blood_limit : ""));
+    if (s.shield !== undefined && s.shield !== null && s.shield !== 0) out.push("格挡 " + s.shield);
+    if (s.mana !== undefined && s.mana !== null) out.push("法力 " + s.mana + (s.mana_limit != null ? "/" + s.mana_limit : ""));
+    if (s.alive === false) out.push("已死亡");
+    return out.join(" · ");
+  };
+  function setFighter(id, p, active) {
+    const el = $(id);
+    el.className = "fighter " + sideClass(p) + (active ? " active" : "");
+    el.querySelector(".sigil").textContent = sigil(p);
+    el.querySelector(".name").textContent = p?.name || "未指定角色";
+    el.querySelector(".kind").textContent = p?.entity_type || (p?.side === "unknown" ? "事件参与者" : "角色");
+    el.querySelector(".stats").textContent = finalStats(p);
+  }
+  function summary(e) {
+    if (!e) return "无事件";
+    const actor = e.actor_name || "系统";
+    const target = e.target_name ? " → " + e.target_name : "";
+    const d = e.data || {};
+    const amount = d.actual_life_loss ?? d.actual_damage ?? d.damage ?? d.actual_heal ?? d.heal_amount ?? d.amount;
+    const amountText = amount !== undefined ? "（" + (e.event_type === "heal_applied" ? "恢复 " : "数值 ") + amount + "）" : "";
+    const extra = d.status_name || d.status || d.source || d.note || d.reason;
+    return actor + target + amountText + (extra ? " · " + extra : "");
+  }
+  function detailText(e) {
+    if (!e) return "没有可显示的事件。";
+    const data = e.data || {};
+    const rows = Object.entries(data).map(([key,value]) => (dataLabels[key] || key) + ": " + (typeof value === "object" ? JSON.stringify(value) : String(value)));
+    if (e.ctx) rows.push("因果上下文: " + JSON.stringify(e.ctx));
+    return rows.length ? rows.join("\n") : "该事件没有额外数值字段。";
+  }
+  function renderList() {
+    const root = $("events");
+    root.replaceChildren();
+    events().forEach((e,i) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "event-row" + (i === index ? " selected" : "");
+      const round = document.createElement("span"); round.className = "event-round";
+      round.textContent = "第 " + (e.round_no || 0) + " 回合";
+      const text = document.createElement("span"); text.className = "event-summary";
+      text.textContent = eventLabel(e) + " · " + summary(e);
+      b.append(round,text); b.addEventListener("click",() => { stop(); show(i); });
+      root.appendChild(b);
+    });
+    if (!events().length) root.innerHTML = '<div class="empty">这个回放没有事件</div>';
+    $("event-count").textContent = events().length + " 个事件";
+  }
+  function show(nextIndex) {
+    const list = events();
+    if (!list.length) return;
+    index = Math.max(0,Math.min(list.length-1,nextIndex));
+    const e = list[index];
+    let actor = findParticipant(e.actor_name), target = findParticipant(e.target_name);
+    if (!actor && !target) { actor = participants()[0]; target = participants().find(p => p !== actor); }
+    if (!actor) actor = target;
+    if (!target || target === actor) target = participants().find(p => p !== actor) || null;
+    setFighter("left",actor,!!e.actor_name && actor?.name === e.actor_name);
+    setFighter("right",target,!!e.target_name && target?.name === e.target_name);
+    const active = ["action_declared","dodge_declared","before_damage","damage_applied","heal_applied","entity_died","status_applied"].includes(e.event_type);
+    $("attack-line").classList.toggle("on",active && !!(e.actor_name || e.target_name));
+    $("vs-label").textContent = e.event_type === "dodge_declared" ? "闪避" : e.event_type === "damage_applied" ? "命中" : "VS";
+    $("battle-title").textContent = replay.title || ("第 " + (replay.battle_no || "?") + " 场战斗回放");
+    $("round-label").textContent = "第 " + (e.round_no || 0) + " 回合 · 事件 " + (index+1) + " / " + list.length;
+    $("event-title").textContent = eventLabel(e);
+    $("event-summary").textContent = summary(e);
+    $("detail").textContent = detailText(e);
+    $("timeline").value = index;
+    $("prev").disabled = index === 0; $("next").disabled = index === list.length-1;
+    renderList();
+  }
+  function load(data) {
+    stop();
+    if (!data || !Array.isArray(data.events) || !Array.isArray(data.participants)) {
+      $("status").textContent = "文件格式不正确：需要包含 events 和 participants。";
+      return;
+    }
+    replay = data; index = 0;
+    $("status").textContent = "已载入 " + data.event_count + " 个事件";
+    $("timeline").max = Math.max(0,data.events.length-1);
+    $("timeline").disabled = data.events.length < 2;
+    $("play").disabled = data.events.length < 2;
+    $("restart").disabled = data.events.length === 0;
+    $("prev").disabled = true; $("next").disabled = data.events.length < 2;
+    renderList();
+    if (data.events.length) show(0);
+    else { $("event-title").textContent = "没有战斗事件"; $("detail").textContent = "该文件中 events 为空。"; }
+  }
+  $("file").addEventListener("change", async event => {
+    const file = event.target.files?.[0]; if (!file) return;
+    try { load(JSON.parse(await file.text())); }
+    catch (error) { $("status").textContent = "读取失败：" + error.message; }
+  });
+  $("prev").addEventListener("click",() => { stop(); show(index-1); });
+  $("next").addEventListener("click",() => { stop(); show(index+1); });
+  $("timeline").addEventListener("input",event => { stop(); show(Number(event.target.value)); });
+  $("restart").addEventListener("click",() => { stop(); show(0); });
+  $("play").addEventListener("click",() => {
+    if (!events().length) return;
+    if (timer !== null) { stop(); return; }
+    if (index >= events().length-1) show(0);
+    $("play").textContent = "Ⅱ 暂停";
+    timer = setInterval(() => {
+      if (index >= events().length-1) { stop(); return; }
+      show(index+1);
+    }, Number($("speed").value));
+    $("play").textContent = "Ⅱ 暂停";
+  });
+  $("speed").addEventListener("change",() => {
+    if (timer !== null) { stop(); $("play").click(); }
+  });
+  $("demo").addEventListener("click",() => load({
+    schema_version:1,title:"演示：一场战斗",battle_no:1,event_count:6,round_count:1,
+    participants:[
+      {name:"轮回者 A",entity_type:"轮回者",side:"player",final_state:{hp:38,blood_limit:50,mana:7,mana_limit:10,shield:0,alive:true,statuses:[]}},
+      {name:"怪物 B",entity_type:"怪物",side:"enemy",final_state:{hp:0,blood_limit:30,mana:0,mana_limit:0,shield:0,alive:false,statuses:[]}}
+    ],
+    events:[
+      {sequence:0,event_type:"battle_start",battle_no:1,round_no:0,actor_name:"",target_name:"",data:{}},
+      {sequence:1,event_type:"round_start",battle_no:1,round_no:1,actor_name:"",target_name:"",data:{}},
+      {sequence:2,event_type:"action_declared",battle_no:1,round_no:1,actor_name:"轮回者 A",target_name:"怪物 B",data:{action:"普通攻击"}},
+      {sequence:3,event_type:"dodge_declared",battle_no:1,round_no:1,actor_name:"怪物 B",target_name:"轮回者 A",data:{success:false}},
+      {sequence:4,event_type:"damage_applied",battle_no:1,round_no:1,actor_name:"轮回者 A",target_name:"怪物 B",data:{actual_damage:30,actual_life_loss:30,hp_before:30,hp_after:0,source:"普通攻击"}},
+      {sequence:5,event_type:"entity_died",battle_no:1,round_no:1,actor_name:"轮回者 A",target_name:"怪物 B",data:{reason:"命零"}}
+    ]
+  }));
+})();
+</script>
+</body>
+</html>
