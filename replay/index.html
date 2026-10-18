@@ -285,8 +285,8 @@ input[type=range]{width:100%;accent-color:var(--blue);min-height:30px}
     $("restart").disabled = data.events.length === 0;
     $("prev").disabled = true; $("next").disabled = data.events.length < 2;
     renderList();
-    if (data.events.length) show(0); else renderMap(null);
-    else { $("event-title").textContent = "没有战斗事件"; $("detail").textContent = "该文件中 events 为空。"; }
+    if (data.events.length) show(0);
+    else { renderMap(null); $("event-title").textContent = "没有战斗事件"; $("detail").textContent = "该文件中 events 为空。"; }
   }
   async function loadFromServer() {
     try {
