@@ -1535,7 +1535,7 @@ class GameEngine:
         actor_id = getattr(self.state.player, "runtime_id", None) if self.state.player else None
         safe_params = {
             key: value for key, value in params.items()
-            if isinstance(value, (str, int, float, bool, type(None), list, tuple))
+            if isinstance(value, (str, int, float, bool, type(None)))
         }
         fact = {"type": "action_succeeded", "actor_id": actor_id,
                 "world_turn": self._world_turn(),
