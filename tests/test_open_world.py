@@ -523,7 +523,8 @@ def test_npc_only_world_encounters_use_combat_engine_and_do_not_stall(tmp_path):
                                     faction="enemy", mode="autonomous"))
     world.add_actor(WorldActorState(monster.runtime_id, "M", "enemy", 4, 3,
                                     faction="monster", mode="autonomous"))
-    encounter = world.start_encounter([rival.runtime_id, monster.runtime_id], monster.position)
+    encounter = world.start_encounter(
+        [rival.runtime_id, monster.runtime_id], world.actors[monster.runtime_id].position)
 
     resolved = engine._resolve_world_npc_encounters(world)
     assert resolved and resolved[0]["encounter_id"] == encounter.encounter_id
@@ -539,6 +540,7 @@ def test_autonomous_reincarnator_collects_shard_cache_on_its_cell(tmp_path):
     engine = GameEngine(db_path=str(tmp_path / "npc-shards.db"),
                         save_dir=str(tmp_path), rng_seed=127, autosave=False)
     engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.phase = "pre_battle"
     npc = Entity("NPC", "轮回者", blood_limit=30, current_hp=30)
     engine.state.enemies = [npc]
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
@@ -758,7 +760,7 @@ def test_learned_daowen_can_be_reserved_for_a_future_friend(tmp_path):
     engine.state.player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
     engine.state.current_region = "罪孽都市"
     engine.state.phase = "pre_battle"
-    name = next(name for name in DaoWenEngine.TRANSFORMED_DAOWEN
+    name = next(name for name in DaoWenEngine.list_all()
                 if not learnability_error(name, owned=set(),
                                           region=engine.state.current_region,
                                           known=DaoWenEngine.list_all()))
@@ -851,6 +853,7 @@ def test_reincarnator_trade_requires_fair_offer_and_transfers_atomically(tmp_pat
     player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
     rival = Entity("R", "轮回者", blood_limit=30, current_hp=30, shards=10)
     engine.state.player = player
+    engine.state.phase = "pre_battle"
     engine.state.enemies = [rival]
     engine.state.shards = 20
     engine.state.relics = [Relic(name="玩家遗物", effect="A")]
@@ -889,6 +892,7 @@ def test_intimidation_temporarily_recruits_rival_then_expires(tmp_path):
     player = Entity("P", "轮回者", blood_limit=30, current_hp=30, attack_power=10)
     rival = Entity("R", "轮回者", blood_limit=30, current_hp=5, attack_power=1)
     engine.state.player = player
+    engine.state.phase = "pre_battle"
     engine.state.enemies = [rival]
     world = WorldState(clock=WorldClock(), map=_open_map())
     world.add_actor(WorldActorState(player.runtime_id, "P", "player", 1, 1,
@@ -926,6 +930,7 @@ def test_created_being_can_follow_and_report_exploration_to_owner(tmp_path):
     being.is_created_being = True
     being.created_by_runtime_id = player.runtime_id
     engine.state.player = player
+    engine.state.phase = "pre_battle"
     engine.state.friends = [being]
     world = WorldState(clock=WorldClock(), map=_open_map())
     world.add_actor(WorldActorState(player.runtime_id, player.name, "player", 1, 1,
@@ -1096,6 +1101,7 @@ def test_world_status_exposes_boundary_and_final_search_without_revealing_hidden
     engine = GameEngine(db_path=str(tmp_path / "world-status-final.db"),
                         save_dir=str(tmp_path), rng_seed=149, autosave=False)
     engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.phase = "pre_battle"
     rival = Entity("R", "轮回者", blood_limit=30, current_hp=30)
     engine.state.enemies = [rival]
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
@@ -1163,6 +1169,7 @@ def test_twisted_city_places_modern_landmarks_and_exposes_descriptions_on_discov
     player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
     enemy = Entity("M", "怪物", blood_limit=10, current_hp=10)
     engine.state.player = player
+    engine.state.phase = "pre_battle"
     engine.state.enemies = [enemy]
     engine.state.current_region = "扭曲都市"
     assert engine.execute_action("world_initialize", {"width": 15, "height": 15})["success"]
