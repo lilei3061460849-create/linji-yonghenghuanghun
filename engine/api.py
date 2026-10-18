@@ -2522,8 +2522,13 @@ class GameEngine:
                     "battle_started": world.final_duel_started,
                     "complete": world.final_duel_complete,
                     "winner": world.final_duel_winner if world.final_duel_complete else None,
+                    # NPC决赛者以地图中心为会合点；把目标公开给玩家，避免远距离死斗
+                    # 只在后台寻路、却不给玩家可执行的方向信息。
+                    "rally_point": ([world.map.width // 2, world.map.height // 2]
+                                    if world.final_duel_search and not world.final_duel_started
+                                    else None),
                     "instruction": (
-                        "最后两名轮回者正在自行寻找彼此；移动和世界威胁仍继续结算"
+                        "最后两名轮回者正向地图中心会合；前往rally_point寻找最终对手。移动和世界威胁仍继续结算"
                         if world.final_duel_search and not world.final_duel_started
                         else "最终遭遇已开始" if world.final_duel_started and not world.final_duel_complete
                         else "最终生存阶段已结束" if world.final_duel_complete else None
