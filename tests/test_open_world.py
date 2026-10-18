@@ -176,3 +176,28 @@ def test_monsters_never_receive_attack_outcome_against_merchant():
     result = world.move_actor("m", (2, 1))
     assert len(result["new_interactions"]) == 1
     assert "攻击" not in result["new_interactions"][0]["available_outcomes"]
+
+
+def test_autonomous_units_act_after_player_movement_and_wait_turns():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState("p", "玩家", "player", 1, 1, faction="player", mode="manual"))
+    world.add_actor(WorldActorState("m", "怪物", "怪物", 5, 5, faction="monster"))
+    before = world.actors["m"].position
+    result = world.move_actor("p", (1, 2))
+    assert result["world_turn"] == 1
+    assert world.actors["m"].position != before
+    after_move = world.actors["m"].position
+    world.wait("p", 2)
+    assert world.clock.turn == 3
+    assert world.actors["m"].position != after_move
+
+
+def test_autonomous_units_pause_when_participating_in_active_encounter():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState("p", "玩家", "player", 1, 1, faction="player", mode="manual"))
+    world.add_actor(WorldActorState("m", "怪物", "怪物", 2, 1, faction="monster"))
+    encounter = world.start_encounter(["p", "m"], (2, 1))
+    before = world.actors["m"].position
+    world.wait("p", 1)
+    assert world.actors["m"].position == before
+    assert encounter.active
