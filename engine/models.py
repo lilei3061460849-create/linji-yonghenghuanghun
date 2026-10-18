@@ -267,7 +267,12 @@ class Entity:
     runtime_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     # 分裂复制体的创建者身份；供遗物被动追踪归属，不依赖可能重名的实体名称。
     copy_creator_runtime_id: str = ""
-    
+    # 开放世界位置字段：所有角色共用；地图系统尚未分配位置时为None。
+    world_region: str = ""
+    world_x: Optional[int] = None
+    world_y: Optional[int] = None
+    is_neutral: bool = False  # 中立特殊角色不会自动进入任一战斗阵营
+
     # 基础属性
     blood_limit: int = 0         # 血限
     current_hp: int = 0          # 当前生命
@@ -913,6 +918,10 @@ class Entity:
             "name": self.name,
             "entity_type": self.entity_type,
             "runtime_id": self.runtime_id,
+            "world_region": self.world_region,
+            "world_x": self.world_x,
+            "world_y": self.world_y,
+            "is_neutral": self.is_neutral,
             "blood_limit": self.blood_limit,
             "current_hp": self.current_hp,
             "mana_limit": self.mana_limit,
@@ -992,7 +1001,6 @@ class GameState:
     current_region: str = ""    # 当前副本
     # 过路商人是独立中立角色，不属于轮回者/怪物阵营；库存与世界坐标单独保存。
     merchant: Optional[Entity] = None
-    merchant_position: dict = field(default_factory=dict)  # 开放世界接通后使用：{x, y, region}
     energy: int = 3             # 局外精力
     
     # 轮回者
@@ -1675,7 +1683,6 @@ class GameState:
             "current_battle": self.current_battle,
             "current_region": self.current_region,
             "merchant": self.merchant.to_dict() if getattr(self, "merchant", None) else None,
-            "merchant_position": dict(getattr(self, "merchant_position", {}) or {}),
             "energy": self.energy,
             "shards": self.shards,
             "shards_peak": self.shards_peak,
