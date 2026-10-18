@@ -189,6 +189,17 @@ def test_entering_adjacency_triggers_neutral_interaction_once():
     assert len(third["new_interactions"]) == 1
 
 
+def test_monsters_are_hostile_to_other_reincarnators_not_only_the_player():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState("m", "怪物", "enemy", 1, 1,
+                                    faction="monster", mode="manual"))
+    world.add_actor(WorldActorState("r", "其他轮回者", "enemy", 2, 1,
+                                    faction="enemy", mode="manual"))
+    encounters = world.detect_adjacent_encounters()
+    assert len(encounters) == 1
+    assert set(world.encounters[encounters[0]].participants) == {"m", "r"}
+
+
 def test_monsters_never_receive_attack_outcome_against_merchant():
     world = WorldState(clock=WorldClock(), map=_open_map())
     world.add_actor(WorldActorState("m", "怪物", "怪物", 1, 1, faction="monster"))
