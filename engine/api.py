@@ -6627,7 +6627,7 @@ class GameEngine:
         """给旧 pickle 状态补齐序列字段，优先从状态来源角色的同名道纹恢复位置。"""
         state = self.state
         # 旧版 pickle 没有历史碎片峰值；只能以读档时真实余额作为可恢复的基线。
-        if not hasattr(state, "shards_peak"):
+        if "shards_peak" not in getattr(state, "__dict__", {}):
             state.shards_peak = max(0, int(getattr(state, "shards", 0)))
         entities = [getattr(state, "player", None)]
         for field_name in ("friends", "employees", "temp_friends", "enemies", "dead_monsters"):
@@ -6650,7 +6650,7 @@ class GameEngine:
             for entity in unique_entities
         }
         for entity in unique_entities:
-            if not hasattr(entity, "shards_peak"):
+            if "shards_peak" not in getattr(entity, "__dict__", {}):
                 entity.shards_peak = max(0, int(getattr(entity, "shards", 0)))
             owner_order = order_by_entity[id(entity)]
             for status in entity.status_effects:
