@@ -1817,7 +1817,7 @@ class GameEngine:
             self.state.relics_pool.remove(relic)
         self.state.merchant = Entity(
             name="过路商人", entity_type="特殊角色", relics=chosen,
-            shards=0, shards_peak=0,
+            shards=20, shards_peak=20,
         )
         # 地图坐标由开放世界地图生成器写入；空值表示地图移动系统尚未分配坐标。
         self.state.merchant_position = {}
