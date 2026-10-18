@@ -2223,6 +2223,15 @@ class GameEngine:
             location_names = [name for name in self.event_pool.build_pool(self.state.current_region)
                               if name not in non_location_events]
             available = [pos for pos in candidates if pos not in used]
+            generic_event_labels = {
+                "遗忘书屋": ("遗忘书屋", "书架上的书名都已褪色，翻开后只剩下与自身有关的残页。"),
+                "祭坛": ("碎片祭坛", "祭坛中央的凹槽等待投入碎片，回报与代价都无法预知。"),
+                "猩红暴雨": ("暴雨避难点", "血色暴雨正在侵蚀街道，附近的漏雨废墟提供了暂避之处。"),
+                "无名碑林": ("无名碑林", "苔藓覆盖的石碑刻满死者执念，靠近时会产生共鸣。"),
+                "回音长廊": ("回音长廊", "破碎镜面映出此前轮回的惨死片段，尽头传来八音盒声。"),
+                "回忆当铺": ("回忆当铺", "没有门的当铺以记忆作价，柜台后有阴影静候来客。"),
+                "无魂泥潭": ("无魂泥潭", "黑色沥青状淤泥隔绝灵魂波动，采集时会腐蚀肉体。"),
+            }
             twisted_event_labels = {
                 "医生": ("社区诊所", "街角诊所仍亮着应急灯，医生可能愿意接触来访者。"),
                 "乞丐": ("地铁口的乞丐", "地铁入口附近的乞丐向路人乞讨，也可能掌握城市传闻。"),
@@ -2233,6 +2242,7 @@ class GameEngine:
                 "尖叫下水道": ("下水道入口", "井盖下不断传出断续尖叫，回声会掩盖附近的动静。"),
                 "恶魔医务室": ("恶魔医务室", "手术灯仍在运转，器械台上摆着不该存在的工具。"),
             }
+            event_labels = {**generic_event_labels, **twisted_event_labels}
             for event_name in location_names:
                 if not available:
                     break
@@ -2240,11 +2250,8 @@ class GameEngine:
                     f"open_world_location_{event_name}", available,
                     context=f"开放世界地点放置：{event_name}")
                 pos = tuple(roll["selected"])
-                display_name, description = (
-                    twisted_event_labels.get(event_name, (event_name, "副本专属事件地点。"))
-                    if self.state.current_region == "扭曲都市"
-                    else (event_name, "副本专属事件地点。")
-                )
+                display_name, description = event_labels.get(
+                    event_name, (event_name, "到达此处后可触发对应的地点事件。"))
                 world.map.add_location(event_name, {
                     "kind": "event", "name": display_name, "event_name": event_name,
                     "description": description,
