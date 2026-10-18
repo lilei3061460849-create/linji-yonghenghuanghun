@@ -49,6 +49,7 @@ EVENT_NAMES = {
     "罪孽都市": ["遗落的赌局", "高利贷钱庄", "地下角斗场", "黑市军火贩", "通缉悬赏榜", "假钞印钞厂", "帮派断指酒吧"],
     "龙心谷": ["断桥余烬", "熔炉余火", "逆行者", "裂隙温泉", "追求者", "埋骨之地"],
     "乱葬岗": ["纸人冥婚", "镇尸棺材钉", "悬木红煞", "孤坟香案", "赶尸栈房", "无名将军墓", "无名冢"],
+    "沉沦海": ["潮下基地"],
 }
 
 
@@ -319,6 +320,11 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         return {"applied": [], "instructions": [],
                 "interrupt_required": {"event": event_name, "option": text, "params": params}}
 
+    def _record_shards_peak() -> None:
+        engine.state.shards_peak = max(
+            int(getattr(engine.state, "shards_peak", 0)),
+            max(0, int(engine.state.shards)))
+
     def _pay_numeric(cost_type: str, amount: int) -> dict:
         return engine.combat.pay_numeric_cost(
             player, cost_type, amount,
@@ -361,6 +367,30 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
                 "outcome_multiplier": outcome_multiplier, "multiplier": multiplier,
                 "principal": principal, "net_delta": delta, "debt_result": debt_result}
 
+    # ---- 沉沦海·潮下基地：休整加成与药物偷窃均跨普通战斗保留，直到本轮结束 ----
+    if event_name == "潮下基地":
+        if text.startswith("救助基地"):
+            engine.state.shards -= 20
+            engine.state.event_modifiers["sunken_sea_rest_bonus_active"] = True
+            applied.extend([
+                "失去20碎片",
+                "本次沉沦海局外休整额外恢复12点，直到本轮死斗结束",
+            ])
+            return {"applied": applied, "instructions": instructions,
+                    "rest_bonus": 12, "active_until_deathmatch": True}
+        if text.startswith("盗窃药物"):
+            engine.state.shards += 20
+            _record_shards_peak()
+            engine.state.event_modifiers["sunken_sea_extra_tide_zombie"] = True
+            applied.extend([
+                "获得20碎片",
+                "本次沉沦海每场战斗额外加入1只潮尸，直到本轮结束",
+            ])
+            return {"applied": applied, "instructions": instructions,
+                    "extra_monster": "潮尸", "per_battle": True}
+        if text.startswith("离开基地"):
+            return {"applied": ["离开潮下基地"], "instructions": instructions}
+
     # ---- 过路商人：买入/卖出遗物，价格必须事前确认 ----
     if event_name == "过路商人" and text.startswith("遗物交易"):
         from .models import Relic
@@ -397,6 +427,8 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             roll = engine.dice.auto_roll("event_lost_gamble_shards", ["win", "lose"], context="遗落的赌局·碎片")
             delta = 2 * x if roll["selected"] == "win" else -2 * x
             engine.state.shards += delta
+            if delta > 0:
+                _record_shards_peak()
             applied.append(f"赌局{roll['selected']}：碎片{delta:+d}")
             return {"applied": applied, "instructions": [], "random": roll["record"]}
         if text.startswith("下注生命"):
@@ -405,6 +437,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             roll = engine.dice.auto_roll("event_lost_gamble_life", ["win", "lose"], context="遗落的赌局·生命")
             if roll["selected"] == "win":
                 engine.state.shards += 2 * x
+                _record_shards_peak()
                 applied.append(f"获得{2*x}碎片")
             else:
                 applied.append("无事发生")
@@ -864,7 +897,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         x = int(m.group(1)); engine.state.shards -= x; applied.append(f"失去{x}碎片")
     # 获得碎片（含"获得X碎片"/"获得X[碎片]"；跳过"双倍"等需随机的）
     for m in re.finditer(r'获得\s*(\d+)\s*\[?碎片\]?', text):
-        x = int(m.group(1)); engine.state.shards += x; applied.append(f"获得{x}碎片")
+        x = int(m.group(1)); engine.state.shards += x; _record_shards_peak(); applied.append(f"获得{x}碎片")
     # 血限+X
     for m in re.finditer(r'\[?血限\]?\s*\+\s*(\d+)', text):
         x = int(m.group(1)); player.blood_limit += x; player.current_hp += x; applied.append(f"血限+{x}")
