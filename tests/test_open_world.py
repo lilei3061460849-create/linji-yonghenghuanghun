@@ -689,6 +689,31 @@ def test_hiring_signal_persists_while_player_moves_and_resolves_on_arrival(tmp_p
                for actor in restored.actors.values())
 
 
+def test_final_duel_search_starts_when_only_two_reincarnators_remain_even_if_monsters_survive(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "final-duel-search.db"),
+                        save_dir=str(tmp_path), rng_seed=103, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    rival = Entity("R", "轮回者", blood_limit=30, current_hp=30)
+    monster = Entity("M", "怪物", blood_limit=10, current_hp=10)
+    engine.state.enemies = [rival, monster]
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(engine.state.player.runtime_id, "P", "player", 1, 1,
+                                    faction="player", mode="manual"))
+    world.add_actor(WorldActorState(rival.runtime_id, "R", "enemy", 5, 5,
+                                    faction="enemy", mode="autonomous"))
+    world.add_actor(WorldActorState(monster.runtime_id, "M", "enemy", 4, 5,
+                                    faction="monster", mode="autonomous"))
+
+    result = engine._refresh_world_final_duel(world)
+    assert result["active"] is True
+    assert set(result["finalists"]) == {engine.state.player.runtime_id, rival.runtime_id}
+    assert world.final_duel_search is True
+    assert world.final_duel_started is False
+
+
 def test_final_survivors_converge_to_a_marked_final_encounter():
     world = WorldState(clock=WorldClock(), map=_open_map(),
                        final_duel_search=True,
