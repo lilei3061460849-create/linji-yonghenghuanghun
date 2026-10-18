@@ -1782,3 +1782,39 @@ def test_world_initialize_spawns_exactly_five_relics_on_neutral_merchant(tmp_pat
     assert actor.faction == "neutral"
     assert actor.mode == "autonomous"
     assert len({relic.name for relic in merchant.relics}) == 5
+
+
+
+def test_world_learning_action_advances_three_turns_before_granting_daowen(tmp_path):
+    from engine.api import GameEngine
+    from engine.daowen import DaoWenEngine
+    from engine.gamedata import learnability_error
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-learning.db"),
+                        save_dir=str(tmp_path), rng_seed=113, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
+    engine.state.current_region = "罪孽都市"
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    name = next(name for name in DaoWenEngine.list_all()
+                if not learnability_error(name, owned=set(),
+                                          region=engine.state.current_region,
+                                          known=DaoWenEngine.list_all()))
+
+    result = engine.execute_action("pre_battle_action", {
+        "sub_action": "学习", "sub": "daowen", "tier": 1,
+        "names": [name], "recipient": "player",
+    })
+
+    assert result["success"], result
+    assert engine.state.world_state["clock"]["turn"] == 3
+    assert name in engine.state.player.dao_wen
+    events = engine.state.world_state["event_log"]
+    started = next(event for event in events if event["type"] == "world_action_started"
+                   and event.get("action") == "学习")
+    completed = next(event for event in events if event["type"] == "world_action_completed"
+                     and event.get("action") == "学习")
+    assert started["duration"] == 3
+    assert completed["elapsed_turns"] == 3
+    assert engine.state.energy == 3
