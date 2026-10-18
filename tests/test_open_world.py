@@ -1558,3 +1558,16 @@ def test_final_duelist_tracks_only_last_known_opponent_position():
     world._run_autonomous_units()
 
     assert world.actors["rival"].position == (3, 4)
+
+def test_traveling_merchant_is_neutral_immediately_when_created(tmp_path):
+    from engine.api import GameEngine
+
+    engine = GameEngine(db_path=str(tmp_path / "merchant-neutral.db"),
+                        save_dir=str(tmp_path), rng_seed=181, autosave=False)
+
+    merchant = engine._initialize_merchant_inventory()
+
+    assert merchant.is_neutral is True
+    assert merchant.shards == 20
+    assert len(merchant.relics) == 5
+
