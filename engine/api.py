@@ -1450,6 +1450,25 @@ class GameEngine:
             raise ValueError("开放世界尚未初始化，请先执行world_initialize")
         return WorldState.from_dict(self.state.world_state)
 
+    def _sync_world_entity_positions(self, world: WorldState) -> None:
+        """将地图中的权威位置同步回实体存档字段，避免移动只存在于地图副本。"""
+        entities = []
+        if self.state.player is not None:
+            entities.append(self.state.player)
+        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+            entities.extend(getattr(self.state, group_name, []) or [])
+        if getattr(self.state, "merchant", None) is not None:
+            entities.append(self.state.merchant)
+        by_id = {getattr(entity, "runtime_id", ""): entity
+                 for entity in entities if getattr(entity, "runtime_id", "")}
+        for actor in world.actors.values():
+            entity = by_id.get(actor.actor_id)
+            if entity is None:
+                continue
+            entity.world_region = self.state.current_region
+            entity.world_x, entity.world_y = actor.x, actor.y
+            entity.is_neutral = actor.faction == "neutral"
+
     def _action_world_initialize(self, params: dict) -> dict:
         """创建可存档的网格世界，并将当前存活单位登记为独立地图单位。"""
         if self.state.player is None:
@@ -1493,6 +1512,7 @@ class GameEngine:
                                                 faction=faction))
                 if kind == "player":
                     world.record("world_entered", actor_id, region=self.state.current_region)
+            self._sync_world_entity_positions(world)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_initialize",
                     "result": {"width": width, "height": height,
@@ -1512,6 +1532,13 @@ class GameEngine:
             if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
                 return {"success": False, "error": "目标坐标x/y必须是整数"}
             result = world.move_actor(actor_id, (x, y))
+            self._sync_world_entity_positions(world)
+            # 过路商人是地图上的中立角色；进入其相邻格后才开启交易会话，不走随机事件抽取。
+            if (self.event_pool.current is None
+                    and any(item.get("target_kind") == "merchant"
+                            for item in result.get("new_interactions", []))
+                    and "过路商人" in self.event_pool.events):
+                self.event_pool.current = "过路商人"
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_move", "result": result}
         except (ValueError, KeyError, TypeError) as exc:
@@ -1527,6 +1554,7 @@ class GameEngine:
                 return {"success": False, "error": "当前API只允许轮回者控制自己的地图单位"}
             turns = params.get("turns", 1)
             world.wait(actor_id, turns)
+            self._sync_world_entity_positions(world)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_wait",
                     "result": {"world_turn": world.clock.turn, "turns": turns}}
@@ -1543,6 +1571,7 @@ class GameEngine:
             if actor_id is None or actor_id != player_id or actor_id not in world.actors:
                 return {"success": False, "error": "只能查询轮回者自己的地图情报"}
             visible = set(world.visible_cells(actor_id))
+            self._sync_world_entity_positions(world)
             actor = world.actors[actor_id]
             known_terrain = [
                 {"x": x, "y": y, "terrain": world.map.terrain_at((x, y))}
@@ -1583,6 +1612,7 @@ class GameEngine:
             if actor_id is None or actor_id != player_id:
                 return {"success": False, "error": "只能查看轮回者自己的视野"}
             visible = world.visible_cells(actor_id)
+            self._sync_world_entity_positions(world)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_vision",
                     "result": {"actor_id": actor_id, "visible_cells": [list(p) for p in visible],
