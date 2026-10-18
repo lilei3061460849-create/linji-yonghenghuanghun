@@ -43,11 +43,12 @@ EVENT_CONSUMABLES = {
 }
 
 EVENT_NAMES = {
-    "通用": ["无名冢", "遗忘书屋", "祭坛", "过路商人", "猩红暴雨", "无名碑林", "回音长廊", "回忆当铺", "手术", "无魂泥潭"],
-    "扭曲都市": ["医生", "乞丐", "血肉温室", "绝望来电", "皮衣店", "生锈邮筒", "尖叫下水道"],
+    # 过路商人的事件定义保留供地图接触时打开交易会话；build_pool会将其排除于随机事件池。
+    "通用": ["遗忘书屋", "祭坛", "过路商人", "猩红暴雨", "无名碑林", "回音长廊", "回忆当铺", "无魂泥潭"],
+    "扭曲都市": ["医生", "乞丐", "血肉温室", "绝望来电", "皮衣店", "生锈邮筒", "尖叫下水道", "恶魔医务室"],
     "罪孽都市": ["遗落的赌局", "高利贷钱庄", "地下角斗场", "黑市军火贩", "通缉悬赏榜", "假钞印钞厂", "帮派断指酒吧"],
     "龙心谷": ["断桥余烬", "熔炉余火", "逆行者", "裂隙温泉", "追求者", "埋骨之地"],
-    "乱葬岗": ["纸人冥婚", "镇尸棺材钉", "悬木红煞", "孤坟香案", "赶尸栈房", "无名将军墓"],
+    "乱葬岗": ["纸人冥婚", "镇尸棺材钉", "悬木红煞", "孤坟香案", "赶尸栈房", "无名将军墓", "无名冢"],
 }
 
 
@@ -143,13 +144,17 @@ class EventPool:
 
     def build_pool(self, region: str) -> list[str]:
         """当前池 = 未触发通用 + 未触发本区域专属（通用在前）"""
-        pool = [n for n in EVENT_NAMES["通用"] if n in self.events and n not in self.triggered]
-        pool += [n for n in EVENT_NAMES.get(region, []) if n in self.events and n not in self.triggered]
+        # 过路商人是地图上的独立中立角色，不属于随机地点事件池；由世界地图相遇逻辑显式打开交易会话。
+        pool = [n for n in EVENT_NAMES["通用"]
+                if n in self.events and n not in self.triggered and n != "过路商人"]
+        pool += [n for n in EVENT_NAMES.get(region, [])
+                 if n in self.events and n not in self.triggered and n != "过路商人"]
         return pool
 
     def resolve(self, name: str):
-        """标记事件已触发"""
-        self.triggered.add(name)
+        """标记事件已触发；祭坛可重复投资，过路商人可在地图上反复遭遇。"""
+        if name not in {"祭坛", "过路商人"}:
+            self.triggered.add(name)
         if self.current == name:
             self.current = None
 
@@ -204,6 +209,54 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
     if shard_cost > 0 and shard_cost > engine.state.shards and not allow_debt:
         return f"碎片不足，无法支付{shard_cost}（当前{engine.state.shards}）"
 
+    event_name = params.get("_event_name", "")
+    if event_name == "祭坛" and text.startswith("投资"):
+        x = params.get("x", params.get("principal", params.get("amount")))
+        # 旧调用方未传倍率时兼容按最低倍率1结算；新接口仍可显式选择1..上限。
+        multiplier = params.get("multiplier", 1)
+        if not isinstance(x, int) or isinstance(x, bool) or x < 1:
+            return "祭坛投资必须显式提交正整数x"
+        if x > engine.state.shards:
+            return f"碎片不足，无法投入{x}（当前{engine.state.shards}）"
+        max_multiplier = 10 + (x // 100)
+        if (not isinstance(multiplier, int) or isinstance(multiplier, bool)
+                or multiplier < 1 or multiplier > max_multiplier):
+            return f"祭坛倍率必须是1到{max_multiplier}之间的整数（本金{x}，每100本金提高1点倍率上限）"
+    if event_name == "过路商人" and text.startswith("遗物交易"):
+        direction = params.get("trade_direction")
+        relic_name = params.get("relic_name", "")
+        price = params.get("price")
+        if direction not in {"buy", "sell"}:
+            return "遗物交易必须指定trade_direction为buy或sell"
+        if not isinstance(relic_name, str) or not relic_name:
+            return "遗物交易必须指定relic_name"
+        if not isinstance(price, int) or isinstance(price, bool) or price < 0:
+            return "遗物交易必须提交非负整数price"
+        if params.get("confirmed") is not True:
+            return "必须在成交前显式确认交易双方、遗物名称与碎片价格（confirmed=true）"
+        if isinstance(price, bool) or not isinstance(price, int) or price < 0:
+            return "交易价格必须是非负整数碎片"
+        merchant = getattr(engine.state, "merchant", None)
+        if merchant is None:
+            return "过路商人尚未进入本局副本，当前没有可交易的商人库存"
+        if direction == "buy":
+            if any(r.name == relic_name for r in engine.state.relics):
+                return "你已经持有这件遗物，不可重复购买"
+            if not any(r.name == relic_name for r in merchant.relics):
+                return "过路商人当前没有这件遗物；售出后不会自动补货"
+            if price > engine.state.shards:
+                return f"你没有足够碎片购买该遗物：需要{price}，当前{engine.state.shards}"
+            cap = player.relic_capacity
+            owned = len({r.name for r in engine.state.relics})
+            if relic_name not in {r.name for r in engine.state.relics} and owned >= cap:
+                return f"遗物承载上限不足：当前{owned}/{cap}种"
+        else:
+            if not any(r.name == relic_name for r in engine.state.relics):
+                return "你当前没有这件可出售遗物"
+            if any(r.name == relic_name for r in merchant.relics):
+                return "商人已经持有同名遗物，交易不能复制遗物"
+            if price > merchant.shards:
+                return f"商人碎片不足，无法支付{price}（商人当前{merchant.shards}）"
     if ("销毁一件当前遗物" in text or "失去一件当前遗物" in text):
         relic_name = params.get("relic_name", "")
         if not isinstance(relic_name, str) or not any(r.name == relic_name for r in engine.state.relics):
@@ -266,11 +319,79 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         return {"applied": [], "instructions": [],
                 "interrupt_required": {"event": event_name, "option": text, "params": params}}
 
+    def _record_shards_peak() -> None:
+        engine.state.shards_peak = max(
+            int(getattr(engine.state, "shards_peak", 0)),
+            max(0, int(engine.state.shards)))
+
     def _pay_numeric(cost_type: str, amount: int) -> dict:
         return engine.combat.pay_numeric_cost(
             player, cost_type, amount,
             cost_share_target_ref=params.get("cost_share_target_ref", ""),
             cost_context={"timing": "pre_battle_event", "source": event_name or "事件", "source_type": "event", "tags": {"active_payment"}})
+
+    # ---- 祭坛：玩家自选倍率，随机整数本身就是最终盈亏倍数 ----
+    if event_name == "祭坛" and text.startswith("投资"):
+        principal = int(params.get("x", params.get("principal", params.get("amount"))))
+        multiplier = int(params.get("multiplier", 1))
+        engine.state.shards -= principal
+        roll = engine.dice.auto_roll(
+            "altar_investment_multiplier",
+            list(range(-multiplier, multiplier + 1)),
+            context=f"祭坛·自选倍率{multiplier}·随机盈亏倍数")
+        outcome_multiplier = int(roll["selected"])
+        # 先扣本金，再返还本金加净盈亏；净变化严格等于本金×随机数。
+        delta = principal * outcome_multiplier
+        engine.state.shards += principal * (outcome_multiplier + 1)
+        outcome = "盈利" if outcome_multiplier > 0 else "亏损" if outcome_multiplier < 0 else "持平"
+        engine.state.shards_peak = max(
+            int(getattr(engine.state, "shards_peak", 0)),
+            max(0, int(engine.state.shards)))
+        applied.append(
+            f"祭坛投资：本金{principal}，自选倍率{multiplier}，"
+            f"随机结果{outcome_multiplier:+d}倍，{outcome}{abs(delta)}碎片，"
+            f"净变化{delta:+d}，当前碎片{engine.state.shards}")
+        debt_result = None
+        player_peak = max(0, int(getattr(engine.state, "shards_peak", 0)))
+        threshold = 10 + player_peak
+        if engine.state.shards <= -threshold and player.is_alive:
+            player.current_hp = 0
+            player.depart_battle("还债")
+            debt_result = {"type": "debt_death", "entity": player.name,
+                           "debt": -engine.state.shards, "threshold": threshold,
+                           "note": f"{player.name}被祭坛嚼碎：碎片余额{engine.state.shards}触及动态还债线"}
+            applied.append(debt_result["note"])
+        return {"applied": applied, "instructions": instructions,
+                "random": roll["record"], "outcome": outcome,
+                "outcome_multiplier": outcome_multiplier, "multiplier": multiplier,
+                "principal": principal, "net_delta": delta, "debt_result": debt_result}
+
+    # ---- 过路商人：买入/卖出遗物，价格必须事前确认 ----
+    if event_name == "过路商人" and text.startswith("遗物交易"):
+        from .models import Relic
+        direction = params["trade_direction"]
+        relic_name = params["relic_name"]
+        price = params["price"]
+        merchant = engine.state.merchant
+        if merchant is None:
+            return {"applied": [], "instructions": [], "error": "过路商人尚未进入本局副本"}
+        if direction == "buy":
+            relic = next(r for r in merchant.relics if r.name == relic_name)
+            engine.state.shards -= price
+            merchant.shards += price
+            merchant.relics.remove(relic)
+            engine.state.relics.append(relic)
+            applied.append(f"与过路商人成交：买入遗物{relic_name}，支付{price}碎片；商人余额{merchant.shards}，剩余{len(merchant.relics)}件遗物")
+        else:
+            relic = next(r for r in engine.state.relics if r.name == relic_name)
+            engine.state.relics.remove(relic)
+            merchant.relics.append(relic)
+            merchant.shards -= price
+            engine.state.shards += price
+            applied.append(f"与过路商人成交：卖出遗物{relic_name}，获得{price}碎片；商人余额{merchant.shards}，现有{len(merchant.relics)}件遗物")
+        return {"applied": applied, "instructions": instructions,
+                "trade": {"merchant": "过路商人", "direction": direction,
+                          "relic_name": relic_name, "price": price, "confirmed": True}}
 
     # ---- 罪孽都市·遗落的赌局：正式随机只走DiceEngine，结果不可由调用方注入 ----
     if event_name == "遗落的赌局" and text.startswith("下注"):
@@ -281,6 +402,8 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             roll = engine.dice.auto_roll("event_lost_gamble_shards", ["win", "lose"], context="遗落的赌局·碎片")
             delta = 2 * x if roll["selected"] == "win" else -2 * x
             engine.state.shards += delta
+            if delta > 0:
+                _record_shards_peak()
             applied.append(f"赌局{roll['selected']}：碎片{delta:+d}")
             return {"applied": applied, "instructions": [], "random": roll["record"]}
         if text.startswith("下注生命"):
@@ -289,6 +412,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             roll = engine.dice.auto_roll("event_lost_gamble_life", ["win", "lose"], context="遗落的赌局·生命")
             if roll["selected"] == "win":
                 engine.state.shards += 2 * x
+                _record_shards_peak()
                 applied.append(f"获得{2*x}碎片")
             else:
                 applied.append("无事发生")
@@ -526,7 +650,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         _pay_numeric("枯竭", 1)
         engine.state.resonance[resonance_type] = engine.state.resonance.get(resonance_type, 0) + 1
         return {"applied": ["枯竭1", f"获得{resonance_type}残韵"], "instructions": []}
-    if event_name == "手术" and text.startswith("强制移植"):
+    if event_name in {"手术", "恶魔医务室"} and text.startswith("强制移植"):
         refs = {f"friend:{i}": entity for i, entity in enumerate(engine.state.friends) if entity.is_alive}
         refs.update({f"employee:{i}": entity for i, entity in enumerate(engine.state.employees) if entity.is_alive})
         target = refs.get(params.get("target_ref"))
@@ -542,7 +666,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         target._transplant_rounds_unchanged = 0
         return {"applied": [f"{target.name}被移植{roll['selected']}1"], "instructions": [],
                 "random": roll["record"]}
-    if event_name == "手术" and text.startswith("抽取灵魂"):
+    if event_name in {"手术", "恶魔医务室"} and text.startswith("抽取灵魂"):
         refs = {f"friend:{i}": entity for i, entity in enumerate(engine.state.friends) if entity.is_alive}
         refs.update({f"employee:{i}": entity for i, entity in enumerate(engine.state.employees) if entity.is_alive})
         target = refs.get(params.get("target_ref"))
@@ -748,7 +872,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         x = int(m.group(1)); engine.state.shards -= x; applied.append(f"失去{x}碎片")
     # 获得碎片（含"获得X碎片"/"获得X[碎片]"；跳过"双倍"等需随机的）
     for m in re.finditer(r'获得\s*(\d+)\s*\[?碎片\]?', text):
-        x = int(m.group(1)); engine.state.shards += x; applied.append(f"获得{x}碎片")
+        x = int(m.group(1)); engine.state.shards += x; _record_shards_peak(); applied.append(f"获得{x}碎片")
     # 血限+X
     for m in re.finditer(r'\[?血限\]?\s*\+\s*(\d+)', text):
         x = int(m.group(1)); player.blood_limit += x; player.current_hp += x; applied.append(f"血限+{x}")

@@ -274,12 +274,8 @@ class TacticalAI:
             per_key = self._probe_cache.get(key)
             if per_key is not None and per_key.get("target") == "reject":
                 continue
-            params: dict = {"daowen_name": name, "x": 1, "dodge": False,
-                            "blood_shadow": False}
-            if self._actor_ref:
-                params["actor_ref"] = self._actor_ref   # 守擂者视角：预演也须指定施法者，否则引擎当玩家动作
-            if target:
-                params["target"] = target
+            # 与正式发动共用稳定引用解析，避免重名怪物让预演走入“目标不唯一”分支。
+            params = self._params(name, 1, target)
             pv = self.previewer.preview("use_daowen", params)
             res = pv.get("result") or {}
             if not res.get("success"):
@@ -324,12 +320,8 @@ class TacticalAI:
         cached = self._probe_cache.get(key)
         if cached is not None:
             return cached
-        params: dict = {"daowen_name": name, "x": x, "dodge": False,
-                        "blood_shadow": False}
-        if self._actor_ref:
-            params["actor_ref"] = self._actor_ref
-        if target:
-            params["target"] = target
+        # 伤害档位探测也必须使用与正式发动相同的稳定目标引用。
+        params = self._params(name, x, target)
         pv = self.previewer.preview("use_daowen", params)
         if not (pv.get("result") or {}).get("success"):
             self._probe_cache[key] = 0
@@ -541,12 +533,14 @@ class TacticalAI:
                 harvest_cap = max(cap, max(1, self.mana() // cost))
             target = probe.get("target_name")
             kind = probe["kind"]
+            kill_x = 0
             if kind == "damage":         # 输出牌给血最少敌人（收割/推进）
                 foes = sorted(self.alive_enemies(), key=lambda e: e.current_hp)
                 targets = [foes[0].name] if foes else []
                 if foes and probe["dmg"] > 0:   # 收割档：恰好打死血最少者（真实预演，非线性外推）
                     _kx = self._x_to_kill(name, foes[0].current_hp, foes[0].name)
                     if _kx >= 1:
+                        kill_x = _kx
                         xs.add(_kx)
                         # 收割档只受「买得起」约束，不受均分预算的 cap 裁剪：
                         # 超线性伤害（杀伐 X²）下击杀所需 X 常高于 budget_x，
@@ -565,6 +559,11 @@ class TacticalAI:
                     out.append({"action": "use_daowen",
                                 "label": f"{name}X={x}",
                                 "kind": kind, "target": t,
+                                # 斩杀档优先；若当前血量超过单次可击杀范围，也保留最大伤害档，
+                                # 避免候选截断让AI第二手仍重复低伤普攻。
+                                "priority_damage": bool(
+                                    kind == "damage" and
+                                    (x == max(xs) or (kill_x and x == kill_x))),
                                 "params": self._params(name, x, t)})
         return out
 
@@ -572,8 +571,22 @@ class TacticalAI:
         p: dict = {"daowen_name": name, "x": x, "dodge": False, "blood_shadow": False}
         if self._actor_ref:
             p["actor_ref"] = self._actor_ref   # 守擂者视角：所有道纹都指定施法者
-        if target:
-            p["target"] = target
+        if target and name != "波及":
+            refs = self.engine.combat._combat_entity_refs()
+            matches = [(ref, entity) for ref, entity in refs.items()
+                       if entity.name == target and entity.is_alive]
+            if len(matches) == 1:
+                p["target_ref"] = matches[0][0]
+            elif matches:
+                # 重名怪物很常见；名称接口会拒绝歧义目标。按当前目标选择规则
+                # 锁定同名单位中生命最低者，并把稳定引用传给引擎。
+                enemy_ids = {id(entity) for entity in self.alive_enemies()}
+                hostile_matches = [pair for pair in matches if id(pair[1]) in enemy_ids]
+                pool = hostile_matches or matches
+                p["target_ref"] = min(pool, key=lambda pair: (
+                    pair[1].current_hp, pair[0]))[0]
+            else:
+                p["target"] = target
         if name == "波及":
             refs = self.engine.combat._combat_entity_refs()
             # 视角重定向：波及目标是「本 AI 视角的敌人」；普通视角取非玩家侧，守擂视角取挑战者侧。
@@ -934,16 +947,27 @@ class TacticalAI:
         candidates.extend(basic_candidates)
         for bonus, cand in self._resonance_candidates():
             candidates.append(cand)   # 残韵候选已按威胁预筛，附带基础分
-        # 普攻是常驻候选，不能因为道纹候选太多而在
-        # MAX_CANDIDATE_PREVIEWS 截断时消失；否则AI会出现“有攻击力却只会
-        # 重复控制”的假性策略。
-        if basic_candidates:
-            reserve = min(len(basic_candidates), MAX_CANDIDATE_PREVIEWS)
-            non_basic = [cand for cand in candidates if cand not in basic_candidates]
-            candidates = (non_basic[:MAX_CANDIDATE_PREVIEWS - reserve]
-                          + basic_candidates[:reserve])
-        else:
-            candidates = candidates[:MAX_CANDIDATE_PREVIEWS]
+        # 普攻与真实斩杀档都必须穿过预演预算闸门：否则大量按名称排序的
+        # 道纹候选会把后面的斩杀候选截掉，AI明明有一手可终结战斗却重复普攻。
+        if len(candidates) > MAX_CANDIDATE_PREVIEWS:
+            basic_ids = {id(cand) for cand in basic_candidates}
+            priority_damage_candidates = [
+                cand for cand in candidates
+                if cand.get("priority_damage") and id(cand) not in basic_ids
+            ]
+            reserve_basic = min(len(basic_candidates), MAX_CANDIDATE_PREVIEWS)
+            reserve_priority_damage = min(
+                len(priority_damage_candidates), MAX_CANDIDATE_PREVIEWS - reserve_basic)
+            reserved_ids = basic_ids | {id(cand) for cand in priority_damage_candidates}
+            regular_candidates = [
+                cand for cand in candidates if id(cand) not in reserved_ids
+            ]
+            regular_slots = MAX_CANDIDATE_PREVIEWS - reserve_basic - reserve_priority_damage
+            candidates = (
+                regular_candidates[:regular_slots]
+                + priority_damage_candidates[:reserve_priority_damage]
+                + basic_candidates[:reserve_basic]
+            )
         immediate_damage_available = False
         immediate_damage_candidates: set[int] = set()
         for cand in candidates:

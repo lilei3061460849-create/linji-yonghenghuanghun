@@ -181,7 +181,7 @@ class MonsterLifeMixin:
 
     PROLIFERATION_THRESHOLD = Entity.CANCER_HEAL_MULTIPLIER  # 癌变：规则正文「累计恢复量达血限×2」；过量回复按原值计（阈值唯一事实源在 Entity，DM裁定2026-08-18）
     CANCER_THRESHOLD = PROLIFERATION_THRESHOLD  # 别名：增生旧名已统一为癌变，二者同阈值
-    DEBT_THRESHOLD = special_events.threshold("huanzhai")  # 还债阈值来自 data/rules/special_events.toml
+    DEBT_THRESHOLD = special_events.threshold("huanzhai")  # 动态阈值基数10来自 TOML；实际阈值=基数+角色历史最高碎片余额
     # 雕塑数值唯一事实源在 data/rules/special_events.toml（与 Entity 阈值同口径接线）
     SCULPTURE_DAMAGE = special_events.damage_per_durability("diaosu")    # 每点耐久可造成的伤害
     SCULPTURE_SHIELD = special_events.shield_per_durability("diaosu")    # 每点耐久可获得的格挡
@@ -289,7 +289,7 @@ class MonsterLifeMixin:
         """
         回终多路径胜利结算（依次检查：雕塑 / 癌变 / 还债）
         雕塑：任何非轮回者（怪物/微光者/赤族等），不视为击杀，不提供碎片。
-        还债：仅怪物。
+        还债：怪物转为债务员工；轮回者、朋友、员工等其他角色被债务吞噬。
         癌变对任一角色生效。
         """
         results = []
@@ -317,18 +317,39 @@ class MonsterLifeMixin:
                 results.append(cancer)
                 continue
 
-            # 3. 还债：负债达阈值（仅怪物；shards为负）
-            if monster.entity_type == "怪物" and monster.shards <= -self.DEBT_THRESHOLD:
-                results.append(self._debt_bind_monster(monster))
+            # 3. 动态还债：M 为该角色本局历史最高真实碎片余额，阈值=10+M。
+            debt_balance = monster.shards
+            debt_peak = max(0, int(getattr(monster, "shards_peak", 0)))
+            if debt_balance <= -(self.DEBT_THRESHOLD + debt_peak):
+                if monster.entity_type == "怪物":
+                    results.append(self._debt_bind_monster(monster))
+                else:
+                    monster.current_hp = 0
+                    monster.depart_battle("还债")
+                    results.append({"type": "debt_death", "entity": monster.name,
+                                    "debt": -debt_balance,
+                                    "threshold": self.DEBT_THRESHOLD + debt_peak,
+                                    "note": f"{monster.name}碎片余额{debt_balance}触及动态还债线，已被吞噬并死亡"})
                 continue
 
         seen = {id(e) for e in self.state.enemies}
         for ally in list(self.state.get_all_player_side()):
             if id(ally) in seen:
                 continue
-            if (ally.is_alive and not ally.is_sculptured and not ally.is_proliferated
-                    and not ally.is_debt_bound
-                    and self._can_be_sculptured(ally)
+            if not ally.is_alive or ally.is_sculptured or ally.is_proliferated or ally.is_debt_bound:
+                continue
+            debt_balance = self.state.shards if ally is self.state.player else ally.shards
+            debt_peak = max(0, int(getattr(self.state, "shards_peak", 0) if ally is self.state.player
+                                   else getattr(ally, "shards_peak", 0)))
+            if debt_balance <= -(self.DEBT_THRESHOLD + debt_peak):
+                ally.current_hp = 0
+                ally.depart_battle("还债")
+                results.append({"type": "debt_death", "entity": ally.name,
+                                "debt": -debt_balance,
+                                "threshold": self.DEBT_THRESHOLD + debt_peak,
+                                "note": f"{ally.name}碎片余额{debt_balance}触及动态还债线，被祭坛嚼碎并死亡"})
+                continue
+            if (self._can_be_sculptured(ally)
                     and ally.effective_attack_count() <= 0
                     and ally.effective_attack_power() <= 0):
                 results.append(self._sculpture_monster(ally))

@@ -62,10 +62,13 @@ class DaoWenInstance:
     # 与冷却同族但作用域更大——冷却按战斗场数递减，唯一是轮回级一次性，
     # 跨场不恢复，只有开新轮回（状态重置）才清零。
     spent_unique: bool = False
+    # 时间的偏爱：将按战斗场数计的冷却改为逐回合递减。
+    cooldown_rounds_remaining: int = 0
 
     def can_use(self) -> bool:
         return (not self.is_frozen and not self.spent_unique
-                and self.cooldown_remaining <= 0)
+                and self.cooldown_remaining <= 0
+                and getattr(self, "cooldown_rounds_remaining", 0) <= 0)
 
 
 @dataclass
@@ -120,7 +123,7 @@ class Relic:
 # 每只怪物出厂自带的遗物：[回始]获得法限等量的法力和异变。
 # 定义在此而非 monsters.py：授予发生在 Entity.__post_init__，效果判定在 combat.py，
 # 两侧都要引用，放 models 可避免 monsters ↔ combat 的循环导入。
-MONSTER_MANA_RELIC = "某人的偏爱"
+MONSTER_MANA_RELIC = "痛苦的偏爱"
 MONSTER_MANA_RELIC_EFFECT = "[回始]获得等同[法限]的法力和【异变】"
 
 
@@ -267,7 +270,19 @@ class Entity:
     runtime_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     # 分裂复制体的创建者身份；供遗物被动追踪归属，不依赖可能重名的实体名称。
     copy_creator_runtime_id: str = ""
-    
+    # 开放世界位置字段：所有角色共用；地图系统尚未分配位置时为None。
+    world_region: str = ""
+    world_x: Optional[int] = None
+    world_y: Optional[int] = None
+    is_neutral: bool = False  # 中立特殊角色不会自动进入任一战斗阵营
+    # 怪物/造物共用的固有偏爱；每种偏爱在同一实体上最多出现一次。
+    preferences: list[str] = field(default_factory=list)
+    # 造物是具有专属身份的朋友，不是分裂道纹产生的临时朋友。
+    is_created_being: bool = False
+    created_by_runtime_id: str = ""
+    # 造物只有在主人明确召唤时才加入战斗；世界地图上的独立行动不因此中断。
+    is_summoned: bool = False
+
     # 基础属性
     blood_limit: int = 0         # 血限
     current_hp: int = 0          # 当前生命
@@ -323,6 +338,7 @@ class Entity:
     chenglu_paid: int = 0       # 本场已按此兑换过的生命总额（每10一档，战始归零）
 
     # 多路径胜利追踪
+    shards_peak: int = 0          # 本局历史最高真实碎片余额 M，只升不降
     shards: int = 0              # 怪物自带碎片（罪孽都市）/ 负值表示负债（还债）
     fake_shards: int = 0         # 假碎片（罪孽都市：假钞产出；战斗中失去碎片时优先失去假碎片）
     total_healed: int = 0        # 累计受到的恢复量（癌变；含过量部分，按原值计，双倍机制已删）
@@ -417,6 +433,9 @@ class Entity:
     is_chizu_of: str = ""
 
     def __post_init__(self):
+        # 每个实体的本局历史最高碎片余额至少包含其初始真实余额。
+        # 不能只依赖 __setattr__：dataclass 构造与旧存档恢复路径都要满足同一不变量。
+        self.shards_peak = max(0, int(self.shards_peak), int(self.shards))
         if self.battle_start_blood_limit == 0:
             self.battle_start_blood_limit = self.blood_limit
         # ---- 2026-09-16 属性模型统一的向上兼容 ----
@@ -429,7 +448,7 @@ class Entity:
             self.mana_limit = self.attack_power
         if self.speed_limit == 0 and self.attack_count > 0:
             self.speed_limit = self.attack_count
-        # 每个怪物出厂自带【某人的偏爱】，覆盖工厂、手造与读档全部构造路径。
+        # 每个怪物出厂自带【痛苦的偏爱】，覆盖工厂、手造与读档全部构造路径。
         # 2026-10-13：回始获得法限等量法力与异变；是否触发迷失由角色类型决定，
         # 不由遗物决定。持有者不限于怪物，失去遗物的怪物仍免于迷失。
         if self.entity_type == "怪物" and not any(
@@ -459,7 +478,14 @@ class Entity:
     # _hp_engine_ref 为可选弱引用（非字段，不参与序列化/深拷贝判定）。
     def __setattr__(self, name, value):
         old = self.__dict__.get(name, None)
+        # 只在最终真实余额变化时更新历史峰值；该逻辑必须位于实际生效的
+        # __setattr__ 中，不能被后续生命/面板同步钩子覆盖。
+        if name == "shards_peak" and old is not None:
+            value = max(int(value), int(old))
         object.__setattr__(self, name, value)
+        if name == "shards" and "shards_peak" in self.__dict__:
+            if int(value) > int(self.__dict__.get("shards_peak", 0)):
+                object.__setattr__(self, "shards_peak", int(value))
         if name == "current_hp" and old is not None and value < old:
             self._fire_hp_loss(old, value)
         # ---- 2026-09-16 属性模型统一：旧面板字段写穿到新的上限/当前值 ----
@@ -795,8 +821,15 @@ class Entity:
         """清空格挡（回终）"""
         self.shield = 0
     
+    def mana_cost(self, amount: int) -> int:
+        """返回实际法力支出；愤怒状态与贪婪的偏爱均使正数消耗减半、向上取整。"""
+        amount = max(0, int(amount))
+        if amount > 0 and (self.has_status("愤怒") or "贪婪的偏爱" in getattr(self, "preferences", [])):
+            amount = math.ceil(amount / 2)
+        return amount
+
     def spend_mana(self, amount: int) -> bool:
-        """消耗法力。愤怒：法力消耗减半（向上取整）。
+        """消耗法力。愤怒与贪婪的偏爱：法力消耗减半（向上取整）。
 
         版本史（【勾魂】）：
         - 旧版「[回始]失去2X法力，持续∞」——已废止。
@@ -808,8 +841,7 @@ class Entity:
           透支/法术），效果重新有对象；判定位统一收敛到
           `can_gain_mana()` / `gain_mana()`，不再散落各处。
         """
-        if amount > 0 and self.has_status("愤怒"):
-            amount = math.ceil(amount / 2)
+        amount = self.mana_cost(amount)
         if self.current_mana < amount:
             return False
         self.current_mana -= amount
@@ -904,6 +936,14 @@ class Entity:
             "name": self.name,
             "entity_type": self.entity_type,
             "runtime_id": self.runtime_id,
+            "world_region": self.world_region,
+            "world_x": self.world_x,
+            "world_y": self.world_y,
+            "is_neutral": self.is_neutral,
+            "preferences": list(getattr(self, "preferences", [])),
+            "is_created_being": bool(getattr(self, "is_created_being", False)),
+            "created_by_runtime_id": getattr(self, "created_by_runtime_id", ""),
+            "is_summoned": bool(getattr(self, "is_summoned", False)),
             "blood_limit": self.blood_limit,
             "current_hp": self.current_hp,
             "mana_limit": self.mana_limit,
@@ -924,6 +964,7 @@ class Entity:
             "battle_start_blood_limit": self.battle_start_blood_limit,
             "deployed_at_round": self.deployed_at_round,
             "shards": self.shards,
+            "shards_peak": self.shards_peak,
             "fake_shards": self.fake_shards,
             "total_healed": self.total_healed,
             "mutation_count": self.mutation_count,
@@ -980,6 +1021,14 @@ class GameState:
     current_round: int = 0
     current_battle: int = 0     # 第几场战斗
     current_region: str = ""    # 当前副本
+    # 过路商人是独立中立角色，不属于轮回者/怪物阵营；库存与世界坐标单独保存。
+    merchant: Optional[Entity] = None
+    # 开放世界状态采用纯dict快照，避免地图/行动模块与战斗实体模型形成循环依赖。
+    world_state: dict = field(default_factory=dict)
+    # 开放世界战斗时暂存未参与本次遭遇的地图敌方单位，战终后恢复。
+    world_enemy_reserve: list[Entity] = field(default_factory=list)
+    world_encounter_entities: list[Entity] = field(default_factory=list)
+    world_encounter_id: str = ""
     energy: int = 3             # 局外精力
     
     # 轮回者
@@ -1000,8 +1049,25 @@ class GameState:
     personality_traits: dict[str, dict] = field(default_factory=dict)
     
     # 资源
+    shards_peak: int = 0        # 玩家本局历史最高真实碎片余额 M，只升不降
     shards: int = 20            # 碎片
     fake_shards: int = 0        # 假碎片（罪孽都市假钞X产出；战斗中失去碎片时优先失去假碎片）
+
+    def __setattr__(self, name, value):
+        if name == "shards_peak" and "shards_peak" in self.__dict__:
+            value = max(int(value), int(self.__dict__.get("shards_peak", 0)))
+        object.__setattr__(self, name, value)
+        if name == "shards" and "shards_peak" in self.__dict__:
+            if int(value) > int(self.__dict__.get("shards_peak", 0)):
+                object.__setattr__(self, "shards_peak", int(value))
+        # 玩家真实碎片余额存于 GameState；镜像同步峰值，避免状态快照出现两套玩家峰值。
+        if name in {"shards", "shards_peak", "player"} and "shards_peak" in self.__dict__:
+            player = self.__dict__.get("player")
+            if player is not None and hasattr(player, "shards_peak"):
+                peak = max(int(self.__dict__.get("shards_peak", 0)),
+                           int(getattr(player, "shards_peak", 0)))
+                object.__setattr__(self, "shards_peak", peak)
+                object.__setattr__(player, "shards_peak", peak)
 
     def lose_shards(self, amount: int) -> int:
         """玩家失去碎片（假碎片优先）。返回实际失去的真碎片数。"""
@@ -1121,6 +1187,8 @@ class GameState:
 
     # 雇佣后"发现并选择一种转化道纹"：{员工名: [3个候选道纹名]}，未选择前该员工暂不持有转化道纹
     pending_daowen_choices: dict[str, list[str]] = field(default_factory=dict)
+    # 学习获得但尚未分配的普通道纹；可留存，等未来结识朋友后再分配。
+    pending_learned_daowen: list[str] = field(default_factory=list)
 
     # 事件登记的"下一场战斗额外出现的怪物"（如龙心谷"追求者·拿走口粮"），[战始]出怪时读取并额外加入
     forced_monsters_next_battle: list[dict] = field(default_factory=list)
@@ -1644,13 +1712,20 @@ class GameState:
             "current_round": self.current_round,
             "current_battle": self.current_battle,
             "current_region": self.current_region,
+            "merchant": self.merchant.to_dict() if getattr(self, "merchant", None) else None,
+            "world_state": getattr(self, "world_state", {}),
+            "world_enemy_reserve": [e.to_dict() for e in getattr(self, "world_enemy_reserve", [])],
+            "world_encounter_entities": [e.to_dict() for e in getattr(self, "world_encounter_entities", [])],
+            "world_encounter_id": getattr(self, "world_encounter_id", ""),
             "energy": self.energy,
             "shards": self.shards,
+            "shards_peak": self.shards_peak,
             "fake_shards": self.fake_shards,
             "blacklist_level": self.blacklist_level,
             "is_blacklisted": self.is_blacklisted,
             "pending_wage_decisions": self.pending_wage_decisions,
             "pending_daowen_choices": self.pending_daowen_choices,
+            "pending_learned_daowen": list(getattr(self, "pending_learned_daowen", [])),
             "pending_relic_choices": list(self.pending_relic_choices),
             "pending_relic_source": self.pending_relic_source,
             "pending_initial_daowen_choices": list(self.pending_initial_daowen_choices),
@@ -1753,7 +1828,9 @@ class GameState:
         if self.player and self.player.is_alive and not self.is_sealed_away(self.player):
             entities.append(self.player)
         entities.extend(f for f in self.friends if f.is_alive and not f.has_retreated
-                        and not self.is_sealed_away(f))
+                        and not self.is_sealed_away(f)
+                        and (not getattr(f, "is_created_being", False)
+                             or getattr(f, "is_summoned", False)))
         entities.extend(e for e in self.employees if e.is_alive and e.is_deployed and not e.has_retreated
                         and not self.is_sealed_away(e))
         entities.extend(t for t in self.temp_friends if t.is_alive and not t.has_retreated

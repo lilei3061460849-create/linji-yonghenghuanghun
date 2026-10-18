@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>扭曲都市 · 正方形地图原型</title>
+<style>
+:root{color-scheme:dark;--bg:#101216;--panel:#1b2028;--panel2:#242c37;--line:#3a4553;--text:#eef2f7;--muted:#aab5c4;--road:#3b4148;--building:#555c68;--accent:#e4bd72;--danger:#e06e6e;--green:#79b79a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1100px;margin:auto;padding:14px;display:grid;gap:12px}
+header,.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:0 0 10px}.muted{color:var(--muted);font-size:12px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+button,input{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;min-height:40px}
+button{cursor:pointer;touch-action:manipulation}button.primary{border-color:#9d8252;background:#463a28}
+.layout{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(250px,.7fr);gap:12px;align-items:start}
+.map-wrap{overflow:auto;background:#0c0f13;border:1px solid var(--line);border-radius:10px;padding:8px}
+#map{display:grid;gap:2px;width:100%;max-width:680px;margin:auto;aspect-ratio:1}
+.cell{min-width:0;min-height:0;position:relative;border:1px solid #ffffff0a;border-radius:2px;display:grid;place-items:center;padding:0;font-size:clamp(7px,1.6vw,15px);line-height:1;overflow:hidden;aspect-ratio:1}
+.cell.road{background:#343a42}.cell.sidewalk{background:#6a6d69}.cell.empty{background:#444b50}.cell.rubble{background:#62584e}.cell.weeds{background:#344e43}.cell.puddle{background:#344b5a}.cell.building{background:#555c68}.cell.school{background:#596579}.cell.parking{background:#4d5259}.cell.utility{background:#665849}.cell.landmark{border:1px solid var(--accent);background:#5c463b;box-shadow:inset 0 0 0 1px #e4bd7255}.cell.site{background:#76513a;border:1px solid #ffd68a;color:#fff4d5;z-index:1}.cell.outside{display:none}.cell:focus-visible{outline:2px solid white;outline-offset:1px}
+.legend{display:flex;flex-wrap:wrap;gap:7px 12px;margin-top:10px}.legend span{display:inline-flex;gap:5px;align-items:center;color:var(--muted);font-size:11px}.swatch{width:12px;height:12px;border-radius:3px;display:inline-block}
+#details{min-height:180px}.detail-title{font-weight:750;font-size:17px;margin-bottom:4px}.detail-body{white-space:pre-wrap;color:#d4dbe4;font-size:13px}.pill{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:3px 8px;color:var(--muted);font-size:11px;margin:2px 4px 2px 0}
+.note{border-left:3px solid var(--accent);padding:8px 10px;background:#2b261e;color:#e4d7be;border-radius:0 8px 8px 0;font-size:12px}
+@media(max-width:760px){main{padding:8px}.layout{grid-template-columns:1fr}.map-wrap{padding:5px}#map{gap:1px}.cell{border-radius:1px}.panel,header{padding:11px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>扭曲都市 · 正方形地图原型</h1>
+  <div class="muted">21×21 固定基础地图 · 随机城市街区与地形 · 外围逐圈消失</div>
+  <div class="toolbar">
+    <label class="muted" for="seed">地图种子</label><input id="seed" inputmode="numeric" value="20261018" aria-label="地图随机种子" style="width:112px">
+    <button id="generate" class="primary">重新生成地形</button>
+    <button id="shrink">消失最外一圈</button>
+    <button id="reset">重置边界</button>
+  </div>
+  <div id="status" class="muted" style="margin-top:9px"></div>
+</header>
+<div class="layout">
+  <section class="panel">
+    <h2>地图</h2>
+    <div class="map-wrap"><div id="map" role="grid" aria-label="扭曲都市正方形地图"></div></div>
+    <div class="legend">
+      <span><i class="swatch" style="background:#343a42"></i>道路</span>
+      <span><i class="swatch" style="background:#555c68"></i>建筑</span>
+      <span><i class="swatch" style="background:#62584e"></i>瓦砾</span>
+      <span><i class="swatch" style="background:#344e43"></i>杂草</span>
+      <span><i class="swatch" style="background:#344b5a"></i>积水</span>
+      <span><i class="swatch" style="background:#76513a"></i>事件地点</span>
+      <span><i class="swatch" style="background:#6a6d69"></i>人行区域</span>
+    </div>
+    <p class="muted">点击地图上的事件标记查看地点。道路按固定间隔生成，保证街区间存在连通的道路网络；街区内部的地形与建筑形状随机变化。</p>
+  </section>
+  <aside style="display:grid;gap:12px">
+    <section class="panel" id="details" aria-live="polite">
+      <h2>地点详情</h2>
+      <div class="muted">点击地图上的事件标记后，这里会显示地点描述、事件选项与代价。</div>
+    </section>
+    <section class="panel">
+      <h2>本原型的规则边界</h2>
+      <div class="note">这是地图生成与地点交互的独立原型，不会触发或结算真实游戏事件。展示当前原型中的8个通用事件与8个扭曲都市普通专属事件。通用事件的机制保持共通，地点外观按扭曲都市废土环境呈现；“都市的终音”和“初拥之夜”仍不地点化，因为它们依赖死斗结果或角色状态。</div>
+      <p class="muted">建筑表现遵守废土设定：医院、学校、停车场等是废弃建筑遗迹，不是仍在正常营业的机构。地图面积固定，地形数量与占比允许每次随机变化。</p>
+    </section>
+  </aside>
+</div>
+</main>
+<script>
+"use strict";
+const SIZE=21, BLOCKS=4;
+const EVENTS=[
+ {id:"doctor",name:"医生",icon:"✚",building:"废弃医院 / 临时手术间",kind:"人物遭遇",desc:"癫狂的微光者用生锈手术刀招揽“改良”。这里是废弃医院遗迹中被临时占据的手术间，不是正常营业的医院。",options:["接受改造：流血12，血限+6","拒绝改造：流血6，获得8碎片","雇佣医生：失去10碎片，获得医生（50/1/1）；可付5碎片提升1攻击次数或2攻击力。"]},
+ {id:"demon-infirmary",name:"恶魔医务室",icon:"✚",building:"废弃医院遗迹 / 被占据的地下手术间",kind:"扭曲都市专属事件",desc:"废弃医院深处仍亮着一盏不稳定的手术灯。培养皿里，一颗长满触手的心脏缓慢搏动。这里没有医生资质，只有把队友当作材料的恶魔式医疗。",options:["强制移植：使一名微光者队友被植入一种随机的怪物道纹（该道纹每场战斗三回合后若保持原样，则仍变为怪物）","抽取灵魂：失去一名微光者队友，获得其血限50%的碎片","拒绝：无事发生"]},
+ {id:"beggar",name:"乞丐",icon:"♟",building:"街角避难处",kind:"人物遭遇",desc:"异化迹象明显的幸存者蜷缩在街角，向路过者伸手求助。",options:["给予庇护：流血10，获得乞丐（50/3/2，异变3）","施舍碎片：失去5碎片，获得随机遗物","冷酷终结：获得8碎片","无视：无事发生"]},
+ {id:"greenhouse",name:"血肉温室",icon:"♧",building:"破碎玻璃温室",kind:"特殊建筑",desc:"废墟里的玻璃温室仍被猩红植物占据，植物像心脏般搏动，果实散发甜香。",options:["采摘猩红果实：获得遗物·猩红果实","采摘苍白之花：获得遗物·苍白之花","收集活性养分：获得活性土壤","拒绝：无事发生"]},
+ {id:"phone",name:"绝望来电",icon:"☎",building:"猩红真菌电话亭",kind:"地点触发",desc:"街角铸铁公用电话亭被猩红真菌覆盖。断线多年的话筒突然响起，另一端的声音似乎熟知你的过去。必须抵达电话亭并互动才可触发。",options:["接听：流血10，得到一个问题的答案","拒绝：无事发生"]},
+ {id:"tailor",name:"皮衣店",icon:"✂",building:"废弃服装店 / 改衣作坊",kind:"异常商贩",desc:"旧橱窗里陈列着由活体皮肤缝制的时装。异化裁缝占据了废弃店面，交易并非正常商业活动。",options:["试穿皮衣：流血10，下场战斗第一回始获得30点格挡","购买皮衣：失去20碎片，获得皮衣","交换物品：失去一件当前遗物，获得皮衣","拒绝：无事发生"]},
+ {id:"mailbox",name:"生锈邮筒",icon:"✉",building:"坍塌街区旧邮筒",kind:"地点触发",desc:"倒塌建筑旁的旧邮筒里传来指甲抓挠声。空洞的声音声称能把信寄给“过去的自己”。",options:["写信：流血5，可写最多40字，寄给下一场轮回的自己","拒绝：无事发生"]},
+ {id:"sewer",name:"尖叫下水道",icon:"▽",building:"排水井口 / 地下管线",kind:"条件地点",desc:"井盖被顶开，黑色油性物质从地下排水通道溢出，深处传来类似人类的尖叫。原文的五种道纹门槛保留。",options:["前置条件：拥有五种道纹及以上","献出声音：失忆X，获得缄默面具","法力净化：枯竭3，获得焦黑发丝","避开井口：无事发生"]}
+];
+const GENERIC_EVENTS=[
+ {id:"forgotten-bookshop",name:"遗忘书屋",icon:"▤",building:"坍塌街角的旧档案室",kind:"通用事件",desc:"旧书与潮湿档案散落在坍塌房间里。无面店员将三本以皮革缝合的古籍推到你面前。不同副本可以替换场景外壳，不改变事件本身。",options:["阅读《战争残卷》：流血15，选择获得两种法术定义","阅读《禁忌法典》：失忆1，自选一件遗物与20碎片","阅读《自我剖析》：枯竭1，自选残韵×1","拒绝：无事发生"]},
+ {id:"altar",name:"祭坛",icon:"†",building:"废墟广场中的黑石祭坛",kind:"通用事件",desc:"黑石表面浮动着碎片刻度，裂缝深处传来吞咽般的声响。祭坛只接受碎片投资，不提供遗物交易。",options:["投资X碎片：可自由选择金额，不能超过当前可用余额；每次抵达最多投资一次","15%暴涨净赚4X；25%上涨净赚X；35%崩盘净亏X；25%黑天鹅净亏3X并直接扣除额外2X，立即检查动态还债阈值","拒绝投资或离开：不投资，并按通用规则获得拒绝奖励"]},
+ {id:"travelling-merchant",name:"过路商人",icon:"♙",building:"道路交汇处的临时货摊",kind:"通用事件",desc:"一个独眼商人拖着载满杂物的车，在道路交汇处短暂停留。他愿意买入角色的遗物，也出售自己拥有的遗物。",options:["自由遗物交易：双方协商碎片价格，成交前确认双方、遗物名称与价格；同次遭遇可连续交易多件，选择其他选项结束","限制选择权：失去8碎片，限制下一场战斗怪物的选择权","拒绝：无事发生"]},
+ {id:"crimson-rain",name:"猩红暴雨",icon:"☂",building:"积水街道与腐蚀雨幕",kind:"通用事件",desc:"异色暴雨突然砸落，积水泛起不自然的红褐色，雨滴接触皮肤时带来灼痛。具体天气表现可随副本环境调整，事件代价不变。",options:["硬扛：流血20","用法力撑起屏障：枯竭3","躲入漏雨的废墟：失去1次精力"]},
+ {id:"nameless-stelae",name:"无名碑林",icon:"▥",building:"被苔藓与裂纹覆盖的纪念碑群",kind:"通用事件",desc:"密集石碑记录着无数死者未能放下的执念。靠近时，碑面符文逐一共鸣。",options:["触摸：流血15，获得残韵·曲解×1与15碎片","拒绝：无事发生"]},
+ {id:"echo-gallery",name:"回音长廊",icon:"♬",building:"废弃建筑内部的镜廊",kind:"通用事件",desc:"破碎镜面映出你在前几次轮回中的死亡片段。走廊尽头有一只仍会自行运转的旧八音盒。",options:["聆听安魂曲：在《死者之书》中留下一条错误遗言，获得10碎片","打碎镜子：流血5，清除《死者之书》中一条遗言","捂住耳朵：无事发生"]},
+ {id:"memory-pawnshop",name:"回忆当铺",icon:"◉",building:"无门的地下交易柜台",kind:"通用事件",desc:"一处没有门的柜台后坐着由眼球与脑髓构成的阴影。它能称量记忆，并以碎片作为交易凭据。",options:["典当：获得10碎片，本次轮回无法再获得前世记忆","赎回：支付10碎片，获得一段前世记忆","拒绝：无事发生"]},
+ {id:"soulless-mire",name:"无魂泥潭",icon:"≈",building:"沥青坑与蠕动黑泥",kind:"通用事件",desc:"地面塌陷成散发焦胶气味的黑色深坑，淤泥缓慢蠕动，隔绝灵魂波动。采集它需要付出肉体代价。",options:["采集绝息淤泥：流血10，获得绝息淤泥（可随时使用；使用后屏蔽自身灵魂位置，可使本次战终立刻逃脱）","拒绝：无事发生"]}
+];
+const CITY_FEATURES=[
+  {name:"住宅楼遗迹",icon:"▦",type:"building"},{name:"学校遗址",icon:"▤",type:"school"},
+  {name:"停车场",icon:"▥",type:"parking"},{name:"仓库废墟",icon:"▧",type:"building"},
+  {name:"废弃工厂",icon:"⚙",type:"utility"},{name:"失效控制室",icon:"▣",type:"utility"},
+  {name:"便利店残骸",icon:"▤",type:"building"},{name:"公交站遗迹",icon:"▥",type:"building"},
+  {name:"配电室",icon:"ϟ",type:"utility"},{name:"办公楼残骸",icon:"▦",type:"building"}
+];
+const mapEl=document.getElementById("map"),detailEl=document.getElementById("details"),statusEl=document.getElementById("status");
+let cells=[],landmarks=[],edge=0,seed=20261018,rng=Math.random;
+function seeded(s){let a=(Number(s)>>>0)||1;return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function pick(a){return a[Math.floor(rng()*a.length)]}
+function idx(x,y){return y*SIZE+x}
+function makeCell(x,y,type="empty"){return{x,y,type,building:null,site:null,icon:""}}
+function generate(){
+ seed=(Number(document.getElementById("seed").value)>>>0)||1;rng=seeded(seed);edge=0;cells=Array.from({length:SIZE*SIZE},(_,i)=>makeCell(i%SIZE,Math.floor(i/SIZE),((i%SIZE)%5===0||Math.floor(i/SIZE)%5===0)?"road":"sidewalk"));landmarks=[];
+ // Street blocks are fixed-size; roads remain connected while footprints and ground terrain vary.
+ const blocks=[];for(let by=0;by<BLOCKS;by++)for(let bx=0;bx<BLOCKS;bx++)blocks.push({bx,by});
+ for(let i=blocks.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[blocks[i],blocks[j]]=[blocks[j],blocks[i]]}
+ const eventPool=[...GENERIC_EVENTS,...EVENTS];const eventOrder=[...eventPool];for(let i=eventOrder.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[eventOrder[i],eventOrder[j]]=[eventOrder[j],eventOrder[i]]}
+ blocks.forEach((b,bi)=>{
+   const x0=b.bx*5+1,y0=b.by*5+1;
+   const w=2+Math.floor(rng()*2),h=2+Math.floor(rng()*2);
+   const ox=Math.floor(rng()*(5-w)),oy=Math.floor(rng()*(5-h));
+   let building=bi<eventPool.length?eventOrder[bi]:pick(CITY_FEATURES);
+   const buildingId="b"+bi;
+   for(let y=y0+oy;y<y0+oy+h;y++)for(let x=x0+ox;x<x0+ox+w;x++){const c=cells[idx(x,y)];c.type=building.type||"landmark";c.building=buildingId;c.icon=building.icon||""}
+   // Vary unused block tiles independently without changing total map area.
+   for(let y=y0;y<y0+4;y++)for(let x=x0;x<x0+4;x++){const c=cells[idx(x,y)];if(c.building)continue;const roll=rng();c.type=roll<.12?"rubble":roll<.21?"weeds":roll<.27?"puddle":"sidewalk"}
+   if(bi<eventPool.length){
+     const ev=building;const sides=[];
+     if(b.by>0)sides.push(0);if(b.by<BLOCKS-1)sides.push(1);
+     if(b.bx>0)sides.push(2);if(b.bx<BLOCKS-1)sides.push(3);
+     const side=pick(sides);let ex,ey;
+     if(side===0){ex=b.bx*5+1+Math.floor(rng()*4);ey=b.by*5}
+     else if(side===1){ex=b.bx*5+1+Math.floor(rng()*4);ey=b.by*5+5}
+     else if(side===2){ex=b.bx*5;ey=b.by*5+1+Math.floor(rng()*4)}
+     else {ex=b.bx*5+5;ey=b.by*5+1+Math.floor(rng()*4)}
+     const site={...ev,x:ex,y:ey,buildingId};landmarks.push(site);const c=cells[idx(ex,ey)];c.type="site";c.site=site.id;c.icon=ev.icon;
+   }
+ });
+ render();
+}
+function cellLabel(c){if(c.site){const s=landmarks.find(v=>v.id===c.site);return s?s.icon:"?"}if(c.building)return c.icon||"▪";if(c.type==="rubble")return"·";if(c.type==="weeds")return"♧";if(c.type==="puddle")return"≈";return""}
+function render(){
+ const min=edge,max=SIZE-edge-1,n=max-min+1;mapEl.style.gridTemplateColumns="repeat("+n+",minmax(0,1fr))";mapEl.replaceChildren();
+ for(let y=min;y<=max;y++)for(let x=min;x<=max;x++){
+  const c=cells[idx(x,y)],b=document.createElement("button");b.type="button";b.className="cell "+c.type;b.setAttribute("role","gridcell");b.title="("+x+","+y+")"+(c.site?": "+(landmarks.find(s=>s.id===c.site)?.name||"事件地点"):c.building?": 建筑/街区":"");
+  b.textContent=cellLabel(c);if(c.site){const site=landmarks.find(s=>s.id===c.site);b.setAttribute("aria-label",site.name+"，坐标"+x+","+y);b.addEventListener("click",()=>showDetail(site))}
+  else {b.disabled=true;b.setAttribute("aria-label","坐标"+x+","+y+" "+c.type)}
+  mapEl.appendChild(b)
+ }
+ const visible=landmarks.filter(s=>s.x>=min&&s.x<=max&&s.y>=min&&s.y<=max);
+ statusEl.textContent="种子 "+seed+" · 当前有效地图 "+n+"×"+n+"（"+(n*n)+" 格） · "+visible.length+"/"+landmarks.length+" 个事件地点仍在边界内";
+ document.getElementById("shrink").disabled=n<=3;
+}
+function showDetail(site){
+ detailEl.replaceChildren();const h=document.createElement("h2");h.textContent="地点详情";detailEl.appendChild(h);
+ const title=document.createElement("div");title.className="detail-title";title.textContent=site.icon+" "+site.name;detailEl.appendChild(title);
+ const p=document.createElement("div");p.className="muted";p.textContent=site.building+" · 地图坐标 ("+site.x+","+site.y+")";detailEl.appendChild(p);
+ const tag=document.createElement("span");tag.className="pill";tag.textContent=site.kind;detailEl.appendChild(tag);
+ const body=document.createElement("p");body.className="detail-body";body.textContent=site.desc;detailEl.appendChild(body);
+ const ul=document.createElement("div");ul.className="detail-body";ul.style.marginTop="8px";ul.textContent=site.options.map((v,i)=>(i+1)+". "+v).join("\n");detailEl.appendChild(ul);
+ const note=document.createElement("p");note.className="muted";note.textContent="原型仅展示地点与原事件的对应关系，不会实际执行这些选项。";detailEl.appendChild(note);
+}
+document.getElementById("generate").addEventListener("click",generate);
+document.getElementById("shrink").addEventListener("click",()=>{if(SIZE-edge*2>3){edge++;render()}});
+document.getElementById("reset").addEventListener("click",()=>{edge=0;render()});
+generate();
+</script>
+</body>
+</html>

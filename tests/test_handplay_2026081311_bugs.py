@@ -128,7 +128,7 @@ def test_true_refuse_still_wushi_and_wusuoqiu():
     engine.state.relics.append(Relic(name="无所求", effect=""))
     pool = engine.state.attribute_points
     engine.event_pool.current = "祭坛"
-    r = engine.execute_action("resolve_event", {"event": "祭坛", "option_id": 3})
+    r = engine.execute_action("resolve_event", {"event": "祭坛", "option_id": 2})
     assert r["success"], r
     assert "无事发生" in r["result"]["applied"]
     assert any("无所求" in a for a in r["result"]["applied"])
@@ -146,7 +146,7 @@ def test_wusuoqiu_points_redeem_at_standard_rate():
     engine.state.relics.append(Relic(name="无所求", effect=""))
     p = engine.state.player
     ml, sp = p.mana_limit, p.speed_limit
-    r = _resolve_reject(engine, "祭坛", 3)
+    r = _resolve_reject(engine, "祭坛", 2)
     assert any("无所求" in a for a in r["result"]["applied"])
     assert engine.state.attribute_points == 1, "第一次拒绝只给1点，不足以兑换"
     assert p.mana_limit == ml and p.speed_limit == sp, "1点属性点换不到任何面板"
@@ -165,7 +165,7 @@ def test_wusuoqiu_does_not_fire_on_non_reject_option():
     pool = engine.state.attribute_points
     engine.state.shards = 100
     engine.event_pool.current = "祭坛"
-    r = engine.execute_action("resolve_event", {"event": "祭坛", "option_id": 1})  # 献祭血肉
+    r = engine.execute_action("resolve_event", {"event": "祭坛", "option_id": 1, "x": 1, "multiplier": 1})  # 投资本金1，倍率1
     assert r["success"], r
     assert engine.state.attribute_points == pool, "非拒绝选项不得给属性点"
 
@@ -175,8 +175,8 @@ def test_wusuoqiu_points_accumulate_in_pool():
     engine = _engine("wusuoqiu_accum")
     engine.state.relics.append(Relic(name="无所求", effect=""))
     base = engine.state.attribute_points
-    # 祭坛3＝拒绝：无事发生；遗忘书屋4＝拒绝：无事发生
-    for event, oid in (("祭坛", 3), ("遗忘书屋", 4)):
+    # 祭坛2＝拒绝：无事发生；遗忘书屋4＝拒绝：无事发生
+    for event, oid in (("祭坛", 2), ("遗忘书屋", 4)):
         _resolve_reject(engine, event, oid)
     assert engine.state.attribute_points == base + 2, "两次真拒绝应累计2点属性点"
 

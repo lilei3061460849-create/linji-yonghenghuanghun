@@ -1,7 +1,7 @@
-"""怪物碎片代价透支成负债（DM裁定2026-08-22 方案A）+ 还债触发阈值20 的回归锚点。
+"""怪物碎片代价透支成负债 + 动态还债阈值10+历史最高碎片余额 的回归锚点。
 
 背景：引擎曾对所有碎片类代价做余额门禁——怪物碎片守恒≥0，【还债】
-（规则正文：负债≥20 触发，转为我方[员工]参战）在 20万+ 局实跑中零触发。
+（规则正文：余额达到 -(10+本局历史最高碎片余额) 时触发）在 20万+ 局实跑中零触发。
 修复：仅怪物侧，真碎片轨道余额不足时不再拒绝发动，shards 扣成负数（负债）。
 玩家/朋友/员工/api 侧仍维持"余额不足拒绝发动"。
 """
@@ -43,31 +43,43 @@ def test_monster_xiaozai_overdraws_real_shards_into_debt():
 
 
 def test_xiaozai_chain_reaches_debt_threshold_and_binds_at_settle():
-    """链路：连续透支→负债≥20→回终结算触发还债→转为员工参战。"""
+    """链路：连续透支越过动态负债线→回终结算触发还债→转为员工参战。"""
     combat = _make_combat(_xiaozai_monster(x=1, shards=0, fake=0))
     monster = combat.state.enemies[0]
     # 2026-09-16：道纹递增已废止，消灾 X 恒为 1、每次真碎片代价恒为 5。
-    # 原序列靠 X 递增（5/15/25）三轮累到 -45；现在需 4 轮：-5/-10/-15/-20。
-    for _ in range(4):
+    # 历史峰值为0，动态阈值为10；两次消灾后余额达到-10。
+    for _ in range(2):
         combat._resolve_monster_daowen_choice(
             monster, {"name": "消灾", "dodge": False, "blood_shadow": False},
             {}, set(), {})
         combat._monster_round_used(monster).discard("消灾")  # 跨回合重置使用记录
-    assert monster.shards <= -combat.DEBT_THRESHOLD
+    assert monster.shards <= -(combat.DEBT_THRESHOLD + monster.shards_peak)
     results = combat.settle_victory_paths()
-    assert any(r.get("type") == "debt_bind" for r in results), f"负债≥20应触发还债: {results}"
+    assert any(r.get("type") == "debt_bind" for r in results), f"负债达到动态阈值应触发还债: {results}"
     assert monster.is_debt_bound is True
     assert monster.entity_type == "员工" and monster in combat.state.get_all_player_side()
 
 
-def test_debt_trigger_boundary_19_not_bound_20_bound():
-    """边界条件：负债19不触发、20正好触发（阈值含端点）。"""
-    for shards, expect in ((-19, False), (-20, True)):
+def test_debt_trigger_boundary_9_not_bound_10_bound():
+    """历史峰值为0时，负债9不触发、负债10正好触发。"""
+    for shards, expect in ((-9, False), (-10, True)):
         combat = _make_combat(_xiaozai_monster(shards=shards))
         monster = combat.state.enemies[0]
         results = combat.settle_victory_paths()
         bound = any(r.get("type") == "debt_bind" for r in results)
         assert bound is expect, f"负债{-shards}触发期望{expect}，实际{bound}"
+
+
+def test_debt_threshold_scales_with_historical_peak():
+    """历史最高碎片余额100时，负债109不触发，负债110触发。"""
+    for shards, expect in ((-109, False), (-110, True)):
+        monster = _xiaozai_monster(shards=100)
+        monster.shards = shards
+        combat = _make_combat(monster)
+        results = combat.settle_victory_paths()
+        bound = any(r.get("type") == "debt_bind" for r in results)
+        assert bound is expect, (shards, monster.shards_peak, results)
+        assert monster.shards_peak == 100
 
 
 def test_fake_shards_still_preferred_no_debt_when_fake_sufficient():
@@ -88,7 +100,7 @@ from engine.api import GameEngine
 from tests.setup_support import finish_initial_daowen
 
 
-def _debt_engine(tmp_path, debt: int = -76) -> GameEngine:
+def _debt_engine(tmp_path, debt: int = -25) -> GameEngine:
     """构造：完整开局 + pre_battle 阶段 + 玩家负债（裁定D逼真负债场景）。
 
     冒烟批实测（2026-08-23，当时【逼债】还在）：罪孽都市逼债寄存把玩家 shards
@@ -124,7 +136,7 @@ def test_debt_zero_cost_xiuxing_allowed(tmp_path):
     assert ok["result"]["attribute_points"] >= 1, "tier1 的 1 点应存进属性点池"
     blocked = e.execute_action("pre_battle_action", {"sub_action": "修行", "tier": 2, "to": "mana"})
     assert not blocked["success"] and "碎片不足" in blocked["error"]
-    assert e.state.shards == -76, "被拒的正费行动不得扣碎片"
+    assert e.state.shards == -25, "被拒的正费行动不得扣碎片"
 
 
 def test_debt_zero_cost_xiuzheng_and_tansuo_allowed(tmp_path):

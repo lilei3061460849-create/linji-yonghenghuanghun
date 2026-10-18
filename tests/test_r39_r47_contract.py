@@ -304,6 +304,14 @@ def test_r43_all_implemented_event_options_have_a_runtime_route(tmp_path):
                       "resonance_type": "转换", "daowen_names": ["杀伐"]}
             if "自选一件遗物" in text:
                 engine._init_relic_pool(); params["relic_name"] = engine.state.relics_pool[0].name
+            if event_name == "过路商人" and text.startswith("遗物交易"):
+                merchant = engine._initialize_merchant_inventory()
+                params.update({
+                    "trade_direction": "buy",
+                    "relic_name": merchant.relics[0].name,
+                    "price": 0,
+                    "confirmed": True,
+                })
             if "48点恢复量" in text:
                 params["heal_allocations"] = [{"target_ref": "player:0", "amount": 48}]
             if "失忆" in text:
@@ -314,7 +322,7 @@ def test_r43_all_implemented_event_options_have_a_runtime_route(tmp_path):
             assert result["success"], (event_name, option["id"], result)
             assert not result.get("result", {}).get("instructions"), (event_name, option["id"], result)
             checked += 1
-    assert checked == 90  # 87 + 埋骨之地(龙族起源事件)3选项
+    assert checked == 86  # 当前已接入的事件选项数；删除/迁移事件后同步更新此契约
 
 
 # R44：统一向上取整

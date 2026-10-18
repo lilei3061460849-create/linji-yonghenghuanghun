@@ -114,6 +114,8 @@ def handle_setup_choose_region(engine: Any, params: Dict[str, Any]) -> Dict[str,
         return {"success": False, "error": f"只能从{valid}中选择"}
     engine.state.current_region = region
     engine.state.phase = "pre_battle"
+    # 过路商人是独立中立角色，不是随机事件；首次进入本局副本时取得5件有限遗物库存。
+    engine._initialize_merchant_inventory()
     owned = [r.name for r in engine.state.relics]
     endless_note = ""
     if engine.state.endless_mode:

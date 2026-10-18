@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from .dungeons import load_dungeon_documents
-# 每只怪物出厂自带的遗物【某人的偏爱】——常量与授予都在 engine/models.py
+# 每只怪物出厂自带的遗物【痛苦的偏爱】——常量与授予都在 engine/models.py
 # （授予点在 Entity.__post_init__，覆盖所有构造路径），此处仅再导出便于就近引用。
 from .models import MONSTER_MANA_RELIC
 
@@ -213,6 +213,42 @@ def merge_monster_pools(monster_pools: dict) -> list[dict]:
     return merged
 
 
+# 当前偏爱池。效果定义与偏爱数量规则以 Issue #66 为准；每只怪物按当前副本阶位
+# 从池中无放回随机抽取，使用引擎骰子记录每一次选择。
+MONSTER_PREFERENCE_POOL = (
+    "痛苦的偏爱", "贪婪的偏爱", "永恒的偏爱", "饥荒的偏爱", "时间的偏爱",
+)
+
+
+def assign_monster_preferences(entity, tier: int, dice) -> list[str]:
+    """为怪物配置与副本阶位相同数量的不同偏爱。"""
+    count = min(len(MONSTER_PREFERENCE_POOL), max(1, int(tier)))
+    remaining = list(MONSTER_PREFERENCE_POOL)
+    selected: list[str] = []
+    for index in range(count):
+        roll = dice.auto_roll(
+            f"monster_preference_{entity.runtime_id}_{index + 1}",
+            remaining,
+            context=f"{entity.name}·第{index + 1}种固有偏爱（副本{tier}阶）",
+        )
+        choice = str(roll["selected"])
+        selected.append(choice)
+        remaining.remove(choice)
+    entity.preferences = selected
+    # 「痛苦的偏爱」沿用原有[回始]效果，但只在该偏爱被抽中时授予；
+    # 不能再让一阶怪物固定拥有它、同时又额外抽取一项偏爱。
+    from .models import MONSTER_MANA_RELIC, MONSTER_MANA_RELIC_EFFECT, Relic
+    if "痛苦的偏爱" in selected:
+        if not any(relic.name == MONSTER_MANA_RELIC for relic in entity.relics):
+            entity.relics.append(Relic(
+                name=MONSTER_MANA_RELIC, effect=MONSTER_MANA_RELIC_EFFECT,
+                tags=["怪物偏爱"]))
+    else:
+        entity.relics = [relic for relic in entity.relics
+                         if relic.name != MONSTER_MANA_RELIC]
+    return selected
+
+
 def make_monster_entity(monster_def: dict):
     """按怪物定义构造Entity（延迟导入避免循环依赖）"""
     from .models import Entity, DaoWen, DaoWenInstance
@@ -226,7 +262,7 @@ def make_monster_entity(monster_def: dict):
                speed_limit=_speed_limit, mana_limit=_mana_limit)
     m.current_speed = _speed_limit
     m.current_mana = _mana_limit
-    # 遗物【某人的偏爱】由 Entity.__post_init__ 统一授予，此处不再重复挂载。
+    # 遗物【痛苦的偏爱】由 Entity.__post_init__ 统一授予，此处不再重复挂载。
     for dw_name, x in monster_def["dao_wen"].items():
         # x 为 None → 面板未写死 X，标记 x_free 由发动方自选（2026-09-16 用户令）；
         # x 为整数 → 旧面板的固定 X，原样保留。

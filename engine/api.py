@@ -23,6 +23,7 @@ from .models import (
     Entity, GameState, DaoWen, DaoWenInstance, Spell,
     Relic, Consumable, StatusEffect, LongJiXin
 )
+from .world import WorldState, WorldActorState
 from .enums import (GamePhase, CombatSubphase, ActionPhase, TriggerTiming,
                     InterruptType, EntityType, EffectScope, EffectPolarity)
 from .dice import DiceEngine
@@ -173,13 +174,86 @@ class GameEngine:
 
     # ==================== 状态查询 ====================
 
+    def _project_state_for_world_player(self, state_data: dict) -> dict:
+        """局外阶段给AI返回迷雾投影；绝不泄露未见单位、地图地形或地点坐标。"""
+        if not getattr(self.state, "world_state", {}) or self.state.phase != GamePhase.PRE_BATTLE.value:
+            return state_data
+        world = WorldState.from_dict(self.state.world_state)
+        player = next((actor for actor in world.actors.values()
+                       if actor.kind == "player" and actor.alive), None)
+        if player is None:
+            return state_data
+        # 决策观察会刷新该轮可见单位与私有记忆，但不会推进世界时间。
+        world.visible_cells(player.actor_id)
+        self.state.world_state = world.to_dict()
+        visible_positions = {player.position, *world.map.adjacent_vision(player.position)}
+        visible_actor_ids = {
+            actor.actor_id for actor in world.actors.values()
+            if actor.alive and actor.position in visible_positions
+        }
+        visible_actor_ids.add(player.actor_id)
+        known_keys = set(player.known_cells)
+        known_keys.update(world.map.key(pos) for pos in visible_positions)
+
+        # GameState.to_dict() 引用原 world_state，必须深拷贝后再投影，不能修改真实存档。
+        world_payload = copy.deepcopy(world.to_dict())
+        map_payload = world_payload.get("map", {})
+        map_payload["terrain"] = {
+            key: terrain for key, terrain in map_payload.get("terrain", {}).items()
+            if key in known_keys
+        }
+        map_payload["locations"] = {
+            key: location for key, location in map_payload.get("locations", {}).items()
+            if location.get("discovered", False)
+            and (location.get("kind") != "relic"
+                 or player.actor_id in (location.get("discovered_by") or []))
+        }
+        world_payload["actors"] = {
+            key: actor for key, actor in world_payload.get("actors", {}).items()
+            if key in visible_actor_ids
+        }
+        world_payload["encounters"] = {
+            key: encounter for key, encounter in world_payload.get("encounters", {}).items()
+            if player.actor_id in encounter.get("participants", [])
+        }
+        # 仅向AI展示由轮回者亲历的世界事实；隐藏NPC的移动和遭遇不进入观察流。
+        world_payload["event_log"] = [
+            event for event in world_payload.get("event_log", [])
+            if event.get("actor_id") == player.actor_id
+        ]
+        state_data["world_state"] = world_payload
+        state_data["enemies"] = [
+            entity for entity in state_data.get("enemies", [])
+            if entity.get("runtime_id") in visible_actor_ids
+        ]
+        for group_name in ("friends", "employees", "temp_friends"):
+            for entity in state_data.get(group_name, []):
+                if entity.get("runtime_id") not in visible_actor_ids:
+                    entity["world_x"] = None
+                    entity["world_y"] = None
+        merchant = state_data.get("merchant")
+        if merchant and merchant.get("runtime_id") not in visible_actor_ids:
+            state_data["merchant"] = None
+        for key in ("world_enemy_reserve", "world_encounter_entities"):
+            state_data[key] = [
+                entity for entity in state_data.get(key, [])
+                if entity.get("runtime_id") in visible_actor_ids
+            ]
+        traits = state_data.get("personality_traits")
+        if isinstance(traits, dict):
+            state_data["personality_traits"] = {
+                key: value for key, value in traits.items() if key in visible_actor_ids
+            }
+        return state_data
+
     def get_state(self) -> dict:
         """
-        获取当前游戏完整状态
-        AI每次决策前应调用此方法
+        获取当前决策者可观察的游戏状态。
+        开放世界局外阶段按当前视野投影；战斗中保留现有完整战斗状态。
         """
+        state_data = self._project_state_for_world_player(self.state.to_dict())
         return {
-            "state": self.state.to_dict(),
+            "state": state_data,
             "pending_interrupts": [i.to_dict() for i in self._pending_interrupts],
             "last_result": self._last_result,
             "available_actions": self.get_available_actions(),
@@ -282,6 +356,17 @@ class GameEngine:
                 schema: dict = {"event": self.event_pool.current, "option_id": option["id"]}
                 if has_wusuoqiu and self._is_reject_option_text(option["text"]):
                     schema["note"] = "持【无所求】：本选项另获1点属性点（入属性点池，按正文2点一档兑速限/法限、1点一档兑血限）"
+                if self.event_pool.current == "祭坛" and option["text"].startswith("投资"):
+                    schema["x"] = "投入的正整数本金，不超过当前真实碎片余额"
+                    schema["multiplier"] = "自选正整数倍率，范围1至(10+本金//100)；每100本金提高1点上限"
+                    schema["note"] = "随机整数直接决定盈亏倍数，范围为-倍率至+倍率；本金100、倍率3、结果-2即净亏200，结果0不赚不亏。亏损可形成负碎片余额，并沿用动态债务线"
+                if self.event_pool.current == "过路商人" and option["text"].startswith("遗物交易"):
+                    self._init_relic_pool()
+                    schema.update({"trade_direction": ["buy", "sell"],
+                                   "relic_name": f"字符串；buy可选：{[r.name for r in (getattr(self.state, "merchant", None).relics if getattr(self.state, "merchant", None) else [])]}；sell可选：{[r.name for r in self.state.relics]}",
+                                   "price": "双方协商后的非负整数碎片价格",
+                                   "confirmed": True})
+                    schema["note"] = "同次遭遇可连续买卖多件遗物；成交前确认价格。选择其他选项结束交易会话。买卖立即转移遗物与碎片，不得复制遗物或通过交易透支"
                 actions.append({"action_type": "resolve_event",
                                 "params_schema": schema,
                                 "option": option["text"],
@@ -365,12 +450,14 @@ class GameEngine:
                 "allocations": {"blood_points": "nonnegative integer",
                                 "speed_points": "nonnegative integer",
                                 "mana_points": "nonnegative integer",
-                                "constraint": "三者之和≤档位属性点+池内余点；1点=6血限，2点=1速限=1法限"}}},
+                                "constraint": "三者之和≤档位属性点+池内余点；1点=6血限，2点=1速限=1法限"},
+                "target": "player（默认）或已存在的朋友/员工/造物名称"}},
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "学习", "sub": ["daowen"],
                 "tier": {"daowen": [1, 2]},
                 "names": "daowen必填，数量必须等于tier",
-                "note": "法术已于2026-09-16改为无需学习：持所需道纹即可在战斗中用 "
+                "recipient": "player（默认）、现存朋友/员工/造物名称，或pending暂存给未来朋友",
+                "note": "学习所得可分配给其他角色或暂存；法术已于2026-09-16改为无需学习：持所需道纹即可在战斗中用 "
                         "统一自定义施法（define_spell，消耗1次主动出手）"}},
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "共鸣",
@@ -385,6 +472,20 @@ class GameEngine:
                 "params_schema": {"sub_action": region_action["id"],
                                   **region_action["params_schema"]},
             })
+        pending_learned = list(getattr(self.state, "pending_learned_daowen", []))
+        if pending_learned:
+            actions.append({"action_type": "assign_learned_daowen",
+                            "params_schema": {"name": pending_learned,
+                                              "recipient": "现存轮回者/朋友/员工/造物名称或runtime_id"},
+                            "note": "学习成果可以暂存，待未来结识朋友后再分配"})
+        has_ten_thousand_souls_banner = any(
+            relic.name == "万魂幡" for relic in (self.state.relics or []))
+        if (has_ten_thousand_souls_banner
+                and not any(action.get("params_schema", {}).get("sub_action") == "造生"
+                            for action in actions)):
+            actions.append({"action_type": "pre_battle_action",
+                            "params_schema": {"sub_action": "造生", "name": "optional string"},
+                            "note": "持有万魂幡，可在乱葬岗以外发动造生"})
         if any(entity.name == "医生" and entity.is_alive for entity in self.state.employees):
             actions.append({"action_type": "upgrade_doctor",
                             "params_schema": {"mode": ["attack_count", "attack_power"]},
@@ -441,6 +542,58 @@ class GameEngine:
             # 保证 get_available_actions 的输出仍可原样执行（开发规则 13）。
             actions = [a for a in actions
                        if a.get("params_schema", {}).get("sub_action") != "探索"]
+        if getattr(self.state, "world_state", {}):
+            # 开放世界中不再提供独立「探索」菜单；事件由地图地点触发，旧附煞已由造生取代。
+            actions = [action for action in actions
+                       if action.get("params_schema", {}).get("sub_action") not in {"探索", "附煞"}]
+        if not getattr(self.state, "world_state", {}):
+            actions.append({"action_type": "world_initialize",
+                            "params_schema": {"width": "integer (default 21)", "height": "integer (default 21)"},
+                            "note": "初始化开放世界地图；地图种子由引擎骰子产生并记录"})
+        else:
+            actions.extend([
+                {"action_type": "world_status", "params_schema": {}},
+                {"action_type": "world_vision", "params_schema": {"actor_id": "optional; defaults to player"}},
+                {"action_type": "world_move", "params_schema": {"x": "integer", "y": "integer",
+                                                                  "actor_id": "optional; defaults to player"}},
+                {"action_type": "world_wait", "params_schema": {"turns": "positive integer (default 1)",
+                                                                  "actor_id": "optional; defaults to player"}},
+                {"action_type": "world_command_created_being", "params_schema": {
+                    "behavior": ["explore", "follow", "guard"],
+                    "x": "guard模式可选整数坐标", "y": "guard模式可选整数坐标"}},
+                {"action_type": "world_interact", "params_schema": {
+                    "target_actor_id": "actor_id from visible_actors",
+                    "choice": ["talk", "trade", "cooperate", "intimidate", "attack"],
+                    "offer_shards": "trade时可选：你支付的碎片",
+                    "request_shards": "trade时可选：你索取的碎片",
+                    "give_relic": "trade时可选：你交出的遗物名称",
+                    "request_relic": "trade时可选：你索取的遗物名称",
+                    "trade_rule": "NPC按每件遗物10碎片估值；只接受对其价值不亏的报价"}},
+            ])
+        if getattr(self.state, "world_state", {}):
+            world = WorldState.from_dict(self.state.world_state)
+            player_id = next((key for key, actor in world.actors.items()
+                              if actor.kind == "player" and actor.alive), None)
+            encounter = next((item for item in world.encounters.values()
+                              if item.active and player_id in item.participants), None)
+            if encounter is not None:
+                schema: dict[str, Any] = {
+                    "world_encounter_id": encounter.encounter_id,
+                    "relic_choices": "逐件显式提交可选战始遗物",
+                    "summon_created_being": "可选布尔值；true时召唤五格可通行路径内的造物助战，默认false",
+                }
+                global_spells = self.combat.prepare_global_trigger_spells(TriggerTiming.BATTLE_START.value)
+                if global_spells:
+                    schema["spell_choices"] = {
+                        "_instruction": "存在战始全局法术候选，按现有战斗协议提交",
+                        "candidates": global_spells,
+                    }
+                actions = [{"action_type": "battle_start", "params_schema": schema,
+                            "note": "地图遭遇已发生；使用遭遇参与者进入现有战斗引擎"}]
+            else:
+                # 开放世界不允许脱离地图遭遇随机开启旧式战斗。
+                actions = [action for action in actions
+                           if action.get("action_type") != "battle_start"]
         return {"phase": GamePhase.PRE_BATTLE.value, "energy": self.state.energy, "actions": actions}
 
     def _get_region_actions(self) -> list[dict]:
@@ -463,9 +616,9 @@ class GameEngine:
         if self.state.current_region == "龙心谷":
             return [{"id": "炼心", "params_schema": {}}]
         if self.state.current_region == "乱葬岗":
-            return [{"id": "附煞", "params_schema": {
-                "mode": ["发现", "选择"], "sha_qi": "选择模式必填：法煞/魂煞/冥煞/血煞/锁煞/心煞",
-                "daowen_name": "要附煞的道纹名"}}]
+            return [{"id": "造生", "params_schema": {
+                "name": "首次造生时可选；造物名字，须与场上其他角色不同"},
+                "note": "首次造生消耗10碎片并创造一个造物；后续每次消耗25碎片，为同一造物随机增加一种未拥有的偏爱"}]
         return []
 
     def _get_battle_start_actions(self) -> dict:
@@ -961,11 +1114,14 @@ class GameEngine:
                     "error": f"事件【{self.event_pool.current}】尚未结算，不能执行其它行动"}
         if action_type.startswith("setup_") and phase != "setup":
             return {"success": False, "error": f"【{action_type}】只能在开局阶段执行"}
+        if action_type.startswith("world_") and phase != "pre_battle":
+            return {"success": False,
+                    "error": "当前开放世界行动尚处于第一阶段，只能在局外阶段调用；战斗/世界统一主循环尚未接通"}
         if action_type in ("pre_battle_action", "resolve_event", "upgrade_doctor") and phase != "pre_battle":
             return {"success": False, "error": "局外行动/事件只能在局外阶段执行"}
         if action_type == "battle_start" and phase != "pre_battle":
             return {"success": False, "error": "只有局外阶段可以进入战始"}
-        if action_type == "battle_start" and self.state.energy > 0:
+        if action_type == "battle_start" and self.state.energy > 0 and not params.get("world_encounter_id"):
             return {"success": False, "error": f"尚有{self.state.energy}点精力，耗尽后才能进入战斗"}
         if action_type == "use_daowen":
             name = params.get("daowen_name", "")
@@ -1255,7 +1411,21 @@ class GameEngine:
 
     def _dispatch_action(self, action_type: str, params: dict) -> dict:
         """action 名 → 处理器：唯一的 action 路由表（执行实现见各 _action_*）。"""
-        if action_type == "setup_attributes":
+        if action_type == "world_initialize":
+            return self._action_world_initialize(params)
+        elif action_type == "world_move":
+            return self._action_world_move(params)
+        elif action_type == "world_wait":
+            return self._action_world_wait(params)
+        elif action_type == "world_command_created_being":
+            return self._action_world_command_created_being(params)
+        elif action_type == "world_status":
+            return self._action_world_status(params)
+        elif action_type == "world_vision":
+            return self._action_world_vision(params)
+        elif action_type == "world_interact":
+            return self._action_world_interact(params)
+        elif action_type == "setup_attributes":
             return self._action_setup_attributes(params)
         elif action_type == "setup_choose_region":
             return self._action_setup_choose_region(params)
@@ -1290,6 +1460,8 @@ class GameEngine:
             return self._action_use_resonance(params)
         elif action_type == "redeem_attribute_points":
             return self._action_redeem_attribute_points(params)
+        elif action_type == "assign_learned_daowen":
+            return self._action_assign_learned_daowen(params)
         elif action_type == "declare_parry":
             return self._action_declare_parry(params)
         elif action_type == "prepare_attack":
@@ -1400,6 +1572,1259 @@ class GameEngine:
             return self._action_read_death_book(params)
         else:
             return {"success": False, "error": f"未知行动类型: {action_type}"}
+
+    # ==================== 开放世界基础行动 ====================
+
+    def _world_from_state(self) -> WorldState:
+        if not self.state.world_state:
+            raise ValueError("开放世界尚未初始化，请先执行world_initialize")
+        return WorldState.from_dict(self.state.world_state)
+
+    def _sync_world_entity_positions(self, world: WorldState) -> None:
+        """将地图中的权威位置同步回实体存档字段，避免移动只存在于地图副本。"""
+        entities = []
+        if self.state.player is not None:
+            entities.append(self.state.player)
+        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+            entities.extend(getattr(self.state, group_name, []) or [])
+        if getattr(self.state, "merchant", None) is not None:
+            entities.append(self.state.merchant)
+        by_id = {getattr(entity, "runtime_id", ""): entity
+                 for entity in entities if getattr(entity, "runtime_id", "")}
+        for actor in world.actors.values():
+            entity = by_id.get(actor.actor_id)
+            if entity is None:
+                continue
+            entity.world_region = self.state.current_region
+            entity.world_x, entity.world_y = actor.x, actor.y
+            entity.is_neutral = actor.faction == "neutral"
+            # 实体命零/永久离场必须同步到地图单位，否则死者会继续移动或触发遭遇。
+            actor.alive = bool(entity.is_alive and not entity.is_departed)
+
+    def _open_adjacent_merchant_session(self, world: WorldState) -> bool:
+        """玩家与过路商人正交相邻时开启现有交易会话；商人不进入随机事件池。"""
+        if self.event_pool.current is not None or "过路商人" not in self.event_pool.events:
+            return False
+        player = next((actor for actor in world.actors.values()
+                       if actor.kind == "player" and actor.alive), None)
+        if player is None:
+            return False
+        if any(encounter.active and player.actor_id in encounter.participants
+               for encounter in world.encounters.values()):
+            return False
+        merchant = next((actor for actor in world.actors.values()
+                         if actor.kind == "merchant" and actor.alive
+                         and abs(actor.x - player.x) + abs(actor.y - player.y) == 1), None)
+        if merchant is None:
+            return False
+        self.event_pool.current = "过路商人"
+        world.record("merchant_encountered", player.actor_id,
+                     merchant_actor_id=merchant.actor_id, position=list(merchant.position))
+        return True
+
+    def _refresh_world_final_duel(self, world: WorldState) -> dict:
+        """在地图存活状态变化后，启动或结算最后两名轮回者的自然会合阶段。"""
+        player = self.state.player
+        enemies = [entity for entity in (getattr(self.state, "enemies", []) or [])
+                   if entity.is_alive and not entity.is_departed]
+        living_rivals = [entity for entity in enemies if entity.entity_type == "轮回者"]
+        if world.final_duel_complete:
+            return {"active": False, "complete": True, "winner": world.final_duel_winner}
+        # 最终死斗以剩余轮回者人数判定，不要求玩家先抛弃朋友/员工/造物；
+        # 怪物仍然存在时，也会在两名轮回者自然会合期间继续构成威胁。
+        eligible = (player is not None and player.is_alive
+                    and len(living_rivals) == 1)
+        if not world.final_duel_search and eligible:
+            world.final_duel_search = True
+            world.final_duel_finalists = [player.runtime_id, living_rivals[0].runtime_id]
+            for encounter in world.encounters.values():
+                if encounter.active and set(world.final_duel_finalists).issubset(set(encounter.participants)):
+                    encounter.final_duel = True
+                    world.final_duel_started = True
+            world.record("final_duel_search_started", player.runtime_id,
+                         finalists=list(world.final_duel_finalists),
+                         note="最后两名轮回者开始自行寻找彼此；世界威胁在会合前继续结算")
+            return {"active": True, "finalists": list(world.final_duel_finalists)}
+        if world.final_duel_search and not world.final_duel_started:
+            entities = ([player] if player is not None else []) + list(
+                getattr(self.state, "enemies", []) or [])
+            live_ids = {entity.runtime_id for entity in entities
+                        if entity.is_alive and not entity.is_departed}
+            living_finalists = [actor_id for actor_id in world.final_duel_finalists
+                                if actor_id in live_ids]
+            if len(living_finalists) == 1:
+                world.final_duel_search = False
+                world.final_duel_complete = True
+                world.final_duel_winner = living_finalists[0]
+                world.record("final_duel_search_ended", living_finalists[0],
+                             winner=world.final_duel_winner,
+                             note="另一名最终候选在会合前已被世界威胁淘汰")
+                return {"active": False, "complete": True,
+                        "winner": world.final_duel_winner}
+            if len(living_finalists) < 2:
+                world.final_duel_search = False
+                world.final_duel_finalists = []
+        return {"active": world.final_duel_search,
+                "finalists": list(world.final_duel_finalists)}
+
+    def _resolve_world_npc_encounters(self, world: WorldState) -> list[dict]:
+        """NPC之间的遭遇由现有攻击结算器逐个世界回合自动推进；玩家遭遇仍交给玩家操作。"""
+        player_id = next((actor_id for actor_id, actor in world.actors.items()
+                          if actor.kind == "player"), None)
+        entities = ([self.state.player] if self.state.player else [])
+        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+            entities.extend(getattr(self.state, group_name, []) or [])
+        entity_by_id = {entity.runtime_id: entity for entity in entities if entity is not None}
+        resolved = []
+        for encounter in list(world.encounters.values()):
+            if not encounter.active or player_id in encounter.participants:
+                continue
+            participants = [world.actors.get(actor_id) for actor_id in encounter.participants]
+            participants = [actor for actor in participants if actor is not None and actor.alive]
+            if len(participants) < 2:
+                world.finish_encounter(encounter.encounter_id, "npc_encounter_ended")
+                resolved.append({"encounter_id": encounter.encounter_id, "status": "ended"})
+                continue
+            for attacker_actor in participants:
+                if not encounter.active or not attacker_actor.alive:
+                    continue
+                attacker = entity_by_id.get(attacker_actor.actor_id)
+                if attacker is None or not attacker.is_alive or attacker.is_departed:
+                    attacker_actor.alive = False
+                    continue
+                targets = [actor for actor in participants
+                           if actor.alive and actor.actor_id != attacker_actor.actor_id
+                           and world._hostile_pair(attacker_actor, actor)]
+                if not targets:
+                    continue
+                target_actor = min(
+                    targets,
+                    key=lambda actor: (
+                        entity_by_id[actor.actor_id].current_hp
+                        / max(1, entity_by_id[actor.actor_id].blood_limit)
+                        if actor.actor_id in entity_by_id else 1.0,
+                        actor.actor_id))
+                target = entity_by_id.get(target_actor.actor_id)
+                if target is None or not target.is_alive:
+                    target_actor.alive = False
+                    continue
+                # 一名单位在一个世界回合内按其攻击次数行动；不额外推进世界时间。
+                for hit_index in range(max(1, int(getattr(attacker, "attack_count", 0)))):
+                    if not attacker.is_alive or not target.is_alive:
+                        break
+                    self.combat.resolve_attack(
+                        attacker, target, hit_index=hit_index, is_must_hit=False,
+                        dodge=False, parry=False,
+                        spell_choices={"before": {}, "after": {}})
+                target_actor.alive = bool(target.is_alive and not target.is_departed)
+                attacker_actor.alive = bool(attacker.is_alive and not attacker.is_departed)
+                world.record("npc_skirmish_attack", attacker_actor.actor_id,
+                             target_actor_id=target_actor.actor_id,
+                             target_hp=target.current_hp, target_alive=target_actor.alive)
+            survivors = [world.actors[actor_id] for actor_id in encounter.participants
+                         if actor_id in world.actors and world.actors[actor_id].alive
+                         and actor_id in entity_by_id and entity_by_id[actor_id].is_alive]
+            survivor_sides = {actor.faction for actor in survivors}
+            if len(survivor_sides) <= 1:
+                world.finish_encounter(encounter.encounter_id, "npc_skirmish_resolved")
+                world.record("npc_skirmish_resolved", survivors[0].actor_id if survivors else None,
+                             encounter_id=encounter.encounter_id,
+                             survivors=[actor.actor_id for actor in survivors])
+                resolved.append({"encounter_id": encounter.encounter_id,
+                                 "status": "resolved",
+                                 "survivors": [actor.actor_id for actor in survivors]})
+        return resolved
+
+    def _advance_world_turns(self, world: WorldState, player_id: str, turns: int) -> int:
+        """逐回合推进世界并处理NPC交战，玩家遭遇会立刻打断后续回合。"""
+        if not isinstance(turns, int) or isinstance(turns, bool) or turns < 1:
+            raise ValueError("等待回合数必须是正整数")
+        advanced = 0
+        for _ in range(turns):
+            world.wait(player_id, 1)
+            advanced += 1
+            if any(encounter.active and player_id in encounter.participants
+                   for encounter in world.encounters.values()):
+                break
+            self._resolve_world_npc_encounters(world)
+            self._resolve_world_shard_pickups(world)
+            self._resolve_world_relic_pickups(world)
+            self._resolve_world_npc_merchant_trades(world)
+            self._resolve_world_hiring_signals(world)
+            self._resolve_world_temporary_alliances(world)
+            self._share_created_being_vision(world)
+        return advanced
+
+    def _resolve_world_shard_pickups(self, world: WorldState) -> list[dict]:
+        """所有真实角色进入碎片资源格时各自领取；怪物与商人不拾取玩家资源点。"""
+        entities = ([self.state.player] if self.state.player else [])
+        entities += self.state.friends + self.state.employees + self.state.temp_friends + self.state.enemies
+        by_id = {entity.runtime_id: entity for entity in entities if entity is not None}
+        pickups = []
+        for actor in world.actors.values():
+            if not actor.alive:
+                continue
+            entity = by_id.get(actor.actor_id)
+            if entity is None or entity.entity_type not in {"轮回者", "朋友", "员工"}:
+                continue
+            found = world.map.location_at(actor.position)
+            if found is None:
+                continue
+            location_id, location = found
+            if (location.get("kind") != "resource" or not location.get("active", True)
+                    or location.get("resource_type") != "shards"):
+                continue
+            amount = max(0, int(location.get("amount", 0)))
+            if amount <= 0:
+                location["active"] = False
+                location["collected"] = True
+                world.deactivate_location_sightings(location_id, reason="empty_resource")
+                continue
+            if entity is self.state.player:
+                self.state.shards += amount
+                self.state.shards_peak = max(self.state.shards_peak, self.state.shards)
+                balance = self.state.shards
+            else:
+                entity.shards += amount
+                entity.shards_peak = max(entity.shards_peak, entity.shards)
+                balance = entity.shards
+            location["active"] = False
+            location["collected"] = True
+            location["collected_by"] = actor.actor_id
+            location["collected_turn"] = world.clock.turn
+            world.deactivate_location_sightings(location_id, reason="collected")
+            world.record("resource_collected", actor.actor_id, location_id=location_id,
+                         resource_type="shards", amount=amount, balance=balance,
+                         position=list(actor.position))
+            pickups.append({"actor_id": actor.actor_id, "amount": amount,
+                            "player_visible": entity is self.state.player,
+                            "location_id": location_id})
+        return pickups
+
+    def _resolve_world_relic_pickups(self, world: WorldState) -> list[dict]:
+        """处理世界时间推进后所有单位踩中真实遗物地点的拾取，不泄露NPC的隐藏所得。"""
+        entities = []
+        if self.state.player is not None:
+            entities.append(self.state.player)
+        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+            entities.extend(getattr(self.state, group_name, []) or [])
+        if getattr(self.state, "merchant", None) is not None:
+            entities.append(self.state.merchant)
+        entity_by_id = {getattr(entity, "runtime_id", ""): entity for entity in entities
+                        if getattr(entity, "runtime_id", "")}
+        pickups = []
+        for location_id, location in world.map.locations.items():
+            if location.get("kind") != "relic" or not location.get("active", True):
+                continue
+            pos = (int(location.get("x", -1)), int(location.get("y", -1)))
+            for actor in world.actors.values():
+                if not actor.alive or actor.position != pos:
+                    continue
+                entity = entity_by_id.get(actor.actor_id)
+                if entity is None:
+                    continue
+                is_player = entity is self.state.player
+                inventory = self.state.relics if is_player else entity.relics
+                owned_names = {relic.name for relic in inventory}
+                relic_name = location.get("relic_name", location.get("name", ""))
+                capacity = getattr(entity, "relic_capacity", 10**9)
+                if relic_name not in owned_names and len(owned_names) < capacity:
+                    relic = Relic(name=relic_name, effect=location.get("relic_effect", ""),
+                                  tags=list(location.get("relic_tags") or []))
+                    inventory.append(relic)
+                    location["active"] = False
+                    location["collected"] = True
+                    location["collected_by"] = actor.actor_id
+                    location["collected_turn"] = world.clock.turn
+                    world.deactivate_location_sightings(location_id, reason="collected")
+                    world.record("resonance_relic_collected", actor.actor_id,
+                                 location_id=location_id, relic_name=relic.name,
+                                 position=list(pos))
+                    pickups.append({"actor_id": actor.actor_id, "relic_name": relic.name,
+                                    "player_visible": is_player})
+                else:
+                    known_by = location.setdefault("discovered_by", [])
+                    if actor.actor_id not in known_by:
+                        known_by.append(actor.actor_id)
+                        location["discovered"] = True
+                        world.record("resonance_relic_discovered", actor.actor_id,
+                                     location_id=location_id, relic_name=relic_name,
+                                     position=list(pos))
+                if not location.get("active", True):
+                    break
+        return pickups
+
+    def _resolve_world_npc_merchant_trades(self, world: WorldState) -> list[dict]:
+        """NPC轮回者偶遇商人时可用有限碎片买入一件现存遗物；每个世界回合最多成交一次。"""
+        merchant = getattr(self.state, "merchant", None)
+        if merchant is None:
+            return []
+        merchant_actor = world.actors.get(getattr(merchant, "runtime_id", ""))
+        if merchant_actor is None or not merchant_actor.alive:
+            return []
+        player_id = getattr(self.state.player, "runtime_id", "") if self.state.player else ""
+        if any(encounter.active and player_id in encounter.participants
+               for encounter in world.encounters.values()):
+            return []
+        # 不依赖调用方恰好只调用一次；同一世界回合已有成交记录时禁止重复成交。
+        if any(event.get("type") == "npc_merchant_trade"
+               and int(event.get("world_turn", -1)) == world.clock.turn
+               for event in world.event_log):
+            return []
+        entities = list(getattr(self.state, "enemies", []) or [])
+        entities += list(getattr(self.state, "friends", []) or [])
+        entities += list(getattr(self.state, "employees", []) or [])
+        entities += list(getattr(self.state, "temp_friends", []) or [])
+        entity_by_id = {entity.runtime_id: entity for entity in entities if entity is not None}
+        results = []
+        price = 10
+        # 先按地图坐标排序，而非随机生成的UUID；同一世界种子下交易优先级稳定。
+        for actor_id in sorted(
+                world.actors,
+                key=lambda aid: (world.actors[aid].y, world.actors[aid].x,
+                                world.actors[aid].name, aid)):
+            actor = world.actors[actor_id]
+            entity = entity_by_id.get(actor_id)
+            if (not actor.alive or actor.kind != "enemy" or actor.faction != "enemy"
+                    or actor.mode != "autonomous" or entity is None
+                    or entity.entity_type != "轮回者" or not entity.is_alive
+                    or entity.is_departed
+                    or abs(actor.x - merchant_actor.x) + abs(actor.y - merchant_actor.y) != 1):
+                continue
+            if any(encounter.active and actor_id in encounter.participants
+                   for encounter in world.encounters.values()):
+                continue
+            owned = {relic.name for relic in entity.relics}
+            stock = next((relic for relic in merchant.relics if relic.name not in owned), None)
+            can_buy = (stock is not None
+                       and len(owned) < int(getattr(entity, "relic_capacity", 10**9)))
+            if can_buy and entity.shards >= price:
+                # 固定参考价避免NPC凭空议价；库存与货币由真实实体状态原子转移。
+                merchant.relics.remove(stock)
+                entity.relics.append(stock)
+                entity.shards -= price
+                merchant.shards += price
+                merchant.shards_peak = max(int(getattr(merchant, "shards_peak", 0)),
+                                            int(merchant.shards))
+                direction, traded_relic = "buy", stock
+            else:
+                # NPC也可把普通遗物卖给商人；特殊怪物偏爱遗物不是可交易库存。
+                merchant_names = {relic.name for relic in merchant.relics}
+                sellable = next((relic for relic in entity.relics
+                                 if relic.name not in merchant_names
+                                 and not ({"怪物自带", "怪物偏爱"} & set(relic.tags or []))), None)
+                if sellable is None or merchant.shards < price:
+                    continue
+                entity.relics.remove(sellable)
+                merchant.relics.append(sellable)
+                entity.shards += price
+                entity.shards_peak = max(int(getattr(entity, "shards_peak", 0)),
+                                         int(entity.shards))
+                merchant.shards -= price
+                direction, traded_relic = "sell", sellable
+            world.record("npc_merchant_trade", actor_id,
+                         merchant_actor_id=merchant_actor.actor_id,
+                         direction=direction, relic_name=traded_relic.name, price=price,
+                         npc_shards=entity.shards, merchant_shards=merchant.shards)
+            results.append({"actor_id": actor_id, "direction": direction,
+                            "relic_name": traded_relic.name, "price": price})
+            # 商人每回合最多完成一笔NPC交易。
+            break
+        return results
+
+    def _share_created_being_vision(self, world: WorldState) -> None:
+        """把造物已探索的地形和最近目击记录报告给主人，不泄露实时全图。"""
+        for scout in world.actors.values():
+            if (not scout.alive or scout.kind != "friend" or not scout.owner_actor_id
+                    or scout.behavior not in {"explore", "follow", "guard"}):
+                continue
+            owner = world.actors.get(scout.owner_actor_id)
+            if owner is None or not owner.alive:
+                continue
+            world.visible_cells(scout.actor_id)
+            new_cells = sorted(scout.known_cells - owner.known_cells)
+            if new_cells:
+                owner.known_cells.update(new_cells)
+                world.record("created_being_map_report", owner.actor_id,
+                             scout_actor_id=scout.actor_id, new_known_cells=new_cells)
+            # 造物看见的地点标记会报告给主人；未被玩家/造物视野触及的地点仍保持隐藏。
+            scout_known = set(scout.known_cells)
+            for location_id, location in world.map.locations.items():
+                location_key = world.map.key((int(location.get("x", -1)),
+                                               int(location.get("y", -1))))
+                if location_key not in scout_known:
+                    continue
+                known_by = location.setdefault("discovered_by", [])
+                newly_reported = owner.actor_id not in known_by
+                if scout.actor_id not in known_by:
+                    known_by.append(scout.actor_id)
+                if owner.actor_id not in known_by:
+                    known_by.append(owner.actor_id)
+                if not location.get("discovered", False) or newly_reported:
+                    location["discovered"] = True
+                    world.record("created_being_location_reported", owner.actor_id,
+                                 scout_actor_id=scout.actor_id, location_id=location_id,
+                                 name=location.get("name", location_id))
+            known_reports = {
+                (item.get("reported_by"), item.get("actor_id"), item.get("turn"))
+                for item in owner.memory if item.get("reported_by")
+            }
+            for observation in scout.memory:
+                report_key = (scout.actor_id, observation.get("actor_id"), observation.get("turn"))
+                if report_key in known_reports:
+                    continue
+                report = dict(observation)
+                report["reported_by"] = scout.actor_id
+                owner.memory.append(report)
+                known_reports.add(report_key)
+            owner.memory = owner.memory[-50:]
+
+    def _action_world_command_created_being(self, params: dict) -> dict:
+        """切换造物自主探索、跟随主人或守卫指定格。"""
+        try:
+            world = self._world_from_state()
+            player_id = next((key for key, actor in world.actors.items()
+                              if actor.kind == "player" and actor.alive), None)
+            if player_id is None:
+                return {"success": False, "error": "地图上没有存活的轮回者"}
+            being = next((entity for entity in self.state.friends
+                          if getattr(entity, "is_created_being", False)
+                          and getattr(entity, "created_by_runtime_id", "") == player_id
+                          and entity.is_alive), None)
+            if being is None:
+                return {"success": False, "error": "没有可指挥的存活造物"}
+            actor = world.actors.get(being.runtime_id)
+            if actor is None or not actor.alive:
+                return {"success": False, "error": "造物不在地图上"}
+            behavior = params.get("behavior")
+            if behavior not in {"explore", "follow", "guard"}:
+                return {"success": False, "error": "behavior必须是explore、follow或guard"}
+            if behavior == "guard":
+                gx, gy = params.get("x", actor.x), params.get("y", actor.y)
+                if (not isinstance(gx, int) or isinstance(gx, bool)
+                        or not isinstance(gy, int) or isinstance(gy, bool)
+                        or not world.map.is_passable((gx, gy))):
+                    return {"success": False, "error": "守卫坐标必须是可通行格上的整数坐标"}
+                guard_position = (gx, gy)
+            else:
+                guard_position = None
+            actor.behavior = behavior
+            actor.guard_position = guard_position
+            actor.owner_actor_id = player_id
+            actor.mode = "autonomous"
+            world.record("created_being_behavior_changed", player_id,
+                         created_being=being.name, behavior=behavior,
+                         guard_position=list(guard_position) if guard_position else None)
+            self._share_created_being_vision(world)
+            self._sync_world_entity_positions(world)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "指挥造物",
+                    "result": {"created_being": being.name, "behavior": behavior,
+                               "guard_position": list(guard_position) if guard_position else None,
+                               "known_cells_shared": len(actor.known_cells)},
+                    "instruction": {"explore": "造物会自主探索未知区域，并把地形和目击记录报告给主人",
+                                    "follow": "造物会沿可通行路径向主人靠近",
+                                    "guard": "造物会前往并守卫指定格"}[behavior]}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _resolve_world_temporary_alliances(self, world: WorldState) -> list[dict]:
+        """胁迫形成的临时同盟在3个世界回合后结束，避免永久阵营污染。"""
+        resolved = []
+        for actor in world.actors.values():
+            alliance = next((item for item in actor.memory
+                             if item.get("kind") == "temporary_alliance"), None)
+            if alliance is None or world.clock.turn < int(alliance.get("expires_turn", 0)):
+                continue
+            entity = next((candidate for candidate in self.state.temp_friends
+                           if candidate.runtime_id == actor.actor_id), None)
+            if entity is not None:
+                self.state.temp_friends.remove(entity)
+                if entity.is_alive and not entity.is_departed:
+                    self.state.enemies.append(entity)
+            already_expired = bool(alliance.get("expired"))
+            actor.kind = str(alliance.get("original_kind", "enemy"))
+            actor.faction = str(alliance.get("original_faction", "enemy"))
+            actor.owner_actor_id = ""
+            actor.behavior = "explore"
+            actor.mode = "autonomous"
+            actor.memory = [item for item in actor.memory if item is not alliance]
+            if not already_expired:
+                world.record("temporary_alliance_expired", actor.actor_id,
+                             name=actor.name, expired_turn=world.clock.turn)
+            resolved.append({"actor_id": actor.actor_id, "name": actor.name,
+                             "status": "expired"})
+        return resolved
+
+    def _resolve_world_hiring_signals(self, world: WorldState) -> list[dict]:
+        """结算到期招募信号；响应者抵达信号地点后才真正创建员工。"""
+        resolved = []
+        for signal in world.hiring_signals:
+            if signal.get("status") != "pending" or world.clock.turn < int(signal.get("arrival_turn", 0)):
+                continue
+            params = dict(signal.get("params") or {})
+            name = str(params.get("name", ""))
+            if (self.state.is_blacklisted
+                    or any(entity.name == name for entity in self.state.employees)
+                    or not name):
+                signal["status"] = "failed"
+                signal["resolved_turn"] = world.clock.turn
+                signal["failure"] = ("已列入失信黑名单" if self.state.is_blacklisted
+                                     else "员工名称已被占用或无效")
+                world.record("hiring_signal_failed", None, signal_id=signal.get("signal_id"),
+                             name=name, reason=signal["failure"])
+                resolved.append({"signal_id": signal.get("signal_id"), "status": "failed",
+                                 "reason": signal["failure"]})
+                continue
+            # 边界可能已收缩到信号发出地点；响应者在最近的可通行格抵达。
+            requested = tuple(signal.get("position", (1, 1)))
+            if not world.map.is_passable(requested):
+                candidates = [(x, y) for y in range(world.map.height)
+                              for x in range(world.map.width)
+                              if world.map.is_passable((x, y))]
+                if not candidates:
+                    signal["status"] = "failed"
+                    signal["resolved_turn"] = world.clock.turn
+                    signal["failure"] = "地图已无可通行地点，无法完成招募"
+                    world.record("hiring_signal_failed", None, signal_id=signal.get("signal_id"),
+                                 name=name, reason=signal["failure"])
+                    resolved.append({"signal_id": signal.get("signal_id"), "status": "failed",
+                                     "reason": signal["failure"]})
+                    continue
+                requested = min(candidates, key=lambda pos: (
+                    abs(pos[0] - requested[0]) + abs(pos[1] - requested[1]), pos[1], pos[0]))
+            old_energy = self.state.energy
+            hire_result = self._pre_battle_guyong(params)
+            # 雇佣已改为世界时间行动，不能恢复旧精力系统的“失败退款”副作用。
+            self.state.energy = old_energy
+            if not hire_result.get("success"):
+                signal["status"] = "failed"
+                signal["resolved_turn"] = world.clock.turn
+                signal["failure"] = hire_result.get("error", "雇佣结算失败")
+                world.record("hiring_signal_failed", None, signal_id=signal.get("signal_id"),
+                             name=name, reason=signal["failure"])
+                resolved.append({"signal_id": signal.get("signal_id"), "status": "failed",
+                                 "reason": signal["failure"]})
+                continue
+            employee = next((entity for entity in self.state.employees
+                             if entity.name == name), None)
+            if employee is None:
+                signal["status"] = "failed"
+                signal["resolved_turn"] = world.clock.turn
+                signal["failure"] = "雇佣结算未生成员工实体"
+                world.record("hiring_signal_failed", None, signal_id=signal.get("signal_id"),
+                             name=name, reason=signal["failure"])
+                resolved.append({"signal_id": signal.get("signal_id"), "status": "failed",
+                                 "reason": signal["failure"]})
+                continue
+            actor_id = f"hire:{signal.get('signal_id')}"
+            employee.runtime_id = actor_id
+            employee.world_region = self.state.current_region
+            employee.world_x, employee.world_y = requested
+            world.add_actor(WorldActorState(
+                actor_id=actor_id, name=employee.name, kind="employee",
+                x=requested[0], y=requested[1], alive=employee.is_alive,
+                faction="employee", mode="manual"))
+            signal["status"] = "completed"
+            signal["resolved_turn"] = world.clock.turn
+            signal["responder_actor_id"] = actor_id
+            world.record("hiring_signal_answered", signal.get("owner_actor_id"),
+                         signal_id=signal.get("signal_id"), name=name,
+                         employee_actor_id=actor_id, position=list(requested))
+            resolved.append({"signal_id": signal.get("signal_id"), "status": "completed",
+                             "employee": name, "actor_id": actor_id})
+        return resolved
+
+    def _action_world_initialize(self, params: dict) -> dict:
+        """创建可存档的网格世界，并将当前存活单位登记为独立地图单位。"""
+        if self.state.player is None:
+            return {"success": False, "error": "请先完成角色开局，再初始化开放世界"}
+        if getattr(self.state, "world_state", {}):
+            return {"success": True, "action": "world_initialize",
+                    "result": {"already_initialized": True,
+                               "world_turn": self.state.world_state.get("clock", {}).get("turn", 0)}}
+        width = params.get("width", 21)
+        height = params.get("height", 21)
+        if not isinstance(width, int) or isinstance(width, bool) or not isinstance(height, int) or isinstance(height, bool):
+            return {"success": False, "error": "地图宽高必须是整数"}
+        # 地图种子通过引擎骰子产生并记录，不让AI直接伪造随机结果。
+        seed_roll = self.dice.auto_roll("open_world_map_seed", list(range(10000)),
+                                        context="开放世界地图生成种子")
+        seed = seed_roll["record"]["selected_index"]
+        try:
+            world = WorldState.create(width=width, height=height, seed=seed)
+            spawned_monsters = []
+            spawned_reincarnators = []
+            had_existing_enemies = bool(self.state.enemies)
+            if not had_existing_enemies:
+                # 开放世界把当前副本怪物池中的实体生成到地图；不是每次遭遇才临时抽怪。
+                from .monsters import make_monster_entity, assign_monster_preferences
+                for monster_def in self._monster_pool_for_battle():
+                    monster = make_monster_entity(monster_def)
+                    assign_monster_preferences(monster, self._current_tier(), self.dice)
+                    self.combat.init_monster_shards(monster)
+                    self.state.enemies.append(monster)
+                    spawned_monsters.append(monster)
+                # 正式地图（面积至少150格）还会生成其他真实轮回者。
+                # 小地图主要用于测试/自定义场景，避免自动塞入额外单位破坏调用方布置。
+                if width * height >= 150:
+                    npc_count = min(4, max(2, self._current_tier() + 1))
+                    used_names = {entity.name for entity in
+                                  ([self.state.player] if self.state.player else [])
+                                  + list(self.state.enemies)}
+                    for npc_index in range(npc_count):
+                        npc_name = f"流浪轮回者·{npc_index + 1}"
+                        suffix = npc_index + 1
+                        while npc_name in used_names:
+                            suffix += 1
+                            npc_name = f"流浪轮回者·{suffix}"
+                        used_names.add(npc_name)
+                        template = self.state.player
+                        npc = Entity(
+                            name=npc_name, entity_type="轮回者",
+                            blood_limit=max(1, int(template.blood_limit)),
+                            current_hp=max(1, int(template.blood_limit)),
+                            mana_limit=max(0, int(template.mana_limit)),
+                            current_mana=max(0, int(template.mana_limit)),
+                            speed_limit=max(0, int(template.speed_limit)),
+                            current_speed=max(0, int(template.speed_limit)),
+                            attack_count=max(0, int(template.attack_count)),
+                            attack_power=max(0, int(template.attack_power)),
+                        )
+                        self.state.enemies.append(npc)
+                        spawned_reincarnators.append(npc)
+            # 每局进入开放世界时商人必须真实入场，而不是只在测试/手动调用中存在。
+            # 初始化库存会从遗物池转移恰好5件，随后作为中立自主单位放置到地图。
+            if self.state.merchant is None:
+                self._initialize_merchant_inventory()
+            entities = []
+            if self.state.player is not None:
+                entities.append((self.state.player, "player", "player"))
+            for kind, group in (("friend", self.state.friends), ("employee", self.state.employees),
+                                ("temp_friend", self.state.temp_friends), ("enemy", self.state.enemies)):
+                entities.extend((entity, kind, "monster" if entity.entity_type == "怪物" else kind)
+                                for entity in group if entity.is_alive)
+            if self.state.merchant is not None:
+                entities.append((self.state.merchant, "merchant", "neutral"))
+            candidates = [(x, y) for y in range(height) for x in range(width)
+                          if world.map.is_passable((x, y))]
+            # 轮回者固定从安全起点入场；友方在附近，敌对单位与商人通过引擎骰子随机分散到远处。
+            used = set()
+            player_start = (1, 1)
+            for entity, kind, faction in entities:
+                if kind == "player":
+                    pos = player_start
+                else:
+                    available = [p for p in candidates if p not in used]
+                    if kind in {"friend", "employee", "temp_friend"}:
+                        nearby = [p for p in available
+                                  if abs(p[0] - 1) + abs(p[1] - 1) <= 3]
+                        choices = nearby or available
+                    else:
+                        min_distance = max(4, min(width, height) // 4)
+                        distant = [p for p in available
+                                   if abs(p[0] - 1) + abs(p[1] - 1) >= min_distance]
+                        choices = distant or available
+                    if not choices:
+                        raise ValueError("地图可通行格不足，无法放置全部单位")
+                    placement_roll = self.dice.auto_roll(
+                        f"open_world_spawn_{kind}_{entity.name}_{len(used)}", choices,
+                        context=f"开放世界单位随机出生：{entity.name}")
+                    pos = tuple(placement_roll["selected"])
+                if pos in used:
+                    raise ValueError("随机出生位置发生重叠，请重新初始化地图")
+                used.add(pos)
+                actor_id = getattr(entity, "runtime_id", "") or f"{kind}:{entity.name}:{len(used)}"
+                mode = "manual" if kind in {"player", "friend", "employee", "temp_friend"} else "autonomous"
+                world.add_actor(WorldActorState(actor_id=actor_id, name=entity.name, kind=kind,
+                                                x=pos[0], y=pos[1], alive=entity.is_alive,
+                                                faction=faction, mode=mode))
+                if kind == "player":
+                    world.record("world_entered", actor_id, region=self.state.current_region)
+                elif entity in spawned_monsters:
+                    world.record("monster_spawned", actor_id, name=entity.name,
+                                 position=list(pos), region=self.state.current_region)
+                elif entity in spawned_reincarnators:
+                    world.record("reincarnator_spawned", actor_id, name=entity.name,
+                                 position=list(pos), region=self.state.current_region)
+            # 将当前副本可用的地点型事件放入真实地图格；纯状态/战斗触发事件不伪装成地点。
+            non_location_events = {"过路商人", "都市的终音", "初拥之夜"}
+            location_names = [name for name in self.event_pool.build_pool(self.state.current_region)
+                              if name not in non_location_events]
+            available = [pos for pos in candidates if pos not in used]
+            generic_event_labels = {
+                "遗忘书屋": ("遗忘书屋", "书架上的书名都已褪色，翻开后只剩下与自身有关的残页。"),
+                "祭坛": ("碎片祭坛", "祭坛中央的凹槽等待投入碎片，回报与代价都无法预知。"),
+                "猩红暴雨": ("暴雨避难点", "血色暴雨正在侵蚀街道，附近的漏雨废墟提供了暂避之处。"),
+                "无名碑林": ("无名碑林", "苔藓覆盖的石碑刻满死者执念，靠近时会产生共鸣。"),
+                "回音长廊": ("回音长廊", "破碎镜面映出此前轮回的惨死片段，尽头传来八音盒声。"),
+                "回忆当铺": ("回忆当铺", "没有门的当铺以记忆作价，柜台后有阴影静候来客。"),
+                "无魂泥潭": ("无魂泥潭", "黑色沥青状淤泥隔绝灵魂波动，采集时会腐蚀肉体。"),
+            }
+            twisted_event_labels = {
+                "医生": ("社区诊所", "街角诊所仍亮着应急灯，医生可能愿意接触来访者。"),
+                "乞丐": ("地铁口的乞丐", "地铁入口附近的乞丐向路人乞讨，也可能掌握城市传闻。"),
+                "血肉温室": ("血肉温室", "玻璃穹顶内堆满无法辨认的血肉植株。"),
+                "绝望来电": ("公共电话亭", "电话亭的线路仍然接通，听筒里传来不属于此处的声音。"),
+                "皮衣店": ("皮衣店", "卷帘门半开，橱窗里挂着被血迹浸透的皮衣。"),
+                "生锈邮筒": ("生锈邮筒", "锈蚀的邮筒里塞满了没有寄件人信息的信件。"),
+                "尖叫下水道": ("下水道入口", "井盖下不断传出断续尖叫，回声会掩盖附近的动静。"),
+                "恶魔医务室": ("恶魔医务室", "手术灯仍在运转，器械台上摆着不该存在的工具。"),
+            }
+            event_labels = {**generic_event_labels, **twisted_event_labels}
+            for event_name in location_names:
+                if not available:
+                    break
+                roll = self.dice.auto_roll(
+                    f"open_world_location_{event_name}", available,
+                    context=f"开放世界地点放置：{event_name}")
+                pos = tuple(roll["selected"])
+                display_name, description = event_labels.get(
+                    event_name, (event_name, "到达此处后可触发对应的地点事件。"))
+                world.map.add_location(event_name, {
+                    "kind": "event", "name": display_name, "event_name": event_name,
+                    "description": description,
+                    "x": pos[0], "y": pos[1], "discovered": False, "active": True})
+                available.remove(pos)
+            # 扭曲都市额外生成可辨识的现代城市地标；地标只提供地图语境，不凭空触发事件。
+            if self.state.current_region == "扭曲都市":
+                urban_landmarks = [
+                    ("医院", "废弃综合医院，药械储备区已被翻找过。"),
+                    ("学校", "封锁中的学校，教室、走廊和操场组成开阔区域。"),
+                    ("停车场", "多层停车场，车辆残骸可以遮挡视线。"),
+                    ("地铁站", "停运地铁入口，地下通道深入城市下方。"),
+                    ("便利店", "被洗劫的便利店，货架和收银台散落在地。"),
+                    ("警察局", "废弃警局，卷帘门和防爆玻璃仍保留着。"),
+                    ("购物中心", "空置的购物中心，内部通道错综复杂。"),
+                    ("城市广场", "露天广场视野开阔，却几乎没有掩体。"),
+                ]
+                for landmark_index, (landmark_name, description) in enumerate(urban_landmarks):
+                    if not available:
+                        break
+                    roll = self.dice.auto_roll(
+                        f"open_world_urban_landmark_{landmark_index}", available,
+                        context=f"扭曲都市地标放置：{landmark_name}")
+                    pos = tuple(roll["selected"])
+                    world.map.add_location(f"urban_{landmark_index + 1}", {
+                        "kind": "landmark", "name": landmark_name,
+                        "description": description, "x": pos[0], "y": pos[1],
+                        "discovered": False, "active": True})
+                    available.remove(pos)
+            # 世界地图同时生成真实资源点；进入地点后立即拾取，且该点只结算一次。
+            resource_count = max(1, min(5, (width * height) // 150))
+            for resource_index in range(resource_count):
+                if not available:
+                    break
+                resource_roll = self.dice.auto_roll(
+                    f"open_world_resource_location_{resource_index}", available,
+                    context=f"开放世界碎片资源点位置#{resource_index + 1}")
+                resource_pos = tuple(resource_roll["selected"])
+                amount_roll = self.dice.auto_roll(
+                    f"open_world_resource_amount_{resource_index}", list(range(5, 16)),
+                    context=f"开放世界碎片资源点储量#{resource_index + 1}")
+                world.map.add_location(f"resource_shards_{resource_index + 1}", {
+                    "kind": "resource", "name": "碎片残留", "resource_type": "shards",
+                    "amount": int(amount_roll["selected"]),
+                    "x": resource_pos[0], "y": resource_pos[1],
+                    "discovered": False, "active": True})
+                available.remove(resource_pos)
+            self._sync_world_entity_positions(world)
+            final_phase = self._refresh_world_final_duel(world)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_initialize",
+                    "result": {"width": width, "height": height,
+                               "world_turn": world.clock.turn,
+                               "spawned_monsters": len(spawned_monsters),
+                               "spawned_reincarnators": len(spawned_reincarnators),
+                               "event_locations": len(world.map.locations),
+                               "final_duel_search": final_phase if final_phase.get("active") else None}}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _action_world_move(self, params: dict) -> dict:
+        try:
+            world = self._world_from_state()
+            if world.final_duel_complete:
+                return {"success": False, "error": "最终生存阶段已经结算，地图行动已结束"}
+            actor_id = params.get("actor_id")
+            player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            actor_id = params.get("actor_id") or player_id
+            if actor_id is None or actor_id != player_id:
+                return {"success": False, "error": "当前API只允许轮回者控制自己的地图单位"}
+            x, y = params.get("x"), params.get("y")
+            if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
+                return {"success": False, "error": "目标坐标x/y必须是整数"}
+            result = world.move_actor(actor_id, (x, y))
+            if not any(encounter.active and actor_id in encounter.participants
+                       for encounter in world.encounters.values()):
+                self._resolve_world_npc_encounters(world)
+            self._resolve_world_hiring_signals(world)
+            self._resolve_world_temporary_alliances(world)
+            self._share_created_being_vision(world)
+            self._sync_world_entity_positions(world)
+            location_entry = world.map.location_at((x, y))
+            if location_entry is not None:
+                location_id, location = location_entry
+                if location.get("active", True):
+                    location["discovered"] = True
+                    if location.get("kind") == "resource" and location.get("resource_type") == "shards":
+                        amount = max(0, int(location.get("amount", 0)))
+                        self.state.shards += amount
+                        self.state.shards_peak = max(
+                            int(getattr(self.state, "shards_peak", 0)),
+                            max(0, int(self.state.shards)))
+                        location["active"] = False
+                        location["collected"] = True
+                        location["collected_by"] = actor_id
+                        location["collected_turn"] = world.clock.turn
+                        world.deactivate_location_sightings(location_id, reason="collected")
+                        world.record("resource_collected", actor_id, location_id=location_id,
+                                     resource_type="shards", amount=amount,
+                                     position=[x, y])
+                        result["resource_collected"] = {"name": location.get("name", "碎片残留"),
+                                                        "shards": amount}
+                    elif location.get("kind") == "relic":
+                        actor_entity = None
+                        entity_candidates = ([self.state.player] if self.state.player else [])
+                        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+                            entity_candidates.extend(getattr(self.state, group_name, []) or [])
+                        if getattr(self.state, "merchant", None) is not None:
+                            entity_candidates.append(self.state.merchant)
+                        actor_entity = next((entity for entity in entity_candidates
+                                             if getattr(entity, "runtime_id", "") == actor_id), None)
+                        if actor_entity is not None:
+                            is_player = actor_entity is self.state.player
+                            owned_relics = self.state.relics if is_player else actor_entity.relics
+                            capacity = (actor_entity.relic_capacity if is_player
+                                        else getattr(actor_entity, "relic_capacity", 10**9))
+                            owned_names = {relic.name for relic in owned_relics}
+                            if location.get("relic_name") not in owned_names and len(owned_names) < capacity:
+                                relic = Relic(name=location["relic_name"],
+                                              effect=location.get("relic_effect", ""),
+                                              tags=list(location.get("relic_tags") or []))
+                                owned_relics.append(relic)
+                                location["active"] = False
+                                location["collected"] = True
+                                location["collected_by"] = actor_id
+                                location["collected_turn"] = world.clock.turn
+                                world.deactivate_location_sightings(location_id, reason="collected")
+                                world.record("resonance_relic_collected", actor_id,
+                                             location_id=location_id, relic_name=relic.name,
+                                             position=[x, y])
+                                result["relic_collected"] = {"name": relic.name, "effect": relic.effect}
+                            else:
+                                location["discovered"] = True
+                                location.setdefault("discovered_by", [])
+                                if actor_id not in location["discovered_by"]:
+                                    location["discovered_by"].append(actor_id)
+                                world.record("resonance_relic_discovered", actor_id,
+                                             location_id=location_id,
+                                             relic_name=location.get("relic_name"),
+                                             position=[x, y])
+                    else:
+                        event_name = location.get("event_name", location.get("name", location_id))
+                        if (self.event_pool.current is None and event_name in self.event_pool.events
+                                and (event_name == "祭坛" or event_name not in self.event_pool.triggered)):
+                            self.event_pool.current = event_name
+                            world.record("location_discovered", actor_id, location_id=location_id,
+                                         location_name=location.get("name", location_id),
+                                         event_name=event_name, position=[x, y])
+                            result["location_event"] = event_name
+            # NPC在本回合移动后踩中资源/遗物，也会真正拾取；隐藏NPC所得不会回传给玩家。
+            self._resolve_world_shard_pickups(world)
+            self._resolve_world_relic_pickups(world)
+            npc_trades = self._resolve_world_npc_merchant_trades(world)
+            if npc_trades:
+                player_actor = world.actors.get(actor_id)
+                visible_positions = ({player_actor.position}
+                                     | set(world.map.adjacent_vision(player_actor.position))
+                                     if player_actor is not None else set())
+                # NPC在视野外完成的交易只写入世界事实账本，不直接泄露给玩家。
+                merchant_actor_id = getattr(self.state.merchant, "runtime_id", "")
+                visible_trades = [
+                    trade for trade in npc_trades
+                    if trade["actor_id"] in world.actors
+                    and world.actors[trade["actor_id"]].position in visible_positions
+                    and merchant_actor_id in world.actors
+                    and world.actors[merchant_actor_id].position in visible_positions
+                ]
+                if visible_trades:
+                    result["npc_merchant_trades"] = visible_trades
+            final_phase = self._refresh_world_final_duel(world)
+            if final_phase.get("active") or final_phase.get("complete"):
+                result["final_duel"] = final_phase
+            # 商人自己走近玩家也会建立接触；只在实际相邻时打开交易会话。
+            self._open_adjacent_merchant_session(world)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_move", "result": result}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _action_world_wait(self, params: dict) -> dict:
+        try:
+            world = self._world_from_state()
+            if world.final_duel_complete:
+                return {"success": False, "error": "最终生存阶段已经结算，不能继续等待世界回合"}
+            actor_id = params.get("actor_id")
+            player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            actor_id = params.get("actor_id") or player_id
+            if actor_id is None or actor_id != player_id:
+                return {"success": False, "error": "当前API只允许轮回者控制自己的地图单位"}
+            turns = params.get("turns", 1)
+            start_turn = world.clock.turn
+            self._advance_world_turns(world, actor_id, turns)
+            self._resolve_world_shard_pickups(world)
+            self._resolve_world_relic_pickups(world)
+            self._resolve_world_hiring_signals(world)
+            self._resolve_world_temporary_alliances(world)
+            self._share_created_being_vision(world)
+            self._refresh_world_final_duel(world)
+            elapsed = world.clock.turn - start_turn
+            active_encounter = next((encounter for encounter in world.encounters.values()
+                                     if encounter.active and actor_id in encounter.participants), None)
+            self._sync_world_entity_positions(world)
+            if active_encounter is None:
+                self._open_adjacent_merchant_session(world)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_wait",
+                    "result": {"world_turn": world.clock.turn, "turns": elapsed,
+                               "requested_turns": turns,
+                               "interrupted_by_encounter": active_encounter is not None,
+                               "encounter_id": active_encounter.encounter_id if active_encounter else None}}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _action_world_status(self, params: dict) -> dict:
+        """只返回玩家已知信息，不把全地图、隐藏单位或完整事实账本交给AI。"""
+        try:
+            world = self._world_from_state()
+            actor_id = params.get("actor_id")
+            player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            actor_id = params.get("actor_id") or player_id
+            if actor_id is None or actor_id != player_id or actor_id not in world.actors:
+                return {"success": False, "error": "只能查询轮回者自己的地图情报"}
+            visible = set(world.visible_cells(actor_id))
+            self._sync_world_entity_positions(world)
+            actor = world.actors[actor_id]
+            known_terrain = [
+                {"x": x, "y": y, "terrain": world.map.terrain_at((x, y))}
+                for key in sorted(actor.known_cells)
+                for x, y in [world.map.parse(key)]
+            ]
+            visible_actors = [
+                {"actor_id": other.actor_id, "name": other.name, "kind": other.kind,
+                 "faction": other.faction, "position": [other.x, other.y]}
+                for other in world.actors.values()
+                if other.alive and other.actor_id != actor_id and other.position in visible
+            ]
+            visible_encounters = [
+                {"encounter_id": e.encounter_id, "participants": list(e.participants),
+                 "location": list(e.location), "started_turn": e.started_turn}
+                for e in world.encounters.values()
+                if e.active and actor_id in e.participants
+            ]
+            known_locations = [
+                {"location_id": location_id, "name": location.get("name", location_id),
+                 "kind": location.get("kind", "special"),
+                 "description": location.get("description", ""),
+                 "position": [location.get("x"), location.get("y")],
+                 "active": location.get("active", True)}
+                for location_id, location in world.map.locations.items()
+                if location.get("discovered", False)
+                and (location.get("kind") != "relic"
+                     or actor_id in (location.get("discovered_by") or []))
+            ]
+            next_shrink_turn = None
+            if (world.shrink_interval > 0
+                    and world.shrink_count * 2 < min(world.map.width, world.map.height) - 1):
+                next_shrink_turn = (world.shrink_count + 1) * world.shrink_interval
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_status", "result": {
+                "world_turn": world.clock.turn,
+                "map_size": {"width": world.map.width, "height": world.map.height},
+                "boundary": {
+                    "shape": "square",
+                    "shrink_interval": world.shrink_interval,
+                    "shrunk_rings": world.shrink_count,
+                    "next_shrink_turn": next_shrink_turn,
+                },
+                "final_duel": {
+                    "search_active": world.final_duel_search,
+                    "battle_started": world.final_duel_started,
+                    "complete": world.final_duel_complete,
+                    "winner": world.final_duel_winner if world.final_duel_complete else None,
+                    # NPC决赛者以地图中心为会合点；把目标公开给玩家，避免远距离死斗
+                    # 只在后台寻路、却不给玩家可执行的方向信息。
+                    "rally_point": ([world.map.width // 2, world.map.height // 2]
+                                    if world.final_duel_search and not world.final_duel_started
+                                    else None),
+                    "instruction": (
+                        "最后两名轮回者正向地图中心会合；前往rally_point寻找最终对手。移动和世界威胁仍继续结算"
+                        if world.final_duel_search and not world.final_duel_started
+                        else "最终遭遇已开始" if world.final_duel_started and not world.final_duel_complete
+                        else "最终生存阶段已结束" if world.final_duel_complete else None
+                    ),
+                },
+                "self": {"actor_id": actor.actor_id, "name": actor.name,
+                         "position": [actor.x, actor.y], "alive": actor.alive},
+                "known_terrain": known_terrain,
+                "visible_actors": visible_actors,
+                "visible_encounters": visible_encounters,
+                "known_locations": known_locations,
+                "hiring_signals": [
+                    {"signal_id": signal.get("signal_id"),
+                     "status": signal.get("status"),
+                     "issued_turn": signal.get("issued_turn"),
+                     "arrival_turn": signal.get("arrival_turn"),
+                     "resolved_turn": signal.get("resolved_turn"),
+                     "name": (signal.get("params") or {}).get("name", ""),
+                     "failure": signal.get("failure", "")}
+                    for signal in world.hiring_signals
+                    if signal.get("owner_actor_id") == actor_id
+                ],
+            }}
+        except (ValueError, KeyError) as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _action_world_interact(self, params: dict) -> dict:
+        """与相邻单位交涉；资产只在目标明确接受公平报价后转移。"""
+        try:
+            world = self._world_from_state()
+            player_id = next((key for key, actor in world.actors.items()
+                              if actor.kind == "player" and actor.alive), None)
+            target_id = params.get("target_actor_id")
+            choice = params.get("choice")
+            allowed = {"talk", "trade", "cooperate", "intimidate", "attack"}
+            if choice not in allowed:
+                return {"success": False, "error": f"choice必须是{sorted(allowed)}之一"}
+            if not player_id or not isinstance(target_id, str) or target_id not in world.actors:
+                return {"success": False, "error": "必须指定一个真实存在的目标单位"}
+            if target_id == player_id:
+                return {"success": False, "error": "不能与自己交互"}
+            if any(encounter.active and player_id in encounter.participants
+                   for encounter in world.encounters.values()):
+                return {"success": False, "error": "轮回者正处于遭遇中，不能开启普通交互"}
+            player, target = world.actors[player_id], world.actors[target_id]
+            if not target.alive:
+                return {"success": False, "error": "目标单位已离场"}
+            if abs(player.x - target.x) + abs(player.y - target.y) != 1:
+                return {"success": False, "error": "目标必须位于上下左右相邻格"}
+            if any(encounter.active and target_id in encounter.participants
+                   for encounter in world.encounters.values()):
+                return {"success": False, "error": "目标正处于遭遇中，不能开启普通交互"}
+            entity_candidates = ([self.state.player] if self.state.player else [])
+            for group_name in ("friends", "employees", "temp_friends", "enemies"):
+                entity_candidates.extend(getattr(self.state, group_name, []) or [])
+            target_entity = next((entity for entity in entity_candidates
+                                  if entity is not None and entity.runtime_id == target_id), None)
+
+            if choice == "trade":
+                if target.kind == "merchant":
+                    if self.event_pool.current is not None:
+                        return {"success": False, "error": "当前已有待结算事件，不能开启商人交易"}
+                    self.event_pool.current = "过路商人"
+                    world.record("merchant_encountered", player_id, merchant_actor_id=target_id,
+                                 position=list(target.position))
+                    self.state.world_state = world.to_dict()
+                    return {"success": True, "action": "world_interact",
+                            "result": {"choice": choice, "target": target.name,
+                                       "session": "过路商人"}}
+                if target_entity is None or target_entity.entity_type != "轮回者":
+                    return {"success": False, "error": "普通双边交易只支持与其他轮回者进行"}
+                offer_shards = params.get("offer_shards", 0)
+                request_shards = params.get("request_shards", 0)
+                give_relic = params.get("give_relic")
+                request_relic = params.get("request_relic")
+                if any(not isinstance(value, int) or isinstance(value, bool) or value < 0
+                       for value in (offer_shards, request_shards)):
+                    return {"success": False, "error": "offer_shards/request_shards必须是非负整数"}
+                if not any((offer_shards, request_shards, give_relic, request_relic)):
+                    return {"success": False, "error": "报价必须至少包含碎片或遗物；提交offer_shards/request_shards/give_relic/request_relic"}
+                if offer_shards > self.state.shards:
+                    return {"success": False, "error": "你没有足够碎片支付报价"}
+                if request_shards > target_entity.shards:
+                    return {"success": False, "error": "对方没有足够碎片支付报价"}
+                player_relic = next((r for r in self.state.relics if r.name == give_relic), None) if give_relic else None
+                target_relic = next((r for r in target_entity.relics if r.name == request_relic), None) if request_relic else None
+                if give_relic and player_relic is None:
+                    return {"success": False, "error": f"你没有遗物【{give_relic}】"}
+                if request_relic and target_relic is None:
+                    return {"success": False, "error": f"对方没有遗物【{request_relic}】"}
+                player_relic_count = len({r.name for r in self.state.relics})
+                target_relic_count = len({r.name for r in target_entity.relics})
+                if request_relic and not give_relic and player_relic_count >= self.state.player.relic_capacity:
+                    return {"success": False, "error": "你的遗物承载已满，无法接收对方遗物"}
+                if give_relic and not request_relic and target_relic_count >= target_entity.relic_capacity:
+                    return {"success": False, "error": "对方遗物承载已满，无法接收你的遗物"}
+                # 默认议价基准：一件遗物按10碎片估值。目标只接受自己收到的价值不低于付出的报价。
+                value_received = offer_shards + (10 if give_relic else 0)
+                value_given = request_shards + (10 if request_relic else 0)
+                world.record("trade_offer_made", player_id, target_actor_id=target_id,
+                             offer_shards=offer_shards, request_shards=request_shards,
+                             give_relic=give_relic, request_relic=request_relic,
+                             estimated_value_received=value_received,
+                             estimated_value_given=value_given)
+                if value_received < value_given:
+                    world.record("trade_offer_rejected", target_id, proposer_actor_id=player_id,
+                                 reason="报价价值低于对方付出")
+                    self.state.world_state = world.to_dict()
+                    return {"success": True, "action": "world_interact",
+                            "result": {"choice": "trade", "target": target.name,
+                                       "accepted": False, "completed": False,
+                                       "reason": "对方认为报价不划算；没有资产转移"}}
+                # 先计算交易后的净余额，再一次性提交。不能把交易过程中的临时中间值
+                # 记为历史峰值，否则对方先收到、再付出的同一笔碎片会凭空抬高峰值。
+                player_final_shards = self.state.shards - offer_shards + request_shards
+                target_final_shards = target_entity.shards + offer_shards - request_shards
+                self.state.shards = player_final_shards
+                target_entity.shards = target_final_shards
+                self.state.shards_peak = max(self.state.shards_peak, player_final_shards)
+                target_entity.shards_peak = max(target_entity.shards_peak, target_final_shards)
+                if player_relic is not None:
+                    self.state.relics.remove(player_relic)
+                    target_entity.relics.append(player_relic)
+                if target_relic is not None:
+                    target_entity.relics.remove(target_relic)
+                    self.state.relics.append(target_relic)
+                world.record("trade_offer_accepted", target_id, proposer_actor_id=player_id,
+                             offer_shards=offer_shards, request_shards=request_shards,
+                             give_relic=give_relic, request_relic=request_relic)
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_interact",
+                        "result": {"choice": "trade", "target": target.name,
+                                   "accepted": True, "completed": True,
+                                   "offer_shards": offer_shards, "request_shards": request_shards,
+                                   "gave_relic": give_relic, "received_relic": request_relic,
+                                   "player_shards": self.state.shards,
+                                   "counterparty_shards": target_entity.shards}}
+
+            if choice == "attack":
+                if target.kind != "enemy":
+                    return {"success": False, "error": "当前只有敌方单位可直接进入战斗"}
+                target.faction = "monster" if target.faction == "monster" else "enemy"
+                encounter = world.start_encounter([player_id, target_id], target.position)
+                world.record("hostility_declared", player_id, target_actor_id=target_id,
+                             target_name=target.name, encounter_id=encounter.encounter_id)
+                self._sync_world_entity_positions(world)
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_interact",
+                        "result": {"choice": choice, "encounter_id": encounter.encounter_id,
+                                   "world_encounter_id": encounter.encounter_id,
+                                   "participants": list(encounter.participants),
+                                   "battle_started": False},
+                        "instruction": "遭遇已登记；现在调用battle_start，并传入result.world_encounter_id以接入现有战斗引擎"}
+
+            if choice == "talk":
+                rumors = [dict(item) for item in target.memory[-3:]
+                          if item.get("actor_id") and item.get("turn") is not None]
+                event = world.record("conversation_requested", player_id,
+                                     target_actor_id=target_id, target_name=target.name,
+                                     shared_rumor_count=len(rumors))
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_interact",
+                        "result": {"choice": choice, "event_id": event["event_id"],
+                                   "target": target.name, "reported_sightings": rumors,
+                                   "narrative_input": "对话只可使用目标实际目击并分享的记录，不得虚构交易或承诺"}}
+
+            if choice == "cooperate":
+                if target_entity is None or target_entity.entity_type != "轮回者" or target_entity not in self.state.enemies:
+                    return {"success": False, "error": "只有尚未结盟的其他轮回者可以接受结盟提议"}
+                hp_ratio = target_entity.current_hp / max(1, target_entity.blood_limit)
+                accept_percent = max(15, min(85, 25 + int((1 - hp_ratio) * 60)))
+                roll = self.dice.auto_roll(
+                    f"world_alliance_consent_{target_id}_{world.clock.turn}",
+                    ["accept"] * accept_percent + ["reject"] * (100 - accept_percent),
+                    context=f"{target.name}评估结盟提议：根据当前伤势决定是否接受")
+                accepted = roll["selected"] == "accept"
+                world.record("alliance_decision", target_id, proposer_actor_id=player_id,
+                             accepted=accepted, accept_chance=accept_percent)
+                if accepted:
+                    self.state.enemies.remove(target_entity)
+                    self.state.friends.append(target_entity)
+                    target.kind, target.faction = "friend", "friend"
+                    target.behavior = "explore"
+                    target.owner_actor_id = ""
+                    target.mode = "autonomous"
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_interact",
+                        "result": {"choice": choice, "target": target.name,
+                                   "accepted": accepted, "completed": accepted,
+                                   "accept_chance_percent": accept_percent}}
+
+            # 恐吓只对其他轮回者进行可结算的胁迫；怪物不接受人类谈判。
+            if target_entity is None or target_entity.entity_type != "轮回者" or target_entity not in self.state.enemies:
+                encounter = world.start_encounter([player_id, target_id], target.position)
+                world.record("intimidation_ignored", target_id, proposer_actor_id=player_id,
+                             encounter_id=encounter.encounter_id)
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_interact",
+                        "result": {"choice": choice, "accepted": False,
+                                   "encounter_id": encounter.encounter_id,
+                                   "reason": "目标不接受胁迫，已进入战斗"},
+                        "instruction": "接着调用battle_start处理这次遭遇"}
+            player_entity = self.state.player
+            player_power = max(1, int(getattr(player_entity, "attack_power", 0))
+                               + int(getattr(player_entity, "attack_count", 0)))
+            target_power = max(1, int(target_entity.attack_power) + int(target_entity.attack_count))
+            player_hp_ratio = player_entity.current_hp / max(1, player_entity.blood_limit)
+            target_hp_ratio = target_entity.current_hp / max(1, target_entity.blood_limit)
+            chance = max(10, min(90, 35 + 20 * (player_power > target_power)
+                                 + 25 * (target_hp_ratio < 0.5)
+                                 - 20 * (player_hp_ratio < 0.5)))
+            roll = self.dice.auto_roll(
+                f"world_intimidation_{target_id}_{world.clock.turn}",
+                ["success"] * chance + ["fail"] * (100 - chance),
+                context=f"轮回者胁迫{target.name}：对比战力和伤势")
+            if roll["selected"] == "success":
+                self.state.enemies.remove(target_entity)
+                self.state.temp_friends.append(target_entity)
+                target.kind, target.faction = "friend", "temp_friend"
+                target.behavior = "follow"
+                target.owner_actor_id = player_id
+                target.memory.append({"kind": "temporary_alliance",
+                                      "expires_turn": world.clock.turn + 3,
+                                      "original_kind": "enemy",
+                                      "original_faction": "enemy"})
+                world.record("intimidation_succeeded", player_id, target_actor_id=target_id,
+                             target_name=target.name, expires_turn=world.clock.turn + 3,
+                             success_chance_percent=chance)
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_interact",
+                        "result": {"choice": choice, "accepted": True, "completed": True,
+                                   "target": target.name, "expires_turn": world.clock.turn + 3,
+                                   "success_chance_percent": chance}}
+            encounter = world.start_encounter([player_id, target_id], target.position)
+            world.record("intimidation_failed", target_id, proposer_actor_id=player_id,
+                         encounter_id=encounter.encounter_id, success_chance_percent=chance)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_interact",
+                    "result": {"choice": choice, "accepted": False, "completed": False,
+                               "encounter_id": encounter.encounter_id,
+                               "success_chance_percent": chance},
+                    "instruction": "胁迫失败，接着调用battle_start处理这次遭遇"}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _action_world_vision(self, params: dict) -> dict:
+        try:
+            world = self._world_from_state()
+            actor_id = params.get("actor_id")
+            player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            actor_id = params.get("actor_id") or player_id
+            if actor_id is None or actor_id != player_id:
+                return {"success": False, "error": "只能查看轮回者自己的视野"}
+            visible = world.visible_cells(actor_id)
+            self._share_created_being_vision(world)
+            self._sync_world_entity_positions(world)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_vision",
+                    "result": {"actor_id": actor_id, "visible_cells": [list(p) for p in visible],
+                               "known_cells": sorted(world.actors[actor_id].known_cells),
+                               "reported_sightings": [
+                                   dict(item) for item in world.actors[actor_id].memory
+                                   if item.get("reported_by")]}}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
 
     # ==================== 开局行动 ====================
 
@@ -1544,21 +2969,273 @@ class GameEngine:
                            "attack_power": doctor.attack_power}}
 
     def _action_pre_battle(self, params: dict) -> dict:
-        """局外阶段行动"""
+        """局外行动入口。开放世界中，耗时行动先推进世界，再结算收益。"""
+        if getattr(self.state, "world_state", {}):
+            return self._action_timed_world_pre_battle(params)
+        return self._execute_pre_battle_immediate(params, world_mode=False)
+
+    def _action_timed_world_pre_battle(self, params: dict) -> dict:
+        action = params.get("sub_action", "")
+        durations = {
+            "休整": lambda p: p.get("tier", 1),
+            "修行": lambda p: p.get("tier", 1),
+            "学习": lambda p: 3,
+            "共鸣": lambda p: 1,
+            "维修": lambda p: 1,
+            "雇佣": lambda p: 1,
+            "炼心": lambda p: 1,
+            "造生": lambda p: 1,
+        }
+        if action == "探索":
+            return {"success": False, "error": "开放世界已删除独立探索行动；请移动到地图地点"}
+        if action == "附煞":
+            return {"success": False, "error": "附煞已删除；请使用造生培养造物偏爱"}
+        if action not in durations:
+            # 献祭等尚未裁定为耗时的条件性操作暂时保留即时结算。
+            return self._execute_pre_battle_immediate(params, world_mode=True)
+
+        try:
+            world = self._world_from_state()
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+        if world.final_duel_complete:
+            return {"success": False, "error": "最终生存阶段已经结算，不能继续耗时行动"}
+        player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+        if player_id is None:
+            return {"success": False, "error": "地图上找不到轮回者单位"}
+        if any(encounter.active and player_id in encounter.participants
+               for encounter in world.encounters.values()):
+            return {"success": False, "error": "正在遭遇中，不能开始耗时行动；应先处理遭遇"}
+
+        # 开放世界共鸣：耗时一回合，把一件真实遗物投放到可通行路径距离10以内。
+        # 发动者知道坐标但不直接获得遗物；遭遇打断时不会消耗遗物池。
+        if action == "共鸣":
+            self._init_relic_pool()
+            if not self.state.relics_pool:
+                return {"success": False, "error": "遗物池为空，无法投放共鸣遗物"}
+            player_actor = world.actors[player_id]
+            from collections import deque
+            distances = {player_actor.position: 0}
+            queue = deque([player_actor.position])
+            while queue:
+                pos = queue.popleft()
+                if distances[pos] >= 10:
+                    continue
+                for nxt in world.map.neighbors(pos):
+                    if nxt not in distances:
+                        distances[nxt] = distances[pos] + 1
+                        queue.append(nxt)
+            candidates = [
+                pos for pos, distance in distances.items()
+                if 0 < distance <= 10 and world.map.is_passable(pos)
+                and world.map.location_at(pos) is None
+                and not any(actor.alive and actor.position == pos for actor in world.actors.values())
+            ]
+            if not candidates:
+                return {"success": False, "error": "玩家周围10格路径范围内没有可投放的空地点"}
+            start_turn = world.clock.turn
+            world.record("world_action_started", player_id, action=action, duration=1)
+            self._advance_world_turns(world, player_id, 1)
+            self._resolve_world_shard_pickups(world)
+            self._resolve_world_relic_pickups(world)
+            self._resolve_world_hiring_signals(world)
+            self._resolve_world_temporary_alliances(world)
+            self._share_created_being_vision(world)
+            self._refresh_world_final_duel(world)
+            elapsed = world.clock.turn - start_turn
+            active_encounter = next((encounter for encounter in world.encounters.values()
+                                     if encounter.active and player_id in encounter.participants), None)
+            self._sync_world_entity_positions(world)
+            if active_encounter is not None:
+                world.record("world_action_interrupted", player_id, action=action,
+                             elapsed_turns=elapsed, encounter_id=active_encounter.encounter_id)
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_action_interrupted",
+                        "result": {"sub_action": action, "elapsed_turns": elapsed,
+                                   "required_turns": 1, "encounter_id": active_encounter.encounter_id,
+                                   "reward_applied": False},
+                        "instruction": "共鸣被遭遇打断，未投放遗物；请先处理地图遭遇"}
+            # 等待期间边界可能收缩；投放范围必须按结算后的真实地图重新计算。
+            player_actor = world.actors[player_id]
+            distances = {player_actor.position: 0}
+            queue = deque([player_actor.position])
+            while queue:
+                pos = queue.popleft()
+                if distances[pos] >= 10:
+                    continue
+                for nxt in world.map.neighbors(pos):
+                    if nxt not in distances:
+                        distances[nxt] = distances[pos] + 1
+                        queue.append(nxt)
+            candidates = [
+                pos for pos, distance in distances.items()
+                if 0 < distance <= 10 and world.map.is_passable(pos)
+                and world.map.location_at(pos) is None
+                and not any(actor.alive and actor.position == pos for actor in world.actors.values())
+            ]
+            if not candidates:
+                world.record("world_action_interrupted", player_id, action=action,
+                             elapsed_turns=elapsed, reason="no_valid_relic_drop_cell")
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_action_interrupted",
+                        "result": {"sub_action": action, "elapsed_turns": elapsed,
+                                   "required_turns": 1, "reward_applied": False,
+                                   "completion_error": "边界收缩后没有合法遗物投放格"}}
+            relic_names = [relic.name for relic in self.state.relics_pool]
+            relic_roll = self.dice.auto_roll("world_resonance_relic", relic_names,
+                                             context="开放世界共鸣：选择投放遗物")
+            relic_name = relic_roll["selected"]
+            relic_index = next(i for i, relic in enumerate(self.state.relics_pool)
+                               if relic.name == relic_name)
+            relic = self.state.relics_pool.pop(relic_index)
+            location_roll = self.dice.auto_roll("world_resonance_location", candidates,
+                                                context="开放世界共鸣：遗物投放坐标")
+            position = tuple(location_roll["selected"])
+            location_id = f"resonance_relic_{world.clock.turn}_{len(world.map.locations) + 1}"
+            world.map.add_location(location_id, {
+                "kind": "relic", "name": relic.name, "relic_name": relic.name,
+                "relic_effect": relic.effect, "relic_tags": list(relic.tags),
+                "x": position[0], "y": position[1],
+                "discovered": True, "discovered_by": [player_id], "active": True,
+            })
+            world.record("resonance_relic_dropped", player_id, location_id=location_id,
+                         relic_name=relic.name, position=list(position))
+            world.record("world_action_completed", player_id, action=action, elapsed_turns=elapsed)
+            self._sync_world_entity_positions(world)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "共鸣·投放遗物",
+                    "result": {"relic": relic.name, "effect": relic.effect,
+                               "location_id": location_id, "position": list(position),
+                               "path_distance": distances[position], "acquired": False,
+                               "world_turn": world.clock.turn},
+                    "instruction": "遗物已投放到地图，发动者知道准确位置但未获得；进入该格才会拾取，其他单位也可抢先取得"}
+
+        # 在隔离快照里先执行一次旧结算器作参数/资源预检；回滚状态与随机源，不产生真实收益。
+        state_before = copy.deepcopy(self.state)
+        combat_runtime_before = self._snapshot_combat_runtime()
+        dice_before = copy.deepcopy(self.dice)
+        event_pool_before = (set(self.event_pool.triggered), self.event_pool.current)
+        interrupts_before = copy.deepcopy(self._pending_interrupts)
+        try:
+            preview = self._execute_pre_battle_immediate(dict(params), world_mode=True)
+        finally:
+            self._restore_state_in_place(state_before)
+            self.combat.state = self.state
+            self._restore_combat_runtime(combat_runtime_before)
+            self.dice = dice_before
+            self.combat.dice = self.dice
+            self.event_pool.triggered, self.event_pool.current = event_pool_before
+            self._pending_interrupts = interrupts_before
+        if not preview.get("success", False):
+            return preview
+
+        duration = durations[action](params)
+        if not isinstance(duration, int) or isinstance(duration, bool) or duration < 1:
+            return {"success": False, "error": f"【{action}】耗时档位必须是正整数"}
+        start_turn = world.clock.turn
+        world.record("world_action_started", player_id, action=action, duration=duration)
+        self._advance_world_turns(world, player_id, duration)
+        self._resolve_world_shard_pickups(world)
+        self._resolve_world_relic_pickups(world)
+        self._resolve_world_hiring_signals(world)
+        self._resolve_world_temporary_alliances(world)
+        self._share_created_being_vision(world)
+        self._refresh_world_final_duel(world)
+        elapsed = world.clock.turn - start_turn
+        active_encounter = next((encounter for encounter in world.encounters.values()
+                                 if encounter.active and player_id in encounter.participants), None)
+        self._sync_world_entity_positions(world)
+        if active_encounter is not None:
+            world.record("world_action_interrupted", player_id, action=action,
+                         elapsed_turns=elapsed, encounter_id=active_encounter.encounter_id)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_action_interrupted",
+                    "result": {"sub_action": action, "elapsed_turns": elapsed,
+                               "required_turns": duration,
+                               "encounter_id": active_encounter.encounter_id,
+                               "reward_applied": False},
+                    "instruction": "行动被遭遇打断，未结算本次收益；请先处理地图遭遇"}
+
+        if action == "雇佣":
+            player_actor = world.actors[player_id]
+            signal_id = f"hiring-{world.clock.turn}-{len(world.hiring_signals) + 1}"
+            signal = {
+                "signal_id": signal_id,
+                "owner_actor_id": player_id,
+                "status": "pending",
+                "issued_turn": world.clock.turn,
+                "arrival_turn": world.clock.turn + 2,
+                "position": [player_actor.x, player_actor.y],
+                "params": {
+                    "name": params.get("name", ""),
+                    "blood_alloc": params.get("blood_alloc", 0),
+                    "atk_bundles": params.get("atk_bundles", 0),
+                },
+            }
+            world.hiring_signals.append(signal)
+            world.record("hiring_signal_emitted", player_id, signal_id=signal_id,
+                         name=signal["params"]["name"],
+                         arrival_turn=signal["arrival_turn"],
+                         position=list(signal["position"]))
+            self._sync_world_entity_positions(world)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "雇佣·发出招募信号",
+                    "result": {"signal_id": signal_id, "status": "pending",
+                               "issued_turn": signal["issued_turn"],
+                               "expected_arrival_turn": signal["arrival_turn"],
+                               "position": list(signal["position"]),
+                               "world_turn": world.clock.turn},
+                    "instruction": "招募信号已发出并会持续有效；无需停留等待，可继续行动。响应者到达信号地点后才正式加入。"}
+
+        result = self._execute_pre_battle_immediate(dict(params), world_mode=True)
+        if not result.get("success", False):
+            world.record("world_action_interrupted", player_id, action=action,
+                         elapsed_turns=elapsed, reason=result.get("error", "completion_failed"))
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_action_interrupted",
+                    "result": {"sub_action": action, "elapsed_turns": elapsed,
+                               "required_turns": duration, "reward_applied": False,
+                               "completion_error": result.get("error", "")}}
+        if action == "造生":
+            # 新造物作为真实地图单位加入；再次造生只培养既有单位，不额外复制生命。
+            for being in self.state.friends:
+                if (getattr(being, "is_created_being", False)
+                        and getattr(being, "created_by_runtime_id", "") == player_id
+                        and being.runtime_id not in world.actors):
+                    player_actor = world.actors[player_id]
+                    being.world_region = self.state.current_region
+                    being.world_x, being.world_y = player_actor.x, player_actor.y
+                    world.add_actor(WorldActorState(
+                        actor_id=being.runtime_id, name=being.name, kind="friend",
+                        x=player_actor.x, y=player_actor.y, alive=being.is_alive,
+                        faction="friend", mode="autonomous", behavior="explore",
+                        owner_actor_id=player_id))
+        self._share_created_being_vision(world)
+        world.record("world_action_completed", player_id, action=action,
+                     elapsed_turns=elapsed)
+        self._open_adjacent_merchant_session(world)
+        self._sync_world_entity_positions(world)
+        self.state.world_state = world.to_dict()
+        result["world_time"] = {"elapsed_turns": elapsed, "world_turn": world.clock.turn}
+        return result
+
+    def _execute_pre_battle_immediate(self, params: dict, *, world_mode: bool) -> dict:
+        """旧局外行动结算器；world_mode=True时复用效果但不再消耗旧精力。"""
         action = params.get("sub_action", "")
 
-        if self.state.energy <= 0:
-            return {
-                "success": False,
-                "error": "精力已耗尽",
-                "instruction": "精力耗尽，进入战斗阶段。请调用 battle_start。"
-            }
+        if not world_mode:
+            if self.state.energy <= 0:
+                return {
+                    "success": False,
+                    "error": "精力已耗尽",
+                    "instruction": "精力耗尽，进入战斗阶段。请调用 battle_start。"
+                }
 
-        self.state.energy -= 1
-        # 战斗中发动过的炼心：下一次局外行动额外多消耗1点精力(一次性结算，用完即清零)
-        if self.state.pending_energy_penalty > 0:
-            self.state.energy -= self.state.pending_energy_penalty
-            self.state.pending_energy_penalty = 0
+            self.state.energy -= 1
+            # 旧战斗循环中的炼心精力惩罚仅适用于旧模式。
+            if self.state.pending_energy_penalty > 0:
+                self.state.energy -= self.state.pending_energy_penalty
+                self.state.pending_energy_penalty = 0
 
         result_map = {
             "休整": self._pre_battle_xiuzheng,
@@ -1569,25 +3246,34 @@ class GameEngine:
             "维修": self._pre_battle_weixiu,
             "雇佣": self._pre_battle_guyong,
             "炼心": self._pre_battle_lianxin,
-            "附煞": self._pre_battle_fusha,
+            "造生": self._pre_battle_zaosheng,
             "献祭": self._pre_battle_sacrifice,
         }
         # 2026-09-28：局外【忘忧】已删除，忘忧香效果为溢出回复转格挡。
 
         # 副本专属行动门禁（规则正文：维修=扭曲都市、雇佣=罪孽都市、炼心=龙心谷专属）。
         # 缺少该校验会让任意副本都能用他人专属行动，统计与平衡数据将失真。
-        REGION_EXCLUSIVE = {"维修": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "附煞": "乱葬岗"}
+        REGION_EXCLUSIVE = {"维修": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "造生": "乱葬岗"}
         need_region = REGION_EXCLUSIVE.get(action)
+        if action == "造生" and any(relic.name == "万魂幡" for relic in (self.state.relics or [])):
+            need_region = None
         if need_region and self.state.current_region != need_region:
-            self.state.energy += 1
+            if not world_mode:
+                self.state.energy += 1
             return {"success": False,
                     "error": f"【{action}】是{need_region}专属行动，当前副本为"
                              f"{self.state.current_region or '未选择'}"}
 
         if action in result_map:
-            return result_map[action](params)
+            energy_before = self.state.energy
+            result = result_map[action](params)
+            if world_mode:
+                # 旧处理器会在失败分支退款精力；开放世界不再使用旧精力经济。
+                self.state.energy = energy_before
+            return result
         else:
-            self.state.energy += 1  # 恢复精力
+            if not world_mode:
+                self.state.energy += 1
             return {"success": False, "error": f"未知局外行动: {action}"}
 
     def _pre_battle_xiuzheng(self, params: dict) -> dict:
@@ -1688,7 +3374,7 @@ class GameEngine:
         # DM裁定 2026-09-10：修行给的属性点**先入池**，不强制当场花掉——
         # 档位点数（1/3/5）与 2 点一档的比价不再互相卡死，余点攒着随时兑。
         self.state.attribute_points += points
-        redeemed = self._redeem_attribute_points(vals) if allocations else None
+        redeemed = self._redeem_attribute_points(vals, target=params.get("target", "player")) if allocations else None
         if redeemed is not None and not redeemed.get("success"):
             return redeemed
         gained = ((redeemed or {}).get("result") or {}).get(
@@ -1745,7 +3431,7 @@ class GameEngine:
         9: ("封存血脉", "保留触发权，随时再次触发初拥之夜"),
     }
 
-    # 遗物池定义（25件；【发现】只列候选，效果在对应触发时点应用）
+    # 遗物池定义（26件；【发现】只列候选，效果在对应触发时点应用）
     # 2026-10-13 用户令：【买路财】改制为轮回者【逃跑】行动，【三相残韵盘】删除
     # （发现侧由道纹【典当】承接），两件均移出遗物池。
     RELIC_DEFS = [
@@ -1777,6 +3463,7 @@ class GameEngine:
         ("蚀界残钟", "每回终，所有角色各自失去等同于其攻击力×攻击次数的血限"),
         ("窥隙法匣", "每次成功闪避后，下回合获得10点法力"),
         ("逐影胫骨", "每累计成功闪避两次，速度+1"),
+        ("万魂幡", "持有者可在乱葬岗以外发动造生；造生仍只培养其唯一造物"),
     ]
 
     def _init_relic_pool(self):
@@ -1785,6 +3472,34 @@ class GameEngine:
             return
         self.state.relics_pool = [Relic(name=n, effect=e) for n, e in self.RELIC_DEFS]
         self.state.relic_pool_initialized = True
+
+    def _initialize_merchant_inventory(self):
+        """过路商人首次进入本局副本时，从真实遗物池随机取得5件独立库存，不重复生成。"""
+        if getattr(self.state, "merchant", None) is not None:
+            return self.state.merchant
+        self._init_relic_pool()
+        if len(self.state.relics_pool) < 5:
+            raise ValueError("遗物池不足5件，无法生成过路商人的初始库存")
+        remaining = list(self.state.relics_pool)
+        chosen = []
+        for slot in range(5):
+            roll = self.dice.auto_roll(
+                f"merchant_initial_stock_{slot + 1}",
+                [r.name for r in remaining],
+                context=f"过路商人首次进入副本：随机取得初始遗物{slot + 1}/5",
+            )
+            index = int(roll["record"]["selected_index"])
+            chosen.append(remaining.pop(index))
+        for relic in chosen:
+            self.state.relics_pool.remove(relic)
+        self.state.merchant = Entity(
+            name="过路商人", entity_type="特殊角色", relics=chosen,
+            # 商人从创建时起就是中立单位；不能依赖后续地图同步才补齐阵营身份。
+            is_neutral=True, shards=20, shards_peak=20,
+        )
+        # 地图坐标由开放世界地图生成器写入；空值表示地图移动系统尚未分配坐标。
+        self.state.merchant_position = {}
+        return self.state.merchant
 
     def _offer_relic_discovery(self, source: str) -> dict:
         """从当前池不重复随机列出至多3件；只列候选，不替AI作选择。"""
@@ -2055,26 +3770,20 @@ class GameEngine:
         return {"success": True, "action": "自定义法术", "result": result}
 
     def _pre_battle_xuexi(self, params: dict) -> dict:
-        """学习：仅用于转化道纹1/2种对应0/10碎片。
-
-        法术本身不再需要【学习】：持全部所需道纹即可
-        直接使用，战斗中也可随时自创，法术统一从战斗中的 `define_spell` 入口定义。
-        """
+        """学习取得普通道纹；可直接分配给角色，也可暂存等待未来朋友。"""
         player = self.state.player
         if not player:
             self.state.energy += 1
             return {"success": False, "error": "没有玩家"}
         sub = params.get("sub", "daowen")
-
         tier = params.get("tier", 1)
         if not isinstance(tier, int) or isinstance(tier, bool):
             self.state.energy += 1
             return {"success": False, "error": "学习tier必须是整数"}
-        if sub in ("daowen", "转化道纹"):
-            cost_map = {1: 0, 2: 10}
-        else:
+        if sub not in ("daowen", "转化道纹"):
             self.state.energy += 1
             return {"success": False, "error": "学习sub必须是daowen"}
+        cost_map = {1: 0, 2: 10}
         if tier not in cost_map:
             self.state.energy += 1
             return {"success": False, "error": "学习道纹档位必须是1/2"}
@@ -2086,24 +3795,42 @@ class GameEngine:
                 or any(not isinstance(name, str) or not name for name in names)):
             self.state.energy += 1
             return {"success": False, "error": f"学习{tier}档必须用names提交{tier}个不同名称"}
-        # 2026-10-12 用户令：30X[血限] = 允许拥有 X 种道纹和 X 种遗物。
-        # 放在所有扣费与逐名校验之前：容量是结构性前提，不足时碎片一分不收、精力退回。
-        new_names = [n for n in names if n not in player.dao_wen]
-        owned = len(player.dao_wen)
-        cap = player.daowen_capacity
-        if owned + len(new_names) > cap:
-            self.state.energy += 1
-            return {"success": False,
-                    "error": (f"道纹种类超出承载：[血限]{player.blood_limit} 只允许{cap}种"
-                              f"（30[血限]=1种），已持有{owned}种，本次新增{len(new_names)}种")}
-        if cost > 0 and self.state.shards < cost:  # 负债口径：0费学习不属于支出
+
+        recipient = str(params.get("recipient", "player") or "player")
+        reserve = recipient in {"pending", "unassigned", "reserve", "暂存"}
+        if reserve:
+            target_entity = None
+            owned_names: set[str] = set()
+            if any(name in getattr(self.state, "pending_learned_daowen", []) for name in names):
+                self.state.energy += 1
+                return {"success": False, "error": "该道纹已在待分配池中，不能重复暂存"}
+        else:
+            candidates = ([player] + self.state.friends + self.state.employees
+                          + self.state.temp_friends)
+            # 保留公开动作契约中的 recipient="player" 别名。
+            # 玩家显示名和 runtime_id 都可能变化，不能把稳定的 API 别名当成实体 ID 查找。
+            target_entity = player if recipient == "player" and player.is_alive else next(
+                (entity for entity in candidates
+                 if entity.is_alive and recipient in (entity.name, entity.runtime_id)), None)
+            if target_entity is None:
+                self.state.energy += 1
+                return {"success": False,
+                        "error": f"学习道纹的接收者【{recipient}】不存在或已离场；未来朋友可先选择recipient=pending"}
+            owned_names = set(target_entity.dao_wen)
+            new_names = [name for name in names if name not in owned_names]
+            cap = target_entity.daowen_capacity
+            if len(owned_names) + len(new_names) > cap:
+                self.state.energy += 1
+                return {"success": False,
+                        "error": (f"道纹种类超出接收者承载：[{target_entity.name}血限]"
+                                  f"{target_entity.blood_limit}只允许{cap}种，已持有{len(owned_names)}种，"
+                                  f"本次新增{len(new_names)}种")}
+        if cost > 0 and self.state.shards < cost:
             self.state.energy += 1
             return {"success": False, "error": f"碎片不足，需要{cost}"}
 
         def daowen_error(name: str) -> Optional[str]:
-            # 2026-10-13：口径本体移入 gamedata.learnability_error（与【典当】发现池共用），
-            # 此处只做转发，拒绝文案逐字不变。
-            return learnability_error(name, owned=set(player.dao_wen),
+            return learnability_error(name, owned=owned_names,
                                       region=self.state.current_region,
                                       known=DaoWenEngine.list_all())
 
@@ -2111,13 +3838,23 @@ class GameEngine:
         if errors:
             self.state.energy += 1
             return {"success": False, "error": "；".join(errors)}
-        for name in names:
-            player.dao_wen[name] = DaoWenInstance(
-                DaoWen(name=name, formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
+        if reserve:
+            if not hasattr(self.state, "pending_learned_daowen"):
+                self.state.pending_learned_daowen = []
+            self.state.pending_learned_daowen.extend(names)
+            destination = "pending"
+        else:
+            for name in names:
+                target_entity.dao_wen[name] = DaoWenInstance(
+                    DaoWen(name=name, formula="", cost_type="消耗",
+                           cost_formula="X", effect_formula=""))
+            destination = target_entity.name
         self.state.shards -= cost
         return {"success": True, "action": "学习·道纹",
-                "result": {"learned": "daowen", "names": names, "shard_cost": cost,
-                           "player_daowen": list(player.dao_wen)}}
+                "result": {"learned": "daowen", "names": names, "recipient": destination,
+                           "shard_cost": cost,
+                           "pending_learned_daowen": list(getattr(self.state, "pending_learned_daowen", [])),
+                           "recipient_daowen": list(target_entity.dao_wen) if target_entity else []}}
 
     def _pre_battle_gongming(self, params: dict) -> dict:
         """共鸣：发现时随机列3件后显式选1；付费自选则直接加入。"""
@@ -2389,6 +4126,95 @@ class GameEngine:
                 "instruction": "直到你下一次实际支付数值为X的代价后，获得对应类型的【××龙心】(耐久X)"
             }
         }
+
+    def _pre_battle_zaosheng(self, params: dict) -> dict:
+        """造生：创建唯一造物，或以再次造生为同一造物培养新的固有偏爱。"""
+        player = self.state.player
+        if player is None:
+            return {"success": False, "error": "没有玩家"}
+        if not self.state.world_state:
+            return {"success": False, "error": "造生需要先初始化开放世界"}
+        has_banner = any(relic.name == "万魂幡" for relic in (self.state.relics or []))
+        if self.state.current_region != "乱葬岗" and not has_banner:
+            return {"success": False, "error": "造生只能在乱葬岗发动；持有万魂幡时不受地点限制"}
+        from .monsters import MONSTER_PREFERENCE_POOL
+        from .models import MONSTER_MANA_RELIC, MONSTER_MANA_RELIC_EFFECT
+        owned_beings = [entity for entity in self.state.friends + self.state.employees
+                        if getattr(entity, "is_created_being", False)
+                        and getattr(entity, "created_by_runtime_id", "") == player.runtime_id]
+        existing = owned_beings[0] if owned_beings else None
+        if existing is not None and not existing.is_alive:
+            return {"success": False,
+                    "error": "本轮回已创造过的造物已经死亡；当前规则不允许用再次造生绕过唯一造物限制"}
+        if existing is not None:
+            remaining = [name for name in MONSTER_PREFERENCE_POOL
+                         if name not in getattr(existing, "preferences", [])]
+            if not remaining:
+                return {"success": False, "error": "造物已拥有当前全部偏爱；不会重复获得同一种偏爱"}
+            cost = 25
+            if self.state.shards < cost:
+                return {"success": False, "error": f"培养造物需要{cost}碎片"}
+            roll = self.dice.auto_roll(
+                f"created_being_preference_{existing.runtime_id}_{len(existing.preferences) + 1}",
+                remaining, context=f"{existing.name}再次造生：随机获得一种未拥有的偏爱")
+            preference = str(roll["selected"])
+            existing.preferences.append(preference)
+            if preference == "痛苦的偏爱" and not any(
+                    relic.name == MONSTER_MANA_RELIC for relic in existing.relics):
+                existing.relics.append(Relic(
+                    name=MONSTER_MANA_RELIC, effect=MONSTER_MANA_RELIC_EFFECT,
+                    tags=["怪物偏爱"]))
+            self.state.shards -= cost
+            return {"success": True, "action": "造生·培养造物",
+                    "result": {"created_being": existing.name,
+                               "new_preference": preference,
+                               "preferences": list(existing.preferences),
+                               "shard_cost": cost, "shards": self.state.shards}}
+
+        cost = 10
+        if self.state.shards < cost:
+            return {"success": False, "error": f"首次造生需要{cost}碎片"}
+        requested_name = params.get("name")
+        name = str(requested_name).strip() if requested_name else f"{player.name}的造物"
+        if not name:
+            return {"success": False, "error": "造物名称不能为空"}
+        all_entities = (([player] if player else []) + self.state.friends + self.state.employees
+                        + self.state.temp_friends + self.state.enemies)
+        if any(entity.name == name for entity in all_entities):
+            return {"success": False, "error": f"角色名称【{name}】已被占用"}
+        remaining = list(MONSTER_PREFERENCE_POOL)
+        roll = self.dice.auto_roll("created_being_initial_preference", remaining,
+                                   context=f"{name}诞生：随机获得一种固有偏爱")
+        preference = str(roll["selected"])
+        half = lambda value: max(0, math.ceil(int(value) / 2))
+        being = Entity(
+            name=name, entity_type="朋友",
+            blood_limit=max(1, half(player.blood_limit)),
+            current_hp=max(1, half(player.blood_limit)),
+            mana_limit=half(player.mana_limit), current_mana=half(player.mana_limit),
+            speed_limit=half(player.speed_limit), current_speed=half(player.speed_limit),
+            attack_count=half(player.attack_count), attack_power=half(player.attack_power),
+        )
+        being.is_created_being = True
+        being.created_by_runtime_id = player.runtime_id
+        being.preferences = [preference]
+        if preference == "痛苦的偏爱":
+            being.relics.append(Relic(
+                name=MONSTER_MANA_RELIC, effect=MONSTER_MANA_RELIC_EFFECT,
+                tags=["怪物偏爱"]))
+        self.state.friends.append(being)
+        self.state.shards -= cost
+        return {"success": True, "action": "造生·创造造物",
+                "result": {"created_being": being.name,
+                           "created_being_id": being.runtime_id,
+                           "new_preference": preference,
+                           "preferences": list(being.preferences),
+                           "shard_cost": cost, "shards": self.state.shards,
+                           "attributes": {"blood_limit": being.blood_limit,
+                                          "mana_limit": being.mana_limit,
+                                          "speed_limit": being.speed_limit,
+                                          "attack_count": being.attack_count,
+                                          "attack_power": being.attack_power}}}
 
     # 乱葬岗·附煞：煞气库（6种）
     SHA_QI_LIBRARY = {
@@ -3170,15 +4996,20 @@ class GameEngine:
             payload["redemption"] = redemption
         return payload
 
-    def _redeem_attribute_points(self, allocations: dict) -> dict:
-        """把属性点池里的点兑成[血限]/[速限]/[法限]。
-
-        计价与开局初始分配同口径：1属性点=6[血限]，2属性点=1[速限]=1[法限]。
-        用户裁定 2026-09-12：局外修行不再与初始分配区分，[血限]同样可以后天提升。
-        """
+    def _redeem_attribute_points(self, allocations: dict, target: str = "player") -> dict:
+        """把属性点池兑给轮回者或指定的朋友/员工/造物。"""
         player = self.state.player
         if player is None:
             return {"success": False, "error": "尚未分配初始属性"}
+        if target in ("", "player", player.name, player.runtime_id):
+            target_entity = player
+        else:
+            target_entity = next((entity for group in
+                                  (self.state.friends, self.state.employees, self.state.temp_friends)
+                                  for entity in group
+                                  if entity.is_alive and target in (entity.name, entity.runtime_id)), None)
+            if target_entity is None:
+                return {"success": False, "error": f"属性点目标【{target}】不存在或已离场"}
         alloc_keys = ("blood_points", "speed_points", "mana_points")
         vals = {}
         for key in alloc_keys:
@@ -3200,7 +5031,7 @@ class GameEngine:
                     "instruction": "血限按1点一档不受此限；余点会留在池里，攒够2点再兑"}
         blood_gain = vals["blood_points"] * 6
         # 不朽之躯：[血限]无法增加，兑血限的点会白扔，直接拒绝而不是静默吞点。
-        if blood_gain and self.state.side_has(player, "不朽之躯"):
+        if blood_gain and self.state.side_has(target_entity, "不朽之躯"):
             return {"success": False,
                     "error": "【不朽之躯】使[血限]无法增加，不能把属性点兑成血限",
                     "instruction": "改兑 speed_points / mana_points"}
@@ -3209,18 +5040,46 @@ class GameEngine:
                   "speed": vals["speed_points"] // 2,
                   "mana": vals["mana_points"] // 2}
         if blood_gain:
-            player.blood_limit += blood_gain
-            player.current_hp += blood_gain
-        player.speed_limit += gained["speed"]
-        player.mana_limit += gained["mana"]
-        player.current_speed = player.speed_limit
-        player.current_mana = player.mana_limit
+            target_entity.blood_limit += blood_gain
+            target_entity.current_hp += blood_gain
+        target_entity.speed_limit += gained["speed"]
+        target_entity.mana_limit += gained["mana"]
+        target_entity.current_speed = target_entity.speed_limit
+        target_entity.current_mana = target_entity.mana_limit
         return {"success": True, "action": "兑换属性点",
-                "result": {"gained": gained,
+                "result": {"target": target_entity.name,
+                           "gained": gained,
                            "attribute_points": self.state.attribute_points,
-                           "blood_limit": player.blood_limit,
-                           "speed_limit": player.speed_limit,
-                           "mana_limit": player.mana_limit}}
+                           "blood_limit": target_entity.blood_limit,
+                           "speed_limit": target_entity.speed_limit,
+                           "mana_limit": target_entity.mana_limit}}
+
+    def _action_assign_learned_daowen(self, params: dict) -> dict:
+        """把暂存的学习成果分配给现在或后来结识的朋友/员工/造物。"""
+        if self.state.phase != GamePhase.PRE_BATTLE.value:
+            return {"success": False, "error": "待分配道纹只能在局外分配"}
+        name = params.get("name")
+        recipient = str(params.get("recipient", params.get("target", "")) or "")
+        pending = getattr(self.state, "pending_learned_daowen", [])
+        if not isinstance(name, str) or name not in pending:
+            return {"success": False, "error": f"待分配池中没有道纹【{name}】"}
+        candidates = ([self.state.player] if self.state.player else [])
+        candidates += self.state.friends + self.state.employees + self.state.temp_friends
+        target = next((entity for entity in candidates if entity and entity.is_alive
+                       and recipient in (entity.name, entity.runtime_id)), None)
+        if target is None:
+            return {"success": False, "error": f"接收者【{recipient}】不存在或已离场"}
+        if name in target.dao_wen:
+            return {"success": False, "error": f"【{target.name}】已经拥有道纹【{name}】"}
+        if len(target.dao_wen) >= target.daowen_capacity:
+            return {"success": False,
+                    "error": f"【{target.name}】的道纹承载已满：血限{target.blood_limit}，上限{target.daowen_capacity}种"}
+        target.dao_wen[name] = DaoWenInstance(
+            DaoWen(name=name, formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
+        pending.remove(name)
+        return {"success": True, "action": "分配学习道纹",
+                "result": {"daowen": name, "recipient": target.name,
+                           "remaining_pending_daowen": list(pending)}}
 
     def _action_redeem_attribute_points(self, params: dict) -> dict:
         """自由动作：把存下的属性点兑成面板（不耗精力、不耗碎片）。
@@ -3237,7 +5096,7 @@ class GameEngine:
                     "error": "请用 allocations 指定兑换："
                              "{'blood_points': 非负整数, 'speed_points': 偶数, 'mana_points': 偶数}",
                     "attribute_points": self.state.attribute_points}
-        return self._redeem_attribute_points(allocations)
+        return self._redeem_attribute_points(allocations, target=params.get("target", "player"))
 
     def _action_declare_parry(self, params: dict) -> dict:
         """兼容旧调用；招架现已改为每一击在 resolve_attack 中提交。"""
@@ -3352,18 +5211,19 @@ class GameEngine:
         huangfu_mana = 0
         if huangfu_spell is not None:
             huangfu_mana = max(1, huangfu_spell.rank or 1)
-            if actor.current_mana < huangfu_mana:
+            effective_huangfu_mana = actor.mana_cost(huangfu_mana)
+            if actor.current_mana < effective_huangfu_mana:
                 for daowen in huangfu_temp_granted:
                     actor.dao_wen.pop(daowen, None)
                 return {"success": False,
-                        "error": f"【黄符】施法需要{huangfu_mana}点法力，{actor.name}当前{actor.current_mana}"}
+                        "error": f"【黄符】施法实际需要{effective_huangfu_mana}点法力，{actor.name}当前{actor.current_mana}"}
         budget_err = self._consume_actions_or_error(actor, spell_tier)
         if budget_err:
             for daowen in huangfu_temp_granted:
                 actor.dao_wen.pop(daowen, None)
             return budget_err
         if huangfu_spell is not None:
-            actor.current_mana -= huangfu_mana
+            actor.spend_mana(huangfu_mana)
         try:
             execution.run_all()
         finally:
@@ -3620,6 +5480,10 @@ class GameEngine:
         budget_error = self._consume_action_or_error(attacker)
         if budget_error:
             return budget_error
+        # 「目标死亡时」按是否被选中判定，而不是是否命中；必须在逐击结算前记账，
+        # 否则首击击杀目标时，死亡钩子先于此处记账执行，会漏掉自愈触发。
+        note_action_targets(self.state, attacker,
+                            [refs.get(hit["target_ref"]) for hit in hits])
         results = []
         for index, hit in enumerate(hits):
             target = refs[hit["target_ref"]]
@@ -3639,9 +5503,6 @@ class GameEngine:
         self._advance_duel_turn()
         if self.state.in_final_duel and not self._duel_side_can_act("player_side") and not self._duel_side_can_act("opponent_side"):
             self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
-        # 自愈X「目标死亡时」（2026-10-14 用户裁定）：记持有者本轮选中的目标。
-        note_action_targets(self.state, attacker,
-                            [refs.get(hit["target_ref"]) for hit in hits])
         return {"success": True, "action": f"{attacker.name}结算一轮攻击",
                 "result": {"attacker": attacker.name, "hits": results}}
 
@@ -4047,19 +5908,23 @@ class GameEngine:
                 self._pending_interrupts.append(interrupt)
                 return {"success": True, "action": "活性土壤等待DM确认",
                         "interrupt": interrupt.to_dict(), "uses_remaining": item.current_uses}
-            if (not isinstance(x, int) or isinstance(x, bool) or x < 1 or player.current_mana < x
+            if (not isinstance(x, int) or isinstance(x, bool) or x < 1
                     or not isinstance(panel, dict)):
                 return {"success": False, "error": "活性土壤需要合法x、足够法力和DM确认的friend面板"}
             ac, ap, hp = panel.get("attack_count"), panel.get("attack_power"), panel.get("blood_limit")
             budget = (ac * ac + ap + math.ceil(hp / 6)) if all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in (ac, ap, hp)) else -1
             if budget > x or budget < 0 or not isinstance(panel.get("name"), str) or not panel["name"]:
                 return {"success": False, "error": f"朋友面板属性点成本必须≤X={x}"}
-            player.current_mana -= x
+            mana_paid = player.mana_cost(x)
+            if player.current_mana < mana_paid:
+                return {"success": False, "error": f"活性土壤实际需要{mana_paid}点法力，当前{player.current_mana}"}
+            player.current_mana -= mana_paid
             friend = Entity(panel["name"], "朋友", blood_limit=hp, current_hp=hp,
                             attack_count=ac, attack_power=ap)
             self.state.friends.append(friend)
             item.use()
-            result.update({"friend": friend.name, "budget": budget, "mana_paid": x})
+            result.update({"friend": friend.name, "budget": budget, "mana_paid": mana_paid,
+                           "mana_nominal_cost": x})
         elif name == "假钞贴":
             item.use(); self.state.fake_shards += 20
             result.update({"fake_shards_gained": 20, "fake_shards": self.state.fake_shards})
@@ -4175,12 +6040,14 @@ class GameEngine:
                 if trig_value != "瞬发":
                     return {"success": False, "error": f"黄符只能刻印瞬发法术，「{imprint}」是{trig_value}法术"}
                 rank = max(1, spell.rank or 1)
-                if player.current_mana < rank:
+                mana_paid = player.mana_cost(rank)
+                if player.current_mana < mana_paid:
                     return {"success": False,
-                            "error": f"刻印「{imprint}」需要{rank}点法力，当前{player.current_mana}"}
-                player.current_mana -= rank
+                            "error": f"刻印「{imprint}」实际需要{mana_paid}点法力，当前{player.current_mana}"}
+                player.current_mana -= mana_paid
                 item.effect = (item.effect or "") + f"【刻印：{spell.name}】"
-                result.update({"imprinted": spell.name, "rank": rank, "mana_spent": rank})
+                result.update({"imprinted": spell.name, "rank": rank, "mana_spent": mana_paid,
+                               "mana_nominal_cost": rank})
                 result.update({"uses_remaining": item.current_uses, "is_depleted": item.is_depleted})
                 return {"success": True, "action": f"使用消耗品【{name}】", "result": result}
             if not marked:
@@ -4368,8 +6235,12 @@ class GameEngine:
         elif not (stripped.startswith("拒绝")   # 拒绝：/拒绝:/拒绝下注 皆计
                   or any(stripped.startswith(k) for k in GameEngine.REJECT_OPTION_KEYWORDS)):
             return False
+        # 「按通用规则获得拒绝奖励」是规则说明，不是该选项自身的收益；
+        # 否则这段说明里的「获得」会把真正的无事发生选项误判为有偿拒绝，
+        # 导致【无所求】不发属性点、通用拒绝奖励也被跳过。
+        paid_text = stripped.replace("按通用规则获得拒绝奖励", "")
         # 显式排除带代价/收益的「拒绝改造」
-        if any(k in stripped for k in GameEngine.REJECT_BUT_PAID_KEYWORDS):
+        if any(k in paid_text for k in GameEngine.REJECT_BUT_PAID_KEYWORDS):
             return False
         return True
 
@@ -4409,6 +6280,16 @@ class GameEngine:
         if res.get("error"):
             return {"success": False, "error": res["error"],
                     "pages": res.get("pages"), "instruction": res.get("instruction", "")}
+        # 任意事件造成的真实碎片余额变化都立即检查动态还债线；历史峰值只在余额刷新纪录时上升。
+        player = self.state.player
+        peak = max(0, int(getattr(self.state, "shards_peak", 0)))
+        if player and player.is_alive and self.state.shards <= -(10 + peak):
+            player.current_hp = 0
+            player.depart_battle("还债")
+            res.setdefault("applied", []).append(
+                f"{player.name}被祭坛嚼碎：碎片余额{self.state.shards}触及动态还债线-{10 + peak}")
+            res["debt_result"] = {"entity": player.name, "balance": self.state.shards,
+                                  "threshold": 10 + peak, "triggered": True}
         if is_reject:
             # DM 裁定 2026-09-10（用户）：事件选拒绝选项后随机获得一种残韵——
             # 「用其他道纹解决」怪物墙：放弃事件收益换构筑深度，而非数值对撞。
@@ -4427,10 +6308,28 @@ class GameEngine:
             res["applied"].append(
                 f"无所求：+1属性点（属性点池 {self.state.attribute_points}；"
                 "按正文 2点=1速限=1法限、1点=6血限，兑换仅限战前）")
-        self.event_pool.resolve(name)
+        # 过路商人交易是一个持续会话：同次遭遇可连续买卖多件遗物，直到选择其他选项离开。
+        keep_merchant_open = (name == "过路商人" and text.startswith("遗物交易")
+                              and bool(res.get("trade")))
+        if not keep_merchant_open:
+            self.event_pool.resolve(name)
+            # 一次性地点事件结算后关闭地点；祭坛与商人按既有规则可重复遭遇。
+            if name not in {"祭坛", "过路商人"} and getattr(self.state, "world_state", {}):
+                try:
+                    world = self._world_from_state()
+                    for location_id, location in world.map.locations.items():
+                        if location.get("event_name") == name:
+                            location["active"] = False
+                            world.deactivate_location_sightings(
+                                location_id, reason="event_completed")
+                    self.state.world_state = world.to_dict()
+                except (ValueError, KeyError, TypeError):
+                    pass
         # 扭曲都市完成事件后附赠【发现】：正式随机只走DiceEngine，并等待显式选1。
+        # 连续交易期间尚未离开商人，不重复发放事件完成奖励。
         bonus = None
-        if self.state.current_region == "扭曲都市":
+        if (not keep_merchant_open and self.state.current_region == "扭曲都市"
+                and self.state.player and self.state.player.is_alive):
             owned = {c.name for c in self.state.consumables}
             pool = [n for n in TWISTED_TOOL_LIBRARY if n not in owned]
             if pool:
@@ -4442,10 +6341,15 @@ class GameEngine:
         result_payload = {"option": opt["text"], "applied": res["applied"], "instructions": res["instructions"],
                           "shards": self.state.shards,
                           "player_hp": self.state.player.current_hp if self.state.player else None}
+        for key in ("random", "outcome", "net_delta", "debt_result", "trade"):
+            if key in res:
+                result_payload[key] = res[key]
+        if name == "过路商人":
+            result_payload["merchant_session_open"] = keep_merchant_open
         if bonus:
             result_payload["附赠发现"] = bonus
         next_event = None
-        if self.state.pending_event_queue:
+        if self.state.pending_event_queue and not keep_merchant_open:
             next_event = self.state.pending_event_queue.pop(0)
             self.event_pool.current = next_event
             queued = self.event_pool.events[next_event]
@@ -4457,6 +6361,13 @@ class GameEngine:
                             for option in queued["options"]],
                 "queued_events_remaining": len(self.state.pending_event_queue),
             }
+        if getattr(self.state, "world_state", {}):
+            try:
+                world = self._world_from_state()
+                self._sync_world_entity_positions(world)
+                self.state.world_state = world.to_dict()
+            except (ValueError, KeyError, TypeError):
+                pass
         return {
             "success": True, "action": f"事件【{name}】选项{option_id}",
             "result": result_payload,
@@ -4478,7 +6389,7 @@ class GameEngine:
         面板仍写死 X 时（x_value>0）沿用固定值，保持迁移期双向兼容；
         x_free 时交给 engine/ai_rules.py 的**整场预算分配**决策器——
         微光者按 AI_EXPERIENCE.md:1254 是一池制、[回始]不回填，与怪物
-        （遗物【某人的偏爱】每[回始]回满）不是同一个问题，不能套用怪物侧
+        （遗物【痛苦的偏爱】每[回始]获得法力与异变）不是同一个问题，不能套用怪物侧
         的每回合预演评分。返回 0 表示本回合不该发动，调用方应跳过而非报错。
         """
         inst = ally.dao_wen.get(name)
@@ -4885,6 +6796,14 @@ class GameEngine:
         relic_choices = params.get("relic_choices", {})
         self.combat.validate_round_start_relic_choices(relic_choices)
         result = self.combat.round_start(relic_choices)
+        # 时间的偏爱把冷却改为战斗回合计时：每次回始递减，归零后即可发动。
+        round_entities = {entity.runtime_id: entity for entity in (
+            self.state.get_all_player_side() + self.state.get_all_enemy_side()
+            + list(getattr(self.state, "temp_friends", []) or []))}.values()
+        for entity in round_entities:
+            for instance in entity.dao_wen.values():
+                if getattr(instance, "cooldown_rounds_remaining", 0) > 0:
+                    instance.cooldown_rounds_remaining -= 1
         # 全局法术【回始】：普通战斗与死斗双方共用同一个回始，因此持有者扫描
         # 覆盖玩家侧与死斗对手侧；死斗对手视角下这就是其"敌回始"，见下方
         # _action_prepare_monster_phase/_action_resolve_monster_phase 的普通
@@ -5007,10 +6926,82 @@ class GameEngine:
         配方口径唯一事实源见 `engine/monsters.py::roll_spawn_plan`。
         战斗背景：文档"战斗背景：（名称与影响）"仅为战斗推演格式里的占位提示，
         正文未定义任何具体名称与机制效果，故本引擎不做机制化处理，留给叙事层自由发挥。"""
-        from .monsters import make_monster_entity, roll_spawn_plan, scale_monster_def_for_endless
+        from .monsters import (make_monster_entity, roll_spawn_plan,
+                               scale_monster_def_for_endless, assign_monster_preferences)
         relic_choices = params.get("relic_choices", {})
         # 先完成全部静态校验，再抽怪；非法遗物参数不得消耗正式随机源。
         self.combat.validate_battle_start_relic_choices(relic_choices)
+        world_encounter_id = params.get("world_encounter_id")
+        world_battle = bool(world_encounter_id)
+        world_final_duel = False
+        world_participant_enemies = []
+        if world_battle:
+            try:
+                world = self._world_from_state()
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
+            encounter = world.encounters.get(world_encounter_id)
+            world_final_duel = bool(encounter and encounter.final_duel)
+            player_id = getattr(self.state.player, "runtime_id", "") if self.state.player else ""
+            if encounter is None or not encounter.active or player_id not in encounter.participants:
+                return {"success": False, "error": "world_encounter_id必须指向包含当前轮回者的有效地图遭遇"}
+            enemy_by_id = {entity.runtime_id: entity for entity in self.state.enemies}
+            companion_ids = {
+                entity.runtime_id
+                for group_name in ("friends", "employees", "temp_friends")
+                for entity in (getattr(self.state, group_name, []) or [])
+            }
+            participant_ids = [actor_id for actor_id in encounter.participants if actor_id != player_id]
+            if (not participant_ids
+                    or any(actor_id not in enemy_by_id and actor_id not in companion_ids
+                           for actor_id in participant_ids)):
+                return {"success": False,
+                        "error": "地图遭遇含有未映射到轮回者、队友或敌方实体的参与者"}
+            # 友方地图单位可被同场遭遇记录，但由现有战斗阵营规则决定是否实际参战；
+            # 只有敌方实体从敌方列表中移入本次战斗，避免把队友误当敌人。
+            world_participant_enemies = [
+                enemy_by_id[actor_id] for actor_id in participant_ids
+                if actor_id in enemy_by_id
+            ]
+            if not world_participant_enemies:
+                return {"success": False, "error": "地图遭遇没有可交给战斗引擎的敌方实体"}
+            if any(not entity.is_alive for entity in world_participant_enemies):
+                return {"success": False, "error": "地图遭遇包含已死亡的敌方单位"}
+            self.state.world_enemy_reserve = [
+                entity for entity in self.state.enemies
+                if entity.runtime_id not in set(participant_ids)
+            ]
+            self.state.world_encounter_id = world_encounter_id
+            self.state.world_encounter_entities = list(world_participant_enemies)
+        # 造物默认留在地图上，只有战始显式选择召唤且位于五格可通行路径内才参战。
+        created_beings = [entity for entity in self.state.friends
+                          if getattr(entity, "is_created_being", False)
+                          and getattr(entity, "created_by_runtime_id", "") ==
+                              (self.state.player.runtime_id if self.state.player else "")]
+        for being in created_beings:
+            being.is_summoned = False
+        if params.get("summon_created_being", False):
+            if not world_battle:
+                return {"success": False, "error": "造物召唤仅适用于开放世界地图遭遇"}
+            if not created_beings:
+                return {"success": False, "error": "当前没有可召唤的存活造物"}
+            being = next((entity for entity in created_beings if entity.is_alive), None)
+            if being is None:
+                return {"success": False, "error": "造物已死亡，无法召唤"}
+            player_actor = world.actors.get(player_id)
+            being_actor = world.actors.get(being.runtime_id)
+            if player_actor is None or being_actor is None or not being_actor.alive:
+                return {"success": False, "error": "造物不在地图上，无法召唤"}
+            path = world.map.find_path(player_actor.position, being_actor.position)
+            if path is None or len(path) - 1 > 5:
+                return {"success": False, "error": "造物必须位于五格以内的可通行路径上才能召唤"}
+            if any(encounter.active and being.runtime_id in encounter.participants
+                   for encounter in world.encounters.values()):
+                return {"success": False, "error": "造物正在独立遭遇中，暂时无法召唤"}
+            being.is_summoned = True
+            world.record("created_being_summoned", player_id, created_being=being.name,
+                         created_being_id=being.runtime_id, path_distance=len(path) - 1)
+            self.state.world_state = world.to_dict()
         # 在战始产生随机怪物前保存快照；重来会恢复随机源并再次按当前代码抽取。
         self._battle_restart_snapshot = {
             "state": copy.deepcopy(self.state),
@@ -5054,25 +7045,28 @@ class GameEngine:
         queued_names = []
         draw_count = 0
         spawn_plan = None
-        if pool:
+        if world_battle:
+            self.state.enemies.extend(world_participant_enemies)
+            draw_count = len(world_participant_enemies)
+            drawn_names = [entity.name for entity in world_participant_enemies]
+            spawn_plan = {"total": draw_count, "first_count": draw_count,
+                          "queue_rounds": [], "waves": [], "world_encounter_id": world_encounter_id}
+        elif pool:
             spawn_plan = roll_spawn_plan(self.dice, self.state.current_battle, self._current_tier())
             draw_count = spawn_plan["total"]
             drawn_defs = []
             for i in range(draw_count):
                 roll = self.dice.auto_roll(f"monster_draw_{self.state.current_battle}_{i}", pool,
                                             context=f"出怪(第{self.state.current_battle}场,第{i + 1}只)")
-                # 无尽模式：面板按轮次递增（非无尽时 cycle<=1，原样返回）
                 drawn_defs.append(scale_monster_def_for_endless(roll["selected"], endless_cycle))
-            # 出怪配方：S=随机(1,N) 只在[战始]进场，其余进增援队列，
-            # 每波在上一波之后等待 T_i=随机(1,5) 回合进场 R_i 只（一波可多只）。
-            # 旧的"R1只出第1只、R4/R7/R10各增援1只"固定波次已废止；抽怪随机流不变（全抽、仅延迟进场）。
             first_count = min(int(spawn_plan["first_count"]), draw_count)
             queue_rounds = spawn_plan["queue_rounds"]
             for i, monster_def in enumerate(drawn_defs):
                 if i < first_count:
                     m = make_monster_entity(monster_def)
+                    assign_monster_preferences(m, self._current_tier(), self.dice)
                     m.spawned_round = 1
-                    self.combat.init_monster_shards(m)  # 罪孽都市：[战始]自带碎片=专属道纹数值之和×2（洗劫/赎金等的碎片来源）
+                    self.combat.init_monster_shards(m)
                     self.state.enemies.append(m)
                     drawn_names.append(monster_def["name"])
                 else:
@@ -5084,12 +7078,13 @@ class GameEngine:
         # 事件登记的下一场修正全部在战始一次性消费。
         modifiers = self.state.event_modifiers
         reveal_full_information = bool(modifiers.pop("next_battle_full_information", False))
-        if modifiers.pop("bounty_extra_monster", False) and pool:
+        if not world_battle and modifiers.pop("bounty_extra_monster", False) and pool:
             roll = self.dice.auto_roll(
                 f"bounty_monster_{self.state.current_battle}", pool,
                 context="通缉悬赏榜额外帮派怪物",
             )
             bonus = make_monster_entity(scale_monster_def_for_endless(roll["selected"], endless_cycle))
+            assign_monster_preferences(bonus, self._current_tier(), self.dice)
             self.combat.init_monster_shards(bonus)
             self.state.enemies.append(bonus)
             drawn_names.append(bonus.name + "(悬赏额外)")
@@ -5114,13 +7109,39 @@ class GameEngine:
             modifiers["red_spring_battle_losses"] = red_spring - 1
 
         # 事件登记的"下一场额外出现的怪物"（如龙心谷"追求者·拿走口粮"）
-        forced = list(self.state.forced_monsters_next_battle)
-        self.state.forced_monsters_next_battle = []
+        forced = [] if world_battle else list(self.state.forced_monsters_next_battle)
+        if not world_battle:
+            self.state.forced_monsters_next_battle = []
         for fm in forced:
             m = make_monster_entity(scale_monster_def_for_endless(fm, endless_cycle))
+            assign_monster_preferences(m, self._current_tier(), self.dice)
             self.combat.init_monster_shards(m)
             self.state.enemies.append(m)
             drawn_names.append(fm["name"] + "(额外出现)")
+        if world_final_duel:
+            opponent = next((entity for entity in self.state.enemies
+                             if entity.entity_type == "轮回者" and entity.is_alive), None)
+            if opponent is None or self.state.player is None or not self.state.player.is_alive:
+                return {"success": False, "error": "最终会合遭遇缺少存活的轮回者双方"}
+            player_key = self._duel_priority_key(self.state.player)
+            opponent_key = self._duel_priority_key(opponent)
+            tied = player_key == opponent_key
+            if tied:
+                first_mover = self.dice.auto_roll(
+                    "world_final_duel_first_mover", ["player_side", "opponent_side"],
+                    context="开放世界最终死斗：先手完全平局").get("selected", "player_side")
+            else:
+                first_mover = "player_side" if player_key > opponent_key else "opponent_side"
+            self.state.in_final_duel = True
+            self.state.event_modifiers["world_final_duel"] = True
+            self.state.duel_tier = self._current_tier()
+            self.state.duel_defending_snapshot = {}
+            self.state.opponent_relics = []
+            self.state.opponent_artifacts_owned = []
+            self.state.duel_turn = first_mover
+            self.state.duel_round_first = first_mover
+            self.state.duel_tie_alternating = tied
+            self.state.duel_rounds_started = 0
         arena_percent = modifiers.pop("arena_health_percent", 0)
         if arena_percent:
             for monster in self.state.enemies:
@@ -5163,11 +7184,14 @@ class GameEngine:
             "relic_logs": relic_logs,
             "spell_logs": spell_logs,
             "artifact_logs": artifact_logs,
-            "instruction": (f"首发{len(drawn_names)}只怪物已进场"
-                            + (f"；另有{len(queued_names)}只增援待命（"
-                               + "、".join(f"R{w['arrive_round']}进{w['count']}只" for w in waves)
-                               + "）" if queued_names else "（无增援）")
-                            + "；请补充选择本场战斗背景(纯叙事，不影响数值)并结算其余[战始]效果"),
+            "instruction": (("最终死斗会合已开始：双方按最终死斗回合顺序交替行动，无法逃跑；"
+                             "击败对手后调用 battle_end 结算最后生存者。")
+                            if world_final_duel else
+                            (f"首发{len(drawn_names)}只怪物已进场"
+                             + (f"；另有{len(queued_names)}只增援待命（"
+                                + "、".join(f"R{w['arrive_round']}进{w['count']}只" for w in waves)
+                                + "）" if queued_names else "（无增援）")
+                             + "；请补充选择本场战斗背景(纯叙事，不影响数值)并结算其余[战始]效果")),
         }
 
     # ==================== 最终的冠冕 / 第8场最终死斗 ====================
@@ -5180,12 +7204,16 @@ class GameEngine:
         """完整序列化单个实体(用于封存候选人，需能无损还原道纹X值/法术/状态/面板等)"""
         return {
             "name": e.name, "entity_type": e.entity_type,
+            "world_region": e.world_region, "world_x": e.world_x, "world_y": e.world_y,
+            "is_neutral": e.is_neutral,
+            "preferences": list(getattr(e, "preferences", [])),
             "blood_limit": e.blood_limit, "current_hp": e.current_hp,
             "mana_limit": e.mana_limit, "current_mana": e.current_mana,
             "speed_limit": e.speed_limit, "current_speed": e.current_speed,
             "attack_count": e.attack_count, "attack_power": e.attack_power,
             "shield": e.shield, "is_flying": e.is_flying, "is_alive": e.is_alive,
-            "shards": e.shards, "is_debt_bound": e.is_debt_bound,
+            "shards": e.shards, "shards_peak": e.shards_peak,
+            "is_debt_bound": e.is_debt_bound,
             # ④修复：异变是代价资源、封存前已实付——
             # 带伤续战必须带着异变续战，否则封存=免费洗白迷失进度。
             # （癌变 total_healed 不随封存走：DM 已裁定它是局内减益、每场归零。）
@@ -5195,6 +7223,9 @@ class GameEngine:
             "lethal_counters": {k: list(v) for k, v in e.lethal_counters().items()},
             "lethal_progress": e.lethal_progress(),
             "dao_wen": {k: v.x_value for k, v in e.dao_wen.items()},
+            "daowen_cooldowns": {k: {"battles": v.cooldown_remaining,
+                                      "rounds": getattr(v, "cooldown_rounds_remaining", 0)}
+                                  for k, v in e.dao_wen.items()},
             "spells": [s.to_dict() for s in e.spells],
             "relics": [r.to_dict() for r in e.relics],
             "status_effects": [{"name": s.name, "value": s.value,
@@ -5207,17 +7238,25 @@ class GameEngine:
     def _deserialize_entity_full(self, d: dict) -> Entity:
         """按_serialize_entity_full的格式还原实体"""
         e = Entity(name=d["name"], entity_type=d["entity_type"],
+                   world_region=d.get("world_region", ""), world_x=d.get("world_x"),
+                   world_y=d.get("world_y"), is_neutral=d.get("is_neutral", False),
+                   preferences=list(d.get("preferences") or []),
                    blood_limit=d["blood_limit"], current_hp=d["current_hp"],
                    mana_limit=d["mana_limit"], current_mana=d["current_mana"],
                    speed_limit=d["speed_limit"], current_speed=d["current_speed"],
                    attack_count=d["attack_count"], attack_power=d["attack_power"],
                    shield=d.get("shield", 0), is_flying=d.get("is_flying", False),
                    is_alive=d.get("is_alive", True), shards=d.get("shards", 0),
+                   shards_peak=d.get("shards_peak", max(0, int(d.get("shards", 0)))),
                    is_debt_bound=d.get("is_debt_bound", False))
         e.mutation_count = d.get("mutation_count", 0)   # ④修复：旧档无此键回退0
         for name, x in d.get("dao_wen", {}).items():
+            cooldowns = d.get("daowen_cooldowns", {}).get(name, {})
             e.dao_wen[name] = DaoWenInstance(
-                DaoWen(name=name, formula="", cost_type="消耗", cost_formula="X", effect_formula=""), x_value=x)
+                DaoWen(name=name, formula="", cost_type="消耗", cost_formula="X", effect_formula=""),
+                x_value=x,
+                cooldown_remaining=int(cooldowns.get("battles", 0)),
+                cooldown_rounds_remaining=int(cooldowns.get("rounds", 0)))
         # 旧封存未记录道纹位置；对同名道纹状态从实体当前序列恢复位置。
         # 新格式优先使用显式 daowen_order，避免状态名与来源道纹名不同时猜测。
         daowen_order_by_name = {name: index for index, name in enumerate(e.dao_wen)}
@@ -5265,6 +7304,7 @@ class GameEngine:
             "relics": [r.to_dict() for r in s.relics],
             "resonance": dict(s.resonance),
             "shards": s.shards,
+            "shards_peak": s.shards_peak,
             "death_book_wisdom": list(s.death_book_wisdom),
             "death_book_legacies": [dict(entry) for entry in s.death_book_legacies],
             "attribute_points": s.attribute_points,
@@ -5295,6 +7335,11 @@ class GameEngine:
         if snapshot.get("player"):
             opponent_player = self._deserialize_entity_full(snapshot["player"])
             opponent_player.entity_type = "轮回者"
+            # 死斗快照顶层的碎片余额属于轮回者本体；战斗时映射到对手实体账本。
+            opponent_player.shards = int(snapshot.get("shards", opponent_player.shards))
+            opponent_player.shards_peak = max(
+                int(getattr(opponent_player, "shards_peak", 0)),
+                int(snapshot.get("shards_peak", max(0, opponent_player.shards))))
             _uniquify(opponent_player)
         for f in snapshot.get("friends", []):
             _uniquify(self._deserialize_entity_full(f))
@@ -6048,6 +8093,73 @@ class GameEngine:
 
     def _action_battle_end(self, params: dict) -> dict:
         """战终；仍有未移出的存活敌人时不得跳过战斗直接结算（统一判定见 GameState.battle_won）。"""
+        if self.state.event_modifiers.get("world_final_duel"):
+            try:
+                world = self._world_from_state()
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
+            finalists = list(world.final_duel_finalists)
+            entities = ([self.state.player] if self.state.player else [])
+            for group_name in ("friends", "employees", "temp_friends", "enemies"):
+                entities.extend(getattr(self.state, group_name, []) or [])
+            entity_by_id = {entity.runtime_id: entity for entity in entities}
+            alive_finalists = [
+                actor_id for actor_id in finalists
+                if actor_id in entity_by_id and entity_by_id[actor_id].is_alive
+                and not entity_by_id[actor_id].is_departed
+            ]
+            if len(alive_finalists) != 1:
+                return {"success": False,
+                        "error": "最终死斗必须且只能有一名最终候选存活后才能结算战终"}
+            winner_id = alive_finalists[0]
+            winner_entity = entity_by_id[winner_id]
+            player_id = self.state.player.runtime_id if self.state.player else ""
+            outcome = "player_won" if winner_id == player_id else "opponent_won"
+            for actor_id in finalists:
+                actor = world.actors.get(actor_id)
+                entity = entity_by_id.get(actor_id)
+                if actor is None:
+                    continue
+                if entity is None or not entity.is_alive or entity.is_departed:
+                    actor.alive = False
+                else:
+                    if entity.world_x is not None and entity.world_y is not None:
+                        actor.x, actor.y = int(entity.world_x), int(entity.world_y)
+                    actor.alive = True
+            for companion in self.state.friends + self.state.employees + self.state.temp_friends:
+                companion_actor = world.actors.get(companion.runtime_id)
+                if companion_actor is not None:
+                    companion_actor.alive = bool(companion.is_alive and not companion.is_departed)
+                    if companion.world_x is not None and companion.world_y is not None:
+                        companion_actor.x, companion_actor.y = int(companion.world_x), int(companion.world_y)
+                if getattr(companion, "is_created_being", False):
+                    companion.is_summoned = False
+            encounter_id = self.state.world_encounter_id
+            encounter = world.encounters.get(encounter_id) if encounter_id else None
+            if encounter is not None and encounter.active:
+                world.finish_encounter(encounter_id, "final_duel_" + outcome)
+            world.final_duel_search = False
+            world.final_duel_started = True
+            world.final_duel_complete = True
+            world.final_duel_winner = winner_id
+            world.record("final_duel_completed", winner_id, winner=winner_id,
+                         winner_name=winner_entity.name, outcome=outcome,
+                         finalists=finalists)
+            self.state.world_state = world.to_dict()
+            self.state.world_enemy_reserve = []
+            self.state.world_encounter_entities = []
+            self.state.world_encounter_id = ""
+            self.state.enemies = [] if winner_id == player_id else [winner_entity]
+            self.state.in_final_duel = False
+            self.state.event_modifiers.pop("world_final_duel", None)
+            self.state.phase = "pre_battle"
+            return {"success": True, "action": "最终生存结算",
+                    "result": {"winner": winner_entity.name, "winner_id": winner_id,
+                               "outcome": outcome, "finalists": finalists,
+                               "world_turn": world.clock.turn},
+                    "instruction": f"最终死斗结束，最后存活者为{winner_entity.name}；开放世界最终生存阶段已结算"}
+
+        world_battle = bool(getattr(self.state, "world_encounter_id", ""))
         living = [e.name for e in self.state.active_enemies()]
         escaping = self.state.event_modifiers.pop("escape_at_battle_end", False)
         if living and not escaping:
@@ -6300,8 +8412,54 @@ class GameEngine:
         # 2026-10-11：【苍白之花】重做为「当前法力可超出[法限]」的被动，战终精力+1 已废止。
         self.state.energy = self.state.energy_budget
 
-        # 清空敌人及本场延迟队列（正常战终前延迟队列已由门禁拦截；逃跑等强制结束也不跨场保留）。
-        self.state.enemies.clear()
+        # 普通战斗清空敌人；开放世界遭遇则把存活参与者放回地图，并恢复未参战的敌方单位。
+        if world_battle:
+            world = self._world_from_state()
+            encounter_id = self.state.world_encounter_id
+            encounter = world.encounters.get(encounter_id)
+            participants = list(getattr(self.state, "world_encounter_entities", []) or [])
+            participant_by_id = {entity.runtime_id: entity for entity in participants}
+            reserve = list(getattr(self.state, "world_enemy_reserve", []) or [])
+            player_id = getattr(self.state.player, "runtime_id", "") if self.state.player else ""
+            for actor_id in (encounter.participants if encounter else []):
+                actor = world.actors.get(actor_id)
+                if actor is None:
+                    continue
+                if actor_id == player_id and self.state.player is not None:
+                    actor.alive = self.state.player.is_alive
+                elif actor_id in participant_by_id:
+                    entity = participant_by_id[actor_id]
+                    actor.alive = bool(entity.is_alive and not entity.is_departed)
+                    if entity.world_x is not None and entity.world_y is not None:
+                        actor.x, actor.y = int(entity.world_x), int(entity.world_y)
+                else:
+                    actor.alive = False
+            for companion in self.state.friends + self.state.employees + self.state.temp_friends:
+                companion_actor = world.actors.get(companion.runtime_id)
+                if companion_actor is not None:
+                    companion_actor.alive = bool(companion.is_alive and not companion.is_departed)
+                    if companion.world_x is not None and companion.world_y is not None:
+                        companion_actor.x, companion_actor.y = int(companion.world_x), int(companion.world_y)
+                if getattr(companion, "is_created_being", False):
+                    companion.is_summoned = False
+            if encounter is not None and encounter.active:
+                outcome = "player_dead" if not self.state.player or not self.state.player.is_alive else "resolved"
+                world.finish_encounter(encounter_id, outcome)
+            self.state.enemies = [entity for entity in reserve if entity.is_alive]
+            self.state.enemies.extend(
+                entity for entity in participants if entity.is_alive and not entity.is_departed)
+            self.state.world_enemy_reserve = []
+            self.state.world_encounter_entities = []
+            self.state.world_encounter_id = ""
+            # 战斗结束后立即检查仍与存活单位同格/相邻的敌人；每名单位只进入一场活跃遭遇，
+            # 因此多敌围堵会按遭遇顺序继续，不会留下重复活跃的战斗锁。
+            world.detect_adjacent_encounters()
+            # NPC战斗可能刚好淘汰了倒数第二名轮回者；此时进入自然会合阶段，
+            # 但仍保留地图上的怪物，让它们在会合期间继续构成威胁。
+            self._refresh_world_final_duel(world)
+            self.state.world_state = world.to_dict()
+        else:
+            self.state.enemies.clear()
         self.state.delayed_monster_reentries = []
 
         self.state.phase = "pre_battle"
@@ -6334,7 +8492,7 @@ class GameEngine:
         }
 
         # 最终的冠冕：完成第7场后自动触发，不消耗精力、不经玩家选择
-        if self.state.current_battle == 7:
+        if not world_battle and self.state.current_battle == 7:
             battle_end_result["final_crown"] = self._trigger_final_crown()
 
         return {
@@ -6585,8 +8743,11 @@ class GameEngine:
     SAVE_FORMAT_VERSION = 5
 
     def _migrate_legacy_daowen_status_order(self) -> None:
-        """给旧 pickle 状态补齐序列字段，优先从状态来源角色的同名道纹恢复位置。"""
+        """迁移旧 pickle：补齐历史碎片峰值与道纹序列字段，优先从状态来源角色恢复道纹位置。"""
         state = self.state
+        # 旧版 pickle 没有历史碎片峰值；只能以读档时真实余额作为可恢复的基线。
+        if "shards_peak" not in getattr(state, "__dict__", {}):
+            state.shards_peak = max(0, int(getattr(state, "shards", 0)))
         entities = [getattr(state, "player", None)]
         for field_name in ("friends", "employees", "temp_friends", "enemies", "dead_monsters"):
             entities.extend(getattr(state, field_name, []) or [])
@@ -6608,6 +8769,8 @@ class GameEngine:
             for entity in unique_entities
         }
         for entity in unique_entities:
+            if "shards_peak" not in getattr(entity, "__dict__", {}):
+                entity.shards_peak = max(0, int(getattr(entity, "shards", 0)))
             owner_order = order_by_entity[id(entity)]
             for status in entity.status_effects:
                 # 旧 pickle 反序列化不会自动填充新 dataclass 字段。

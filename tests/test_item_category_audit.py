@@ -55,6 +55,10 @@ def test_daowen_registry_every_daowen_has_positive_cost_channel():
     """40 条现行道纹 X=1 时必有金额>0 的代价通道（法力/失忆/异变/疲惫/流血/衰老/碎片/枯竭）。"""
     DaoWenEngine.register_all()
     assert len(DaoWenEngine._registry) == 40  # 删除独立【自食】并入【再生】，并移除已遗物化触发型道纹
+    # 删除/遗物化边界必须是硬约束，防止后续注册时意外复活旧道纹。
+    assert "坠落" not in DaoWenEngine._registry
+    assert "眩晕" not in DaoWenEngine._registry
+    assert "飞行" not in DaoWenEngine._registry
     for name, fn in sorted(DaoWenEngine._registry.items()):
         kw = {}
         if "target" in inspect.signature(fn).parameters:
@@ -206,16 +210,16 @@ def test_scarlet_fruit_is_pure_passive_hp_may_exceed_blood_limit():
 
 
 def test_pool_relic_text_snapshot():
-    """遗物池文本快照：25 件、无持续X/自选X；含「可」的遗物集合固定（F3 池内子集）。"""
+    """遗物池文本快照：26 件、无持续X/自选X；含「可」的遗物集合固定（F3 池内子集）。"""
     defs = GameEngine.RELIC_DEFS
-    assert len(defs) == 25
+    assert len(defs) == 26
     names = [n for n, _ in defs]
-    assert len(set(names)) == 25
+    assert len(set(names)) == 26
     for n, fx in defs:
         assert not re.search(r"持续\d*X", fx), f"{n}：遗物不得有持续X"
         assert "自选" not in fx, f"{n}：遗物数值不得自选"
     with_ke = {n for n, fx in defs if "可" in fx}
-    assert with_ke == {"同魂笔", "血契"}, with_ke
+    assert with_ke == {"万魂幡", "同魂笔", "血契"}, with_ke
 
 
 def test_pool_relics_all_in_index():

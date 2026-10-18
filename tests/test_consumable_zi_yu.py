@@ -234,6 +234,7 @@ def test_resolve_attack_records_selection_and_death_fires(tmp_path, monkeypatch)
     prepared = engine.execute_action("prepare_attack", {"actor_ref": "player:0"})
     assert prepared["success"], prepared
     opt = prepared["result"]["target_options"][0]
+    selected_target_id = foe.runtime_id
     hits = [{"target_ref": opt["ref"], "dodge": False, "parry": False,
              "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}}
             for _ in range(prepared["result"]["hit_count"])]
@@ -241,12 +242,14 @@ def test_resolve_attack_records_selection_and_death_fires(tmp_path, monkeypatch)
         "token": prepared["result"]["token"], "hits": hits})
     assert resolved["success"], resolved
 
-    refs = engine.combat._combat_entity_refs()
-    assert refs[opt["ref"]].runtime_id in engine.state.player_selected_targets
+    # 目标可能在resolve_attack内死亡并从存活目标映射移除，因此用攻击前捕获的身份核验。
+    assert selected_target_id in engine.state.player_selected_targets
 
-    # 选中过的怪经统一管线死亡→自愈触发。
-    foe.current_hp = 0
-    assert engine.combat._check_hp_zero_death(foe) is True
+    # 若攻击已击杀目标，统一死亡管线会在resolve_attack内触发；不可再次结算。
+    if foe.is_alive:
+        foe.current_hp = 0
+        assert engine.combat._check_hp_zero_death(foe) is True
+    assert not foe.is_alive
     assert (item.current_uses, item.max_uses) == (3, 5)
 
 

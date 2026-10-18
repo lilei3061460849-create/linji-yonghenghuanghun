@@ -795,14 +795,18 @@ def test_events_system():
     wrong = engine.execute_action("resolve_event", {"event": wrong_name, "option_id": 1})
     assert not wrong["success"] and engine.event_pool.current == ev_name
     engine.event_pool.current = "祭坛"
-    bl_before = engine.state.player.blood_limit
-    sp_before = engine.state.player.speed_limit
-    r2 = engine.execute_action("resolve_event", {"event":"祭坛","option_id":1})
+    engine.state.shards = 100
+    balance_before = engine.state.shards
+    r2 = engine.execute_action("resolve_event", {
+        "event": "祭坛", "option_id": 1, "x": 10, "multiplier": 1,
+    })
     assert r2["success"], f"结算失败: {r2}"
-    assert engine.state.player.blood_limit == bl_before - 8, f"衰老8应血限-8，实{engine.state.player.blood_limit}"
-    assert engine.state.player.speed_limit == sp_before + 1, f"应+1速限"
-    assert "祭坛" in engine.event_pool.triggered, "事件应标记已触发"
-    print(f"  ✓ 祭坛选项1：衰老8(血限{bl_before}→{engine.state.player.blood_limit})+1速限，已标记触发")
+    net_delta = r2["result"]["net_delta"]
+    assert net_delta in (-10, 0, 10), f"倍率1的净变化必须在-10/0/+10中，实{net_delta}"
+    assert engine.state.shards == balance_before + net_delta
+    assert "祭坛" not in engine.event_pool.triggered, "祭坛可重复抵达，不永久标记已触发"
+    assert "祭坛" in engine.event_pool.build_pool("扭曲都市"), "结算后祭坛应可再次探索"
+    print(f"  ✓ 祭坛自选倍率1：净变化{net_delta:+d}，余额{engine.state.shards}")
     print("  ✓ 事件系统测试通过")
 
 
@@ -855,7 +859,7 @@ def test_relics_five_more():
     engine.event_pool.current = "祭坛"
     pool = engine.state.attribute_points
     sp = engine.state.player.speed_limit
-    engine.execute_action("resolve_event", {"event":"祭坛","option_id":3})  # 拒绝：无事发生
+    engine.execute_action("resolve_event", {"event":"祭坛","option_id":2})  # 当前祭坛只有投资/拒绝两项
     assert engine.state.attribute_points == pool + 1, "无所求拒绝应+1属性点"
     assert engine.state.player.speed_limit == sp, "属性点入池，不应直接加速限"
     print(f"  ✓ 无所求：选拒绝类选项+1属性点(池{pool}→{engine.state.attribute_points})")
@@ -1286,7 +1290,9 @@ def test_twisted_tool_library():
     ev2 = next(n for n, ev in engine2.event_pool.events.items()
                if ev["region"] == "扭曲都市" and n != ev_name)
     engine2.event_pool.current = ev2
-    r2 = engine2.execute_action("resolve_event", {"event": ev2, "option_id": 1})
+    reject_option = next(o for o in engine2.event_pool.events[ev2]["options"]
+                         if engine2._is_reject_option_text(o["text"]))
+    r2 = engine2.execute_action("resolve_event", {"event": ev2, "option_id": reject_option["id"]})
     assert r2["success"]
     bad = engine2.execute_action("choose_discovered_item", {"item_name": "不存在的道具"})
     assert not bad["success"] and engine2.state.pending_item_choices

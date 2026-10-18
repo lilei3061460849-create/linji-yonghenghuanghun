@@ -108,6 +108,18 @@ class DaowenEffectMixin:
     ) -> dict:
         """应用道纹效果；aoe_targets_override用于绑定两阶段决策的目标快照。"""
         result = {"daowen": name, "effects": []}
+        # 永恒的偏爱只延长该持有者本次发动后新增/刷新的持续状态，
+        # 不会把其他角色施加给他的负面状态错误地永久化。
+        preference_entities = list({
+            entity.runtime_id: entity
+            for entity in (self.state.get_all_player_side() + self.state.get_all_enemy_side()
+                           + list(getattr(self.state, "temp_friends", []) or []))
+        }.values())
+        preference_status_before = {
+            entity.runtime_id: {
+                id(status): status.remaining_rounds for status in entity.status_effects
+            } for entity in preference_entities
+        }
         # 衰变沙漏订阅道纹发动结算：全场每次发动的本次效果数值-1，最低为0。
         # 重新按减1后的X解析本次效果字段，避免只改 calc["x"] 却漏掉已预计算的伤害/回复等数值。
         # 代价已在前置阶段按原声明支付，因此保留原 calc 中所有 cost* 字段，不改变代价规则。
@@ -204,9 +216,14 @@ class DaowenEffectMixin:
         if calc.get("cost_type") == "冷却":
             inst = caster.dao_wen.get(name)
             if inst is not None:
-                inst.cooldown_remaining = max(inst.cooldown_remaining,
-                                              int(calc.get("cost", 0)))
-                result["cooldown_set"] = inst.cooldown_remaining
+                cooldown = max(0, int(calc.get("cost", 0)))
+                if "时间的偏爱" in getattr(caster, "preferences", []):
+                    inst.cooldown_rounds_remaining = max(
+                        inst.cooldown_rounds_remaining, cooldown)
+                    result["cooldown_rounds_set"] = inst.cooldown_rounds_remaining
+                else:
+                    inst.cooldown_remaining = max(inst.cooldown_remaining, cooldown)
+                    result["cooldown_set"] = inst.cooldown_remaining
 
         # 【唯一】代价：规则正文「唯一：使用后，本次轮回中无法再次使用」。
         # 此前该代价种类只有一行名字映射、没有任何结算逻辑，等于空定义；
@@ -1151,6 +1168,20 @@ class DaowenEffectMixin:
         # 此处仅登记结算信息（通用状态块已排除波及，避免重复挂状态）。
         if name == "波及":
             result["effects"].append({"type": "boba_register", "target": target.name, "x": x})
+
+        if "永恒的偏爱" in getattr(caster, "preferences", []):
+            for entity in preference_entities:
+                before = preference_status_before.get(entity.runtime_id, {})
+                for status in entity.status_effects:
+                    old_rounds = before.get(id(status))
+                    changed_or_added = old_rounds is None or old_rounds != status.remaining_rounds
+                    if (changed_or_added and status.source == caster.name
+                            and status.remaining_rounds > 0):
+                        status.remaining_rounds = -1
+                        result["effects"].append({
+                            "type": "eternal_preference", "target": entity.name,
+                            "status": status.name, "remaining_rounds": "∞",
+                        })
 
         return result
 
