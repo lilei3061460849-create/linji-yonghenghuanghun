@@ -691,6 +691,40 @@ def test_hiring_signal_persists_while_player_moves_and_resolves_on_arrival(tmp_p
                for actor in restored.actors.values())
 
 
+def test_learned_daowen_can_be_reserved_for_a_future_friend(tmp_path):
+    from engine.api import GameEngine
+    from engine.daowen import DaoWenEngine
+    from engine.gamedata import learnability_error
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "learned-daowen-reserve.db"),
+                        save_dir=str(tmp_path), rng_seed=105, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
+    engine.state.current_region = "罪孽都市"
+    engine.state.phase = "pre_battle"
+    name = next(name for name in DaoWenEngine.TRANSFORMED_DAOWEN
+                if not learnability_error(name, owned=set(),
+                                          region=engine.state.current_region,
+                                          known=DaoWenEngine.list_all()))
+
+    learned = engine.execute_action("pre_battle_action", {
+        "sub_action": "学习", "sub": "daowen", "tier": 1,
+        "names": [name], "recipient": "pending",
+    })
+    assert learned["success"], learned
+    assert name in engine.state.pending_learned_daowen
+    assert name not in engine.state.player.dao_wen
+
+    future_friend = Entity("后来结识的朋友", "朋友", blood_limit=30, current_hp=30)
+    engine.state.friends.append(future_friend)
+    assigned = engine.execute_action("assign_learned_daowen", {
+        "name": name, "recipient": future_friend.name,
+    })
+    assert assigned["success"], assigned
+    assert name in future_friend.dao_wen
+    assert name not in engine.state.pending_learned_daowen
+
+
 def test_creation_builds_one_map_being_then_cultivates_unique_preferences(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
