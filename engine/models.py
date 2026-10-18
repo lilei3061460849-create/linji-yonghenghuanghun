@@ -1185,6 +1185,8 @@ class GameState:
 
     # 雇佣后"发现并选择一种转化道纹"：{员工名: [3个候选道纹名]}，未选择前该员工暂不持有转化道纹
     pending_daowen_choices: dict[str, list[str]] = field(default_factory=dict)
+    # 学习获得但尚未分配的普通道纹；可留存，等未来结识朋友后再分配。
+    pending_learned_daowen: list[str] = field(default_factory=list)
 
     # 事件登记的"下一场战斗额外出现的怪物"（如龙心谷"追求者·拿走口粮"），[战始]出怪时读取并额外加入
     forced_monsters_next_battle: list[dict] = field(default_factory=list)
@@ -1721,6 +1723,7 @@ class GameState:
             "is_blacklisted": self.is_blacklisted,
             "pending_wage_decisions": self.pending_wage_decisions,
             "pending_daowen_choices": self.pending_daowen_choices,
+            "pending_learned_daowen": list(getattr(self, "pending_learned_daowen", [])),
             "pending_relic_choices": list(self.pending_relic_choices),
             "pending_relic_source": self.pending_relic_source,
             "pending_initial_daowen_choices": list(self.pending_initial_daowen_choices),
