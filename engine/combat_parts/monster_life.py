@@ -317,18 +317,39 @@ class MonsterLifeMixin:
                 results.append(cancer)
                 continue
 
-            # 3. 还债：负债达阈值（仅怪物；shards为负）
-            if monster.entity_type == "怪物" and monster.shards <= -self.DEBT_THRESHOLD:
-                results.append(self._debt_bind_monster(monster))
+            # 3. 动态还债：M 为该角色本局历史最高真实碎片余额，阈值=10+M。
+            debt_balance = monster.shards
+            debt_peak = max(0, int(getattr(monster, "shards_peak", 0)))
+            if debt_balance <= -(self.DEBT_THRESHOLD + debt_peak):
+                if monster.entity_type == "怪物":
+                    results.append(self._debt_bind_monster(monster))
+                else:
+                    monster.current_hp = 0
+                    monster.depart_battle("还债")
+                    results.append({"type": "debt_death", "entity": monster.name,
+                                    "debt": -debt_balance,
+                                    "threshold": self.DEBT_THRESHOLD + debt_peak,
+                                    "note": f"{monster.name}碎片余额{debt_balance}触及动态还债线，已被吞噬并死亡"})
                 continue
 
         seen = {id(e) for e in self.state.enemies}
         for ally in list(self.state.get_all_player_side()):
             if id(ally) in seen:
                 continue
-            if (ally.is_alive and not ally.is_sculptured and not ally.is_proliferated
-                    and not ally.is_debt_bound
-                    and self._can_be_sculptured(ally)
+            if not ally.is_alive or ally.is_sculptured or ally.is_proliferated or ally.is_debt_bound:
+                continue
+            debt_balance = self.state.shards if ally is self.state.player else ally.shards
+            debt_peak = max(0, int(getattr(self.state, "shards_peak", 0) if ally is self.state.player
+                                   else getattr(ally, "shards_peak", 0)))
+            if debt_balance <= -(self.DEBT_THRESHOLD + debt_peak):
+                ally.current_hp = 0
+                ally.depart_battle("还债")
+                results.append({"type": "debt_death", "entity": ally.name,
+                                "debt": -debt_balance,
+                                "threshold": self.DEBT_THRESHOLD + debt_peak,
+                                "note": f"{ally.name}碎片余额{debt_balance}触及动态还债线，被祭坛嚼碎并死亡"})
+                continue
+            if (self._can_be_sculptured(ally)
                     and ally.effective_attack_count() <= 0
                     and ally.effective_attack_power() <= 0):
                 results.append(self._sculpture_monster(ally))
