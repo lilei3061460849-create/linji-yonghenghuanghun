@@ -74,7 +74,7 @@ def test_rewards_are_claimed_once_and_unlock_task_chain(definitions):
                         world_turn=1, player_actor_id="p")
     rewards = engine.claim(state, "find_route", world_turn=1)
     assert rewards == {"shards": 7, "attribute_points": 2}
-    with pytest.raises(QuestError, match="尚未接取"):
+    with pytest.raises(QuestError, match="不能领取奖励"):
         engine.claim(state, "find_route", world_turn=1)
     listing = engine.list_tasks(state, world_turn=1)
     assert [q["id"] for q in listing["available"]] == ["report_back"]
