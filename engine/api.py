@@ -1834,6 +1834,32 @@ class GameEngine:
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
+    def _resolve_world_temporary_alliances(self, world: WorldState) -> list[dict]:
+        """胁迫形成的临时同盟在3个世界回合后结束，避免永久阵营污染。"""
+        resolved = []
+        for actor in world.actors.values():
+            alliance = next((item for item in actor.memory
+                             if item.get("kind") == "temporary_alliance"), None)
+            if alliance is None or world.clock.turn < int(alliance.get("expires_turn", 0)):
+                continue
+            entity = next((candidate for candidate in self.state.temp_friends
+                           if candidate.runtime_id == actor.actor_id), None)
+            if entity is not None:
+                self.state.temp_friends.remove(entity)
+                if entity.is_alive and not entity.is_departed:
+                    self.state.enemies.append(entity)
+            actor.kind = str(alliance.get("original_kind", "enemy"))
+            actor.faction = str(alliance.get("original_faction", "enemy"))
+            actor.owner_actor_id = ""
+            actor.behavior = "explore"
+            actor.mode = "autonomous"
+            actor.memory = [item for item in actor.memory if item is not alliance]
+            world.record("temporary_alliance_expired", actor.actor_id,
+                         name=actor.name, expired_turn=world.clock.turn)
+            resolved.append({"actor_id": actor.actor_id, "name": actor.name,
+                             "status": "expired"})
+        return resolved
+
     def _resolve_world_hiring_signals(self, world: WorldState) -> list[dict]:
         """结算到期招募信号；响应者抵达信号地点后才真正创建员工。"""
         resolved = []
@@ -2072,6 +2098,7 @@ class GameEngine:
                 return {"success": False, "error": "目标坐标x/y必须是整数"}
             result = world.move_actor(actor_id, (x, y))
             self._resolve_world_hiring_signals(world)
+            self._resolve_world_temporary_alliances(world)
             self._share_created_being_vision(world)
             self._sync_world_entity_positions(world)
             location_entry = world.map.location_at((x, y))
@@ -2169,6 +2196,7 @@ class GameEngine:
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
             self._resolve_world_hiring_signals(world)
+            self._resolve_world_temporary_alliances(world)
             self._share_created_being_vision(world)
             self._refresh_world_final_duel(world)
             elapsed = world.clock.turn - start_turn
@@ -2799,6 +2827,7 @@ class GameEngine:
         self._resolve_world_shard_pickups(world)
         self._resolve_world_relic_pickups(world)
         self._resolve_world_hiring_signals(world)
+        self._resolve_world_temporary_alliances(world)
         self._share_created_being_vision(world)
         self._refresh_world_final_duel(world)
         elapsed = world.clock.turn - start_turn
