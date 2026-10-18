@@ -895,9 +895,6 @@ class Entity:
 
     def add_status(self, effect: StatusEffect):
         """添加状态效果；未显式给出极性时按规则表标注，生命周期仍由scope独立决定。"""
-        # 永恒的偏爱：所有由该实体施加的「持续X」效果改为永久持续。
-        if "永恒的偏爱" in self.preferences and effect.remaining_rounds > 0:
-            effect.remaining_rounds = -1
         if effect.polarity == EffectPolarity.NEUTRAL.value:
             buffs = {
                 "固执", "贯穿", "急速", "洞察", "飞行",
