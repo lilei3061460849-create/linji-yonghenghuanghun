@@ -1735,6 +1735,8 @@ class GameEngine:
 
     def _advance_world_turns(self, world: WorldState, player_id: str, turns: int) -> int:
         """逐回合推进世界并处理NPC交战，玩家遭遇会立刻打断后续回合。"""
+        if not isinstance(turns, int) or isinstance(turns, bool) or turns < 1:
+            raise ValueError("等待回合数必须是正整数")
         advanced = 0
         for _ in range(turns):
             world.wait(player_id, 1)
