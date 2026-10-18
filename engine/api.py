@@ -4583,22 +4583,6 @@ class GameEngine:
         """
         return self.combat.pay_daowen_shard_cost(actor, name, calc, x)
 
-    @staticmethod
-    def _apply_intrinsic_preference_calculation(actor: Entity, calc: dict) -> dict:
-        """应用造物/怪物共用的计算型偏爱；不改变即时效果的数值。"""
-        if "永恒的偏爱" not in getattr(actor, "preferences", []):
-            return calc
-        duration = calc.get("duration")
-        summary = calc.get("summary")
-        # 只延长正文明确写出「持续N」的效果，避免误改仅用 duration
-        # 记录瞬时计算信息的道纹。
-        if (isinstance(duration, int) and not isinstance(duration, bool) and duration > 0
-                and isinstance(summary, str)
-                and re.search(r"持续\s*\d+", summary)):
-            calc["duration"] = -1
-            calc["summary"] = re.sub(r"持续\s*\d+(?:回合)?", "持续∞", summary, count=1)
-        return calc
-
     def _action_use_daowen(self, params: dict) -> dict:
         """
         发动道纹。
@@ -4733,7 +4717,6 @@ class GameEngine:
             if name == "再生":
                 resolve_kw["cost_channel"] = params.get("zaisheng_cost", "法力")
             calc = DaoWenEngine.resolve(name, x, **resolve_kw)
-            calc = self._apply_intrinsic_preference_calculation(actor, calc)
         except Exception as e:
             return {"success": False, "error": f"道纹计算失败: {str(e)}"}
         if calc.get("cost_type") == "攻击力" and calc.get("cost_attack", 0) > actor.effective_attack_power():
