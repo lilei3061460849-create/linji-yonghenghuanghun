@@ -277,6 +277,9 @@ class Entity:
     is_neutral: bool = False  # 中立特殊角色不会自动进入任一战斗阵营
     # 怪物/造物共用的固有偏爱；每种偏爱在同一实体上最多出现一次。
     preferences: list[str] = field(default_factory=list)
+    # 造物是具有专属身份的朋友，不是分裂道纹产生的临时朋友。
+    is_created_being: bool = False
+    created_by_runtime_id: str = ""
 
     # 基础属性
     blood_limit: int = 0         # 血限
@@ -937,6 +940,8 @@ class Entity:
             "world_y": self.world_y,
             "is_neutral": self.is_neutral,
             "preferences": list(getattr(self, "preferences", [])),
+            "is_created_being": bool(getattr(self, "is_created_being", False)),
+            "created_by_runtime_id": getattr(self, "created_by_runtime_id", ""),
             "blood_limit": self.blood_limit,
             "current_hp": self.current_hp,
             "mana_limit": self.mana_limit,
