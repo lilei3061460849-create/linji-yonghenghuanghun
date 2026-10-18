@@ -48,14 +48,19 @@ def test_shard_peak_survives_save_load():
     e = _engine(seed=30)
     e.save_dir = tempfile.mkdtemp(prefix="altar-peak-")
     e.state.shards = 120
+    merchant_stock = [r.name for r in e.state.merchant.relics]
+    assert len(merchant_stock) == 5
     saved = e.save_game("peak")
     assert saved.get("success"), saved
     e.state.shards = 5
+    e.state.merchant.relics.clear()
     loaded = e.load_game("peak")
     assert loaded.get("success"), loaded
     assert e.state.shards == 120
     assert e.state.shards_peak == 120
     assert e.state.player.shards_peak == 120
+    assert [r.name for r in e.state.merchant.relics] == merchant_stock
+    assert e.state.merchant.is_neutral is True
 
 
 def test_altar_black_swan_records_debt_and_triggers_dynamic_death():
