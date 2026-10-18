@@ -932,6 +932,10 @@ def test_created_being_can_follow_and_report_exploration_to_owner(tmp_path):
     world.add_actor(WorldActorState(being.runtime_id, being.name, "friend", 5, 5,
                                     faction="friend", mode="autonomous",
                                     behavior="explore", owner_actor_id=player.runtime_id))
+    world.map.add_location("phone-booth", {
+        "name": "电话亭", "kind": "event", "event_name": "电话亭",
+        "x": 5, "y": 4, "active": True,
+    })
     being.world_x, being.world_y = 5, 5
     engine.state.world_state = world.to_dict()
 
@@ -942,6 +946,10 @@ def test_created_being_can_follow_and_report_exploration_to_owner(tmp_path):
     being_before = before.actors[being.runtime_id].position
     assert before.actors[player.runtime_id].known_cells
     assert before.actors[being.runtime_id].owner_actor_id == player.runtime_id
+    status = engine.execute_action("world_status", {})
+    assert status["success"], status
+    assert any(location["location_id"] == "phone-booth"
+               for location in status["result"]["known_locations"])
 
     waited = engine.execute_action("world_wait", {"turns": 1})
     assert waited["success"], waited
