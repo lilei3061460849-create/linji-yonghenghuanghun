@@ -859,7 +859,7 @@ def test_relics_five_more():
     engine.event_pool.current = "祭坛"
     pool = engine.state.attribute_points
     sp = engine.state.player.speed_limit
-    engine.execute_action("resolve_event", {"event":"祭坛","option_id":3})  # 拒绝：无事发生
+    engine.execute_action("resolve_event", {"event":"祭坛","option_id":2})  # 当前祭坛只有投资/拒绝两项
     assert engine.state.attribute_points == pool + 1, "无所求拒绝应+1属性点"
     assert engine.state.player.speed_limit == sp, "属性点入池，不应直接加速限"
     print(f"  ✓ 无所求：选拒绝类选项+1属性点(池{pool}→{engine.state.attribute_points})")
@@ -1290,7 +1290,7 @@ def test_twisted_tool_library():
     ev2 = next(n for n, ev in engine2.event_pool.events.items()
                if ev["region"] == "扭曲都市" and n != ev_name)
     engine2.event_pool.current = ev2
-    r2 = engine2.execute_action("resolve_event", {"event": ev2, "option_id": 1})
+    reject_option = next(o for o in engine2.event_pool.events[ev2]["options"]\n                         if engine2._is_reject_option_text(o["text"]))\n    r2 = engine2.execute_action("resolve_event", {"event": ev2, "option_id": reject_option["id"]})
     assert r2["success"]
     bad = engine2.execute_action("choose_discovered_item", {"item_name": "不存在的道具"})
     assert not bad["success"] and engine2.state.pending_item_choices
