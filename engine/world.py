@@ -388,6 +388,29 @@ class WorldState:
             if any(e.active and actor_id in e.participants for e in self.encounters.values()):
                 continue
             visible = set(self.visible_cells(actor_id))
+            # 地点情报是单位自己的记忆，不把全地图位置直接塞进NPC决策。
+            for location_id, location in self.map.locations.items():
+                location_pos = (int(location.get("x", -1)), int(location.get("y", -1)))
+                if location_pos not in visible:
+                    continue
+                sighting = next((entry for entry in reversed(actor.memory)
+                                 if entry.get("kind") == "location_sighting"
+                                 and entry.get("location_id") == location_id), None)
+                observation = {
+                    "kind": "location_sighting",
+                    "location_id": location_id,
+                    "position": list(location_pos),
+                    "location_kind": location.get("kind", "special"),
+                    "resource_type": location.get("resource_type", ""),
+                    "active": bool(location.get("active", True)),
+                    "turn": self.clock.turn,
+                }
+                if sighting is None:
+                    actor.memory.append(observation)
+                else:
+                    sighting.update(observation)
+            if len(actor.memory) > 50:
+                actor.memory = actor.memory[-50:]
             targets = [
                 other for other in self.actors.values()
                 if other.alive and other.actor_id != actor_id
@@ -408,6 +431,47 @@ class WorldState:
                 continue
             # 造物可自主探索、跟随主人或守卫指定地点。行为只使用已知主人坐标与本地寻路。
             destination = None
+            # 轮回者阵营与可拾取资源的友方单位，会优先追踪自己亲眼发现的资源/遗物。
+            # 目标来源只取本单位记忆；未知地点不会因为地图数据存在而被NPC直接利用。
+            if actor.faction in {"enemy", "friend", "employee", "temp_friend"}:
+                remembered_goals = [
+                    entry for entry in actor.memory
+                    if entry.get("kind") == "location_sighting"
+                    and entry.get("active", False)
+                    and (entry.get("location_kind") == "relic"
+                         or (entry.get("location_kind") == "resource"
+                             and entry.get("resource_type") == "shards"))
+                ]
+                remembered_goals.sort(key=lambda entry: (
+                    0 if entry.get("location_kind") == "relic" else 1,
+                    abs(int(entry["position"][0]) - actor.x)
+                    + abs(int(entry["position"][1]) - actor.y),
+                    -int(entry.get("turn", 0)),
+                    str(entry.get("location_id", "")),
+                ))
+                for goal in remembered_goals:
+                    goal_pos = tuple(goal.get("position", []))
+                    if len(goal_pos) != 2 or goal_pos == actor.position:
+                        continue
+                    path = self.map.find_path(actor.position, goal_pos)
+                    if not path or len(path) < 2:
+                        continue
+                    preferred = path[1]
+                    if preferred in candidates:
+                        destination = preferred
+                        break
+                    # 若最短路被占位阻挡，选择一个可走且更接近目标的格。
+                    shorter = []
+                    for candidate in candidates:
+                        route = self.map.find_path(candidate, goal_pos)
+                        if route is not None and len(route) < len(path):
+                            shorter.append(candidate)
+                    if shorter:
+                        destination = min(
+                            shorter,
+                            key=lambda pos: (len(self.map.find_path(pos, goal_pos) or []),
+                                             pos[1], pos[0]))
+                        break
             if actor.kind == "friend" and actor.owner_actor_id:
                 owner = self.actors.get(actor.owner_actor_id)
                 target_position = None
