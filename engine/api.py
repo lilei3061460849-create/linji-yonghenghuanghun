@@ -2251,7 +2251,7 @@ class GameEngine:
             return {"success": False, "error": str(exc)}
 
     def _action_world_interact(self, params: dict) -> dict:
-        """与实际相邻的地图单位交互；只记录已发生的意图，不替对方伪造同意。"""
+        """与相邻单位交涉；资产只在目标明确接受公平报价后转移。"""
         try:
             world = self._world_from_state()
             player_id = next((key for key, actor in world.actors.items()
@@ -2276,29 +2276,94 @@ class GameEngine:
             if any(encounter.active and target_id in encounter.participants
                    for encounter in world.encounters.values()):
                 return {"success": False, "error": "目标正处于遭遇中，不能开启普通交互"}
+            entity_candidates = ([self.state.player] if self.state.player else [])
+            for group_name in ("friends", "employees", "temp_friends", "enemies"):
+                entity_candidates.extend(getattr(self.state, group_name, []) or [])
+            target_entity = next((entity for entity in entity_candidates
+                                  if entity is not None and entity.runtime_id == target_id), None)
+
             if choice == "trade":
-                if target.kind != "merchant":
-                    world.record("trade_requested", player_id, target_actor_id=target_id,
-                                 target_name=target.name)
+                if target.kind == "merchant":
+                    if self.event_pool.current is not None:
+                        return {"success": False, "error": "当前已有待结算事件，不能开启商人交易"}
+                    self.event_pool.current = "过路商人"
+                    world.record("merchant_encountered", player_id, merchant_actor_id=target_id,
+                                 position=list(target.position))
                     self.state.world_state = world.to_dict()
                     return {"success": True, "action": "world_interact",
                             "result": {"choice": choice, "target": target.name,
-                                       "pending_counterparty_consent": True,
-                                       "completed": False},
-                            "instruction": "已记录交易请求；轮回者间双边报价与对方同意流程尚未实现，不能直接转移资产"}
-                if self.event_pool.current is not None:
-                    return {"success": False, "error": "当前已有待结算事件，不能开启商人交易"}
-                self.event_pool.current = "过路商人"
-                world.record("merchant_encountered", player_id, merchant_actor_id=target_id,
-                             position=list(target.position))
+                                       "session": "过路商人"}}
+                if target_entity is None or target_entity.entity_type != "轮回者":
+                    return {"success": False, "error": "普通双边交易只支持与其他轮回者进行"}
+                offer_shards = params.get("offer_shards", 0)
+                request_shards = params.get("request_shards", 0)
+                give_relic = params.get("give_relic")
+                request_relic = params.get("request_relic")
+                if any(not isinstance(value, int) or isinstance(value, bool) or value < 0
+                       for value in (offer_shards, request_shards)):
+                    return {"success": False, "error": "offer_shards/request_shards必须是非负整数"}
+                if not any((offer_shards, request_shards, give_relic, request_relic)):
+                    return {"success": False, "error": "报价必须至少包含碎片或遗物；提交offer_shards/request_shards/give_relic/request_relic"}
+                if offer_shards > self.state.shards:
+                    return {"success": False, "error": "你没有足够碎片支付报价"}
+                if request_shards > target_entity.shards:
+                    return {"success": False, "error": "对方没有足够碎片支付报价"}
+                player_relic = next((r for r in self.state.relics if r.name == give_relic), None) if give_relic else None
+                target_relic = next((r for r in target_entity.relics if r.name == request_relic), None) if request_relic else None
+                if give_relic and player_relic is None:
+                    return {"success": False, "error": f"你没有遗物【{give_relic}】"}
+                if request_relic and target_relic is None:
+                    return {"success": False, "error": f"对方没有遗物【{request_relic}】"}
+                player_relic_count = len({r.name for r in self.state.relics})
+                target_relic_count = len({r.name for r in target_entity.relics})
+                if request_relic and not give_relic and player_relic_count >= self.state.player.relic_capacity:
+                    return {"success": False, "error": "你的遗物承载已满，无法接收对方遗物"}
+                if give_relic and not request_relic and target_relic_count >= target_entity.relic_capacity:
+                    return {"success": False, "error": "对方遗物承载已满，无法接收你的遗物"}
+                # 默认议价基准：一件遗物按10碎片估值。目标只接受自己收到的价值不低于付出的报价。
+                value_received = offer_shards + (10 if give_relic else 0)
+                value_given = request_shards + (10 if request_relic else 0)
+                world.record("trade_offer_made", player_id, target_actor_id=target_id,
+                             offer_shards=offer_shards, request_shards=request_shards,
+                             give_relic=give_relic, request_relic=request_relic,
+                             estimated_value_received=value_received,
+                             estimated_value_given=value_given)
+                if value_received < value_given:
+                    world.record("trade_offer_rejected", target_id, proposer_actor_id=player_id,
+                                 reason="报价价值低于对方付出")
+                    self.state.world_state = world.to_dict()
+                    return {"success": True, "action": "world_interact",
+                            "result": {"choice": "trade", "target": target.name,
+                                       "accepted": False, "completed": False,
+                                       "reason": "对方认为报价不划算；没有资产转移"}}
+                # 所有检查完成后才原子转移资产。
+                self.state.shards -= offer_shards
+                target_entity.shards += offer_shards
+                target_entity.shards_peak = max(target_entity.shards_peak, target_entity.shards)
+                self.state.shards += request_shards
+                self.state.shards_peak = max(self.state.shards_peak, self.state.shards)
+                target_entity.shards -= request_shards
+                if player_relic is not None:
+                    self.state.relics.remove(player_relic)
+                    target_entity.relics.append(player_relic)
+                if target_relic is not None:
+                    target_entity.relics.remove(target_relic)
+                    self.state.relics.append(target_relic)
+                world.record("trade_offer_accepted", target_id, proposer_actor_id=player_id,
+                             offer_shards=offer_shards, request_shards=request_shards,
+                             give_relic=give_relic, request_relic=request_relic)
                 self.state.world_state = world.to_dict()
                 return {"success": True, "action": "world_interact",
-                        "result": {"choice": choice, "target": target.name,
-                                   "session": "过路商人"}}
+                        "result": {"choice": "trade", "target": target.name,
+                                   "accepted": True, "completed": True,
+                                   "offer_shards": offer_shards, "request_shards": request_shards,
+                                   "gave_relic": give_relic, "received_relic": request_relic,
+                                   "player_shards": self.state.shards,
+                                   "counterparty_shards": target_entity.shards}}
+
             if choice == "attack":
                 if target.kind != "enemy":
-                    return {"success": False,
-                            "error": "当前只有敌方单位可直接进入战斗；攻击商人/友方的阵营转换规则尚未接入"}
+                    return {"success": False, "error": "当前只有敌方单位可直接进入战斗"}
                 target.faction = "monster" if target.faction == "monster" else "enemy"
                 encounter = world.start_encounter([player_id, target_id], target.position)
                 world.record("hostility_declared", player_id, target_actor_id=target_id,
@@ -2309,23 +2374,96 @@ class GameEngine:
                         "result": {"choice": choice, "encounter_id": encounter.encounter_id,
                                    "participants": list(encounter.participants),
                                    "battle_started": False},
-                        "instruction": "遭遇已登记；战斗参与者接入现有战斗引擎尚未完成，暂不能直接结算伤害"}
-            event_type = {"talk": "conversation_requested",
-                          "cooperate": "alliance_proposed",
-                          "intimidate": "intimidation_attempted"}[choice]
-            event = world.record(event_type, player_id, target_actor_id=target_id,
-                                 target_name=target.name, position=list(target.position))
-            self.state.world_state = world.to_dict()
+                        "instruction": "遭遇已登记；现在调用battle_start，并传入返回的world_encounter_id以接入现有战斗引擎"}
+
             if choice == "talk":
+                rumors = [dict(item) for item in target.memory[-3:]
+                          if item.get("actor_id") and item.get("turn") is not None]
+                event = world.record("conversation_requested", player_id,
+                                     target_actor_id=target_id, target_name=target.name,
+                                     shared_rumor_count=len(rumors))
+                self.state.world_state = world.to_dict()
                 return {"success": True, "action": "world_interact",
                         "result": {"choice": choice, "event_id": event["event_id"],
-                                   "target": target.name,
-                                   "narrative_input": "根据已记录事实生成对话，不得虚构移动、交易或承诺"}}
+                                   "target": target.name, "reported_sightings": rumors,
+                                   "narrative_input": "对话只可使用目标实际目击并分享的记录，不得虚构交易或承诺"}}
+
+            if choice == "cooperate":
+                if target_entity is None or target_entity.entity_type != "轮回者" or target_entity not in self.state.enemies:
+                    return {"success": False, "error": "只有尚未结盟的其他轮回者可以接受结盟提议"}
+                hp_ratio = target_entity.current_hp / max(1, target_entity.blood_limit)
+                accept_percent = max(15, min(85, 25 + int((1 - hp_ratio) * 60)))
+                roll = self.dice.auto_roll(
+                    f"world_alliance_consent_{target_id}_{world.clock.turn}",
+                    ["accept"] * accept_percent + ["reject"] * (100 - accept_percent),
+                    context=f"{target.name}评估结盟提议：根据当前伤势决定是否接受")
+                accepted = roll["selected"] == "accept"
+                world.record("alliance_decision", target_id, proposer_actor_id=player_id,
+                             accepted=accepted, accept_chance=accept_percent)
+                if accepted:
+                    self.state.enemies.remove(target_entity)
+                    self.state.friends.append(target_entity)
+                    target.kind, target.faction = "friend", "friend"
+                    target.behavior = "explore"
+                    target.owner_actor_id = ""
+                    target.mode = "autonomous"
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_interact",
+                        "result": {"choice": choice, "target": target.name,
+                                   "accepted": accepted, "completed": accepted,
+                                   "accept_chance_percent": accept_percent}}
+
+            # 恐吓只对其他轮回者进行可结算的胁迫；怪物不接受人类谈判。
+            if target_entity is None or target_entity.entity_type != "轮回者" or target_entity not in self.state.enemies:
+                encounter = world.start_encounter([player_id, target_id], target.position)
+                world.record("intimidation_ignored", target_id, proposer_actor_id=player_id,
+                             encounter_id=encounter.encounter_id)
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_interact",
+                        "result": {"choice": choice, "accepted": False,
+                                   "encounter_id": encounter.encounter_id,
+                                   "reason": "目标不接受胁迫，已进入战斗"},
+                        "instruction": "接着调用battle_start处理这次遭遇"}
+            player_entity = self.state.player
+            player_power = max(1, int(getattr(player_entity, "attack_power", 0))
+                               + int(getattr(player_entity, "attack_count", 0)))
+            target_power = max(1, int(target_entity.attack_power) + int(target_entity.attack_count))
+            player_hp_ratio = player_entity.current_hp / max(1, player_entity.blood_limit)
+            target_hp_ratio = target_entity.current_hp / max(1, target_entity.blood_limit)
+            chance = max(10, min(90, 35 + 20 * (player_power > target_power)
+                                 + 25 * (target_hp_ratio < 0.5)
+                                 - 20 * (player_hp_ratio < 0.5)))
+            roll = self.dice.auto_roll(
+                f"world_intimidation_{target_id}_{world.clock.turn}",
+                ["success"] * chance + ["fail"] * (100 - chance),
+                context=f"轮回者胁迫{target.name}：对比战力和伤势")
+            if roll["selected"] == "success":
+                self.state.enemies.remove(target_entity)
+                self.state.temp_friends.append(target_entity)
+                target.kind, target.faction = "friend", "temp_friend"
+                target.behavior = "follow"
+                target.owner_actor_id = player_id
+                target.memory.append({"kind": "temporary_alliance",
+                                      "expires_turn": world.clock.turn + 3,
+                                      "original_kind": "enemy",
+                                      "original_faction": "enemy"})
+                world.record("intimidation_succeeded", player_id, target_actor_id=target_id,
+                             target_name=target.name, expires_turn=world.clock.turn + 3,
+                             success_chance_percent=chance)
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_interact",
+                        "result": {"choice": choice, "accepted": True, "completed": True,
+                                   "target": target.name, "expires_turn": world.clock.turn + 3,
+                                   "success_chance_percent": chance}}
+            encounter = world.start_encounter([player_id, target_id], target.position)
+            world.record("intimidation_failed", target_id, proposer_actor_id=player_id,
+                         encounter_id=encounter.encounter_id, success_chance_percent=chance)
+            self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_interact",
-                    "result": {"choice": choice, "event_id": event["event_id"],
-                               "target": target.name, "completed": False,
-                               "pending_counterparty_decision": True},
-                    "instruction": "只记录了交涉意图；目标是否同意、勒索是否成功尚无对方决策与结算机制"}
+                    "result": {"choice": choice, "accepted": False, "completed": False,
+                               "encounter_id": encounter.encounter_id,
+                               "success_chance_percent": chance},
+                    "instruction": "胁迫失败，接着调用battle_start处理这次遭遇"}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
