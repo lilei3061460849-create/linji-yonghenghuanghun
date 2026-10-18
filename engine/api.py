@@ -1197,6 +1197,8 @@ class GameEngine:
         self.combat.resolution.begin_action(action_type, params, scale=_scale)
         try:
             result = self._dispatch_action(action_type, params)
+            if result.get("success", False):
+                self._record_successful_action_fact(action_type, params, result)
 
             if not result.get("success", False) and transaction:
                 self._restore_state_in_place(state_before)
@@ -1480,6 +1482,30 @@ class GameEngine:
         for event in generated:
             world.record(event["type"], player_id, quest_id=event["quest_id"], **event.get("details", {}))
         return generated
+
+    def _record_successful_action_fact(self, action_type: str, params: dict,
+                                       result: dict) -> None:
+        """把已成功结算的玩家行动作为事实输入任务系统；只记录动作类型与提交参数。"""
+        if action_type in {"quest_list", "world_status", "world_vision"}:
+            return
+        actor_id = getattr(self.state.player, "runtime_id", None) if self.state.player else None
+        safe_params = {
+            key: value for key, value in params.items()
+            if isinstance(value, (str, int, float, bool, type(None), list, tuple))
+        }
+        fact = {"type": "action_succeeded", "actor_id": actor_id,
+                "world_turn": self._world_turn(),
+                "details": {"action_type": action_type, "params": safe_params}}
+        if getattr(self.state, "world_state", {}):
+            world = self._world_from_state()
+            world.record("action_succeeded", actor_id, action_type=action_type, params=safe_params)
+            self._process_world_quest_facts(world, [fact])
+            self.state.world_state = world.to_dict()
+        else:
+            quest_engine = self._quest_engine()
+            quest_engine.advance_time(self.state.quest_state, self._world_turn())
+            quest_engine.process_fact(self.state.quest_state, fact, self._world_turn(),
+                                      player_actor_id=actor_id)
 
     def _action_quest_list(self, params: dict) -> dict:
         tasks = self._quest_engine().list_tasks(self.state.quest_state, self._world_turn())
