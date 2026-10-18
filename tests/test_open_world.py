@@ -1437,3 +1437,14 @@ def test_world_move_does_not_report_hidden_npc_merchant_trades(tmp_path):
 
     assert moved["success"], moved
     assert "npc_merchant_trades" not in moved["result"]
+
+
+def test_npc_pathfinding_does_not_use_unseen_terrain():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(
+        "r", "流浪轮回者", "enemy", 5, 5, faction="enemy", mode="autonomous"))
+    actor = world.actors["r"]
+    actor.known_cells = {"5,5", "4,5", "5,4", "5,6", "6,5", "2,5"}
+
+    assert world.map.find_path((5, 5), (2, 5)) is not None
+    assert world._find_known_path("r", (5, 5), (2, 5)) is None
