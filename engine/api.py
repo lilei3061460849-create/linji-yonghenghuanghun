@@ -453,6 +453,17 @@ class GameEngine:
             # 保证 get_available_actions 的输出仍可原样执行（开发规则 13）。
             actions = [a for a in actions
                        if a.get("params_schema", {}).get("sub_action") != "探索"]
+        quest_listing = self._quest_engine().list_tasks(self.state.quest_state, self._world_turn())
+        actions.append({"action_type": "quest_list", "params_schema": {}})
+        for quest in quest_listing["available"]:
+            actions.append({"action_type": "quest_accept",
+                            "params_schema": {"quest_id": quest["id"]},
+                            "note": "若任务有委托者，必须先走到其上下左右相邻格"})
+        for quest in quest_listing["history"]:
+            if quest["status"] == "completed":
+                actions.append({"action_type": "quest_claim",
+                                "params_schema": {"quest_id": quest["id"]},
+                                "note": "奖励只能领取一次"})
         if not getattr(self.state, "world_state", {}):
             actions.append({"action_type": "world_initialize",
                             "params_schema": {"width": "integer (default 21)", "height": "integer (default 21)"},
