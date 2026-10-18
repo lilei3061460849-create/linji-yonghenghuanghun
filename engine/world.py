@@ -230,9 +230,11 @@ class WorldState:
         self.clock.advance(1)
         self.record("actor_moved", actor_id, origin=list(origin), destination=list(destination))
         self.visible_cells(actor_id)
-        encounters = self.detect_adjacent_encounters()
+        encounters = self.detect_adjacent_encounters(actor_id)
+        interactions = self.detect_adjacent_interactions(actor_id, origin)
         return {"actor_id": actor_id, "from": list(origin), "to": list(destination),
-                "world_turn": self.clock.turn, "new_encounters": encounters}
+                "world_turn": self.clock.turn, "new_encounters": encounters,
+                "new_interactions": interactions}
 
     @staticmethod
     def _hostile_pair(a: WorldActorState, b: WorldActorState) -> bool:
@@ -245,12 +247,14 @@ class WorldState:
         return ((a.faction in friendly and b.faction == "enemy")
                 or (b.faction in friendly and a.faction == "enemy"))
 
-    def detect_adjacent_encounters(self) -> list[str]:
-        """把正交相邻的敌对单位登记为遭遇；中立商人永不因此进入遭遇。"""
+    def detect_adjacent_encounters(self, actor_id: str | None = None) -> list[str]:
+        """把正交相邻的敌对单位登记为遭遇；一次移动只触发移动者涉及的遭遇。"""
         created: list[str] = []
         living = [a for a in self.actors.values() if a.alive]
         for index, a in enumerate(living):
             for b in living[index + 1:]:
+                if actor_id is not None and actor_id not in {a.actor_id, b.actor_id}:
+                    continue
                 if abs(a.x - b.x) + abs(a.y - b.y) != 1:
                     continue
                 if not self._hostile_pair(a, b):
@@ -263,6 +267,28 @@ class WorldState:
                 encounter = self.start_encounter([a.actor_id, b.actor_id], b.position)
                 created.append(encounter.encounter_id)
         return created
+
+    def detect_adjacent_interactions(self, actor_id: str, origin: Coord) -> list[dict[str, Any]]:
+        """进入新相邻格时记录一次非敌对交互机会；不会自动替角色选择交易/合作等结果。"""
+        actor = self._living_actor(actor_id)
+        interactions: list[dict[str, Any]] = []
+        for other in self.actors.values():
+            if not other.alive or other.actor_id == actor_id:
+                continue
+            was_adjacent = abs(other.x - origin[0]) + abs(other.y - origin[1]) == 1
+            is_adjacent = abs(other.x - actor.x) + abs(other.y - actor.y) == 1
+            if not is_adjacent or was_adjacent or self._hostile_pair(actor, other):
+                continue
+            event = self.record("interaction_triggered", actor_id,
+                                target_actor_id=other.actor_id, target_name=other.name,
+                                target_kind=other.kind, position=list(other.position))
+            interactions.append({
+                "event_id": event["event_id"], "actor_id": actor_id,
+                "target_actor_id": other.actor_id, "target_name": other.name,
+                "target_kind": other.kind, "position": list(other.position),
+                "available_outcomes": ["交谈", "交易", "合作", "攻击"],
+            })
+        return interactions
 
     def wait(self, actor_id: str, turns: int = 1) -> int:
         self._living_actor(actor_id)
