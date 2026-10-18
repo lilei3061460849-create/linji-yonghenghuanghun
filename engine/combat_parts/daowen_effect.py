@@ -192,24 +192,6 @@ class DaowenEffectMixin:
                         result["wave_spread"] = {
                             "targets": [e.name for e in effective], "status_only": True}
 
-        # ---- 乱葬岗·附煞（sha_qi）效果修正 ----
-        # 施法者持有的道纹实例可能带煞气；对消耗/持续/伤害/回复做代数修正。
-        inst = caster.dao_wen.get(name)
-        sha = getattr(inst, "sha_qi", "") if inst is not None else ""
-        if sha:
-            if sha == "法煞" and calc.get("cost", 0) > 0:
-                calc["cost"] = max(calc.get("x", 1), calc["cost"] - calc.get("x", 1))
-            if sha == "魂煞" and calc.get("duration") not in (None, -1):
-                calc["duration"] += calc.get("x", 1)
-            if sha == "冥煞":
-                for k in ("target_damage", "total_damage", "aoe_damage"):
-                    if k in calc:
-                        calc[k] = calc[k] * 2
-            if sha == "血煞" and "target_heal" in calc:
-                calc["target_heal"] *= 2
-            if sha == "心煞":
-                result["sha_qi_cooldown_boost"] = True
-
         # 【冷却X】代价：规则正文「冷却X：使用后该道纹记为【X(0)/Y】，[战终]后已完成
         # 战斗场数+1，达到Y时才能再次使用」。此前从未写入 cooldown_remaining，
         # 导致 固执/束缚/畸变/全速 可在同一场里无限重复发动（束缚因此支配全局）。
@@ -360,18 +342,6 @@ class DaowenEffectMixin:
                 result["effects"].append({"type": "damage", "target": target.name, **dmg})
                 if dmg.get("actual_damage", 0) > 0:
                     caster.damage_dealt_this_round += dmg["actual_damage"]
-
-        # ---- 乱葬岗·附煞后置：锁煞（造成伤害后触发） ----
-        if sha == "锁煞":
-            dealt = 0
-            for ef in result.get("effects", []):
-                if ef.get("type") == "damage":
-                    dealt += ef.get("actual_damage", 0) or 0
-            if dealt > 0 and target.is_alive:
-                if target.entity_type == "轮回者":
-                    drain = min(target.current_mana, dealt)
-                    target.current_mana -= drain
-                    result["sha_qi_lock_mana"] = drain
 
         if "aoe_damage" in calc:
             a = 0 if mengbi_blocked else calc["aoe_damage"]

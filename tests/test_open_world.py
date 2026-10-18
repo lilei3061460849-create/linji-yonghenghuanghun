@@ -1963,3 +1963,25 @@ def test_world_fact_log_records_death_and_departure_once(tmp_path):
     assert departures[0]["details"]["reason"] == "逃离副本"
     assert world.actors[dead.runtime_id].alive is False
     assert world.actors[departed.runtime_id].alive is False
+
+
+def test_deleted_affix_action_and_choice_endpoint_stay_unavailable(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "removed-affix.db"),
+                        save_dir=str(tmp_path), rng_seed=167)
+    engine.state.player = Entity("玩家", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.phase = "pre_battle"
+
+    affix = engine.execute_action("pre_battle_action", {
+        "sub_action": "附煞", "mode": "发现",
+    })
+    legacy_choice = engine.execute_action("choose_sha_qi", {
+        "sha_qi": "法煞", "daowen_name": "测试道纹",
+    })
+
+    assert affix["success"] is False
+    assert ("附煞已删除" in affix["error"]
+            or "未知局外行动" in affix["error"])
+    assert legacy_choice["success"] is False

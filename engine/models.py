@@ -57,7 +57,7 @@ class DaoWenInstance:
     x_free: bool = False
     cooldown_remaining: int = 0 # 冷却剩余
     is_frozen: bool = False     # 是否被封印
-    sha_qi: str = ""            # 乱葬岗附煞：法煞/魂煞/冥煞/血煞/锁煞/心煞
+    sha_qi: str = ""            # 旧存档兼容字段；附煞已删除，此字段不再参与运行时结算
     # 【唯一】代价：规则正文「唯一：使用后，本次轮回中无法再次使用」。
     # 与冷却同族但作用域更大——冷却按战斗场数递减，唯一是轮回级一次性，
     # 跨场不恢复，只有开新轮回（状态重置）才清零。
@@ -1236,13 +1236,13 @@ class GameState:
 
     # 龙心谷"炼心"：待生效标记；下一次玩家实际支付数值型代价后转化为对应类型的【××龙心】消耗品
     pending_lianxin: bool = False
-    pending_sha_qi_choices: list = field(default_factory=list)
+    pending_sha_qi_choices: list = field(default_factory=list)  # 旧存档兼容字段，不再由任何动作写入
     dead_monsters: list = field(default_factory=list)  # 乱葬岗招魂：本场已命零的怪物尸体
     # 战斗事件流（唯一事实源，只增不改）。CombatEngine.event_stream 是它的别名视图。
     # 只登记“发生了什么”，每条事件的 ctx 字段挂 EffectContext 快照回答“为什么发生”。
     # 纯观测用：任何战斗规则都不得依赖本列表做判定。
     combat_events: list = field(default_factory=list)
-    pending_sha_qi_mode: str = ""
+    pending_sha_qi_mode: str = ""  # 旧存档兼容字段，不再由任何动作写入
     # 炼心在战斗中发动时不消耗出手，改为"下次局外行动多消耗1点精力"，此处累计待结算的额外精力消耗
     pending_energy_penalty: int = 0
 
