@@ -1481,6 +1481,9 @@ class GameEngine:
                        if actor.kind == "player" and actor.alive), None)
         if player is None:
             return False
+        if any(encounter.active and player.actor_id in encounter.participants
+               for encounter in world.encounters.values()):
+            return False
         merchant = next((actor for actor in world.actors.values()
                          if actor.kind == "merchant" and actor.alive
                          and abs(actor.x - player.x) + abs(actor.y - player.y) == 1), None)
