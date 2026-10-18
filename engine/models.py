@@ -357,14 +357,6 @@ class Entity:
     # 夺取期间归夺取方（caster）持有并触发被动；[回终] -1，归零归还原持有者。
     stolen_relics: dict = field(default_factory=dict)
 
-    def __setattr__(self, name, value):
-        if name == "shards_peak" and "shards_peak" in self.__dict__:
-            value = max(int(value), int(self.__dict__.get("shards_peak", 0)))
-        object.__setattr__(self, name, value)
-        if name == "shards" and "shards_peak" in self.__dict__:
-            if int(value) > int(self.__dict__.get("shards_peak", 0)):
-                object.__setattr__(self, "shards_peak", int(value))
-
     def lose_shards(self, amount: int) -> int:
         """失去碎片（假碎片优先，余额不足则不足额损失）。返回实际失去的真碎片数。"""
         amount = max(0, amount)
@@ -486,7 +478,14 @@ class Entity:
     # _hp_engine_ref 为可选弱引用（非字段，不参与序列化/深拷贝判定）。
     def __setattr__(self, name, value):
         old = self.__dict__.get(name, None)
+        # 只在最终真实余额变化时更新历史峰值；该逻辑必须位于实际生效的
+        # __setattr__ 中，不能被后续生命/面板同步钩子覆盖。
+        if name == "shards_peak" and old is not None:
+            value = max(int(value), int(old))
         object.__setattr__(self, name, value)
+        if name == "shards" and "shards_peak" in self.__dict__:
+            if int(value) > int(self.__dict__.get("shards_peak", 0)):
+                object.__setattr__(self, "shards_peak", int(value))
         if name == "current_hp" and old is not None and value < old:
             self._fire_hp_loss(old, value)
         # ---- 2026-09-16 属性模型统一：旧面板字段写穿到新的上限/当前值 ----
