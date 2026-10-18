@@ -174,13 +174,81 @@ class GameEngine:
 
     # ==================== 状态查询 ====================
 
+    def _project_state_for_world_player(self, state_data: dict) -> dict:
+        """局外阶段给AI返回迷雾投影；绝不泄露未见单位、地图地形或地点坐标。"""
+        if not getattr(self.state, "world_state", {}) or self.state.phase != GamePhase.PRE_BATTLE.value:
+            return state_data
+        world = WorldState.from_dict(self.state.world_state)
+        player = next((actor for actor in world.actors.values()
+                       if actor.kind == "player" and actor.alive), None)
+        if player is None:
+            return state_data
+        visible_positions = {player.position, *world.map.adjacent_vision(player.position)}
+        visible_actor_ids = {
+            actor.actor_id for actor in world.actors.values()
+            if actor.alive and actor.position in visible_positions
+        }
+        visible_actor_ids.add(player.actor_id)
+        known_keys = set(player.known_cells)
+        known_keys.update(world.map.key(pos) for pos in visible_positions)
+
+        # GameState.to_dict() 引用原 world_state，必须深拷贝后再投影，不能修改真实存档。
+        world_payload = copy.deepcopy(state_data.get("world_state", {}))
+        map_payload = world_payload.get("map", {})
+        map_payload["terrain"] = {
+            key: terrain for key, terrain in map_payload.get("terrain", {}).items()
+            if key in known_keys
+        }
+        map_payload["locations"] = {
+            key: location for key, location in map_payload.get("locations", {}).items()
+            if location.get("discovered", False)
+        }
+        world_payload["actors"] = {
+            key: actor for key, actor in world_payload.get("actors", {}).items()
+            if key in visible_actor_ids
+        }
+        world_payload["encounters"] = {
+            key: encounter for key, encounter in world_payload.get("encounters", {}).items()
+            if player.actor_id in encounter.get("participants", [])
+        }
+        # 仅向AI展示由轮回者亲历的世界事实；隐藏NPC的移动和遭遇不进入观察流。
+        world_payload["event_log"] = [
+            event for event in world_payload.get("event_log", [])
+            if event.get("actor_id") == player.actor_id
+        ]
+        state_data["world_state"] = world_payload
+        state_data["enemies"] = [
+            entity for entity in state_data.get("enemies", [])
+            if entity.get("runtime_id") in visible_actor_ids
+        ]
+        for group_name in ("friends", "employees", "temp_friends"):
+            for entity in state_data.get(group_name, []):
+                if entity.get("runtime_id") not in visible_actor_ids:
+                    entity["world_x"] = None
+                    entity["world_y"] = None
+        merchant = state_data.get("merchant")
+        if merchant and merchant.get("runtime_id") not in visible_actor_ids:
+            state_data["merchant"] = None
+        for key in ("world_enemy_reserve", "world_encounter_entities"):
+            state_data[key] = [
+                entity for entity in state_data.get(key, [])
+                if entity.get("runtime_id") in visible_actor_ids
+            ]
+        traits = state_data.get("personality_traits")
+        if isinstance(traits, dict):
+            state_data["personality_traits"] = {
+                key: value for key, value in traits.items() if key in visible_actor_ids
+            }
+        return state_data
+
     def get_state(self) -> dict:
         """
-        获取当前游戏完整状态
-        AI每次决策前应调用此方法
+        获取当前决策者可观察的游戏状态。
+        开放世界局外阶段按当前视野投影；战斗中保留现有完整战斗状态。
         """
+        state_data = self._project_state_for_world_player(self.state.to_dict())
         return {
-            "state": self.state.to_dict(),
+            "state": state_data,
             "pending_interrupts": [i.to_dict() for i in self._pending_interrupts],
             "last_result": self._last_result,
             "available_actions": self.get_available_actions(),
