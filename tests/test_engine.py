@@ -795,14 +795,18 @@ def test_events_system():
     wrong = engine.execute_action("resolve_event", {"event": wrong_name, "option_id": 1})
     assert not wrong["success"] and engine.event_pool.current == ev_name
     engine.event_pool.current = "祭坛"
-    bl_before = engine.state.player.blood_limit
-    sp_before = engine.state.player.speed_limit
-    r2 = engine.execute_action("resolve_event", {"event":"祭坛","option_id":1})
+    engine.state.shards = 100
+    balance_before = engine.state.shards
+    r2 = engine.execute_action("resolve_event", {
+        "event": "祭坛", "option_id": 1, "x": 10, "multiplier": 1,
+    })
     assert r2["success"], f"结算失败: {r2}"
-    assert engine.state.player.blood_limit == bl_before - 8, f"衰老8应血限-8，实{engine.state.player.blood_limit}"
-    assert engine.state.player.speed_limit == sp_before + 1, f"应+1速限"
-    assert "祭坛" in engine.event_pool.triggered, "事件应标记已触发"
-    print(f"  ✓ 祭坛选项1：衰老8(血限{bl_before}→{engine.state.player.blood_limit})+1速限，已标记触发")
+    net_delta = r2["result"]["net_delta"]
+    assert net_delta in (-10, 0, 10), f"倍率1的净变化必须在-10/0/+10中，实{net_delta}"
+    assert engine.state.shards == balance_before + net_delta
+    assert "祭坛" not in engine.event_pool.triggered, "祭坛可重复抵达，不永久标记已触发"
+    assert "祭坛" in engine.event_pool.build_pool("扭曲都市"), "结算后祭坛应可再次探索"
+    print(f"  ✓ 祭坛自选倍率1：净变化{net_delta:+d}，余额{engine.state.shards}")
     print("  ✓ 事件系统测试通过")
 
 
