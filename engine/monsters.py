@@ -213,6 +213,31 @@ def merge_monster_pools(monster_pools: dict) -> list[dict]:
     return merged
 
 
+# 当前偏爱池。效果定义与偏爱数量规则以 Issue #66 为准；每只怪物按当前副本阶位
+# 从池中无放回随机抽取，使用引擎骰子记录每一次选择。
+MONSTER_PREFERENCE_POOL = (
+    "痛苦的偏爱", "贪婪的偏爱", "永恒的偏爱", "饥荒的偏爱", "时间的偏爱",
+)
+
+
+def assign_monster_preferences(entity, tier: int, dice) -> list[str]:
+    """为怪物配置与副本阶位相同数量的不同偏爱。"""
+    count = min(len(MONSTER_PREFERENCE_POOL), max(1, int(tier)))
+    remaining = list(MONSTER_PREFERENCE_POOL)
+    selected: list[str] = []
+    for index in range(count):
+        roll = dice.auto_roll(
+            f"monster_preference_{entity.runtime_id}_{index + 1}",
+            remaining,
+            context=f"{entity.name}·第{index + 1}种固有偏爱（副本{tier}阶）",
+        )
+        choice = str(roll["selected"])
+        selected.append(choice)
+        remaining.remove(choice)
+    entity.preferences = selected
+    return selected
+
+
 def make_monster_entity(monster_def: dict):
     """按怪物定义构造Entity（延迟导入避免循环依赖）"""
     from .models import Entity, DaoWen, DaoWenInstance
