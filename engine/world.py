@@ -484,9 +484,10 @@ class WorldState:
         for actor in living:
             by_position.setdefault(actor.position, []).append(actor)
         for position, occupants in by_position.items():
+            if actor_id is not None and all(actor.actor_id != actor_id for actor in occupants):
+                continue
             remaining = {actor.actor_id: actor for actor in occupants
-                         if actor.actor_id not in engaged_ids
-                         and (actor_id is None or actor_id == actor.actor_id)}
+                         if actor.actor_id not in engaged_ids}
             while remaining:
                 seed_id = next(iter(remaining))
                 component_ids = {seed_id}
@@ -516,10 +517,12 @@ class WorldState:
 
         # 仍未参战的单位按正交相邻关系触发遭遇；同一单位不会被重复锁入另一场。
         for index, a in enumerate(living):
-            if a.actor_id in engaged_ids or (actor_id is not None and actor_id != a.actor_id):
+            if a.actor_id in engaged_ids:
                 continue
             for b in living[index + 1:]:
-                if b.actor_id in engaged_ids or (actor_id is not None and actor_id != b.actor_id):
+                if b.actor_id in engaged_ids:
+                    continue
+                if actor_id is not None and actor_id not in {a.actor_id, b.actor_id}:
                     continue
                 if abs(a.x - b.x) + abs(a.y - b.y) != 1:
                     continue
