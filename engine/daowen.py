@@ -900,7 +900,7 @@ class DaoWenEngine:
                 and duration > 0 and isinstance(summary, str)
                 and re.search(r"持续\s*\d+", summary)):
             result["duration"] = -1
-            result["summary"] = re.sub(r"持续\\s*\\d+(?:回合)?", "持续∞", summary, count=1)
+            result["summary"] = re.sub(r"持续\s*\d+(?:回合)?", "持续∞", summary, count=1)
         
         # 检查X上限
         cost_type = result.get("cost_type", "支付：")
