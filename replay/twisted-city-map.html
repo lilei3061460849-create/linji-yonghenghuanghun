@@ -112,7 +112,10 @@ function generate(){
    // Vary unused block tiles independently without changing total map area.
    for(let y=y0;y<y0+4;y++)for(let x=x0;x<x0+4;x++){const c=cells[idx(x,y)];if(c.building)continue;const roll=rng();c.type=roll<.12?"rubble":roll<.21?"weeds":roll<.27?"puddle":"sidewalk"}
    if(bi<EVENTS.length){
-     const ev=building;const side=Math.floor(rng()*4);let ex,ey;
+     const ev=building;const sides=[];
+     if(b.by>0)sides.push(0);if(b.by<BLOCKS-1)sides.push(1);
+     if(b.bx>0)sides.push(2);if(b.bx<BLOCKS-1)sides.push(3);
+     const side=pick(sides);let ex,ey;
      if(side===0){ex=b.bx*5+1+Math.floor(rng()*4);ey=b.by*5}
      else if(side===1){ex=b.bx*5+1+Math.floor(rng()*4);ey=b.by*5+5}
      else if(side===2){ex=b.bx*5;ey=b.by*5+1+Math.floor(rng()*4)}
