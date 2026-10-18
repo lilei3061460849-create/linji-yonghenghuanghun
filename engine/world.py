@@ -211,6 +211,8 @@ class WorldState:
     final_duel_started: bool = False
     final_duel_complete: bool = False
     final_duel_winner: str = ""
+    # 雇佣信号跨回合保存；轮回者可以离开信号发出地点继续行动。
+    hiring_signals: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def create(cls, *, width: int = 21, height: int = 21, seed: int = 0) -> "WorldState":
@@ -534,6 +536,7 @@ class WorldState:
             "final_duel_started": self.final_duel_started,
             "final_duel_complete": self.final_duel_complete,
             "final_duel_winner": self.final_duel_winner,
+            "hiring_signals": [dict(signal) for signal in self.hiring_signals],
         }
 
     @classmethod
@@ -561,4 +564,5 @@ class WorldState:
             final_duel_started=bool(data.get("final_duel_started", False)),
             final_duel_complete=bool(data.get("final_duel_complete", False)),
             final_duel_winner=str(data.get("final_duel_winner", "") or ""),
+            hiring_signals=[dict(signal) for signal in data.get("hiring_signals", [])],
         )
