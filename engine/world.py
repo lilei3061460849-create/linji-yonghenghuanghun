@@ -466,25 +466,69 @@ class WorldState:
                 or (b.faction in friendly and a.faction == "enemy"))
 
     def detect_adjacent_encounters(self, actor_id: str | None = None) -> list[str]:
-        """把正交相邻的敌对单位登记为遭遇；一次移动只触发移动者涉及的遭遇。"""
+        """登记敌对遭遇；每个单位同一时刻只进入一个活跃遭遇。
+
+        同格敌对单位先合并为一个遭遇，避免多个敌人占据同一格时为同一玩家
+        创建数个互相锁死的战斗。相邻的其他敌人会在当前遭遇结束后再被登记。
+        """
         created: list[str] = []
         living = [a for a in self.actors.values() if a.alive]
-        for index, a in enumerate(living):
-            for b in living[index + 1:]:
-                if actor_id is not None and actor_id not in {a.actor_id, b.actor_id}:
+        engaged_ids = {
+            participant_id
+            for encounter in self.encounters.values() if encounter.active
+            for participant_id in encounter.participants
+        }
+
+        # 先处理同格单位。一个同格簇中，只把通过敌对关系相连的单位放进同一场遭遇。
+        by_position: dict[Coord, list[WorldActorState]] = {}
+        for actor in living:
+            by_position.setdefault(actor.position, []).append(actor)
+        for position, occupants in by_position.items():
+            remaining = {actor.actor_id: actor for actor in occupants
+                         if actor.actor_id not in engaged_ids
+                         and (actor_id is None or actor_id == actor.actor_id)}
+            while remaining:
+                seed_id = next(iter(remaining))
+                component_ids = {seed_id}
+                frontier = [seed_id]
+                while frontier:
+                    current_id = frontier.pop()
+                    current = remaining.get(current_id)
+                    if current is None:
+                        continue
+                    for other_id, other in list(remaining.items()):
+                        if other_id in component_ids:
+                            continue
+                        if self._hostile_pair(current, other):
+                            component_ids.add(other_id)
+                            frontier.append(other_id)
+                component = [remaining[item] for item in component_ids]
+                if len(component) >= 2:
+                    encounter = self.start_encounter(
+                        [actor.actor_id for actor in component], position)
+                    created.append(encounter.encounter_id)
+                    engaged_ids.update(component_ids)
+                for item in component_ids:
+                    remaining.pop(item, None)
+                # Isolated occupants are not hostile to anyone at this position.
+                if len(component) == 1:
                     continue
-                # 同格与正交相邻格都会立即触发敌对遭遇；同格占位本身合法。
-                if a.position != b.position and abs(a.x - b.x) + abs(a.y - b.y) != 1:
+
+        # 仍未参战的单位按正交相邻关系触发遭遇；同一单位不会被重复锁入另一场。
+        for index, a in enumerate(living):
+            if a.actor_id in engaged_ids or (actor_id is not None and actor_id != a.actor_id):
+                continue
+            for b in living[index + 1:]:
+                if b.actor_id in engaged_ids or (actor_id is not None and actor_id != b.actor_id):
+                    continue
+                if abs(a.x - b.x) + abs(a.y - b.y) != 1:
                     continue
                 if not self._hostile_pair(a, b):
                     continue
-                already_active = any(e.active and a.actor_id in e.participants
-                                     and b.actor_id in e.participants
-                                     for e in self.encounters.values())
-                if already_active:
-                    continue
                 encounter = self.start_encounter([a.actor_id, b.actor_id], b.position)
                 created.append(encounter.encounter_id)
+                engaged_ids.update((a.actor_id, b.actor_id))
+                break
         return created
 
     def detect_adjacent_interactions(self, actor_id: str, origin: Coord) -> list[dict[str, Any]]:
