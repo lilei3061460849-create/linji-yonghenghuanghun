@@ -1239,6 +1239,34 @@ def test_autonomous_reincarnator_remembers_visible_resource_and_moves_toward_it(
                for entry in rival.memory)
 
 
+@pytest.mark.parametrize(
+    ("behavior", "guard_position", "expected_position"),
+    [
+        ("follow", None, (4, 5)),
+        ("guard", (5, 4), (5, 4)),
+    ],
+)
+def test_created_being_follow_and_guard_orders_override_remembered_loot(
+        behavior, guard_position, expected_position):
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    owner = WorldActorState("p", "玩家", "player", 1, 1,
+                            faction="player", mode="manual")
+    being = WorldActorState(
+        "b", "造物", "friend", 5, 5, faction="friend", mode="autonomous",
+        behavior=behavior, owner_actor_id="p", guard_position=guard_position)
+    world.add_actor(owner)
+    world.add_actor(being)
+    # 造物已发现东侧碎片，但显式跟随/守卫命令应优先于自主寻宝。
+    being.memory.append({
+        "kind": "location_sighting", "location_id": "cache",
+        "position": [6, 5], "location_kind": "resource",
+        "resource_type": "shards", "active": True, "turn": 0,
+    })
+    being.known_cells.update(world.map.terrain.keys())
+    world._run_autonomous_units()
+    assert being.position == expected_position
+
+
 def test_random_world_generation_keeps_all_passable_cells_connected():
     from collections import deque
 
