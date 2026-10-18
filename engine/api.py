@@ -1683,6 +1683,9 @@ class GameEngine:
                 return {"success": False, "error": "必须指定一个真实存在的目标单位"}
             if target_id == player_id:
                 return {"success": False, "error": "不能与自己交互"}
+            if any(encounter.active and player_id in encounter.participants
+                   for encounter in world.encounters.values()):
+                return {"success": False, "error": "轮回者正处于遭遇中，不能开启普通交互"}
             player, target = world.actors[player_id], world.actors[target_id]
             if not target.alive:
                 return {"success": False, "error": "目标单位已离场"}
