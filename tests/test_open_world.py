@@ -1694,3 +1694,39 @@ def test_entity_shard_peak_is_monotonic_through_the_active_setattr_hook():
     assert entity.shards_peak == 30
     entity.shards = 45
     assert entity.shards_peak == 45
+
+
+def test_npc_merchant_completes_at_most_one_trade_per_world_turn(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity, Relic
+
+    engine = GameEngine(db_path=str(tmp_path / "npc-merchant-one-trade.db"),
+                        save_dir=str(tmp_path), rng_seed=191, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    first = Entity("甲", "轮回者", blood_limit=30, current_hp=30, shards=20)
+    second = Entity("乙", "轮回者", blood_limit=30, current_hp=30, shards=20)
+    merchant = Entity("过路商人", "特殊角色", shards=0, relics=[
+        Relic(name="遗物甲", effect="普通效果"),
+        Relic(name="遗物乙", effect="普通效果"),
+    ])
+    engine.state.player = player
+    engine.state.enemies = [first, second]
+    engine.state.merchant = merchant
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(
+        player.runtime_id, "P", "player", 0, 0, faction="player", mode="manual"))
+    world.add_actor(WorldActorState(
+        first.runtime_id, "甲", "enemy", 3, 2, faction="enemy", mode="autonomous"))
+    world.add_actor(WorldActorState(
+        second.runtime_id, "乙", "enemy", 2, 3, faction="enemy", mode="autonomous"))
+    world.add_actor(WorldActorState(
+        merchant.runtime_id, "过路商人", "merchant", 3, 3,
+        faction="neutral", mode="autonomous"))
+
+    trades = engine._resolve_world_npc_merchant_trades(world)
+
+    assert len(trades) == 1
+    assert merchant.shards == 10
+    assert len(merchant.relics) == 1
+    assert sum(len(entity.relics) for entity in (first, second)) == 1
+    assert sorted((first.shards, second.shards)) == [10, 20]
