@@ -1500,29 +1500,37 @@ def test_sunken_sea_stolen_medicine_adds_tide_zombie_and_tracks_shard_peak(tmp_p
     from engine.events import resolve_option_effect
     from engine.models import Entity
 
-    engine = GameEngine(
-        db_path=str(tmp_path / "sunken-sea-stolen-medicine.db"),
-        save_dir=str(tmp_path / "saves"), autosave=False, rng_seed=31,
-    )
-    engine.state.phase = "pre_battle"
-    engine.state.current_region = "沉沦海"
-    engine.state.shards = 10
-    engine.state.shards_peak = 10
-    engine.state.player = Entity(
-        name="潜水员", entity_type="轮回者",
-        blood_limit=40, current_hp=40, mana_limit=10, current_mana=10,
-    )
+    def make_engine(name):
+        engine = GameEngine(
+            db_path=str(tmp_path / f"{name}.db"),
+            save_dir=str(tmp_path / f"{name}-saves"), autosave=False, rng_seed=31,
+        )
+        engine.state.phase = "pre_battle"
+        engine.state.current_region = "沉沦海"
+        engine.state.shards = 30
+        engine.state.shards_peak = 30
+        engine.state.player = Entity(
+            name="潜水员", entity_type="轮回者",
+            blood_limit=40, current_hp=40, mana_limit=10, current_mana=10,
+        )
+        return engine
 
+    engine = make_engine("sunken-sea-stolen-medicine")
     event_result = resolve_option_effect(
         "盗窃药物：获得20[碎片]。此后本次沉沦海的每场战斗额外加入1只【潮尸】。",
         engine, event_name="潮下基地",
     )
     assert "error" not in event_result, event_result
-    assert engine.state.shards == 30
-    assert engine.state.shards_peak == 30
+    assert engine.state.shards == 50
+    assert engine.state.shards_peak == 50
     assert engine.state.event_modifiers["sunken_sea_extra_tide_zombie"] is True
 
-    battle = engine.execute_action("battle_start", {})
-    assert battle["success"], battle
-    assert battle["result"]["spawn_plan"]["sunken_sea_extra_tide_zombie"] is True
+    baseline = make_engine("sunken-sea-baseline")
+    baseline.state.shards = 50
+    baseline.state.shards_peak = 50
+    with_modifier = engine.execute_action("battle_start", {})
+    without_modifier = baseline.execute_action("battle_start", {})
+    assert with_modifier["success"], with_modifier
+    assert without_modifier["success"], without_modifier
+    assert len(engine.state.enemies) == len(baseline.state.enemies) + 1
     assert any(entity.name == "潮尸" for entity in engine.state.enemies)
