@@ -1186,6 +1186,10 @@ def test_twisted_city_places_modern_landmarks_and_exposes_descriptions_on_discov
         if any(pos not in occupied for pos in world.map.neighbors(
             (int(location["x"]), int(location["y"]))))
     )
+    landmark_id = next(
+        location_id for location_id, location in world.map.locations.items()
+        if location is landmark
+    )
     destination = (landmark["x"], landmark["y"])
     neighbor = next(pos for pos in world.map.neighbors(destination) if pos not in occupied)
     player_actor = world.actors[player.runtime_id]
@@ -1197,8 +1201,8 @@ def test_twisted_city_places_modern_landmarks_and_exposes_descriptions_on_discov
     status = engine.execute_action("world_status", {})
     assert status["success"], status
     known = next(item for item in status["result"]["known_locations"]
-                 if item["location_id"] == "urban_1")
-    assert known["name"] == "医院"
+                 if item["location_id"] == landmark_id)
+    assert known["name"] == landmark["name"]
     assert known["description"]
 
 
