@@ -111,8 +111,7 @@ def test_game_engine_exposes_world_actions_and_serializes_state(tmp_path):
     assert status["result"]["map_size"]["width"] == 7
     assert "map" not in status["result"] and "event_log" not in status["result"]
     assert status["result"]["self"]["position"] == [1, 1]
-    player_id = next(k for k, v in status["result"]["actors"].items()
-                     if v["kind"] == "player")
+    player_id = status["result"]["self"]["actor_id"]
     moved = engine.execute_action("world_move", {"actor_id": player_id, "x": 1, "y": 0})
     assert moved["success"], moved
     assert engine.state.world_state["clock"]["turn"] == 1
