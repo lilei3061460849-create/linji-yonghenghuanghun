@@ -1433,7 +1433,7 @@ class GameEngine:
         """创建可存档的网格世界，并将当前存活单位登记为独立地图单位。"""
         if self.state.player is None:
             return {"success": False, "error": "请先完成角色开局，再初始化开放世界"}
-        if self.state.world_state and not params.get("reset", False):
+        if getattr(self.state, "world_state", {}) and not params.get("reset", False):
             return {"success": True, "action": "world_initialize",
                     "result": {"already_initialized": True,
                                "world_turn": self.state.world_state.get("clock", {}).get("turn", 0)}}
@@ -1458,6 +1458,8 @@ class GameEngine:
                 entities.append((self.state.merchant, "merchant", "neutral"))
             candidates = [(x, y) for y in range(height) for x in range(width)
                           if world.map.is_passable((x, y))]
+            # 玩家从固定的安全起始区入场，其余单位按距离依次安置，避免出生点重叠。
+            candidates.sort(key=lambda p: (abs(p[0] - 1) + abs(p[1] - 1), p[1], p[0]))
             used = set()
             for entity, kind, faction in entities:
                 pos = next((p for p in candidates if p not in used), None)
@@ -1511,10 +1513,44 @@ class GameEngine:
             return {"success": False, "error": str(exc)}
 
     def _action_world_status(self, params: dict) -> dict:
+        """只返回玩家已知信息，不把全地图、隐藏单位或完整事实账本交给AI。"""
         try:
             world = self._world_from_state()
-            return {"success": True, "action": "world_status", "result": world.to_dict()}
-        except ValueError as exc:
+            actor_id = params.get("actor_id")
+            if not actor_id:
+                actor_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            if actor_id is None or actor_id not in world.actors:
+                return {"success": False, "error": "地图上找不到玩家单位"}
+            visible = set(world.visible_cells(actor_id))
+            actor = world.actors[actor_id]
+            known_terrain = [
+                {"x": x, "y": y, "terrain": world.map.terrain_at((x, y))}
+                for key in sorted(actor.known_cells)
+                for x, y in [world.map.parse(key)]
+            ]
+            visible_actors = [
+                {"actor_id": other.actor_id, "name": other.name, "kind": other.kind,
+                 "faction": other.faction, "position": [other.x, other.y]}
+                for other in world.actors.values()
+                if other.alive and other.actor_id != actor_id and other.position in visible
+            ]
+            visible_encounters = [
+                {"encounter_id": e.encounter_id, "participants": list(e.participants),
+                 "location": list(e.location), "started_turn": e.started_turn}
+                for e in world.encounters.values()
+                if e.active and (actor_id in e.participants or e.location in visible)
+            ]
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_status", "result": {
+                "world_turn": world.clock.turn,
+                "map_size": {"width": world.map.width, "height": world.map.height},
+                "self": {"actor_id": actor.actor_id, "name": actor.name,
+                         "position": [actor.x, actor.y], "alive": actor.alive},
+                "known_terrain": known_terrain,
+                "visible_actors": visible_actors,
+                "visible_encounters": visible_encounters,
+            }}
+        except (ValueError, KeyError) as exc:
             return {"success": False, "error": str(exc)}
 
     def _action_world_vision(self, params: dict) -> dict:
