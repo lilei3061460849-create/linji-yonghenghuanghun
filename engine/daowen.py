@@ -3,6 +3,7 @@
 规则：道纹是概念，不是技能。两字词，世界最小规则单元。
 """
 from __future__ import annotations
+import re
 from typing import Optional, Any
 from .models import Entity, StatusEffect, DaoWen, DaoWenInstance
 from .enums import CostType
@@ -887,6 +888,19 @@ class DaoWenEngine:
                 params['x'] = x
         
         result = func(**params)
+
+        # 永恒的偏爱：只把道纹正文明确标记的有限持续效果变为无限持续。
+        # 放在统一 resolve 入口，确保直接发动与法术内部发动共用同一规则。
+        caster = kwargs.get("caster")
+        summary = result.get("summary")
+        duration = result.get("duration")
+        if (caster is not None
+                and "永恒的偏爱" in getattr(caster, "preferences", [])
+                and isinstance(duration, int) and not isinstance(duration, bool)
+                and duration > 0 and isinstance(summary, str)
+                and re.search(r"持续\\s*\\d+", summary)):
+            result["duration"] = -1
+            result["summary"] = re.sub(r"持续\\s*\\d+(?:回合)?", "持续∞", summary, count=1)
         
         # 检查X上限
         cost_type = result.get("cost_type", "支付：")
