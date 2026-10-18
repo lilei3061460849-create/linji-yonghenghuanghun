@@ -191,6 +191,7 @@ class EncounterState:
     started_turn: int
     active: bool = True
     outcome: str = ""
+    final_duel: bool = False
 
 
 @dataclass
@@ -205,6 +206,11 @@ class WorldState:
     # 每10个世界回合移除方形地图最外一圈；计数随存档保存。
     shrink_interval: int = 10
     shrink_count: int = 0
+    final_duel_search: bool = False
+    final_duel_finalists: list[str] = field(default_factory=list)
+    final_duel_started: bool = False
+    final_duel_complete: bool = False
+    final_duel_winner: str = ""
 
     @classmethod
     def create(cls, *, width: int = 21, height: int = 21, seed: int = 0) -> "WorldState":
@@ -373,7 +379,15 @@ class WorldState:
                 continue
             # 仅在当前相邻视野中选择可走格；方向轮换保证单位持续移动且可复现。
             offset = (self.clock.turn + sum(ord(char) for char in actor_id)) % len(candidates)
-            destination = candidates[offset]
+            if self.final_duel_search and actor_id in self.final_duel_finalists:
+                center = (self.map.width // 2, self.map.height // 2)
+                destination = min(
+                    candidates,
+                    key=lambda pos: (abs(pos[0] - center[0]) + abs(pos[1] - center[1]),
+                                     (pos[0], pos[1])),
+                )
+            else:
+                destination = candidates[offset]
             origin = actor.position
             actor.x, actor.y = destination
             self.record("actor_moved", actor_id, origin=list(origin),
@@ -474,14 +488,19 @@ class WorldState:
             self._living_actor(actor_id)
         if not self.map.in_bounds(location):
             raise ValueError("遭遇地点超出地图")
+        is_final_duel = (self.final_duel_search
+                         and set(self.final_duel_finalists).issubset(set(unique)))
         encounter = EncounterState(
             encounter_id=f"encounter-{self.next_encounter_id}",
             location=location, participants=unique, started_turn=self.clock.turn,
+            final_duel=is_final_duel,
         )
+        if is_final_duel:
+            self.final_duel_started = True
         self.next_encounter_id += 1
         self.encounters[encounter.encounter_id] = encounter
         self.record("encounter_started", unique[0], encounter_id=encounter.encounter_id,
-                    participants=unique, location=list(location))
+                    participants=unique, location=list(location), final_duel=is_final_duel)
         return encounter
 
     def finish_encounter(self, encounter_id: str, outcome: str) -> None:
@@ -509,6 +528,11 @@ class WorldState:
             "next_encounter_id": self.next_encounter_id,
             "shrink_interval": self.shrink_interval,
             "shrink_count": self.shrink_count,
+            "final_duel_search": self.final_duel_search,
+            "final_duel_finalists": list(self.final_duel_finalists),
+            "final_duel_started": self.final_duel_started,
+            "final_duel_complete": self.final_duel_complete,
+            "final_duel_winner": self.final_duel_winner,
         }
 
     @classmethod
@@ -530,4 +554,9 @@ class WorldState:
             next_encounter_id=int(data.get("next_encounter_id", 1)),
             shrink_interval=max(1, int(data.get("shrink_interval", 10))),
             shrink_count=max(0, int(data.get("shrink_count", 0))),
+            final_duel_search=bool(data.get("final_duel_search", False)),
+            final_duel_finalists=list(data.get("final_duel_finalists") or []),
+            final_duel_started=bool(data.get("final_duel_started", False)),
+            final_duel_complete=bool(data.get("final_duel_complete", False)),
+            final_duel_winner=str(data.get("final_duel_winner", "") or ""),
         )
