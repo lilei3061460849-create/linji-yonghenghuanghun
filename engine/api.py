@@ -1598,6 +1598,8 @@ class GameEngine:
             entity.world_region = self.state.current_region
             entity.world_x, entity.world_y = actor.x, actor.y
             entity.is_neutral = actor.faction == "neutral"
+            # 实体命零/永久离场必须同步到地图单位，否则死者会继续移动或触发遭遇。
+            actor.alive = bool(entity.is_alive and not entity.is_departed)
 
     def _open_adjacent_merchant_session(self, world: WorldState) -> bool:
         """玩家与过路商人正交相邻时开启现有交易会话；商人不进入随机事件池。"""
@@ -6274,6 +6276,13 @@ class GameEngine:
                             for option in queued["options"]],
                 "queued_events_remaining": len(self.state.pending_event_queue),
             }
+        if getattr(self.state, "world_state", {}):
+            try:
+                world = self._world_from_state()
+                self._sync_world_entity_positions(world)
+                self.state.world_state = world.to_dict()
+            except (ValueError, KeyError, TypeError):
+                pass
         return {
             "success": True, "action": f"事件【{name}】选项{option_id}",
             "result": result_payload,
