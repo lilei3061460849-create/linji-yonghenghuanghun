@@ -689,6 +689,67 @@ def test_hiring_signal_persists_while_player_moves_and_resolves_on_arrival(tmp_p
                for actor in restored.actors.values())
 
 
+def test_creation_builds_one_map_being_then_cultivates_unique_preferences(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "created-being.db"),
+                        save_dir=str(tmp_path), rng_seed=107, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=60, current_hp=60,
+                                 mana_limit=6, current_mana=6,
+                                 speed_limit=4, current_speed=4,
+                                 attack_count=2, attack_power=3)
+    engine.state.current_region = "乱葬岗"
+    engine.state.phase = "pre_battle"
+    engine.state.shards = 100
+    assert engine.execute_action("world_initialize", {"width": 21, "height": 21})["success"]
+
+    first = engine.execute_action("pre_battle_action", {
+        "sub_action": "造生", "name": "测试造物",
+    })
+    assert first["success"], first
+    assert engine.state.shards == 90
+    beings = [friend for friend in engine.state.friends
+              if getattr(friend, "is_created_being", False)]
+    assert len(beings) == 1
+    being = beings[0]
+    assert being.created_by_runtime_id == engine.state.player.runtime_id
+    assert len(being.preferences) == 1
+    assert being.runtime_id in engine.state.world_state["actors"]
+
+    second = engine.execute_action("pre_battle_action", {"sub_action": "造生"})
+    assert second["success"], second
+    assert engine.state.shards == 65
+    assert len([friend for friend in engine.state.friends
+                if getattr(friend, "is_created_being", False)]) == 1
+    assert len(being.preferences) == 2
+    assert len(set(being.preferences)) == 2
+
+
+def test_cultivation_points_can_be_assigned_to_created_being(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "created-being-points.db"),
+                        save_dir=str(tmp_path), rng_seed=109, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    being = Entity("造物", "朋友", blood_limit=15, current_hp=15)
+    being.is_created_being = True
+    being.created_by_runtime_id = player.runtime_id
+    engine.state.player = player
+    engine.state.friends = [being]
+    engine.state.attribute_points = 1
+    engine.state.phase = "pre_battle"
+
+    result = engine.execute_action("redeem_attribute_points", {
+        "target": being.name, "allocations": {"blood_points": 1},
+    })
+    assert result["success"], result
+    assert being.blood_limit == 21
+    assert player.blood_limit == 30
+    assert engine.state.attribute_points == 0
+
+
 def test_final_duel_search_starts_when_only_two_reincarnators_remain_even_if_monsters_survive(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
