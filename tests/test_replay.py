@@ -1,78 +1,78 @@
+import json
 from types import SimpleNamespace
 
-from engine.combat_events import CombatEvent, CombatEventType
-from engine.replay import build_replay_payload
+from engine.replay import build_replay_payload, export_replay
 
 
-def entity(name, entity_type, side, hp, alive=True):
-    return SimpleNamespace(
-        name=name,
-        entity_type=entity_type,
-        runtime_id=f"id-{name}",
-        current_hp=hp,
-        blood_limit=100,
-        current_mana=5,
-        mana_limit=10,
-        shield=0,
-        is_alive=alive,
-        status_effects=[],
-    )
+class FakeEvent:
+    def __init__(self, event_type, actor="", target="", data=None):
+        self.event_type = event_type
+        self.battle_no = 2
+        self.round_no = 3
+        self.actor_name = actor
+        self.target_name = target
+        self.data = data or {}
+        self.ctx = None
+        self.timestamp = 123.0
+
+    def to_dict(self):
+        return {
+            "event_type": self.event_type,
+            "battle_no": self.battle_no,
+            "round_no": self.round_no,
+            "actor_name": self.actor_name,
+            "target_name": self.target_name,
+            "data": self.data,
+            "ctx": self.ctx,
+            "timestamp": self.timestamp,
+        }
 
 
-def event(event_type, battle_no, round_no, actor="", target="", **data):
-    return CombatEvent(
-        event_type=event_type,
-        battle_no=battle_no,
-        round_no=round_no,
-        actor_name=actor,
-        target_name=target,
-        data=data,
-    )
-
-
-def test_replay_defaults_to_latest_battle_and_keeps_resolved_values():
+def test_build_payload_preserves_event_order_and_safe_data():
     state = SimpleNamespace(
-        current_battle=2,
-        player=entity("玩家", "轮回者", "player", 70),
-        friends=[],
-        employees=[],
-        temp_friends=[],
-        enemies=[entity("怪物", "怪物", "enemy", 0, alive=False)],
+        game_id="g-1", current_region="乱葬岗", current_battle=2, current_round=3,
         combat_events=[
-            event(CombatEventType.BATTLE_START, 1, 0),
-            event(CombatEventType.DAMAGE_APPLIED, 1, 1, "玩家", "旧怪物", actual_life_loss=9),
-            event(CombatEventType.BATTLE_START, 2, 0),
-            event(CombatEventType.DAMAGE_APPLIED, 2, 1, "玩家", "怪物",
-                  actual_life_loss=12, hp_before=12, hp_after=0),
+            FakeEvent("action_declared", "甲", "乙", {"name": "攻击", "amount": 5}),
+            FakeEvent("damage_applied", "甲", "乙", {"actual_damage": 5, "tags": {"a", "b"}}),
         ],
+        player=SimpleNamespace(name="甲", runtime_id="p1", entity_type="轮回者", current_hp=10,
+                               blood_limit=20, current_mana=2, mana_limit=5, current_speed=1,
+                               speed_limit=2, shield=0, is_alive=True, is_departed=False),
+        friends=[], employees=[], temp_friends=[], enemies=[],
     )
-
     payload = build_replay_payload(state)
+    assert [e["sequence"] for e in payload["events"]] == [0, 1]
+    assert payload["events"][1]["data"]["actual_damage"] == 5
+    assert isinstance(payload["events"][1]["data"]["tags"], list)
+    assert payload["participants"][0]["name"] == "甲"
+    json.dumps(payload, ensure_ascii=False)
 
-    assert payload["battle_no"] == 2
-    assert payload["event_count"] == 2
-    assert payload["events"][1]["data"]["actual_life_loss"] == 12
-    assert {p["name"] for p in payload["participants"]} == {"玩家", "怪物"}
-    assert payload["events"][1]["sequence"] == 1
+
+def test_export_replay_writes_utf8_json(tmp_path):
+    state = SimpleNamespace(game_id="test", current_region="测试副本", current_battle=1,
+                            current_round=1, combat_events=[FakeEvent("entity_died", target="怪物")],
+                            player=None, friends=[], employees=[], temp_friends=[], enemies=[])
+    path = tmp_path / "nested" / "replay.json"
+    result = export_replay(state, path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert result["success"] is True
+    assert result["event_count"] == 1
+    assert data["events"][0]["event_type"] == "entity_died"
 
 
-def test_replay_can_export_a_specific_battle_and_json_safe_sets():
-    state = SimpleNamespace(
-        current_battle=2,
-        player=entity("玩家", "轮回者", "player", 70),
-        friends=[],
-        employees=[],
-        temp_friends=[],
-        enemies=[],
-        combat_events=[
-            event(CombatEventType.DAMAGE_APPLIED, 1, 1, "玩家", "怪物",
-                  tags={"闪避", "伤害"}, actual_life_loss=4),
-            event(CombatEventType.BATTLE_END, 2, 2),
-        ],
-    )
+def test_empty_event_stream_is_exportable(tmp_path):
+    state = SimpleNamespace(game_id="empty", current_region="", current_battle=0,
+                            current_round=0, combat_events=[], player=None,
+                            friends=[], employees=[], temp_friends=[], enemies=[])
+    payload = build_replay_payload(state)
+    assert payload["events"] == []
+    assert payload["metadata"]["event_count"] == 0
 
-    payload = build_replay_payload(state, battle_no=1)
 
-    assert payload["event_count"] == 1
-    assert sorted(payload["events"][0]["data"]["tags"]) == ["伤害", "闪避"]
-    assert payload["participants"][0]["name"] == "玩家"
+def test_export_accepts_engine_wrapper(tmp_path):
+    state = SimpleNamespace(game_id="wrapped", current_region="", current_battle=1,
+                            current_round=1, combat_events=[FakeEvent("round_start")],
+                            player=None, friends=[], employees=[], temp_friends=[], enemies=[])
+    engine = SimpleNamespace(state=state)
+    result = export_replay(engine, tmp_path / "replay.json")
+    assert result["event_count"] == 1
