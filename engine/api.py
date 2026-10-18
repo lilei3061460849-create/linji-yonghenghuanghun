@@ -1498,7 +1498,7 @@ class GameEngine:
         """创建可存档的网格世界，并将当前存活单位登记为独立地图单位。"""
         if self.state.player is None:
             return {"success": False, "error": "请先完成角色开局，再初始化开放世界"}
-        if getattr(self.state, "world_state", {}) and not params.get("reset", False):
+        if getattr(self.state, "world_state", {}):
             return {"success": True, "action": "world_initialize",
                     "result": {"already_initialized": True,
                                "world_turn": self.state.world_state.get("clock", {}).get("turn", 0)}}
