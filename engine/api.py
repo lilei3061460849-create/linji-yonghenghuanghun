@@ -1763,6 +1763,7 @@ class GameEngine:
                 encounter = world.start_encounter([player_id, target_id], target.position)
                 world.record("hostility_declared", player_id, target_actor_id=target_id,
                              target_name=target.name, encounter_id=encounter.encounter_id)
+                self._sync_world_entity_positions(world)
                 self.state.world_state = world.to_dict()
                 return {"success": True, "action": "world_interact",
                         "result": {"choice": choice, "encounter_id": encounter.encounter_id,
