@@ -5573,6 +5573,14 @@ class GameEngine:
         relic_choices = params.get("relic_choices", {})
         self.combat.validate_round_start_relic_choices(relic_choices)
         result = self.combat.round_start(relic_choices)
+        # 时间的偏爱把冷却改为战斗回合计时：每次回始递减，归零后即可发动。
+        round_entities = {entity.runtime_id: entity for entity in (
+            self.state.get_all_player_side() + self.state.get_all_enemy_side()
+            + list(getattr(self.state, "temp_friends", []) or []))}.values()
+        for entity in round_entities:
+            for instance in entity.dao_wen.values():
+                if instance.cooldown_rounds_remaining > 0:
+                    instance.cooldown_rounds_remaining -= 1
         # 全局法术【回始】：普通战斗与死斗双方共用同一个回始，因此持有者扫描
         # 覆盖玩家侧与死斗对手侧；死斗对手视角下这就是其"敌回始"，见下方
         # _action_prepare_monster_phase/_action_resolve_monster_phase 的普通
