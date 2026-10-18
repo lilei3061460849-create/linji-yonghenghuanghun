@@ -572,6 +572,7 @@ class GameEngine:
                 schema: dict[str, Any] = {
                     "world_encounter_id": encounter.encounter_id,
                     "relic_choices": "逐件显式提交可选战始遗物",
+                    "summon_created_being": "可选布尔值；true时召唤五格可通行路径内的造物助战，默认false",
                 }
                 global_spells = self.combat.prepare_global_trigger_spells(TriggerTiming.BATTLE_START.value)
                 if global_spells:
@@ -6319,6 +6320,35 @@ class GameEngine:
             ]
             self.state.world_encounter_id = world_encounter_id
             self.state.world_encounter_entities = list(world_participant_enemies)
+        # 造物默认留在地图上，只有战始显式选择召唤且位于五格可通行路径内才参战。
+        created_beings = [entity for entity in self.state.friends
+                          if getattr(entity, "is_created_being", False)
+                          and getattr(entity, "created_by_runtime_id", "") ==
+                              (self.state.player.runtime_id if self.state.player else "")]
+        for being in created_beings:
+            being.is_summoned = False
+        if params.get("summon_created_being", False):
+            if not world_battle:
+                return {"success": False, "error": "造物召唤仅适用于开放世界地图遭遇"}
+            if not created_beings:
+                return {"success": False, "error": "当前没有可召唤的存活造物"}
+            being = next((entity for entity in created_beings if entity.is_alive), None)
+            if being is None:
+                return {"success": False, "error": "造物已死亡，无法召唤"}
+            player_actor = world.actors.get(player_id)
+            being_actor = world.actors.get(being.runtime_id)
+            if player_actor is None or being_actor is None or not being_actor.alive:
+                return {"success": False, "error": "造物不在地图上，无法召唤"}
+            path = world.map.find_path(player_actor.position, being_actor.position)
+            if path is None or len(path) - 1 > 5:
+                return {"success": False, "error": "造物必须位于五格以内的可通行路径上才能召唤"}
+            if any(encounter.active and being.runtime_id in encounter.participants
+                   for encounter in world.encounters.values()):
+                return {"success": False, "error": "造物正在独立遭遇中，暂时无法召唤"}
+            being.is_summoned = True
+            world.record("created_being_summoned", player_id, created_being=being.name,
+                         created_being_id=being.runtime_id, path_distance=len(path) - 1)
+            self.state.world_state = world.to_dict()
         # 在战始产生随机怪物前保存快照；重来会恢复随机源并再次按当前代码抽取。
         self._battle_restart_snapshot = {
             "state": copy.deepcopy(self.state),
