@@ -1683,6 +1683,12 @@ class GameEngine:
                 world.final_duel_search = False
                 world.final_duel_complete = True
                 world.final_duel_winner = living_finalists[0]
+                winner_actor = world.actors.get(world.final_duel_winner)
+                if winner_actor is not None:
+                    winner_actor.alive = False
+                    world.record("final_duel_winner_departed", world.final_duel_winner,
+                                 winner_name=winner_actor.name,
+                                 reason="opponent_eliminated_before_meeting")
                 world.record("final_duel_search_ended", living_finalists[0],
                              winner=world.final_duel_winner,
                              note="另一名最终候选在会合前已被世界威胁淘汰")
@@ -8153,6 +8159,13 @@ class GameEngine:
                     if entity.world_x is not None and entity.world_y is not None:
                         actor.x, actor.y = int(entity.world_x), int(entity.world_y)
                     actor.alive = True
+            # 胜者仍保留真实角色状态供结算/封存使用，但已离开副本，不再是地图上的活动单位。
+            winner_actor = world.actors.get(winner_id)
+            if winner_actor is not None:
+                winner_actor.alive = False
+                world.record("final_duel_winner_departed", winner_id,
+                             winner_name=winner_entity.name, outcome=outcome,
+                             position=list(winner_actor.position))
             for companion in self.state.friends + self.state.employees + self.state.temp_friends:
                 companion_actor = world.actors.get(companion.runtime_id)
                 if companion_actor is not None:
