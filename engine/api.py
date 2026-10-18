@@ -1866,6 +1866,11 @@ class GameEngine:
         if any(encounter.active and player_id in encounter.participants
                for encounter in world.encounters.values()):
             return []
+        # 不依赖调用方恰好只调用一次；同一世界回合已有成交记录时禁止重复成交。
+        if any(event.get("type") == "npc_merchant_trade"
+               and int(event.get("world_turn", -1)) == world.clock.turn
+               for event in world.event_log):
+            return []
         entities = list(getattr(self.state, "enemies", []) or [])
         entities += list(getattr(self.state, "friends", []) or [])
         entities += list(getattr(self.state, "employees", []) or [])
