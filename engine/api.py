@@ -1778,6 +1778,7 @@ class GameEngine:
             if amount <= 0:
                 location["active"] = False
                 location["collected"] = True
+                world.deactivate_location_sightings(location_id, reason="empty_resource")
                 continue
             if entity is self.state.player:
                 self.state.shards += amount
@@ -1791,6 +1792,7 @@ class GameEngine:
             location["collected"] = True
             location["collected_by"] = actor.actor_id
             location["collected_turn"] = world.clock.turn
+            world.deactivate_location_sightings(location_id, reason="collected")
             world.record("resource_collected", actor.actor_id, location_id=location_id,
                          resource_type="shards", amount=amount, balance=balance,
                          position=list(actor.position))
@@ -1834,6 +1836,7 @@ class GameEngine:
                     location["collected"] = True
                     location["collected_by"] = actor.actor_id
                     location["collected_turn"] = world.clock.turn
+                    world.deactivate_location_sightings(location_id, reason="collected")
                     world.record("resonance_relic_collected", actor.actor_id,
                                  location_id=location_id, relic_name=relic.name,
                                  position=list(pos))
@@ -2359,6 +2362,7 @@ class GameEngine:
                         location["collected"] = True
                         location["collected_by"] = actor_id
                         location["collected_turn"] = world.clock.turn
+                        world.deactivate_location_sightings(location_id, reason="collected")
                         world.record("resource_collected", actor_id, location_id=location_id,
                                      resource_type="shards", amount=amount,
                                      position=[x, y])
@@ -2388,6 +2392,7 @@ class GameEngine:
                                 location["collected"] = True
                                 location["collected_by"] = actor_id
                                 location["collected_turn"] = world.clock.turn
+                                world.deactivate_location_sightings(location_id, reason="collected")
                                 world.record("resonance_relic_collected", actor_id,
                                              location_id=location_id, relic_name=relic.name,
                                              position=[x, y])
