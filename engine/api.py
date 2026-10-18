@@ -2193,6 +2193,10 @@ class GameEngine:
                         )
                         self.state.enemies.append(npc)
                         spawned_reincarnators.append(npc)
+            # 每局进入开放世界时商人必须真实入场，而不是只在测试/手动调用中存在。
+            # 初始化库存会从遗物池转移恰好5件，随后作为中立自主单位放置到地图。
+            if self.state.merchant is None:
+                self._initialize_merchant_inventory()
             entities = []
             if self.state.player is not None:
                 entities.append((self.state.player, "player", "player"))
