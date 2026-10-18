@@ -43,6 +43,19 @@ def test_shard_peak_only_increases():
     assert ally.shards_peak == 30
 
 
+def test_shard_peak_survives_save_load():
+    e = _engine(seed=30)
+    e.save_dir = tempfile.mkdtemp(prefix="altar-peak-")
+    e.state.shards = 120
+    saved = e.save_game("peak")
+    assert saved.get("success"), saved
+    e.state.shards = 5
+    loaded = e.load_game("peak")
+    assert loaded.get("success"), loaded
+    assert e.state.shards == 120
+    assert e.state.shards_peak == 120
+
+
 def test_altar_black_swan_records_debt_and_triggers_dynamic_death():
     e = _engine()
     e.state.shards = 20
