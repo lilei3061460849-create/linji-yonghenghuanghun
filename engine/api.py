@@ -5238,6 +5238,8 @@ class GameEngine:
         """完整序列化单个实体(用于封存候选人，需能无损还原道纹X值/法术/状态/面板等)"""
         return {
             "name": e.name, "entity_type": e.entity_type,
+            "world_region": e.world_region, "world_x": e.world_x, "world_y": e.world_y,
+            "is_neutral": e.is_neutral,
             "blood_limit": e.blood_limit, "current_hp": e.current_hp,
             "mana_limit": e.mana_limit, "current_mana": e.current_mana,
             "speed_limit": e.speed_limit, "current_speed": e.current_speed,
@@ -5266,6 +5268,8 @@ class GameEngine:
     def _deserialize_entity_full(self, d: dict) -> Entity:
         """按_serialize_entity_full的格式还原实体"""
         e = Entity(name=d["name"], entity_type=d["entity_type"],
+                   world_region=d.get("world_region", ""), world_x=d.get("world_x"),
+                   world_y=d.get("world_y"), is_neutral=d.get("is_neutral", False),
                    blood_limit=d["blood_limit"], current_hp=d["current_hp"],
                    mana_limit=d["mana_limit"], current_mana=d["current_mana"],
                    speed_limit=d["speed_limit"], current_speed=d["current_speed"],
