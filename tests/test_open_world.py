@@ -1858,6 +1858,7 @@ def test_final_duel_search_marks_survivor_as_departed_from_world_map(tmp_path):
                         save_dir=str(tmp_path), rng_seed=139, autosave=False)
     player = Entity("玩家", "轮回者", blood_limit=30, current_hp=30)
     rival = Entity("败者", "轮回者", blood_limit=30, current_hp=0)
+    rival.is_alive = False
     engine.state.player = player
     engine.state.enemies = [rival]
     world = WorldState(clock=WorldClock(), map=_open_map())
