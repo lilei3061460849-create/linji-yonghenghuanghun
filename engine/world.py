@@ -265,10 +265,7 @@ class WorldState:
             raise ValueError("每次移动只能到上下左右相邻一格")
         if not self.map.is_passable(destination):
             raise ValueError("目标格不可通行")
-        blocker = next((a for a in self.actors.values()
-                        if a.alive and a.actor_id != actor_id and a.position == destination), None)
-        if blocker:
-            raise ValueError(f"目标格被单位占据：{blocker.name}")
+        # 世界规则允许多个单位占据同一格；进入同格后立即检查敌对遭遇。
         origin = actor.position
         actor.x, actor.y = destination
         self.clock.advance(1)
@@ -362,7 +359,8 @@ class WorldState:
             for b in living[index + 1:]:
                 if actor_id is not None and actor_id not in {a.actor_id, b.actor_id}:
                     continue
-                if abs(a.x - b.x) + abs(a.y - b.y) != 1:
+                # 同格与正交相邻格都会立即触发敌对遭遇；同格占位本身合法。
+                if a.position != b.position and abs(a.x - b.x) + abs(a.y - b.y) != 1:
                     continue
                 if not self._hostile_pair(a, b):
                     continue
