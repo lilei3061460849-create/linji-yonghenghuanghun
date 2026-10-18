@@ -1005,6 +1005,7 @@ class GameState:
     world_state: dict = field(default_factory=dict)
     # 开放世界战斗时暂存未参与本次遭遇的地图敌方单位，战终后恢复。
     world_enemy_reserve: list[Entity] = field(default_factory=list)
+    world_encounter_entities: list[Entity] = field(default_factory=list)
     world_encounter_id: str = ""
     energy: int = 3             # 局外精力
     
@@ -1690,6 +1691,7 @@ class GameState:
             "merchant": self.merchant.to_dict() if getattr(self, "merchant", None) else None,
             "world_state": getattr(self, "world_state", {}),
             "world_enemy_reserve": [e.to_dict() for e in getattr(self, "world_enemy_reserve", [])],
+            "world_encounter_entities": [e.to_dict() for e in getattr(self, "world_encounter_entities", [])],
             "world_encounter_id": getattr(self, "world_encounter_id", ""),
             "energy": self.energy,
             "shards": self.shards,
