@@ -201,3 +201,29 @@ def test_autonomous_units_pause_when_participating_in_active_encounter():
     world.wait("p", 1)
     assert world.actors["m"].position == before
     assert encounter.active
+
+
+def test_world_api_syncs_entity_positions_and_opens_adjacent_merchant_session(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "merchant-world.db"),
+                        save_dir=str(tmp_path), rng_seed=41)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.merchant = Entity("过路商人", "特殊角色", is_neutral=True, shards=20)
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+
+    world = WorldState.from_dict(engine.state.world_state)
+    player_id = engine.state.player.runtime_id
+    merchant_id = engine.state.merchant.runtime_id
+    world.actors[player_id].x, world.actors[player_id].y = 1, 1
+    world.actors[merchant_id].x, world.actors[merchant_id].y = 3, 1
+    world.actors[merchant_id].mode = "manual"
+    engine.state.world_state = world.to_dict()
+
+    moved = engine.execute_action("world_move", {"x": 2, "y": 1})
+    assert moved["success"], moved
+    assert (engine.state.player.world_x, engine.state.player.world_y) == (2, 1)
+    assert (engine.state.merchant.world_x, engine.state.merchant.world_y) == (3, 1)
+    assert engine.event_pool.current == "过路商人"
