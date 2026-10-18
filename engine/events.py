@@ -49,7 +49,6 @@ EVENT_NAMES = {
     "罪孽都市": ["遗落的赌局", "高利贷钱庄", "地下角斗场", "黑市军火贩", "通缉悬赏榜", "假钞印钞厂", "帮派断指酒吧"],
     "龙心谷": ["断桥余烬", "熔炉余火", "逆行者", "裂隙温泉", "追求者", "埋骨之地"],
     "乱葬岗": ["纸人冥婚", "镇尸棺材钉", "悬木红煞", "孤坟香案", "赶尸栈房", "无名将军墓", "无名冢"],
-    "沉沦海": ["潮下基地"],
 }
 
 
@@ -366,30 +365,6 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
                 "random": roll["record"], "outcome": outcome,
                 "outcome_multiplier": outcome_multiplier, "multiplier": multiplier,
                 "principal": principal, "net_delta": delta, "debt_result": debt_result}
-
-    # ---- 沉沦海·潮下基地：休整加成与药物偷窃均跨普通战斗保留，直到本轮结束 ----
-    if event_name == "潮下基地":
-        if text.startswith("救助基地"):
-            engine.state.shards -= 20
-            engine.state.event_modifiers["sunken_sea_rest_bonus_active"] = True
-            applied.extend([
-                "失去20碎片",
-                "本次沉沦海局外休整额外恢复12点，直到本轮死斗结束",
-            ])
-            return {"applied": applied, "instructions": instructions,
-                    "rest_bonus": 12, "active_until_deathmatch": True}
-        if text.startswith("盗窃药物"):
-            engine.state.shards += 20
-            _record_shards_peak()
-            engine.state.event_modifiers["sunken_sea_extra_tide_zombie"] = True
-            applied.extend([
-                "获得20碎片",
-                "本次沉沦海每场战斗额外加入1只潮尸，直到本轮结束",
-            ])
-            return {"applied": applied, "instructions": instructions,
-                    "extra_monster": "潮尸", "per_battle": True}
-        if text.startswith("离开基地"):
-            return {"applied": ["离开潮下基地"], "instructions": instructions}
 
     # ---- 过路商人：买入/卖出遗物，价格必须事前确认 ----
     if event_name == "过路商人" and text.startswith("遗物交易"):
