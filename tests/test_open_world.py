@@ -557,11 +557,13 @@ def test_ai_state_projection_hides_unseen_entities_terrain_and_locations(tmp_pat
 
 def test_square_boundary_shrinks_outer_ring_every_ten_world_turns_and_roundtrips():
     world = WorldState(clock=WorldClock(turn=9), map=_open_map())
-    world.add_actor(WorldActorState("p", "玩家", "轮回者", 1, 1, faction="player"))
+    world.add_actor(WorldActorState("p", "玩家", "player", 1, 1,
+                                    faction="player", mode="manual"))
     world.map.add_location("edge-event", {
         "kind": "event", "name": "边界事件", "x": 0, "y": 1, "active": True
     })
-    world.add_actor(WorldActorState("edge", "边缘单位", "轮回者", 0, 1, faction="enemy"))
+    world.add_actor(WorldActorState("edge", "边缘单位", "reincarnator", 0, 1,
+                                    faction="enemy", mode="manual"))
 
     # 第10回合结算后，方形地图最外一圈变为不可通行区域。
     result = world.wait("p", 1)
