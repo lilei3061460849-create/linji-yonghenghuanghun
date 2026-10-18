@@ -351,6 +351,20 @@ class WorldState:
     def _run_autonomous_units(self) -> list[dict[str, Any]]:
         """推进当前世界回合的NPC行动；每个单位只使用自己的可见信息。"""
         generated: list[dict[str, Any]] = []
+        # 临时同盟按世界回合到期；即使一次等待跨过多个回合，也不会额外多持续。
+        for actor in self.actors.values():
+            alliance = next((item for item in actor.memory
+                             if item.get("kind") == "temporary_alliance"
+                             and not item.get("expired")), None)
+            if alliance is not None and self.clock.turn >= int(alliance.get("expires_turn", 0)):
+                actor.kind = str(alliance.get("original_kind", "enemy"))
+                actor.faction = str(alliance.get("original_faction", "enemy"))
+                actor.owner_actor_id = ""
+                actor.behavior = "explore"
+                actor.mode = "autonomous"
+                alliance["expired"] = True
+                self.record("temporary_alliance_expired", actor.actor_id,
+                            name=actor.name, expired_turn=self.clock.turn)
         # 一旦玩家进入遭遇，世界行动立即中断，不能让同一回合继续偷跑其他NPC。
         player_ids = {actor.actor_id for actor in self.actors.values()
                       if actor.kind == "player" and actor.alive}
