@@ -650,7 +650,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         _pay_numeric("枯竭", 1)
         engine.state.resonance[resonance_type] = engine.state.resonance.get(resonance_type, 0) + 1
         return {"applied": ["枯竭1", f"获得{resonance_type}残韵"], "instructions": []}
-    if event_name == "手术" and text.startswith("强制移植"):
+    if event_name in {"手术", "恶魔医务室"} and text.startswith("强制移植"):
         refs = {f"friend:{i}": entity for i, entity in enumerate(engine.state.friends) if entity.is_alive}
         refs.update({f"employee:{i}": entity for i, entity in enumerate(engine.state.employees) if entity.is_alive})
         target = refs.get(params.get("target_ref"))
@@ -666,7 +666,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         target._transplant_rounds_unchanged = 0
         return {"applied": [f"{target.name}被移植{roll['selected']}1"], "instructions": [],
                 "random": roll["record"]}
-    if event_name == "手术" and text.startswith("抽取灵魂"):
+    if event_name in {"手术", "恶魔医务室"} and text.startswith("抽取灵魂"):
         refs = {f"friend:{i}": entity for i, entity in enumerate(engine.state.friends) if entity.is_alive}
         refs.update({f"employee:{i}": entity for i, entity in enumerate(engine.state.employees) if entity.is_alive})
         target = refs.get(params.get("target_ref"))
