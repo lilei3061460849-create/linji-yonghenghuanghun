@@ -18,6 +18,10 @@ on:
       - sim/gen_rules.py
       - sim/gen_ai_context.py
 
+concurrency:
+  group: regenerate-derived-docs-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
