@@ -269,8 +269,17 @@ class WorldState:
     def _run_autonomous_units(self) -> list[dict[str, Any]]:
         """推进当前世界回合的NPC行动；每个单位只使用自己的可见信息。"""
         generated: list[dict[str, Any]] = []
+        # 一旦玩家进入遭遇，世界行动立即中断，不能让同一回合继续偷跑其他NPC。
+        player_ids = {actor.actor_id for actor in self.actors.values()
+                      if actor.kind == "player" and actor.alive}
+        if any(encounter.active and player_ids.intersection(encounter.participants)
+               for encounter in self.encounters.values()):
+            return generated
         # 先登记已经相邻的敌对关系，遭遇中的单位不会再被NPC调度移动。
         self.detect_adjacent_encounters()
+        if any(encounter.active and player_ids.intersection(encounter.participants)
+               for encounter in self.encounters.values()):
+            return generated
         for actor_id in sorted(self.actors):
             actor = self.actors[actor_id]
             if not actor.alive or actor.kind == "player" or actor.mode != "autonomous":
@@ -309,6 +318,9 @@ class WorldState:
             created = self.detect_adjacent_encounters(actor_id)
             generated.extend({"type": "encounter_started", "encounter_id": eid}
                              for eid in created)
+            if any(encounter.active and player_ids.intersection(encounter.participants)
+                   for encounter in self.encounters.values()):
+                break
         return generated
 
     @staticmethod
@@ -372,10 +384,16 @@ class WorldState:
         self._living_actor(actor_id)
         if not isinstance(turns, int) or isinstance(turns, bool) or turns < 1:
             raise ValueError("等待回合数必须是正整数")
+        if any(encounter.active and actor_id in encounter.participants
+               for encounter in self.encounters.values()):
+            raise ValueError("当前处于遭遇中，不能直接等待世界时间")
         for _ in range(turns):
             self.clock.advance(1)
             self.record("world_waited", actor_id, turns=1)
             self._run_autonomous_units()
+            if any(encounter.active and actor_id in encounter.participants
+                   for encounter in self.encounters.values()):
+                break
         return self.clock.turn
 
     def start_encounter(self, participant_ids: list[str], location: Coord) -> EncounterState:
