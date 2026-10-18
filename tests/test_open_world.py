@@ -1732,3 +1732,21 @@ def test_npc_merchant_completes_at_most_one_trade_per_world_turn(tmp_path):
     # NPC交易优先级由地图位置决定，不受随机runtime_id影响。
     assert first.shards == 10
     assert second.shards == 20
+
+
+def test_autonomous_npc_order_is_stable_when_runtime_ids_change():
+    def make_world(alpha_id, beta_id):
+        world = WorldState.create(width=12, height=12, seed=77)
+        world.map = _open_map(12, 12)
+        world.add_actor(WorldActorState(
+            "player", "玩家", "player", 0, 0, faction="player", mode="manual"))
+        world.add_actor(WorldActorState(
+            alpha_id, "甲", "enemy", 7, 7, faction="enemy", mode="autonomous"))
+        world.add_actor(WorldActorState(
+            beta_id, "乙", "enemy", 9, 9, faction="enemy", mode="autonomous"))
+        world._run_autonomous_units()
+        return {actor.name: actor.position for actor in world.actors.values()}
+
+    first = make_world("z-alpha", "a-beta")
+    second = make_world("a-alpha", "z-beta")
+    assert first == second
