@@ -1118,6 +1118,8 @@ def test_world_status_exposes_boundary_and_final_search_without_revealing_hidden
     assert result["boundary"]["shape"] == "square"
     assert result["boundary"]["next_shrink_turn"] == 10
     assert result["final_duel"]["search_active"] is True
+    assert result["final_duel"]["rally_point"] == [3, 3]
+    assert "地图中心" in result["final_duel"]["instruction"]
     assert "final_duel_finalists" not in result
     assert [5, 5] not in [actor["position"] for actor in result["visible_actors"]]
 
