@@ -455,7 +455,7 @@ class GameEngine:
         if getattr(self.state, "world_state", {}):
             # 开放世界中不再提供独立「探索」菜单；事件由地图地点触发。
             actions = [action for action in actions
-                       if action.get("params_schema", {}).get("sub_action") != "探索"]
+                       if action.get("params_schema", {}).get("sub_action") not in {"探索", "附煞"}]
         if not getattr(self.state, "world_state", {}):
             actions.append({"action_type": "world_initialize",
                             "params_schema": {"width": "integer (default 21)", "height": "integer (default 21)"},
@@ -1816,21 +1816,115 @@ class GameEngine:
                            "attack_power": doctor.attack_power}}
 
     def _action_pre_battle(self, params: dict) -> dict:
-        """局外阶段行动"""
+        """局外行动入口。开放世界中，耗时行动先推进世界，再结算收益。"""
+        if getattr(self.state, "world_state", {}):
+            return self._action_timed_world_pre_battle(params)
+        return self._execute_pre_battle_immediate(params, world_mode=False)
+
+    def _action_timed_world_pre_battle(self, params: dict) -> dict:
+        action = params.get("sub_action", "")
+        durations = {
+            "休整": lambda p: p.get("tier", 1),
+            "修行": lambda p: p.get("tier", 1),
+            "学习": lambda p: 3,
+            "共鸣": lambda p: 1,
+            "维修": lambda p: 1,
+            "雇佣": lambda p: 1,
+            "炼心": lambda p: 1,
+        }
+        if action == "探索":
+            return {"success": False, "error": "开放世界已删除独立探索行动；请移动到地图地点"}
+        if action == "附煞":
+            return {"success": False, "error": "附煞已删除，待造生/造物系统接替；当前不能使用旧行动"}
+        if action not in durations:
+            # 献祭等尚未裁定为耗时的条件性操作暂时保留即时结算。
+            return self._execute_pre_battle_immediate(params, world_mode=True)
+
+        try:
+            world = self._world_from_state()
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+        player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+        if player_id is None:
+            return {"success": False, "error": "地图上找不到轮回者单位"}
+        if any(encounter.active and player_id in encounter.participants
+               for encounter in world.encounters.values()):
+            return {"success": False, "error": "正在遭遇中，不能开始耗时行动；应先处理遭遇"}
+
+        # 在隔离快照里先执行一次旧结算器作参数/资源预检；回滚状态与随机源，不产生真实收益。
+        state_before = copy.deepcopy(self.state)
+        combat_runtime_before = self._snapshot_combat_runtime()
+        dice_before = copy.deepcopy(self.dice)
+        event_pool_before = (set(self.event_pool.triggered), self.event_pool.current)
+        interrupts_before = copy.deepcopy(self._pending_interrupts)
+        try:
+            preview = self._execute_pre_battle_immediate(dict(params), world_mode=True)
+        finally:
+            self._restore_state_in_place(state_before)
+            self.combat.state = self.state
+            self._restore_combat_runtime(combat_runtime_before)
+            self.dice = dice_before
+            self.combat.dice = self.dice
+            self.event_pool.triggered, self.event_pool.current = event_pool_before
+            self._pending_interrupts = interrupts_before
+        if not preview.get("success", False):
+            return preview
+
+        duration = durations[action](params)
+        if not isinstance(duration, int) or isinstance(duration, bool) or duration < 1:
+            return {"success": False, "error": f"【{action}】耗时档位必须是正整数"}
+        start_turn = world.clock.turn
+        world.record("world_action_started", player_id, action=action, duration=duration)
+        world.wait(player_id, duration)
+        elapsed = world.clock.turn - start_turn
+        active_encounter = next((encounter for encounter in world.encounters.values()
+                                 if encounter.active and player_id in encounter.participants), None)
+        self._sync_world_entity_positions(world)
+        if active_encounter is not None:
+            world.record("world_action_interrupted", player_id, action=action,
+                         elapsed_turns=elapsed, encounter_id=active_encounter.encounter_id)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_action_interrupted",
+                    "result": {"sub_action": action, "elapsed_turns": elapsed,
+                               "required_turns": duration,
+                               "encounter_id": active_encounter.encounter_id,
+                               "reward_applied": False},
+                    "instruction": "行动被遭遇打断，未结算本次收益；请先处理地图遭遇"}
+
+        result = self._execute_pre_battle_immediate(dict(params), world_mode=True)
+        if not result.get("success", False):
+            world.record("world_action_interrupted", player_id, action=action,
+                         elapsed_turns=elapsed, reason=result.get("error", "completion_failed"))
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_action_interrupted",
+                    "result": {"sub_action": action, "elapsed_turns": elapsed,
+                               "required_turns": duration, "reward_applied": False,
+                               "completion_error": result.get("error", "")}}
+        world.record("world_action_completed", player_id, action=action,
+                     elapsed_turns=elapsed)
+        self._open_adjacent_merchant_session(world)
+        self._sync_world_entity_positions(world)
+        self.state.world_state = world.to_dict()
+        result["world_time"] = {"elapsed_turns": elapsed, "world_turn": world.clock.turn}
+        return result
+
+    def _execute_pre_battle_immediate(self, params: dict, *, world_mode: bool) -> dict:
+        """旧局外行动结算器；world_mode=True时复用效果但不再消耗旧精力。"""
         action = params.get("sub_action", "")
 
-        if self.state.energy <= 0:
-            return {
-                "success": False,
-                "error": "精力已耗尽",
-                "instruction": "精力耗尽，进入战斗阶段。请调用 battle_start。"
-            }
+        if not world_mode:
+            if self.state.energy <= 0:
+                return {
+                    "success": False,
+                    "error": "精力已耗尽",
+                    "instruction": "精力耗尽，进入战斗阶段。请调用 battle_start。"
+                }
 
-        self.state.energy -= 1
-        # 战斗中发动过的炼心：下一次局外行动额外多消耗1点精力(一次性结算，用完即清零)
-        if self.state.pending_energy_penalty > 0:
-            self.state.energy -= self.state.pending_energy_penalty
-            self.state.pending_energy_penalty = 0
+            self.state.energy -= 1
+            # 旧战斗循环中的炼心精力惩罚仅适用于旧模式。
+            if self.state.pending_energy_penalty > 0:
+                self.state.energy -= self.state.pending_energy_penalty
+                self.state.pending_energy_penalty = 0
 
         result_map = {
             "休整": self._pre_battle_xiuzheng,
