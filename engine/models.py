@@ -443,7 +443,7 @@ class Entity:
             self.mana_limit = self.attack_power
         if self.speed_limit == 0 and self.attack_count > 0:
             self.speed_limit = self.attack_count
-        # 每个怪物出厂自带【某人的偏爱】，覆盖工厂、手造与读档全部构造路径。
+        # 每个怪物出厂自带【痛苦的偏爱】，覆盖工厂、手造与读档全部构造路径。
         # 2026-10-13：回始获得法限等量法力与异变；是否触发迷失由角色类型决定，
         # 不由遗物决定。持有者不限于怪物，失去遗物的怪物仍免于迷失。
         if self.entity_type == "怪物" and not any(
