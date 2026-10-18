@@ -817,7 +817,7 @@ class Entity:
     def mana_cost(self, amount: int) -> int:
         """返回实际法力支出；愤怒状态与贪婪的偏爱均使正数消耗减半、向上取整。"""
         amount = max(0, int(amount))
-        if amount > 0 and (self.has_status("愤怒") or "贪婪的偏爱" in self.preferences):
+        if amount > 0 and (self.has_status("愤怒") or "贪婪的偏爱" in getattr(self, "preferences", [])):
             amount = math.ceil(amount / 2)
         return amount
 
@@ -933,7 +933,7 @@ class Entity:
             "world_x": self.world_x,
             "world_y": self.world_y,
             "is_neutral": self.is_neutral,
-            "preferences": list(self.preferences),
+            "preferences": list(getattr(self, "preferences", [])),
             "blood_limit": self.blood_limit,
             "current_hp": self.current_hp,
             "mana_limit": self.mana_limit,
