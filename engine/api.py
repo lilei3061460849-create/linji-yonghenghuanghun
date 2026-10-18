@@ -2370,7 +2370,7 @@ class GameEngine:
             ]
             next_shrink_turn = None
             if (world.shrink_interval > 0
-                    and (world.shrink_count + 1) * 2 < min(world.map.width, world.map.height) - 1):
+                    and world.shrink_count * 2 < min(world.map.width, world.map.height) - 1):
                 next_shrink_turn = (world.shrink_count + 1) * world.shrink_interval
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_status", "result": {
