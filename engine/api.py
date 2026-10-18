@@ -452,6 +452,19 @@ class GameEngine:
             # 保证 get_available_actions 的输出仍可原样执行（开发规则 13）。
             actions = [a for a in actions
                        if a.get("params_schema", {}).get("sub_action") != "探索"]
+        if not getattr(self.state, "world_state", {}):
+            actions.append({"action_type": "world_initialize",
+                            "params_schema": {"width": "integer (default 21)", "height": "integer (default 21)"},
+                            "note": "初始化开放世界地图；地图种子由引擎骰子产生并记录"})
+        else:
+            actions.extend([
+                {"action_type": "world_status", "params_schema": {}},
+                {"action_type": "world_vision", "params_schema": {"actor_id": "optional; defaults to player"}},
+                {"action_type": "world_move", "params_schema": {"x": "integer", "y": "integer",
+                                                                  "actor_id": "optional; defaults to player"}},
+                {"action_type": "world_wait", "params_schema": {"turns": "positive integer (default 1)",
+                                                                  "actor_id": "optional; defaults to player"}},
+            ])
         return {"phase": GamePhase.PRE_BATTLE.value, "energy": self.state.energy, "actions": actions}
 
     def _get_region_actions(self) -> list[dict]:
