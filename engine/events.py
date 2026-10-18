@@ -148,8 +148,9 @@ class EventPool:
         return pool
 
     def resolve(self, name: str):
-        """标记事件已触发"""
-        self.triggered.add(name)
+        """标记事件已触发。祭坛是可反复抵达的投资地点，每次访问单独结算一次。"""
+        if name != "祭坛":
+            self.triggered.add(name)
         if self.current == name:
             self.current = None
 
