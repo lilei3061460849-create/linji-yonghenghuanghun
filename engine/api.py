@@ -2636,13 +2636,14 @@ class GameEngine:
                             "result": {"choice": "trade", "target": target.name,
                                        "accepted": False, "completed": False,
                                        "reason": "对方认为报价不划算；没有资产转移"}}
-                # 所有检查完成后才原子转移资产。
-                self.state.shards -= offer_shards
-                target_entity.shards += offer_shards
-                target_entity.shards_peak = max(target_entity.shards_peak, target_entity.shards)
-                self.state.shards += request_shards
-                self.state.shards_peak = max(self.state.shards_peak, self.state.shards)
-                target_entity.shards -= request_shards
+                # 先计算交易后的净余额，再一次性提交。不能把交易过程中的临时中间值
+                # 记为历史峰值，否则对方先收到、再付出的同一笔碎片会凭空抬高峰值。
+                player_final_shards = self.state.shards - offer_shards + request_shards
+                target_final_shards = target_entity.shards + offer_shards - request_shards
+                self.state.shards = player_final_shards
+                target_entity.shards = target_final_shards
+                self.state.shards_peak = max(self.state.shards_peak, player_final_shards)
+                target_entity.shards_peak = max(target_entity.shards_peak, target_final_shards)
                 if player_relic is not None:
                     self.state.relics.remove(player_relic)
                     target_entity.relics.append(player_relic)
