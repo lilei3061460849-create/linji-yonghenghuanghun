@@ -106,3 +106,41 @@ def test_definition_validation_rejects_duplicate_objectives_and_invalid_rewards(
     broken = [dict(definitions[0], rewards={"fragments_from_nothing": -3})]
     with pytest.raises(QuestError, match="未支持"):
         validate_definitions(broken)
+
+
+def test_game_engine_drives_quest_progress_only_from_real_world_actions(tmp_path, monkeypatch):
+    from engine.api import GameEngine
+    from engine.models import Entity
+    import engine.api as api_module
+
+    definitions = [{
+        "id": "visit_old_crossing",
+        "title": "测试：抵达旧路口",
+        "objectives": [{
+            "id": "visit",
+            "event": "actor_moved",
+            "match": {"actor_id": "$player", "details.destination": [2, 1]},
+        }],
+        "rewards": {"shards": 7, "attribute_points": 2},
+    }]
+    monkeypatch.setattr(api_module, "load_quest_definitions", lambda: definitions)
+    engine = GameEngine(db_path=str(tmp_path / "quest.db"),
+                        save_dir=str(tmp_path), rng_seed=31)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    accepted = engine.execute_action("quest_accept", {"quest_id": "visit_old_crossing"})
+    assert accepted["success"], accepted
+    assert engine.state.quest_state["instances"]["visit_old_crossing"]["status"] == "active"
+
+    # 没有移动时不能由任务接口直接提交目标完成。
+    assert engine.execute_action("quest_claim", {"quest_id": "visit_old_crossing"})["success"] is False
+    moved = engine.execute_action("world_move", {"x": 2, "y": 1})
+    assert moved["success"], moved
+    assert engine.state.quest_state["instances"]["visit_old_crossing"]["status"] == "completed"
+
+    claimed = engine.execute_action("quest_claim", {"quest_id": "visit_old_crossing"})
+    assert claimed["success"], claimed
+    assert engine.state.shards == 27
+    assert engine.state.attribute_points == 2
+    assert engine.execute_action("quest_claim", {"quest_id": "visit_old_crossing"})["success"] is False
