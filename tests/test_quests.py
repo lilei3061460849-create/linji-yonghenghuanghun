@@ -144,3 +144,32 @@ def test_game_engine_drives_quest_progress_only_from_real_world_actions(tmp_path
     assert engine.state.shards == 27
     assert engine.state.attribute_points == 2
     assert engine.execute_action("quest_claim", {"quest_id": "visit_old_crossing"})["success"] is False
+
+
+def test_real_combat_event_bus_fact_advances_quest(tmp_path, monkeypatch):
+    from engine.api import GameEngine
+    from engine.combat_events import CombatEvent, CombatEventType
+    from engine.models import Entity
+    import engine.api as api_module
+
+    definitions = [{
+        "id": "defeat_named_monster",
+        "title": "测试：击败指定怪物",
+        "objectives": [{
+            "id": "kill",
+            "event": "entity_died",
+            "match": {"details.target_name": "M"},
+        }],
+        "rewards": {"shards": 1},
+    }]
+    monkeypatch.setattr(api_module, "load_quest_definitions", lambda: definitions)
+    engine = GameEngine(db_path=str(tmp_path / "combat-quest.db"),
+                        save_dir=str(tmp_path), rng_seed=41)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.enemies = [Entity("M", "怪物", blood_limit=10, current_hp=10)]
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("quest_accept", {"quest_id": "defeat_named_monster"})["success"]
+    fact = CombatEvent(event_type=CombatEventType.ENTITY_DIED,
+                       actor_name="P", target_name="M", data={"cause": "damage"})
+    engine._record_combat_quest_facts([fact])
+    assert engine.state.quest_state["instances"]["defeat_named_monster"]["status"] == "completed"
