@@ -1003,6 +1003,8 @@ class GameState:
     merchant: Optional[Entity] = None
     # 开放世界状态采用纯dict快照，避免地图/行动模块与战斗实体模型形成循环依赖。
     world_state: dict = field(default_factory=dict)
+    # 开放世界任务进度与任务事实日志，随存档往返。
+    quest_state: dict = field(default_factory=dict)
     energy: int = 3             # 局外精力
     
     # 轮回者
@@ -1686,6 +1688,7 @@ class GameState:
             "current_region": self.current_region,
             "merchant": self.merchant.to_dict() if getattr(self, "merchant", None) else None,
             "world_state": getattr(self, "world_state", {}),
+            "quest_state": getattr(self, "quest_state", {}),
             "energy": self.energy,
             "shards": self.shards,
             "shards_peak": self.shards_peak,
