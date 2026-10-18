@@ -551,3 +551,27 @@ def test_ai_state_projection_hides_unseen_entities_terrain_and_locations(tmp_pat
     assert "hidden_site" not in observed["world_state"]["map"]["locations"]
     # 投影只能改变返回副本，不得删除真实地图里的隐藏单位。
     assert hidden.runtime_id in engine.state.world_state["actors"]
+
+
+
+def test_square_boundary_shrinks_outer_ring_every_ten_world_turns_and_roundtrips():
+    world = WorldState(clock=WorldClock(turn=9), map=_open_map())
+    world.add_actor(WorldActorState("p", "玩家", "轮回者", 1, 1, faction="player"))
+    world.map.add_location("edge-event", {
+        "kind": "event", "name": "边界事件", "x": 0, "y": 1, "active": True
+    })
+    world.add_actor(WorldActorState("edge", "边缘单位", "轮回者", 0, 1, faction="enemy"))
+
+    # 第10回合结算后，方形地图最外一圈变为不可通行区域。
+    result = world.wait("p", 1)
+    assert result == 10
+    assert world.shrink_count == 1
+    assert world.map.terrain_at((0, 1)) == "void"
+    assert world.map.terrain_at((1, 1)) == "floor"
+    assert not world.map.is_passable((0, 1))
+    assert world.map.locations["edge-event"]["active"] is False
+    assert any(event["type"] == "actor_caught_by_shrinking_boundary"
+               for event in world.event_log)
+    restored = WorldState.from_dict(world.to_dict())
+    assert restored.shrink_count == 1
+    assert restored.map.terrain_at((0, 1)) == "void"
