@@ -1610,9 +1610,10 @@ class GameEngine:
             spawned_monsters = []
             if not self.state.enemies:
                 # 开放世界把当前副本怪物池中的实体生成到地图；不是每次遭遇才临时抽怪。
-                from .monsters import make_monster_entity
+                from .monsters import make_monster_entity, assign_monster_preferences
                 for monster_def in self._monster_pool_for_battle():
                     monster = make_monster_entity(monster_def)
+                    assign_monster_preferences(monster, self._current_tier(), self.dice)
                     self.combat.init_monster_shards(monster)
                     self.state.enemies.append(monster)
                     spawned_monsters.append(monster)
@@ -5694,7 +5695,8 @@ class GameEngine:
         配方口径唯一事实源见 `engine/monsters.py::roll_spawn_plan`。
         战斗背景：文档"战斗背景：（名称与影响）"仅为战斗推演格式里的占位提示，
         正文未定义任何具体名称与机制效果，故本引擎不做机制化处理，留给叙事层自由发挥。"""
-        from .monsters import make_monster_entity, roll_spawn_plan, scale_monster_def_for_endless
+        from .monsters import (make_monster_entity, roll_spawn_plan,
+                               scale_monster_def_for_endless, assign_monster_preferences)
         relic_choices = params.get("relic_choices", {})
         # 先完成全部静态校验，再抽怪；非法遗物参数不得消耗正式随机源。
         self.combat.validate_battle_start_relic_choices(relic_choices)
@@ -5786,6 +5788,7 @@ class GameEngine:
             for i, monster_def in enumerate(drawn_defs):
                 if i < first_count:
                     m = make_monster_entity(monster_def)
+                    assign_monster_preferences(m, self._current_tier(), self.dice)
                     m.spawned_round = 1
                     self.combat.init_monster_shards(m)
                     self.state.enemies.append(m)
@@ -5805,6 +5808,7 @@ class GameEngine:
                 context="通缉悬赏榜额外帮派怪物",
             )
             bonus = make_monster_entity(scale_monster_def_for_endless(roll["selected"], endless_cycle))
+            assign_monster_preferences(bonus, self._current_tier(), self.dice)
             self.combat.init_monster_shards(bonus)
             self.state.enemies.append(bonus)
             drawn_names.append(bonus.name + "(悬赏额外)")
@@ -5834,6 +5838,7 @@ class GameEngine:
             self.state.forced_monsters_next_battle = []
         for fm in forced:
             m = make_monster_entity(scale_monster_def_for_endless(fm, endless_cycle))
+            assign_monster_preferences(m, self._current_tier(), self.dice)
             self.combat.init_monster_shards(m)
             self.state.enemies.append(m)
             drawn_names.append(fm["name"] + "(额外出现)")
