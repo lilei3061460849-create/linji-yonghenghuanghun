@@ -3139,26 +3139,20 @@ class GameEngine:
         return {"success": True, "action": "自定义法术", "result": result}
 
     def _pre_battle_xuexi(self, params: dict) -> dict:
-        """学习：仅用于转化道纹1/2种对应0/10碎片。
-
-        法术本身不再需要【学习】：持全部所需道纹即可
-        直接使用，战斗中也可随时自创，法术统一从战斗中的 `define_spell` 入口定义。
-        """
+        """学习取得普通道纹；可直接分配给角色，也可暂存等待未来朋友。"""
         player = self.state.player
         if not player:
             self.state.energy += 1
             return {"success": False, "error": "没有玩家"}
         sub = params.get("sub", "daowen")
-
         tier = params.get("tier", 1)
         if not isinstance(tier, int) or isinstance(tier, bool):
             self.state.energy += 1
             return {"success": False, "error": "学习tier必须是整数"}
-        if sub in ("daowen", "转化道纹"):
-            cost_map = {1: 0, 2: 10}
-        else:
+        if sub not in ("daowen", "转化道纹"):
             self.state.energy += 1
             return {"success": False, "error": "学习sub必须是daowen"}
+        cost_map = {1: 0, 2: 10}
         if tier not in cost_map:
             self.state.energy += 1
             return {"success": False, "error": "学习道纹档位必须是1/2"}
@@ -3170,24 +3164,40 @@ class GameEngine:
                 or any(not isinstance(name, str) or not name for name in names)):
             self.state.energy += 1
             return {"success": False, "error": f"学习{tier}档必须用names提交{tier}个不同名称"}
-        # 2026-10-12 用户令：30X[血限] = 允许拥有 X 种道纹和 X 种遗物。
-        # 放在所有扣费与逐名校验之前：容量是结构性前提，不足时碎片一分不收、精力退回。
-        new_names = [n for n in names if n not in player.dao_wen]
-        owned = len(player.dao_wen)
-        cap = player.daowen_capacity
-        if owned + len(new_names) > cap:
-            self.state.energy += 1
-            return {"success": False,
-                    "error": (f"道纹种类超出承载：[血限]{player.blood_limit} 只允许{cap}种"
-                              f"（30[血限]=1种），已持有{owned}种，本次新增{len(new_names)}种")}
-        if cost > 0 and self.state.shards < cost:  # 负债口径：0费学习不属于支出
+
+        recipient = str(params.get("recipient", "player") or "player")
+        reserve = recipient in {"pending", "unassigned", "reserve", "暂存"}
+        if reserve:
+            target_entity = None
+            owned_names: set[str] = set()
+            if any(name in getattr(self.state, "pending_learned_daowen", []) for name in names):
+                self.state.energy += 1
+                return {"success": False, "error": "该道纹已在待分配池中，不能重复暂存"}
+        else:
+            candidates = ([player] + self.state.friends + self.state.employees
+                          + self.state.temp_friends)
+            target_entity = next((entity for entity in candidates
+                                  if entity.is_alive and recipient in
+                                  (entity.name, entity.runtime_id)), None)
+            if target_entity is None:
+                self.state.energy += 1
+                return {"success": False,
+                        "error": f"学习道纹的接收者【{recipient}】不存在或已离场；未来朋友可先选择recipient=pending"}
+            owned_names = set(target_entity.dao_wen)
+            new_names = [name for name in names if name not in owned_names]
+            cap = target_entity.daowen_capacity
+            if len(owned_names) + len(new_names) > cap:
+                self.state.energy += 1
+                return {"success": False,
+                        "error": (f"道纹种类超出接收者承载：[{target_entity.name}血限]"
+                                  f"{target_entity.blood_limit}只允许{cap}种，已持有{len(owned_names)}种，"
+                                  f"本次新增{len(new_names)}种")}
+        if cost > 0 and self.state.shards < cost:
             self.state.energy += 1
             return {"success": False, "error": f"碎片不足，需要{cost}"}
 
         def daowen_error(name: str) -> Optional[str]:
-            # 2026-10-13：口径本体移入 gamedata.learnability_error（与【典当】发现池共用），
-            # 此处只做转发，拒绝文案逐字不变。
-            return learnability_error(name, owned=set(player.dao_wen),
+            return learnability_error(name, owned=owned_names,
                                       region=self.state.current_region,
                                       known=DaoWenEngine.list_all())
 
@@ -3195,13 +3205,21 @@ class GameEngine:
         if errors:
             self.state.energy += 1
             return {"success": False, "error": "；".join(errors)}
-        for name in names:
-            player.dao_wen[name] = DaoWenInstance(
-                DaoWen(name=name, formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
+        if reserve:
+            self.state.pending_learned_daowen.extend(names)
+            destination = "pending"
+        else:
+            for name in names:
+                target_entity.dao_wen[name] = DaoWenInstance(
+                    DaoWen(name=name, formula="", cost_type="消耗",
+                           cost_formula="X", effect_formula=""))
+            destination = target_entity.name
         self.state.shards -= cost
         return {"success": True, "action": "学习·道纹",
-                "result": {"learned": "daowen", "names": names, "shard_cost": cost,
-                           "player_daowen": list(player.dao_wen)}}
+                "result": {"learned": "daowen", "names": names, "recipient": destination,
+                           "shard_cost": cost,
+                           "pending_learned_daowen": list(getattr(self.state, "pending_learned_daowen", [])),
+                           "recipient_daowen": list(target_entity.dao_wen) if target_entity else []}}
 
     def _pre_battle_gongming(self, params: dict) -> dict:
         """共鸣：发现时随机列3件后显式选1；付费自选则直接加入。"""
