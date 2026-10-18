@@ -1819,3 +1819,32 @@ def test_world_learning_action_advances_three_turns_before_granting_daowen(tmp_p
     assert started["details"]["duration"] == 3
     assert completed["details"]["elapsed_turns"] == 3
     assert engine.state.energy == energy_before
+
+
+def test_final_duel_counts_a_reincarnator_who_became_a_friend(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "allied-finalist.db"),
+                        save_dir=str(tmp_path), rng_seed=137, autosave=False)
+    player = Entity("玩家", "轮回者", blood_limit=30, current_hp=30)
+    rival = Entity("旧盟友", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.player = player
+    engine.state.friends = [rival]
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(
+        player.runtime_id, player.name, "player", 1, 1,
+        faction="player", mode="manual"))
+    world.add_actor(WorldActorState(
+        rival.runtime_id, rival.name, "friend", 5, 5,
+        faction="friend", mode="manual", owner_actor_id=player.runtime_id))
+
+    result = engine._refresh_world_final_duel(world)
+
+    assert result["active"] is True
+    assert world.final_duel_finalists == [player.runtime_id, rival.runtime_id]
+    assert rival not in engine.state.friends
+    assert rival in engine.state.enemies
+    assert world.actors[rival.runtime_id].kind == "enemy"
+    assert world.actors[rival.runtime_id].faction == "enemy"
+    assert world.actors[rival.runtime_id].mode == "autonomous"
