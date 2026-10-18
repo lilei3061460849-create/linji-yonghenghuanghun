@@ -102,7 +102,7 @@ class _LethalEvents:
         return entity_type not in self.by_id(event_id).get("excluded_entity_types", ())
 
     def threshold(self, event_id: str) -> int:
-        """固定阈值（癌变是倍率制，走 threshold_multiplier）。"""
+        """读取规则源中的阈值常量；还债将其作为动态公式的基数（10+历史最高碎片余额）。"""
         entry = self.by_id(event_id)
         if "threshold" not in entry:
             raise KeyError(f"致死事件 {event_id} 没有固定阈值，请用 threshold_multiplier")
