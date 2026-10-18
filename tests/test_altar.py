@@ -77,6 +77,12 @@ def test_generic_event_shard_gain_updates_this_run_peak(tmp_path):
         db_path=str(tmp_path / "event-shard-peak.db"),
         save_dir=str(tmp_path / "saves"), autosave=False, rng_seed=37,
     )
+    from engine.models import Entity
+    engine.state.phase = "pre_battle"
+    engine.state.player = Entity(
+        name="测试者", entity_type="轮回者",
+        blood_limit=30, current_hp=30, mana_limit=10, current_mana=10,
+    )
     engine.state.shards = 10
     engine.state.shards_peak = 10
 
