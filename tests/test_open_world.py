@@ -1848,3 +1848,33 @@ def test_final_duel_counts_a_reincarnator_who_became_a_friend(tmp_path):
     assert world.actors[rival.runtime_id].kind == "enemy"
     assert world.actors[rival.runtime_id].faction == "enemy"
     assert world.actors[rival.runtime_id].mode == "autonomous"
+
+
+def test_final_duel_search_marks_survivor_as_departed_from_world_map(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "final-duel-exit.db"),
+                        save_dir=str(tmp_path), rng_seed=139, autosave=False)
+    player = Entity("玩家", "轮回者", blood_limit=30, current_hp=30)
+    rival = Entity("败者", "轮回者", blood_limit=30, current_hp=0)
+    engine.state.player = player
+    engine.state.enemies = [rival]
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(
+        player.runtime_id, player.name, "player", 1, 1,
+        faction="player", mode="manual", alive=True))
+    world.add_actor(WorldActorState(
+        rival.runtime_id, rival.name, "enemy", 5, 5,
+        faction="enemy", mode="autonomous", alive=False))
+    world.final_duel_search = True
+    world.final_duel_finalists = [player.runtime_id, rival.runtime_id]
+
+    result = engine._refresh_world_final_duel(world)
+
+    assert result["complete"] is True
+    assert result["winner"] == player.runtime_id
+    assert player.is_alive
+    assert world.actors[player.runtime_id].alive is False
+    assert any(event["type"] == "final_duel_winner_departed"
+               for event in world.event_log)
