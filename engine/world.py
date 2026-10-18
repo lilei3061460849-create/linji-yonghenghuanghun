@@ -548,6 +548,7 @@ class WorldState:
                 started_turn=int(v["started_turn"]),
                 active=bool(v.get("active", True)),
                 outcome=str(v.get("outcome", "")),
+                final_duel=bool(v.get("final_duel", False)),
             ) for k, v in data.get("encounters", {}).items()},
             event_log=list(data.get("event_log", [])),
             next_event_id=int(data.get("next_event_id", 1)),
