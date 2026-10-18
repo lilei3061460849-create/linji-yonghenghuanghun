@@ -4897,7 +4897,7 @@ class GameEngine:
                 self._pending_interrupts.append(interrupt)
                 return {"success": True, "action": "活性土壤等待DM确认",
                         "interrupt": interrupt.to_dict(), "uses_remaining": item.current_uses}
-            if (not isinstance(x, int) or isinstance(x, bool) or x < 1 or player.current_mana < x
+            if (not isinstance(x, int) or isinstance(x, bool) or x < 1
                     or not isinstance(panel, dict)):
                 return {"success": False, "error": "活性土壤需要合法x、足够法力和DM确认的friend面板"}
             ac, ap, hp = panel.get("attack_count"), panel.get("attack_power"), panel.get("blood_limit")
