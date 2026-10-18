@@ -282,11 +282,14 @@ class WorldState:
             event = self.record("interaction_triggered", actor_id,
                                 target_actor_id=other.actor_id, target_name=other.name,
                                 target_kind=other.kind, position=list(other.position))
+            outcomes = ["交谈", "交易", "合作", "攻击"]
+            if actor.faction == "monster" and other.kind == "merchant":
+                outcomes = ["交谈", "交易", "合作"]
             interactions.append({
                 "event_id": event["event_id"], "actor_id": actor_id,
                 "target_actor_id": other.actor_id, "target_name": other.name,
                 "target_kind": other.kind, "position": list(other.position),
-                "available_outcomes": ["交谈", "交易", "合作", "攻击"],
+                "available_outcomes": outcomes,
             })
         return interactions
 
