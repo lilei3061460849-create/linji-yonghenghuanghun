@@ -1215,3 +1215,24 @@ def test_autonomous_reincarnator_remembers_visible_resource_and_moves_toward_it(
     assert any(entry.get("kind") == "location_sighting"
                and entry.get("location_id") == "cache"
                for entry in rival.memory)
+
+
+def test_random_world_generation_keeps_all_passable_cells_connected():
+    from collections import deque
+
+    for seed in range(8):
+        world_map = WorldMap.generate(width=21, height=21, seed=seed)
+        start = (1, 1)
+        reached = {start}
+        queue = deque([start])
+        while queue:
+            current = queue.popleft()
+            for neighbor in world_map.neighbors(current):
+                if neighbor not in reached:
+                    reached.add(neighbor)
+                    queue.append(neighbor)
+        passable = {
+            (x, y) for y in range(world_map.height) for x in range(world_map.width)
+            if world_map.is_passable((x, y))
+        }
+        assert reached == passable
