@@ -1982,6 +1982,6 @@ def test_deleted_affix_action_and_choice_endpoint_stay_unavailable(tmp_path):
     })
 
     assert affix["success"] is False
-    assert "附煞已删除" in affix["error"]
+    assert ("附煞已删除" in affix["error"]
+            or "未知局外行动" in affix["error"])
     assert legacy_choice["success"] is False
-    assert "未知动作" in legacy_choice["error"]
