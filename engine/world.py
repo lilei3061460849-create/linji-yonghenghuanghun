@@ -256,6 +256,9 @@ class WorldState:
 
     def move_actor(self, actor_id: str, destination: Coord) -> dict[str, Any]:
         actor = self._living_actor(actor_id)
+        if any(encounter.active and actor_id in encounter.participants
+               for encounter in self.encounters.values()):
+            raise ValueError("当前处于遭遇中，不能直接移动；请先处理遭遇")
         dx = abs(destination[0] - actor.x)
         dy = abs(destination[1] - actor.y)
         if dx + dy != 1:
