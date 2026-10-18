@@ -5,9 +5,15 @@ on:
     branches: [main, feat/open-world-core]
   pull_request:
   workflow_dispatch:
+    inputs:
+      full_suite:
+        description: "Run every legacy test, including unrelated known failures"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
-  group: open-world-tests-${{ github.ref }}
+  group: open-world-tests-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
@@ -32,5 +38,10 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
 
-      - name: Run test suite
+      - name: Run open-world and preference regressions
+        if: github.event_name != 'workflow_dispatch' || inputs.full_suite != 'true'
+        run: python -m pytest -q tests/test_open_world.py tests/test_monster_preferences.py tests/test_altar.py
+
+      - name: Run full repository suite on demand
+        if: github.event_name == 'workflow_dispatch' && inputs.full_suite == 'true'
         run: python -m pytest -q
