@@ -269,3 +269,47 @@ def test_arriving_at_event_location_opens_event_instead_of_exploration_action(tm
     assert engine.event_pool.current == event_name
     location = engine.state.world_state["map"]["locations"]["test_location"]
     assert location["discovered"] is True
+
+
+def test_cultivation_consumes_world_time_without_legacy_energy_cost(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "timed-action.db"),
+                        save_dir=str(tmp_path), rng_seed=53)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=20)
+    engine.state.phase = "pre_battle"
+    energy_before = engine.state.energy
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+
+    result = engine.execute_action("pre_battle_action", {
+        "sub_action": "修行", "tier": 1,
+        "allocations": {"blood_points": 1, "speed_points": 0, "mana_points": 0},
+    })
+    assert result["success"], result
+    assert engine.state.world_state["clock"]["turn"] == 1
+    assert engine.state.energy == energy_before
+    assert any(event["type"] == "world_action_completed"
+               for event in engine.state.world_state["event_log"])
+
+
+def test_timed_action_is_interrupted_by_hostile_encounter_before_reward(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "interrupted-action.db"),
+                        save_dir=str(tmp_path), rng_seed=59)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=20)
+    engine.state.enemies = [Entity("M", "怪物", blood_limit=10, current_hp=10)]
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    result = engine.execute_action("pre_battle_action", {
+        "sub_action": "修行", "tier": 1,
+        "allocations": {"blood_points": 1, "speed_points": 0, "mana_points": 0},
+    })
+    assert result["success"], result
+    assert result["action"] == "world_action_interrupted"
+    assert result["result"]["reward_applied"] is False
+    assert engine.state.attribute_points == 0
+    assert any(encounter["active"] for encounter in WorldState.from_dict(
+        engine.state.world_state).encounters.values())
