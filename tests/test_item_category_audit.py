@@ -219,7 +219,7 @@ def test_pool_relic_text_snapshot():
         assert not re.search(r"持续\d*X", fx), f"{n}：遗物不得有持续X"
         assert "自选" not in fx, f"{n}：遗物数值不得自选"
     with_ke = {n for n, fx in defs if "可" in fx}
-    assert with_ke == {"同魂笔", "血契"}, with_ke
+    assert with_ke == {"万魂幡", "同魂笔", "血契"}, with_ke
 
 
 def test_pool_relics_all_in_index():
