@@ -1462,18 +1462,18 @@ def test_npc_pathfinding_does_not_use_unseen_terrain():
 
 def test_trade_does_not_count_temporary_transfer_balance_as_shard_peak(tmp_path):
     from engine.api import GameEngine
-    from engine.models import Entity
+    from engine.models import Entity, GameState
 
     engine = GameEngine(db_path=str(tmp_path / "world-trade-peak.db"),
                         save_dir=str(tmp_path), rng_seed=149, autosave=False)
+    engine.state = GameState(shards=10, shards_peak=10)
+    engine.combat.state = engine.state
     player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
     rival = Entity("R", "轮回者", blood_limit=30, current_hp=30, shards=10)
     rival.shards_peak = 10
     engine.state.player = player
     engine.state.phase = "pre_battle"
     engine.state.enemies = [rival]
-    engine.state.shards = 10
-    engine.state.shards_peak = 10
 
     world = WorldState(clock=WorldClock(), map=_open_map())
     world.add_actor(WorldActorState(player.runtime_id, "P", "player", 1, 1,
