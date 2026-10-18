@@ -27,7 +27,7 @@ def test_world_clock_advances_only_by_valid_nonnegative_integer():
 def test_movement_is_adjacent_passable_and_time_costs_one_turn():
     world = WorldState.create(width=7, height=7, seed=1)
     world.map = _open_map()
-    world.add_actor(WorldActorState("p", "玩家", "轮回者", 1, 1, faction="player"))
+    world.add_actor(WorldActorState("p", "玩家", "player", 1, 1, faction="player", mode="manual"))
     result = world.move_actor("p", (2, 1))
     assert result["world_turn"] == 1
     assert world.actors["p"].position == (2, 1)
@@ -85,7 +85,7 @@ def test_pathfinding_routes_around_walls_and_detects_unreachable_goal():
 def test_world_state_roundtrip_preserves_clock_map_actors_and_fact_log():
     world = WorldState(clock=__import__("engine.world", fromlist=["WorldClock"]).WorldClock(),
                        map=_open_map())
-    world.add_actor(WorldActorState("p", "玩家", "轮回者", 1, 1))
+    world.add_actor(WorldActorState("p", "玩家", "player", 1, 1, mode="manual"))
     world.move_actor("p", (2, 1))
     restored = WorldState.from_dict(world.to_dict())
     assert restored.clock.turn == 1
@@ -335,7 +335,7 @@ def test_timed_action_is_interrupted_by_hostile_encounter_before_reward(tmp_path
     assert result["action"] == "world_action_interrupted"
     assert result["result"]["reward_applied"] is False
     assert engine.state.attribute_points == 0
-    assert any(encounter["active"] for encounter in WorldState.from_dict(
+    assert any(encounter.active for encounter in WorldState.from_dict(
         engine.state.world_state).encounters.values())
 
 
@@ -476,20 +476,21 @@ def test_world_initialization_spawns_current_dungeon_monster_population_and_even
         assert (actor.x, actor.y) != (1, 1)
     positions = [actor.position for actor in world.actors.values() if actor.alive]
     assert len(positions) == len(set(positions))
-    event_names = {location["event_name"] for location in world.map.locations.values()}
+    event_names = {location["event_name"] for location in world.map.locations.values()
+                   if location.get("kind") == "event"}
     assert event_names <= set(engine.event_pool.build_pool("乱葬岗"))
     assert "恶魔医务室" not in event_names
 
 
 def test_resource_location_is_collected_once_on_arrival_and_updates_shard_peak(tmp_path):
     from engine.api import GameEngine
-    from engine.models import Entity
+    from engine.models import Entity, GameState
 
     engine = GameEngine(db_path=str(tmp_path / "world-resource.db"),
                         save_dir=str(tmp_path), rng_seed=79)
+    engine.state = GameState(shards=4, shards_peak=8)
+    engine.combat.state = engine.state
     engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30, shards=4)
-    engine.state.shards = 4
-    engine.state.shards_peak = 8
     engine.state.phase = "pre_battle"
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
 
