@@ -756,8 +756,10 @@ def test_creation_builds_one_map_being_then_cultivates_unique_preferences(tmp_pa
     second = engine.execute_action("pre_battle_action", {"sub_action": "造生"})
     assert second["success"], second
     assert engine.state.shards == 65
-    assert len([friend for friend in engine.state.friends
-                if getattr(friend, "is_created_being", False)]) == 1
+    beings = [friend for friend in engine.state.friends
+              if getattr(friend, "is_created_being", False)]
+    assert len(beings) == 1
+    being = beings[0]
     assert len(being.preferences) == 2
     assert len(set(being.preferences)) == 2
 
