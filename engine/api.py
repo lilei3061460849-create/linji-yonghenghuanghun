@@ -1688,6 +1688,74 @@ class GameEngine:
                     break
         return pickups
 
+    def _resolve_world_hiring_signals(self, world: WorldState) -> list[dict]:
+        """结算到期招募信号；响应者抵达信号地点后才真正创建员工。"""
+        resolved = []
+        for signal in world.hiring_signals:
+            if signal.get("status") != "pending" or world.clock.turn < int(signal.get("arrival_turn", 0)):
+                continue
+            params = dict(signal.get("params") or {})
+            name = str(params.get("name", ""))
+            if (self.state.is_blacklisted
+                    or any(entity.name == name for entity in self.state.employees)
+                    or not name):
+                signal["status"] = "failed"
+                signal["resolved_turn"] = world.clock.turn
+                signal["failure"] = ("已列入失信黑名单" if self.state.is_blacklisted
+                                     else "员工名称已被占用或无效")
+                world.record("hiring_signal_failed", None, signal_id=signal.get("signal_id"),
+                             name=name, reason=signal["failure"])
+                resolved.append({"signal_id": signal.get("signal_id"), "status": "failed",
+                                 "reason": signal["failure"]})
+                continue
+            # 边界可能已收缩到信号发出地点；响应者在最近的可通行格抵达。
+            requested = tuple(signal.get("position", (1, 1)))
+            if not world.map.is_passable(requested):
+                candidates = [(x, y) for y in range(world.map.height)
+                              for x in range(world.map.width)
+                              if world.map.is_passable((x, y))]
+                if not candidates:
+                    continue
+                requested = min(candidates, key=lambda pos: (
+                    abs(pos[0] - requested[0]) + abs(pos[1] - requested[1]), pos[1], pos[0]))
+            old_energy = self.state.energy
+            hire_result = self._pre_battle_guyong(params)
+            # 雇佣已改为世界时间行动，不能恢复旧精力系统的“失败退款”副作用。
+            self.state.energy = old_energy
+            if not hire_result.get("success"):
+                signal["status"] = "failed"
+                signal["resolved_turn"] = world.clock.turn
+                signal["failure"] = hire_result.get("error", "雇佣结算失败")
+                world.record("hiring_signal_failed", None, signal_id=signal.get("signal_id"),
+                             name=name, reason=signal["failure"])
+                resolved.append({"signal_id": signal.get("signal_id"), "status": "failed",
+                                 "reason": signal["failure"]})
+                continue
+            employee = next((entity for entity in self.state.employees
+                             if entity.name == name), None)
+            if employee is None:
+                signal["status"] = "failed"
+                signal["resolved_turn"] = world.clock.turn
+                signal["failure"] = "雇佣结算未生成员工实体"
+                continue
+            actor_id = f"hire:{signal.get('signal_id')}"
+            employee.runtime_id = actor_id
+            employee.world_region = self.state.current_region
+            employee.world_x, employee.world_y = requested
+            world.add_actor(WorldActorState(
+                actor_id=actor_id, name=employee.name, kind="employee",
+                x=requested[0], y=requested[1], alive=employee.is_alive,
+                faction="employee", mode="manual"))
+            signal["status"] = "completed"
+            signal["resolved_turn"] = world.clock.turn
+            signal["responder_actor_id"] = actor_id
+            world.record("hiring_signal_answered", actor_id,
+                         signal_id=signal.get("signal_id"), name=name,
+                         position=list(requested))
+            resolved.append({"signal_id": signal.get("signal_id"), "status": "completed",
+                             "employee": name, "actor_id": actor_id})
+        return resolved
+
     def _action_world_initialize(self, params: dict) -> dict:
         """创建可存档的网格世界，并将当前存活单位登记为独立地图单位。"""
         if self.state.player is None:
