@@ -59,6 +59,7 @@ def test_altar_black_swan_records_debt_and_triggers_dynamic_death():
     assert e.state.player.departure_reason == "还债"
     assert result["result"]["outcome"] == "黑天鹅"
     assert "祭坛" not in e.event_pool.triggered, "祭坛可重复抵达，每次访问各投资一次"
+    assert "祭坛" in e.event_pool.build_pool("扭曲都市"), "投资结算后祭坛应重新进入可探索事件池"
 
 
 def test_merchant_can_buy_and_sell_relics_at_confirmed_price():
