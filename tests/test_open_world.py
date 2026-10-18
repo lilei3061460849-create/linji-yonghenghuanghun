@@ -1438,6 +1438,7 @@ def test_entity_death_is_synchronized_to_world_actor_and_prevents_future_movemen
     rival = Entity("R", "轮回者", blood_limit=30, current_hp=30)
     engine.state.player = player
     engine.state.enemies = [rival]
+    engine.state.phase = "pre_battle"
     world = WorldState(clock=WorldClock(), map=_open_map())
     world.add_actor(WorldActorState(
         player.runtime_id, "P", "player", 1, 1, faction="player", mode="manual"))
