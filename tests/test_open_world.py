@@ -108,10 +108,23 @@ def test_game_engine_exposes_world_actions_and_serializes_state(tmp_path):
     assert initialized["success"], initialized
     status = engine.execute_action("world_status")
     assert status["success"]
-    assert status["result"]["map"]["width"] == 7
+    assert status["result"]["map_size"]["width"] == 7
+    assert "map" not in status["result"] and "event_log" not in status["result"]
+    assert status["result"]["self"]["position"] == [1, 1]
     player_id = next(k for k, v in status["result"]["actors"].items()
                      if v["kind"] == "player")
     moved = engine.execute_action("world_move", {"actor_id": player_id, "x": 1, "y": 0})
     assert moved["success"], moved
     assert engine.state.world_state["clock"]["turn"] == 1
     assert engine.state.to_dict()["world_state"]["clock"]["turn"] == 1
+
+
+def test_moving_next_to_hostile_unit_creates_one_encounter_but_merchant_stays_neutral():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState("p", "玩家", "轮回者", 1, 1, faction="player"))
+    world.add_actor(WorldActorState("m", "怪物", "怪物", 3, 1, faction="monster"))
+    world.add_actor(WorldActorState("shop", "商人", "merchant", 1, 3, faction="neutral"))
+    result = world.move_actor("p", (2, 1))
+    assert len(result["new_encounters"]) == 1
+    assert world.encounters[result["new_encounters"][0]].participants == ["p", "m"]
+    assert world.detect_adjacent_encounters() == []
