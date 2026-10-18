@@ -1921,3 +1921,45 @@ def test_timed_action_does_not_award_reward_after_final_duel_completes(tmp_path,
     assert any(event["type"] == "world_action_interrupted"
                and event["details"].get("reason") == "final_duel_completed"
                for event in settled.event_log)
+
+
+def test_world_fact_log_records_death_and_departure_once(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-outcomes.db"),
+                        save_dir=str(tmp_path), rng_seed=163)
+    player = Entity("玩家", "轮回者", blood_limit=30, current_hp=30)
+    dead = Entity("已死轮回者", "轮回者", blood_limit=20, current_hp=0)
+    dead.is_alive = False
+    departed = Entity("离场轮回者", "轮回者", blood_limit=20, current_hp=20)
+    departed.is_departed = True
+    departed.departure_reason = "逃离副本"
+    engine.state.player = player
+    engine.state.enemies = [dead, departed]
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(
+        player.runtime_id, player.name, "player", 1, 1,
+        faction="player", mode="manual"))
+    world.add_actor(WorldActorState(
+        dead.runtime_id, dead.name, "enemy", 2, 1,
+        faction="enemy", mode="autonomous", alive=False))
+    world.add_actor(WorldActorState(
+        departed.runtime_id, departed.name, "enemy", 3, 1,
+        faction="enemy", mode="autonomous", alive=True))
+
+    engine._sync_world_entity_positions(world)
+    engine._sync_world_entity_positions(world)
+
+    deaths = [event for event in world.event_log
+              if event["type"] == "actor_died" and event["actor_id"] == dead.runtime_id]
+    departures = [event for event in world.event_log
+                  if event["type"] == "actor_departed"
+                  and event["actor_id"] == departed.runtime_id]
+    assert len(deaths) == 1
+    assert deaths[0]["details"]["name"] == dead.name
+    assert deaths[0]["details"]["position"] == [2, 1]
+    assert len(departures) == 1
+    assert departures[0]["details"]["reason"] == "逃离副本"
+    assert world.actors[dead.runtime_id].alive is False
+    assert world.actors[departed.runtime_id].alive is False
