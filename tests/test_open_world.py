@@ -1879,3 +1879,7 @@ def test_final_duel_search_marks_survivor_as_departed_from_world_map(tmp_path):
     assert world.actors[player.runtime_id].alive is False
     assert any(event["type"] == "final_duel_winner_departed"
                for event in world.event_log)
+    engine.state.world_state = world.to_dict()
+    status = engine.execute_action("world_status", {})
+    assert status["success"], status
+    assert status["result"]["final_duel"]["winner_name"] == player.name
