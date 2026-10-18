@@ -816,6 +816,10 @@ class DamageDeathMixin:
                            attack_count=caster.attack_count,
                            attack_power=caster.attack_power,
                            copy_creator_runtime_id=caster.runtime_id)
+            clone.preferences = list(getattr(caster, "preferences", []))
+            if "痛苦的偏爱" not in clone.preferences:
+                clone.relics = [relic for relic in clone.relics
+                                if relic.name != MONSTER_MANA_RELIC]
             for dw_name, dw_inst in caster.dao_wen.items():
                 if dw_name == "分裂":
                     continue      # 复制体无分裂道纹，防止无限分裂
