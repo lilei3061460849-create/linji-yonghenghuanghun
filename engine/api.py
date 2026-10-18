@@ -355,8 +355,9 @@ class GameEngine:
                 if has_wusuoqiu and self._is_reject_option_text(option["text"]):
                     schema["note"] = "持【无所求】：本选项另获1点属性点（入属性点池，按正文2点一档兑速限/法限、1点一档兑血限）"
                 if self.event_pool.current == "祭坛" and option["text"].startswith("投资"):
-                    schema["x"] = "正整数，且不超过当前真实碎片余额；每次抵达最多投资一次"
-                    schema["note"] = "祭坛投资概率：15%净赚4X、25%净赚X、35%净亏X、25%净亏3X；黑天鹅额外2X直接计入真实负余额，可能触发动态还债"
+                    schema["x"] = "投入的正整数本金，不超过当前真实碎片余额"
+                    schema["multiplier"] = "自选正整数倍率，范围1至(10+本金//100)；每100本金提高1点上限"
+                    schema["note"] = "随机整数直接决定盈亏倍数，范围为-倍率至+倍率；本金100、倍率3、结果-2即净亏200，结果0不赚不亏。亏损可形成负碎片余额，并沿用动态债务线"
                 if self.event_pool.current == "过路商人" and option["text"].startswith("遗物交易"):
                     self._init_relic_pool()
                     schema.update({"trade_direction": ["buy", "sell"],
