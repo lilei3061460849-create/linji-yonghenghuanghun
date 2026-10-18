@@ -1538,3 +1538,23 @@ def test_distant_final_duelist_reaches_rally_area_and_starts_final_encounter():
     assert len(final_encounters) == 1
     assert set(final_encounters[0].participants) == {"player", "rival"}
     assert world.final_duel_started is True
+
+def test_final_duelist_tracks_only_last_known_opponent_position():
+    world = WorldState(clock=WorldClock(), map=_open_map(9, 9))
+    world.add_actor(WorldActorState(
+        "player", "玩家", "轮回者", 1, 1, faction="player", mode="manual"))
+    rival = WorldActorState(
+        "rival", "最后的对手", "轮回者", 4, 4, faction="enemy", mode="autonomous")
+    rival.known_cells.update({"4,4", "3,4", "2,4"})
+    rival.memory.append({
+        "turn": 2, "actor_id": "player", "name": "玩家",
+        "kind": "player", "position": [2, 4],
+    })
+    world.add_actor(rival)
+    world.final_duel_search = True
+    world.final_duel_finalists = ["player", "rival"]
+
+    world.clock.advance(1)
+    world._run_autonomous_units()
+
+    assert world.actors["rival"].position == (3, 4)
