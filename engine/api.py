@@ -1945,15 +1945,22 @@ class GameEngine:
         REGION_EXCLUSIVE = {"维修": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "附煞": "乱葬岗"}
         need_region = REGION_EXCLUSIVE.get(action)
         if need_region and self.state.current_region != need_region:
-            self.state.energy += 1
+            if not world_mode:
+                self.state.energy += 1
             return {"success": False,
                     "error": f"【{action}】是{need_region}专属行动，当前副本为"
                              f"{self.state.current_region or '未选择'}"}
 
         if action in result_map:
-            return result_map[action](params)
+            energy_before = self.state.energy
+            result = result_map[action](params)
+            if world_mode:
+                # 旧处理器会在失败分支退款精力；开放世界不再使用旧精力经济。
+                self.state.energy = energy_before
+            return result
         else:
-            self.state.energy += 1  # 恢复精力
+            if not world_mode:
+                self.state.energy += 1
             return {"success": False, "error": f"未知局外行动: {action}"}
 
     def _pre_battle_xiuzheng(self, params: dict) -> dict:
