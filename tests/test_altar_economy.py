@@ -79,3 +79,17 @@ def test_merchant_can_buy_and_sell_relics_at_confirmed_price():
     assert bought.get("success"), bought
     assert any(r.name == relic_to_buy for r in buy_engine.state.relics)
     assert buy_engine.state.shards == 10
+
+
+def test_non_monster_debt_threshold_causes_death_not_kill_reward():
+    """朋友触及动态还债线时被吞噬离场，不按普通击杀结算。"""
+    e = _engine(seed=34)
+    ally = Entity("欠债朋友", "朋友", blood_limit=30, current_hp=30,
+                  attack_count=1, attack_power=1, shards=-10)
+    e.state.friends.append(ally)
+    results = e.combat.settle_victory_paths()
+    assert not ally.is_alive
+    assert ally.current_hp == 0
+    assert ally.departure_reason == "还债"
+    assert any(r.get("type") == "debt_death" and r.get("entity") == "欠债朋友"
+               for r in results)
