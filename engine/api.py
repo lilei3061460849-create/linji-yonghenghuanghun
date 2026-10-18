@@ -456,7 +456,8 @@ class GameEngine:
                 "sub_action": "学习", "sub": ["daowen"],
                 "tier": {"daowen": [1, 2]},
                 "names": "daowen必填，数量必须等于tier",
-                "note": "法术已于2026-09-16改为无需学习：持所需道纹即可在战斗中用 "
+                "recipient": "player（默认）、现存朋友/员工/造物名称，或pending暂存给未来朋友",
+                "note": "学习所得可分配给其他角色或暂存；法术已于2026-09-16改为无需学习：持所需道纹即可在战斗中用 "
                         "统一自定义施法（define_spell，消耗1次主动出手）"}},
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "共鸣",
