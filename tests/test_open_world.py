@@ -1394,8 +1394,9 @@ def test_autonomous_reincarnator_can_sell_a_relic_only_within_merchant_budget(tm
     assert [relic.name for relic in merchant.relics] == ["可售遗物"]
 
     merchant.shards = 5
+    rival.shards = 0
     rival.relics.append(Relic(name="另一件可售遗物", effect="普通效果"))
     blocked = engine._resolve_world_npc_merchant_trades(world)
     assert blocked == []
-    assert rival.shards == 10 and merchant.shards == 5
+    assert rival.shards == 0 and merchant.shards == 5
     assert [relic.name for relic in rival.relics] == ["另一件可售遗物"]
