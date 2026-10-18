@@ -558,6 +558,9 @@ class GameEngine:
                                                                   "actor_id": "optional; defaults to player"}},
                 {"action_type": "world_wait", "params_schema": {"turns": "positive integer (default 1)",
                                                                   "actor_id": "optional; defaults to player"}},
+                {"action_type": "world_command_created_being", "params_schema": {
+                    "behavior": ["explore", "follow", "guard"],
+                    "x": "guard模式可选整数坐标", "y": "guard模式可选整数坐标"}},
                 {"action_type": "world_interact", "params_schema": {
                     "target_actor_id": "actor_id from visible_actors",
                     "choice": ["talk", "trade", "cooperate", "intimidate", "attack"]}},
@@ -1409,6 +1412,8 @@ class GameEngine:
             return self._action_world_move(params)
         elif action_type == "world_wait":
             return self._action_world_wait(params)
+        elif action_type == "world_command_created_being":
+            return self._action_world_command_created_being(params)
         elif action_type == "world_status":
             return self._action_world_status(params)
         elif action_type == "world_vision":
@@ -1706,6 +1711,84 @@ class GameEngine:
                 if not location.get("active", True):
                     break
         return pickups
+
+    def _share_created_being_vision(self, world: WorldState) -> None:
+        """把造物已探索的地形和最近目击记录报告给主人，不泄露实时全图。"""
+        for scout in world.actors.values():
+            if (not scout.alive or scout.kind != "friend" or not scout.owner_actor_id
+                    or scout.behavior not in {"explore", "follow", "guard"}):
+                continue
+            owner = world.actors.get(scout.owner_actor_id)
+            if owner is None or not owner.alive:
+                continue
+            world.visible_cells(scout.actor_id)
+            new_cells = sorted(scout.known_cells - owner.known_cells)
+            if new_cells:
+                owner.known_cells.update(new_cells)
+                world.record("created_being_map_report", owner.actor_id,
+                             scout_actor_id=scout.actor_id, new_known_cells=new_cells)
+            known_reports = {
+                (item.get("reported_by"), item.get("actor_id"), item.get("turn"))
+                for item in owner.memory if item.get("reported_by")
+            }
+            for observation in scout.memory:
+                report_key = (scout.actor_id, observation.get("actor_id"), observation.get("turn"))
+                if report_key in known_reports:
+                    continue
+                report = dict(observation)
+                report["reported_by"] = scout.actor_id
+                owner.memory.append(report)
+                known_reports.add(report_key)
+            owner.memory = owner.memory[-50:]
+
+    def _action_world_command_created_being(self, params: dict) -> dict:
+        """切换造物自主探索、跟随主人或守卫指定格。"""
+        try:
+            world = self._world_from_state()
+            player_id = next((key for key, actor in world.actors.items()
+                              if actor.kind == "player" and actor.alive), None)
+            if player_id is None:
+                return {"success": False, "error": "地图上没有存活的轮回者"}
+            being = next((entity for entity in self.state.friends
+                          if getattr(entity, "is_created_being", False)
+                          and getattr(entity, "created_by_runtime_id", "") == player_id
+                          and entity.is_alive), None)
+            if being is None:
+                return {"success": False, "error": "没有可指挥的存活造物"}
+            actor = world.actors.get(being.runtime_id)
+            if actor is None or not actor.alive:
+                return {"success": False, "error": "造物不在地图上"}
+            behavior = params.get("behavior")
+            if behavior not in {"explore", "follow", "guard"}:
+                return {"success": False, "error": "behavior必须是explore、follow或guard"}
+            if behavior == "guard":
+                gx, gy = params.get("x", actor.x), params.get("y", actor.y)
+                if (not isinstance(gx, int) or isinstance(gx, bool)
+                        or not isinstance(gy, int) or isinstance(gy, bool)
+                        or not world.map.is_passable((gx, gy))):
+                    return {"success": False, "error": "守卫坐标必须是可通行格上的整数坐标"}
+                guard_position = (gx, gy)
+            else:
+                guard_position = None
+            actor.behavior = behavior
+            actor.guard_position = guard_position
+            actor.owner_actor_id = player_id
+            actor.mode = "autonomous"
+            world.record("created_being_behavior_changed", player_id,
+                         created_being=being.name, behavior=behavior,
+                         guard_position=list(guard_position) if guard_position else None)
+            self._share_created_being_vision(world)
+            self._sync_world_entity_positions(world)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "指挥造物",
+                    "result": {"created_being": being.name, "behavior": behavior,
+                               "guard_position": list(guard_position) if guard_position else None,
+                               "known_cells_shared": len(actor.known_cells)},
+                    "instruction": {"explore": "造物会自主探索未知区域，并把地形和目击记录报告给主人",
+                                    "follow": "造物会沿可通行路径向主人靠近",
+                                    "guard": "造物会前往并守卫指定格"}[behavior]}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
 
     def _resolve_world_hiring_signals(self, world: WorldState) -> list[dict]:
         """结算到期招募信号；响应者抵达信号地点后才真正创建员工。"""
