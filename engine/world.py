@@ -233,8 +233,25 @@ class WorldState:
     def visible_cells(self, actor_id: str) -> list[Coord]:
         actor = self._living_actor(actor_id)
         cells = [actor.position] + self.map.adjacent_vision(actor.position)
+        visible = set(cells)
         # 角色只能更新自己的情报；不共享其他角色的视野。
         actor.known_cells.update(self.map.key(p) for p in cells)
+        for other in self.actors.values():
+            if not other.alive or other.actor_id == actor_id or other.position not in visible:
+                continue
+            observation = {
+                "turn": self.clock.turn,
+                "actor_id": other.actor_id,
+                "name": other.name,
+                "kind": other.kind,
+                "faction": other.faction,
+                "position": list(other.position),
+            }
+            if not actor.memory or actor.memory[-1] != observation:
+                actor.memory.append(observation)
+                actor.memory = actor.memory[-50:]
+                self.record("actor_seen", actor_id, target_actor_id=other.actor_id,
+                            name=other.name, kind=other.kind, position=list(other.position))
         return cells
 
     def move_actor(self, actor_id: str, destination: Coord) -> dict[str, Any]:
