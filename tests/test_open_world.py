@@ -1724,6 +1724,8 @@ def test_npc_merchant_completes_at_most_one_trade_per_world_turn(tmp_path):
         faction="neutral", mode="autonomous"))
 
     trades = engine._resolve_world_npc_merchant_trades(world)
+    # 即使调用方在同一世界回合重复检查，也不能重复成交。
+    assert engine._resolve_world_npc_merchant_trades(world) == []
 
     assert len(trades) == 1
     assert merchant.shards == 10
