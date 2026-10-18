@@ -211,8 +211,9 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
 
     event_name = params.get("_event_name", "")
     if event_name == "祭坛" and text.startswith("投资"):
-        x = params.get("x")
-        multiplier = params.get("multiplier")
+        x = params.get("x", params.get("principal", params.get("amount")))
+        # 旧调用方未传倍率时兼容按最低倍率1结算；新接口仍可显式选择1..上限。
+        multiplier = params.get("multiplier", 1)
         if not isinstance(x, int) or isinstance(x, bool) or x < 1:
             return "祭坛投资必须显式提交正整数x"
         if x > engine.state.shards:
@@ -326,8 +327,8 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
 
     # ---- 祭坛：玩家自选倍率，随机整数本身就是最终盈亏倍数 ----
     if event_name == "祭坛" and text.startswith("投资"):
-        principal = int(params["x"])
-        multiplier = int(params["multiplier"])
+        principal = int(params.get("x", params.get("principal", params.get("amount"))))
+        multiplier = int(params.get("multiplier", 1))
         engine.state.shards -= principal
         roll = engine.dice.auto_roll(
             "altar_investment_multiplier",
