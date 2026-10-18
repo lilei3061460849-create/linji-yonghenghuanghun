@@ -143,8 +143,6 @@ function render(){
  const visible=landmarks.filter(s=>s.x>=min&&s.x<=max&&s.y>=min&&s.y<=max);
  statusEl.textContent="种子 "+seed+" · 当前有效地图 "+n+"×"+n+"（"+(n*n)+" 格） · "+visible.length+"/"+landmarks.length+" 个事件地点仍在边界内";
  document.getElementById("shrink").disabled=n<=3;
- sitesEl.replaceChildren();
- landmarks.forEach(site=>{const b=document.createElement("button");b.type="button";b.className="site-row";const gone=site.x<min||site.x>max||site.y<min||site.y>max;b.disabled=gone;b.innerHTML='<span class="glyph">'+site.icon+'</span><span><strong>'+site.name+'</strong><br><span class="sub">'+site.building+' · ('+site.x+','+site.y+')'+(gone?' · 已被边界吞没':'')+'</span></span>';if(!gone)b.addEventListener("click",()=>showDetail(site));sitesEl.appendChild(b)});
 }
 function showDetail(site){
  detailEl.replaceChildren();const h=document.createElement("h2");h.textContent="地点详情";detailEl.appendChild(h);
