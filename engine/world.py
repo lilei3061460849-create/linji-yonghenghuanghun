@@ -65,6 +65,46 @@ class WorldMap:
                     roll = rng.random()
                     kind = "wall" if roll < obstacle_rate else ("ruin" if roll < obstacle_rate + 0.18 else "floor")
                 terrain[cls.key(pos)] = kind
+
+        # 保留随机墙体与废墟，但修补被墙完全隔断的可通行区域。
+        # 否则随机地图会出现玩家永远走不到的事件点或出生在孤岛的NPC。
+        def reachable_from_start() -> set[Coord]:
+            start = (1, 1)
+            seen = {start}
+            queue = deque([start])
+            while queue:
+                x, y = queue.popleft()
+                for nxt in ((x, y - 1), (x, y + 1), (x - 1, y), (x + 1, y)):
+                    if (0 <= nxt[0] < width and 0 <= nxt[1] < height
+                            and terrain.get(cls.key(nxt)) not in {"wall", "building", "void"}
+                            and nxt not in seen):
+                        seen.add(nxt)
+                        queue.append(nxt)
+            return seen
+
+        while True:
+            reachable = reachable_from_start()
+            disconnected = [
+                (x, y) for y in range(height) for x in range(width)
+                if terrain.get(cls.key((x, y))) not in {"wall", "building", "void"}
+                and (x, y) not in reachable
+            ]
+            if not disconnected:
+                break
+            source = min(disconnected, key=lambda pos: (
+                min(abs(pos[0] - other[0]) + abs(pos[1] - other[1]) for other in reachable),
+                pos[1], pos[0]))
+            goal = min(reachable, key=lambda pos: (
+                abs(source[0] - pos[0]) + abs(source[1] - pos[1]), pos[1], pos[0]))
+            cursor = source
+            while cursor != goal:
+                if cursor[0] != goal[0]:
+                    cursor = (cursor[0] + (1 if goal[0] > cursor[0] else -1), cursor[1])
+                else:
+                    cursor = (cursor[0], cursor[1] + (1 if goal[1] > cursor[1] else -1))
+                key = cls.key(cursor)
+                if terrain.get(key) == "wall":
+                    terrain[key] = "floor"
         return cls(width=width, height=height, terrain=terrain)
 
     def in_bounds(self, pos: Coord) -> bool:
