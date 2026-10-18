@@ -124,7 +124,7 @@ def test_full_pool_shaifa_outscores_basic_attack(engine, monkeypatch):
     """
     monkeypatch.setenv(FLAG, "1")
     ai = TacticalAI(engine, verbose=True)
-    ai.take_turn()
+    ai.take_action()
     decisions = [line for line in ai.log if "实时决策" in line]
     assert decisions, decisions
     assert "普攻" in decisions[0], decisions
@@ -132,7 +132,17 @@ def test_full_pool_shaifa_outscores_basic_attack(engine, monkeypatch):
     kill_candidates = [c["label"] for c in ai._daowen_candidates()
                        if c["label"].startswith("杀伐")]
     assert kill_probe and kill_probe.get("kind") == "damage", kill_probe
-    assert "杀伐X=8" in kill_candidates, kill_candidates
+    assert ai.remaining_actions() == 1
+    assert "杀伐X=8" in kill_candidates, {
+        "kill_candidates": kill_candidates,
+        "mana": ai.mana(),
+        "remaining_actions": ai.remaining_actions(),
+        "cost_per_x": kill_probe.get("cost_per_x"),
+        "x_value": ai.player.dao_wen["杀伐"].x_value,
+        "can_use": ai.player.dao_wen["杀伐"].can_use(),
+    }
+    ai.take_action()
+    decisions = [line for line in ai.log if "实时决策" in line]
     assert any("杀伐" in line for line in decisions[1:]), {
         "decisions": decisions,
         "mana": ai.mana(),
