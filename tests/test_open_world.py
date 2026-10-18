@@ -651,6 +651,44 @@ def test_player_picks_up_resonance_relic_only_by_entering_its_cell(tmp_path):
 
 
 
+def test_hiring_signal_persists_while_player_moves_and_resolves_on_arrival(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "hiring-signal.db"),
+                        save_dir=str(tmp_path), rng_seed=97, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+
+    issued = engine.execute_action("pre_battle_action", {
+        "sub_action": "雇佣", "name": "测试员工",
+        "blood_alloc": 20, "atk_bundles": 0,
+    })
+    assert issued["success"], issued
+    signal_id = issued["result"]["signal_id"]
+    assert issued["result"]["status"] == "pending"
+    assert engine.state.employees == []
+
+    # 玩家无需停留等待；招募信号在后续世界回合仍然有效。
+    assert engine.execute_action("world_move", {"x": 2, "y": 1})["success"]
+    signal = next(s for s in engine.state.world_state["hiring_signals"]
+                  if s["signal_id"] == signal_id)
+    assert signal["status"] == "pending"
+    assert engine.execute_action("world_move", {"x": 2, "y": 2})["success"]
+
+    signal = next(s for s in engine.state.world_state["hiring_signals"]
+                  if s["signal_id"] == signal_id)
+    assert signal["status"] == "completed"
+    assert len(engine.state.employees) == 1
+    employee = engine.state.employees[0]
+    assert employee.name == "测试员工"
+    assert employee.runtime_id == signal["responder_actor_id"]
+    restored = WorldState.from_dict(engine.state.world_state)
+    assert any(actor.actor_id == employee.runtime_id and actor.kind == "employee"
+               for actor in restored.actors.values())
+
+
 def test_final_survivors_converge_to_a_marked_final_encounter():
     world = WorldState(clock=WorldClock(), map=_open_map(),
                        final_duel_search=True,
