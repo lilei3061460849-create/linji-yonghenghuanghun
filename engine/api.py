@@ -2497,9 +2497,10 @@ class GameEngine:
                 self.state.world_state = world.to_dict()
                 return {"success": True, "action": "world_interact",
                         "result": {"choice": choice, "encounter_id": encounter.encounter_id,
+                                   "world_encounter_id": encounter.encounter_id,
                                    "participants": list(encounter.participants),
                                    "battle_started": False},
-                        "instruction": "遭遇已登记；现在调用battle_start，并传入返回的world_encounter_id以接入现有战斗引擎"}
+                        "instruction": "遭遇已登记；现在调用battle_start，并传入result.world_encounter_id以接入现有战斗引擎"}
 
             if choice == "talk":
                 rumors = [dict(item) for item in target.memory[-3:]
