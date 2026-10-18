@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
-from engine.world import WorldActorState, WorldMap, WorldState
+from engine.world import WorldActorState, WorldClock, WorldMap, WorldState
 
 
 def _open_map(width=7, height=7):
@@ -16,9 +16,8 @@ def _open_map(width=7, height=7):
 
 
 def test_world_clock_advances_only_by_valid_nonnegative_integer():
-    world = WorldState(clock=__import__("engine.world", fromlist=["WorldClock"]).WorldClock(),
-                       map=_open_map())
-    assert world.wait("p", 1) if False else world.clock.turn == 0
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    assert world.clock.turn == 0
     with pytest.raises(ValueError):
         world.clock.advance(-1)
     with pytest.raises(ValueError):
@@ -37,15 +36,16 @@ def test_movement_is_adjacent_passable_and_time_costs_one_turn():
 
 
 def test_units_cannot_overlap_and_blocked_terrain_rejects_move():
-    world = WorldState(clock=__import__("engine.world", fromlist=["WorldClock"]).WorldClock(),
+    world = WorldState(clock=WorldClock(),
                        map=_open_map())
     world.map.terrain["2,1"] = "wall"
     world.add_actor(WorldActorState("p", "玩家", "轮回者", 1, 1))
-    world.add_actor(WorldActorState("m", "怪物", "怪物", 3, 1))
+    world.add_actor(WorldActorState("m", "怪物", "怪物", 2, 1))
+    with pytest.raises(ValueError, match="占据"):
+        world.move_actor("p", (2, 1))
+    world.map.terrain["2,1"] = "wall"
     with pytest.raises(ValueError, match="不可通行"):
         world.move_actor("p", (2, 1))
-    with pytest.raises(ValueError, match="占据"):
-        world.move_actor("p", (3, 1))
 
 
 def test_vision_is_four_orthogonal_cells_and_private_per_actor():
@@ -95,3 +95,23 @@ def test_encounter_lifecycle_is_recorded_and_cannot_finish_twice():
     assert not encounter.active
     with pytest.raises(ValueError, match="不存在或已经结束"):
         world.finish_encounter(encounter.encounter_id, "escaped")
+
+
+def test_game_engine_exposes_world_actions_and_serializes_state(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world.db"),
+                        save_dir=str(tmp_path), rng_seed=19)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    initialized = engine.execute_action("world_initialize", {"width": 7, "height": 7})
+    assert initialized["success"], initialized
+    status = engine.execute_action("world_status")
+    assert status["success"]
+    assert status["result"]["map"]["width"] == 7
+    player_id = next(k for k, v in status["result"]["actors"].items()
+                     if v["kind"] == "player")
+    moved = engine.execute_action("world_move", {"actor_id": player_id, "x": 1, "y": 0})
+    assert moved["success"], moved
+    assert engine.state.world_state["clock"]["turn"] == 1
+    assert engine.state.to_dict()["world_state"]["clock"]["turn"] == 1
