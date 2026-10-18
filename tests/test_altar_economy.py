@@ -71,6 +71,16 @@ def test_merchant_can_buy_and_sell_relics_at_confirmed_price():
     assert sold.get("success"), sold
     assert not any(r.name == relic_name for r in sell_engine.state.relics)
     assert sell_engine.state.shards == 35
+    assert sell_engine.event_pool.current == "过路商人"
+    assert sold["result"]["merchant_session_open"] is True
+
+    bought_back = sell_engine.execute_action("resolve_event", {
+        "event": "过路商人", "option_id": 1, "trade_direction": "buy",
+        "relic_name": relic_name, "price": 10, "confirmed": True})
+    assert bought_back.get("success"), bought_back
+    assert any(r.name == relic_name for r in sell_engine.state.relics)
+    assert sell_engine.state.shards == 25
+    assert bought_back["result"]["merchant_session_open"] is True
 
     buy_engine = _engine(seed=33)
     buy_engine.state.player.blood_limit = 60
