@@ -230,8 +230,39 @@ class WorldState:
         self.clock.advance(1)
         self.record("actor_moved", actor_id, origin=list(origin), destination=list(destination))
         self.visible_cells(actor_id)
+        encounters = self.detect_adjacent_encounters()
         return {"actor_id": actor_id, "from": list(origin), "to": list(destination),
-                "world_turn": self.clock.turn}
+                "world_turn": self.clock.turn, "new_encounters": encounters}
+
+    @staticmethod
+    def _hostile_pair(a: WorldActorState, b: WorldActorState) -> bool:
+        if not a.alive or not b.alive or a.faction == "neutral" or b.faction == "neutral":
+            return False
+        if a.faction == "monster" or b.faction == "monster":
+            other = b if a.faction == "monster" else a
+            return other.faction in {"player", "friend", "employee", "temp_friend"}
+        friendly = {"player", "friend", "employee", "temp_friend"}
+        return ((a.faction in friendly and b.faction == "enemy")
+                or (b.faction in friendly and a.faction == "enemy"))
+
+    def detect_adjacent_encounters(self) -> list[str]:
+        """把正交相邻的敌对单位登记为遭遇；中立商人永不因此进入遭遇。"""
+        created: list[str] = []
+        living = [a for a in self.actors.values() if a.alive]
+        for index, a in enumerate(living):
+            for b in living[index + 1:]:
+                if abs(a.x - b.x) + abs(a.y - b.y) != 1:
+                    continue
+                if not self._hostile_pair(a, b):
+                    continue
+                already_active = any(e.active and a.actor_id in e.participants
+                                     and b.actor_id in e.participants
+                                     for e in self.encounters.values())
+                if already_active:
+                    continue
+                encounter = self.start_encounter([a.actor_id, b.actor_id], b.position)
+                created.append(encounter.encounter_id)
+        return created
 
     def wait(self, actor_id: str, turns: int = 1) -> int:
         self._living_actor(actor_id)
