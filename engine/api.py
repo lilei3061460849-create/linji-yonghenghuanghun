@@ -1490,8 +1490,6 @@ class GameEngine:
             return self._action_pay_employee_wage(params)
         elif action_type == "choose_hired_daowen":
             return self._action_choose_hired_daowen(params)
-        elif action_type == "choose_sha_qi":
-            return self._action_choose_sha_qi(params)
         elif action_type == "suppress_rebellion":
             return self._action_suppress_rebellion(params)
         elif action_type == "resolve_rebellion_battle":
@@ -4316,78 +4314,7 @@ class GameEngine:
                                           "attack_count": being.attack_count,
                                           "attack_power": being.attack_power}}}
 
-    # 乱葬岗·附煞：煞气库（6种）
-    SHA_QI_LIBRARY = {
-        "法煞": "该道纹消耗-X（最低为X）",
-        "魂煞": "该道纹的持续X+X（例如持续X变成2X）",
-        "冥煞": "该道纹造成的伤害+100%",
-        "血煞": "该道纹[回复]+100%",
-        "锁煞": "该道纹造成伤害后使[目标]失去等量法力",
-        "心煞": "该道纹[战终]冷却已完成战斗场数额外+1",
-    }
-
-    def _pre_battle_fusha(self, params: dict) -> dict:
-        """附煞（乱葬岗专属）：发现（10碎片）/选择（25碎片）一种煞气，赋予指定道纹。
-
-        每种道纹最多保留1种煞气，重复附煞可覆盖。煞气存于 DaoWenInstance.sha_qi。
-        """
-        player = self.state.player
-        if not player:
-            return {"success": False, "error": "没有玩家"}
-        mode = params.get("mode", "")
-        if mode not in ("发现", "选择"):
-            return {"success": False, "error": "mode必须是发现或选择"}
-        if mode == "选择":
-            sha = params.get("sha_qi", "")
-            if sha not in self.SHA_QI_LIBRARY:
-                return {"success": False,
-                        "error": f"未知煞气「{sha}」；可选：{list(self.SHA_QI_LIBRARY)}"}
-            cost = 25
-        else:
-            # 发现：随机列3件候选并显式选1
-            import random as _r
-            cands = _r.sample(list(self.SHA_QI_LIBRARY), min(3, len(self.SHA_QI_LIBRARY)))
-            self.state.pending_sha_qi_choices = cands
-            self.state.pending_sha_qi_mode = mode
-            return {"success": True, "action": "附煞·发现",
-                    "result": {"sha_qi_candidates": cands, "cost": 10,
-                               "instruction": "调用 choose_sha_qi(sha_qi) 选择一种煞气"}}
-        daowen = params.get("daowen_name", "")
-        if daowen not in player.dao_wen:
-            return {"success": False, "error": f"未持有道纹「{daowen}」；持有：{list(player.dao_wen)}"}
-        if self.state.shards < cost:
-            return {"success": False, "error": f"碎片不足，需要{cost}"}
-        self.state.shards -= cost
-        inst = player.dao_wen[daowen]
-        inst.sha_qi = sha
-        return {"success": True, "action": "附煞",
-                "result": {"sha_qi": sha, "daowen": daowen, "shard_cost": cost,
-                           "effect": self.SHA_QI_LIBRARY[sha], "shards": self.state.shards}}
-
-    def _action_choose_sha_qi(self, params: dict) -> dict:
-        """发现模式：从候选煞气中显式选择1种并附给道纹。"""
-        player = self.state.player
-        cands = self.state.pending_sha_qi_choices or []
-        if not cands:
-            return {"success": False, "error": "当前没有待选择的煞气发现"}
-        sha = params.get("sha_qi", "")
-        if sha not in cands:
-            return {"success": False, "error": f"只能选择本次发现列出的煞气：{cands}"}
-        daowen = params.get("daowen_name", "")
-        if daowen not in player.dao_wen:
-            return {"success": False, "error": f"未持有道纹「{daowen}」"}
-        # 门禁与收费统一为10（发现接口明示{"cost": 10}；旧门禁50是复制残留，
-        # 持10~49碎片会被错误拒之门外）。
-        if self.state.shards < 10:
-            return {"success": False, "error": "碎片不足，需要10"}
-        self.state.shards -= 10
-        inst = player.dao_wen[daowen]
-        inst.sha_qi = sha
-        self.state.pending_sha_qi_choices = []
-        self.state.pending_sha_qi_mode = ""
-        return {"success": True, "action": "附煞·发现选择",
-                "result": {"sha_qi": sha, "daowen": daowen, "effect": self.SHA_QI_LIBRARY[sha],
-                           "shards": self.state.shards}}
+    # 旧附煞/煞气接口已删除；旧存档字段仅为兼容读取保留，不再参与结算。
 
     def _action_lianxin_in_battle(self, params: dict) -> dict:
         """炼心（战斗中版）：不消耗出手，改为下一次局外行动额外多消耗1点精力"""
