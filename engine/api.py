@@ -205,6 +205,8 @@ class GameEngine:
         map_payload["locations"] = {
             key: location for key, location in map_payload.get("locations", {}).items()
             if location.get("discovered", False)
+            and (location.get("kind") != "relic"
+                 or player.actor_id in (location.get("discovered_by") or []))
         }
         world_payload["actors"] = {
             key: actor for key, actor in world_payload.get("actors", {}).items()
