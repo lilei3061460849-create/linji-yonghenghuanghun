@@ -2153,6 +2153,16 @@ class GameEngine:
             location_names = [name for name in self.event_pool.build_pool(self.state.current_region)
                               if name not in non_location_events]
             available = [pos for pos in candidates if pos not in used]
+            twisted_event_labels = {
+                "医生": ("社区诊所", "街角诊所仍亮着应急灯，医生可能愿意接触来访者。"),
+                "乞丐": ("地铁口的乞丐", "地铁入口附近的乞丐向路人乞讨，也可能掌握城市传闻。"),
+                "血肉温室": ("血肉温室", "玻璃穹顶内堆满无法辨认的血肉植株。"),
+                "绝望来电": ("公共电话亭", "电话亭的线路仍然接通，听筒里传来不属于此处的声音。"),
+                "皮衣店": ("皮衣店", "卷帘门半开，橱窗里挂着被血迹浸透的皮衣。"),
+                "生锈邮筒": ("生锈邮筒", "锈蚀的邮筒里塞满了没有寄件人信息的信件。"),
+                "尖叫下水道": ("下水道入口", "井盖下不断传出断续尖叫，回声会掩盖附近的动静。"),
+                "恶魔医务室": ("恶魔医务室", "手术灯仍在运转，器械台上摆着不该存在的工具。"),
+            }
             for event_name in location_names:
                 if not available:
                     break
@@ -2160,10 +2170,40 @@ class GameEngine:
                     f"open_world_location_{event_name}", available,
                     context=f"开放世界地点放置：{event_name}")
                 pos = tuple(roll["selected"])
+                display_name, description = (
+                    twisted_event_labels.get(event_name, (event_name, "副本专属事件地点。"))
+                    if self.state.current_region == "扭曲都市"
+                    else (event_name, "副本专属事件地点。")
+                )
                 world.map.add_location(event_name, {
-                    "kind": "event", "name": event_name, "event_name": event_name,
+                    "kind": "event", "name": display_name, "event_name": event_name,
+                    "description": description,
                     "x": pos[0], "y": pos[1], "discovered": False, "active": True})
                 available.remove(pos)
+            # 扭曲都市额外生成可辨识的现代城市地标；地标只提供地图语境，不凭空触发事件。
+            if self.state.current_region == "扭曲都市":
+                urban_landmarks = [
+                    ("医院", "废弃综合医院，药械储备区已被翻找过。"),
+                    ("学校", "封锁中的学校，教室、走廊和操场组成开阔区域。"),
+                    ("停车场", "多层停车场，车辆残骸可以遮挡视线。"),
+                    ("地铁站", "停运地铁入口，地下通道深入城市下方。"),
+                    ("便利店", "被洗劫的便利店，货架和收银台散落在地。"),
+                    ("警察局", "废弃警局，卷帘门和防爆玻璃仍保留着。"),
+                    ("购物中心", "空置的购物中心，内部通道错综复杂。"),
+                    ("城市广场", "露天广场视野开阔，却几乎没有掩体。"),
+                ]
+                for landmark_index, (landmark_name, description) in enumerate(urban_landmarks):
+                    if not available:
+                        break
+                    roll = self.dice.auto_roll(
+                        f"open_world_urban_landmark_{landmark_index}", available,
+                        context=f"扭曲都市地标放置：{landmark_name}")
+                    pos = tuple(roll["selected"])
+                    world.map.add_location(f"urban_{landmark_index + 1}", {
+                        "kind": "landmark", "name": landmark_name,
+                        "description": description, "x": pos[0], "y": pos[1],
+                        "discovered": False, "active": True})
+                    available.remove(pos)
             # 世界地图同时生成真实资源点；进入地点后立即拾取，且该点只结算一次。
             resource_count = max(1, min(5, (width * height) // 150))
             for resource_index in range(resource_count):
@@ -2361,6 +2401,7 @@ class GameEngine:
             known_locations = [
                 {"location_id": location_id, "name": location.get("name", location_id),
                  "kind": location.get("kind", "special"),
+                 "description": location.get("description", ""),
                  "position": [location.get("x"), location.get("y")],
                  "active": location.get("active", True)}
                 for location_id, location in world.map.locations.items()
