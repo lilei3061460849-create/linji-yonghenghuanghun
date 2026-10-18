@@ -1469,6 +1469,24 @@ class GameEngine:
             entity.world_x, entity.world_y = actor.x, actor.y
             entity.is_neutral = actor.faction == "neutral"
 
+    def _open_adjacent_merchant_session(self, world: WorldState) -> bool:
+        """玩家与过路商人正交相邻时开启现有交易会话；商人不进入随机事件池。"""
+        if self.event_pool.current is not None or "过路商人" not in self.event_pool.events:
+            return False
+        player = next((actor for actor in world.actors.values()
+                       if actor.kind == "player" and actor.alive), None)
+        if player is None:
+            return False
+        merchant = next((actor for actor in world.actors.values()
+                         if actor.kind == "merchant" and actor.alive
+                         and abs(actor.x - player.x) + abs(actor.y - player.y) == 1), None)
+        if merchant is None:
+            return False
+        self.event_pool.current = "过路商人"
+        world.record("merchant_encountered", player.actor_id,
+                     merchant_actor_id=merchant.actor_id, position=list(merchant.position))
+        return True
+
     def _action_world_initialize(self, params: dict) -> dict:
         """创建可存档的网格世界，并将当前存活单位登记为独立地图单位。"""
         if self.state.player is None:
@@ -1533,12 +1551,8 @@ class GameEngine:
                 return {"success": False, "error": "目标坐标x/y必须是整数"}
             result = world.move_actor(actor_id, (x, y))
             self._sync_world_entity_positions(world)
-            # 过路商人是地图上的中立角色；进入其相邻格后才开启交易会话，不走随机事件抽取。
-            if (self.event_pool.current is None
-                    and any(item.get("target_kind") == "merchant"
-                            for item in result.get("new_interactions", []))
-                    and "过路商人" in self.event_pool.events):
-                self.event_pool.current = "过路商人"
+            # 商人自己走近玩家也会建立接触；只在实际相邻时打开交易会话。
+            self._open_adjacent_merchant_session(world)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_move", "result": result}
         except (ValueError, KeyError, TypeError) as exc:
@@ -1555,6 +1569,7 @@ class GameEngine:
             turns = params.get("turns", 1)
             world.wait(actor_id, turns)
             self._sync_world_entity_positions(world)
+            self._open_adjacent_merchant_session(world)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_wait",
                     "result": {"world_turn": world.clock.turn, "turns": turns}}
