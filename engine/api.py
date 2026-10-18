@@ -1578,7 +1578,9 @@ class GameEngine:
             raise ValueError("开放世界尚未初始化，请先执行world_initialize")
         return WorldState.from_dict(self.state.world_state)
 
-    def _record_world_entity_outcomes(self, world: WorldState) -> None:
+    def _record_world_entity_outcomes(
+        self, world: WorldState, *, extra_entities: list[Entity] | None = None,
+    ) -> None:
         """把死亡/永久离场写入世界事实账本；同一单位的结果事件只记录一次。"""
         entities = []
         if self.state.player is not None:
@@ -1587,6 +1589,7 @@ class GameEngine:
             entities.extend(getattr(self.state, group_name, []) or [])
         if getattr(self.state, "merchant", None) is not None:
             entities.append(self.state.merchant)
+        entities.extend(extra_entities or [])
         by_id = {getattr(entity, "runtime_id", ""): entity
                  for entity in entities if getattr(entity, "runtime_id", "")}
         recorded = {
@@ -8516,7 +8519,8 @@ class GameEngine:
             # NPC战斗可能刚好淘汰了倒数第二名轮回者；此时进入自然会合阶段，
             # 但仍保留地图上的怪物，让它们在会合期间继续构成威胁。
             self._refresh_world_final_duel(world)
-            self._record_world_entity_outcomes(world)
+            # 死亡参与者已从state.enemies移除，但仍必须写入世界事实账本。
+            self._record_world_entity_outcomes(world, extra_entities=participants + reserve)
             self.state.world_state = world.to_dict()
         else:
             self.state.enemies.clear()
