@@ -585,18 +585,48 @@ class WorldState:
                 if (actor.behavior in {"follow", "guard"}
                         and target_position == actor.position):
                     continue
-            # 最终会合者朝地图中心收敛，但优先沿未走过的格子绕开局部死路；
-            # 其他NPC也优先探索新格，走遍附近后才回访，减少原地来回循环。
+            # 最终会合者先向地图中心收敛；到达中心附近后，继续按自己的迷雾记忆
+            # 搜索已知的未探索格，避免因中心格被占或中心已到达而在周围反复打转。
+            # 若曾目击另一名决斗者，优先沿已知地形前往其最后目击位置，不读取其当前隐藏坐标。
             if destination is None and self.final_duel_search and actor_id in self.final_duel_finalists:
+                rival_ids = [item for item in self.final_duel_finalists if item != actor_id]
+                rival_id = rival_ids[0] if rival_ids else None
+                sightings = [entry for entry in actor.memory
+                             if entry.get("actor_id") == rival_id
+                             and isinstance(entry.get("position"), (list, tuple))
+                             and len(entry["position"]) == 2]
+                if sightings:
+                    last_seen = max(sightings, key=lambda entry: int(entry.get("turn", 0)))
+                    goal = (int(last_seen["position"][0]), int(last_seen["position"][1]))
+                    path = self._find_known_path(actor_id, actor.position, goal)
+                    if path is not None and len(path) > 1:
+                        destination = path[1]
+
                 center = (self.map.width // 2, self.map.height // 2)
-                destination = min(
-                    candidates,
-                    key=lambda pos: (
-                        abs(pos[0] - center[0]) + abs(pos[1] - center[1]),
-                        self.map.key(pos) in actor.visited_cells,
-                        pos[1], pos[0],
-                    ),
-                )
+                center_distance = abs(actor.x - center[0]) + abs(actor.y - center[1])
+                if destination is None and center_distance > 1:
+                    closer = [pos for pos in candidates
+                              if abs(pos[0] - center[0]) + abs(pos[1] - center[1]) < center_distance]
+                    if closer:
+                        destination = min(
+                            closer,
+                            key=lambda pos: (
+                                abs(pos[0] - center[0]) + abs(pos[1] - center[1]),
+                                self.map.key(pos) in actor.visited_cells,
+                                pos[1], pos[0]))
+                if destination is None:
+                    known_unvisited = sorted(
+                        (self.map.parse(key) for key in actor.known_cells
+                         if key not in actor.visited_cells and self.map.is_passable(self.map.parse(key))),
+                        key=lambda pos: (abs(pos[0] - actor.x) + abs(pos[1] - actor.y), pos[1], pos[0]))
+                    for goal in known_unvisited:
+                        path = self._find_known_path(actor_id, actor.position, goal)
+                        if path is not None and len(path) > 1:
+                            destination = path[1]
+                            break
+                    if destination is None:
+                        destination = min(candidates, key=lambda pos: (
+                            self.map.key(pos) in actor.visited_cells, pos[1], pos[0]))
             elif destination is None:
                 unvisited = [pos for pos in candidates
                              if self.map.key(pos) not in actor.visited_cells]
