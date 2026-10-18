@@ -2069,6 +2069,13 @@ class GameEngine:
                               for x in range(world.map.width)
                               if world.map.is_passable((x, y))]
                 if not candidates:
+                    signal["status"] = "failed"
+                    signal["resolved_turn"] = world.clock.turn
+                    signal["failure"] = "地图已无可通行地点，无法完成招募"
+                    world.record("hiring_signal_failed", None, signal_id=signal.get("signal_id"),
+                                 name=name, reason=signal["failure"])
+                    resolved.append({"signal_id": signal.get("signal_id"), "status": "failed",
+                                     "reason": signal["failure"]})
                     continue
                 requested = min(candidates, key=lambda pos: (
                     abs(pos[0] - requested[0]) + abs(pos[1] - requested[1]), pos[1], pos[0]))
