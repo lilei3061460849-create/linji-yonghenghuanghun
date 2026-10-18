@@ -4236,6 +4236,7 @@ class GameEngine:
         if self.state.current_region != "乱葬岗" and not has_banner:
             return {"success": False, "error": "造生只能在乱葬岗发动；持有万魂幡时不受地点限制"}
         from .monsters import MONSTER_PREFERENCE_POOL
+        from .gamedata import MONSTER_DAOWEN
         from .models import MONSTER_MANA_RELIC, MONSTER_MANA_RELIC_EFFECT
         owned_beings = [entity for entity in self.state.friends + self.state.employees
                         if getattr(entity, "is_created_being", False)
@@ -4280,6 +4281,22 @@ class GameEngine:
                         + self.state.temp_friends + self.state.enemies)
         if any(entity.name == name for entity in all_entities):
             return {"success": False, "error": f"角色名称【{name}】已被占用"}
+
+        # 造物的专属道纹只在首次造生时确定一次；后续造生只培养偏爱。
+        # 优先从当前副本真实怪物面板中抽取，确保这项能力确实属于该世界的怪物生态。
+        signature_values: dict[str, int | None] = {}
+        for monster_def in self.monster_pool.get(self.state.current_region, []):
+            for daowen_name, x_value in (monster_def.get("dao_wen") or {}).items():
+                signature_values.setdefault(str(daowen_name), x_value)
+        if not signature_values:
+            # 数据不完整的副本仍允许造生：回退到通用怪物专属道纹池，不把缺失数据变成软锁。
+            signature_values = {str(daowen_name): None for daowen_name in MONSTER_DAOWEN}
+        signature_name = str(self.dice.auto_roll(
+            "created_being_signature_daowen",
+            sorted(signature_values),
+            context=f"{name}造生：抽取一次性专属道纹")["selected"])
+        signature_x = signature_values[signature_name]
+
         remaining = list(MONSTER_PREFERENCE_POOL)
         roll = self.dice.auto_roll("created_being_initial_preference", remaining,
                                    context=f"{name}诞生：随机获得一种固有偏爱")
@@ -4295,6 +4312,12 @@ class GameEngine:
         )
         being.is_created_being = True
         being.created_by_runtime_id = player.runtime_id
+        being.dao_wen[signature_name] = DaoWenInstance(
+            dao_wen=DaoWen(name=signature_name, formula="", cost_type="",
+                           cost_formula="", effect_formula=""),
+            x_value=signature_x if signature_x is not None else 0,
+            x_free=signature_x is None,
+        )
         being.preferences = [preference]
         if preference == "痛苦的偏爱":
             being.relics.append(Relic(
@@ -4307,6 +4330,7 @@ class GameEngine:
                            "created_being_id": being.runtime_id,
                            "new_preference": preference,
                            "preferences": list(being.preferences),
+                           "signature_daowen": signature_name,
                            "shard_cost": cost, "shards": self.state.shards,
                            "attributes": {"blood_limit": being.blood_limit,
                                           "mana_limit": being.mana_limit,

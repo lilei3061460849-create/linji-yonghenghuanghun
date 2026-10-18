@@ -917,6 +917,9 @@ def test_creation_builds_one_map_being_then_cultivates_unique_preferences(tmp_pa
     being = beings[0]
     assert being.created_by_runtime_id == engine.state.player.runtime_id
     assert len(being.preferences) == 1
+    assert len(being.dao_wen) == 1
+    signature_daowen = next(iter(being.dao_wen))
+    assert first["result"]["signature_daowen"] == signature_daowen
     assert being.runtime_id in engine.state.world_state["actors"]
 
     second = engine.execute_action("pre_battle_action", {"sub_action": "造生"})
@@ -928,6 +931,8 @@ def test_creation_builds_one_map_being_then_cultivates_unique_preferences(tmp_pa
     being = beings[0]
     assert len(being.preferences) == 2
     assert len(set(being.preferences)) == 2
+    # 再次造生只培养新的偏爱，不会反复抽取/替换专属道纹。
+    assert list(being.dao_wen) == [signature_daowen]
 
 
 def test_reincarnator_trade_requires_fair_offer_and_transfers_atomically(tmp_path):
