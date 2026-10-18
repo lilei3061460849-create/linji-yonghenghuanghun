@@ -1113,3 +1113,41 @@ def test_world_status_exposes_boundary_and_final_search_without_revealing_hidden
     assert result["final_duel"]["search_active"] is True
     assert "final_duel_finalists" not in result
     assert [5, 5] not in [actor["position"] for actor in result["visible_actors"]]
+
+
+def test_world_encounter_handoff_accepts_companions_without_forcing_created_beings_into_combat(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-companion-handoff.db"),
+                        save_dir=str(tmp_path), rng_seed=151, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    monster = Entity("M", "怪物", blood_limit=10, current_hp=10)
+    being = Entity("造物", "朋友", blood_limit=20, current_hp=20)
+    being.is_created_being = True
+    being.created_by_runtime_id = player.runtime_id
+    engine.state.player = player
+    engine.state.enemies = [monster]
+    engine.state.friends = [being]
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+
+    world = WorldState.from_dict(engine.state.world_state)
+    player_id = player.runtime_id
+    monster_id = monster.runtime_id
+    being_id = being.runtime_id
+    world.actors[player_id].x, world.actors[player_id].y = 2, 2
+    world.actors[monster_id].x, world.actors[monster_id].y = 2, 2
+    world.actors[being_id].x, world.actors[being_id].y = 2, 2
+    engine.state.world_state = world.to_dict()
+
+    encounter_ids = world.detect_adjacent_encounters(player_id)
+    assert len(encounter_ids) == 1
+    engine.state.world_state = world.to_dict()
+    started = engine.execute_action("battle_start", {
+        "world_encounter_id": encounter_ids[0], "relic_choices": {},
+    })
+
+    assert started["success"], started
+    assert engine.state.enemies == [monster]
+    assert being not in engine.state.get_all_player_side()
