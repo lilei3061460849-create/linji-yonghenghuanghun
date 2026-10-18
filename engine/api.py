@@ -1547,6 +1547,14 @@ class GameEngine:
             instance = quest_engine.accept(self.state.quest_state, quest_id,
                                            world_turn=self._world_turn(),
                                            source_actor_id=source_actor_id)
+            if getattr(self.state, "world_state", {}):
+                world = self._world_from_state()
+                player_id = getattr(self.state.player, "runtime_id", None) if self.state.player else None
+                fact = world.record("quest_accepted", source_actor_id or player_id,
+                                    quest_id=quest_id)
+                self._process_world_quest_facts(world, [fact])
+                self.state.world_state = world.to_dict()
+                instance = self.state.quest_state["instances"][quest_id]
             return {"success": True, "action": "quest_accept",
                     "result": {"quest_id": quest_id, **instance}}
         except QuestError as exc:
@@ -1569,8 +1577,9 @@ class GameEngine:
             self.state.attribute_points += points
         if getattr(self.state, "world_state", {}):
             world = self._world_from_state()
-            world.record("quest_reward_claimed", getattr(self.state.player, "runtime_id", None),
-                         quest_id=quest_id, rewards=rewards)
+            fact = world.record("quest_reward_claimed", getattr(self.state.player, "runtime_id", None),
+                                quest_id=quest_id, rewards=rewards)
+            self._process_world_quest_facts(world, [fact])
             self.state.world_state = world.to_dict()
         return {"success": True, "action": "quest_claim",
                 "result": {"quest_id": quest_id, "rewards": rewards,
