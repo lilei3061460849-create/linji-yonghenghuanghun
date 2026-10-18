@@ -1176,6 +1176,10 @@ def test_twisted_city_places_modern_landmarks_and_exposes_descriptions_on_discov
     phone_booth = world.map.locations["绝望来电"]
     assert phone_booth["name"] == "公共电话亭"
     assert phone_booth["event_name"] == "绝望来电"
+    storm_site = world.map.locations["猩红暴雨"]
+    assert storm_site["name"] == "暴雨避难点"
+    assert "血色暴雨" in storm_site["description"]
+    assert world.map.locations["祭坛"]["name"] == "碎片祭坛"
 
     occupied = {
         actor.position for actor in world.actors.values()
