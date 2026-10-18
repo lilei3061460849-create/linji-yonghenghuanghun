@@ -33,9 +33,13 @@ def test_shard_peak_only_increases():
     assert e.state.shards_peak == 120
     e.state.shards = 5
     assert e.state.shards_peak == 120
+    e.state.shards_peak = 2
+    assert e.state.shards_peak == 120
     ally = Entity("测试朋友", "朋友", shards=30)
     assert ally.shards_peak == 30
     ally.shards = -5
+    assert ally.shards_peak == 30
+    ally.shards_peak = 1
     assert ally.shards_peak == 30
 
 
