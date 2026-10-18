@@ -274,12 +274,8 @@ class TacticalAI:
             per_key = self._probe_cache.get(key)
             if per_key is not None and per_key.get("target") == "reject":
                 continue
-            params: dict = {"daowen_name": name, "x": 1, "dodge": False,
-                            "blood_shadow": False}
-            if self._actor_ref:
-                params["actor_ref"] = self._actor_ref   # 守擂者视角：预演也须指定施法者，否则引擎当玩家动作
-            if target:
-                params["target"] = target
+            # 与正式发动共用稳定引用解析，避免重名怪物让预演走入“目标不唯一”分支。
+            params = self._params(name, 1, target)
             pv = self.previewer.preview("use_daowen", params)
             res = pv.get("result") or {}
             if not res.get("success"):
@@ -324,12 +320,8 @@ class TacticalAI:
         cached = self._probe_cache.get(key)
         if cached is not None:
             return cached
-        params: dict = {"daowen_name": name, "x": x, "dodge": False,
-                        "blood_shadow": False}
-        if self._actor_ref:
-            params["actor_ref"] = self._actor_ref
-        if target:
-            params["target"] = target
+        # 伤害档位探测也必须使用与正式发动相同的稳定目标引用。
+        params = self._params(name, x, target)
         pv = self.previewer.preview("use_daowen", params)
         if not (pv.get("result") or {}).get("success"):
             self._probe_cache[key] = 0
