@@ -1523,13 +1523,31 @@ class GameEngine:
                 entities.append((self.state.merchant, "merchant", "neutral"))
             candidates = [(x, y) for y in range(height) for x in range(width)
                           if world.map.is_passable((x, y))]
-            # 玩家从固定的安全起始区入场，其余单位按距离依次安置，避免出生点重叠。
-            candidates.sort(key=lambda p: (abs(p[0] - 1) + abs(p[1] - 1), p[1], p[0]))
+            # 轮回者固定从安全起点入场；友方在附近，敌对单位与商人通过引擎骰子随机分散到远处。
             used = set()
+            player_start = (1, 1)
             for entity, kind, faction in entities:
-                pos = next((p for p in candidates if p not in used), None)
-                if pos is None:
-                    raise ValueError("地图可通行格不足，无法放置全部单位")
+                if kind == "player":
+                    pos = player_start
+                else:
+                    available = [p for p in candidates if p not in used]
+                    if kind in {"friend", "employee", "temp_friend"}:
+                        nearby = [p for p in available
+                                  if abs(p[0] - 1) + abs(p[1] - 1) <= 3]
+                        choices = nearby or available
+                    else:
+                        min_distance = max(4, min(width, height) // 4)
+                        distant = [p for p in available
+                                   if abs(p[0] - 1) + abs(p[1] - 1) >= min_distance]
+                        choices = distant or available
+                    if not choices:
+                        raise ValueError("地图可通行格不足，无法放置全部单位")
+                    placement_roll = self.dice.auto_roll(
+                        f"open_world_spawn_{kind}_{entity.name}_{len(used)}", choices,
+                        context=f"开放世界单位随机出生：{entity.name}")
+                    pos = tuple(placement_roll["selected"])
+                if pos in used:
+                    raise ValueError("随机出生位置发生重叠，请重新初始化地图")
                 used.add(pos)
                 actor_id = getattr(entity, "runtime_id", "") or f"{kind}:{entity.name}:{len(used)}"
                 mode = "manual" if kind in {"player", "friend", "employee", "temp_friend"} else "autonomous"
