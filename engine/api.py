@@ -1531,9 +1531,8 @@ class GameEngine:
                     world.record("world_entered", actor_id, region=self.state.current_region)
             # 将当前副本可用的地点型事件放入真实地图格；纯状态/战斗触发事件不伪装成地点。
             non_location_events = {"过路商人", "都市的终音", "初拥之夜"}
-            location_names = [name for name in sorted(self.event_pool.events)
-                              if name not in non_location_events
-                              and name not in self.event_pool.triggered]
+            location_names = [name for name in self.event_pool.build_pool(self.state.current_region)
+                              if name not in non_location_events]
             available = [pos for pos in candidates if pos not in used]
             for event_name in location_names:
                 if not available:
