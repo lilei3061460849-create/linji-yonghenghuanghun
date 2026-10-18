@@ -1873,7 +1873,11 @@ class GameEngine:
         entity_by_id = {entity.runtime_id: entity for entity in entities if entity is not None}
         results = []
         price = 10
-        for actor_id in sorted(world.actors):
+        # 先按地图坐标排序，而非随机生成的UUID；同一世界种子下交易优先级稳定。
+        for actor_id in sorted(
+                world.actors,
+                key=lambda aid: (world.actors[aid].y, world.actors[aid].x,
+                                world.actors[aid].name, aid)):
             actor = world.actors[actor_id]
             entity = entity_by_id.get(actor_id)
             if (not actor.alive or actor.kind != "enemy" or actor.faction != "enemy"
@@ -1919,7 +1923,7 @@ class GameEngine:
                          npc_shards=entity.shards, merchant_shards=merchant.shards)
             results.append({"actor_id": actor_id, "direction": direction,
                             "relic_name": traded_relic.name, "price": price})
-            # 商人每回合最多完成一笔NPC交易；按actor_id排序，结果可复现。
+            # 商人每回合最多完成一笔NPC交易。
             break
         return results
 
