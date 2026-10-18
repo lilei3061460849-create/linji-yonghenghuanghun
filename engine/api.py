@@ -3217,6 +3217,8 @@ class GameEngine:
             self.state.energy += 1
             return {"success": False, "error": "；".join(errors)}
         if reserve:
+            if not hasattr(self.state, "pending_learned_daowen"):
+                self.state.pending_learned_daowen = []
             self.state.pending_learned_daowen.extend(names)
             destination = "pending"
         else:
