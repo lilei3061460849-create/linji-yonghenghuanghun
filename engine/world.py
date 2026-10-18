@@ -266,6 +266,8 @@ class WorldState:
 
     def wait(self, actor_id: str, turns: int = 1) -> int:
         self._living_actor(actor_id)
+        if not isinstance(turns, int) or isinstance(turns, bool) or turns < 1:
+            raise ValueError("等待回合数必须是正整数")
         self.clock.advance(turns)
         self.record("world_waited", actor_id, turns=turns)
         return self.clock.turn
