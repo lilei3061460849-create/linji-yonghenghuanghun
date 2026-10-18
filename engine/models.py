@@ -1021,6 +1021,14 @@ class GameState:
         if name == "shards" and "shards_peak" in self.__dict__:
             if int(value) > int(self.__dict__.get("shards_peak", 0)):
                 object.__setattr__(self, "shards_peak", int(value))
+        # 玩家真实碎片余额存于 GameState；镜像同步峰值，避免状态快照出现两套玩家峰值。
+        if name in {"shards", "shards_peak", "player"} and "shards_peak" in self.__dict__:
+            player = self.__dict__.get("player")
+            if player is not None and hasattr(player, "shards_peak"):
+                peak = max(int(self.__dict__.get("shards_peak", 0)),
+                           int(getattr(player, "shards_peak", 0)))
+                object.__setattr__(self, "shards_peak", peak)
+                object.__setattr__(player, "shards_peak", peak)
 
     def lose_shards(self, amount: int) -> int:
         """玩家失去碎片（假碎片优先）。返回实际失去的真碎片数。"""
