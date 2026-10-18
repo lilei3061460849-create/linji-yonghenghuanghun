@@ -709,6 +709,28 @@ def test_player_picks_up_resonance_relic_only_by_entering_its_cell(tmp_path):
 
 
 
+def test_hiring_signal_fails_instead_of_remaining_pending_when_map_has_no_walkable_tiles(tmp_path):
+    from engine.api import GameEngine
+
+    engine = GameEngine(db_path=str(tmp_path / "blocked-hiring.db"),
+                        save_dir=str(tmp_path), rng_seed=101, autosave=False)
+    world = WorldState.create(width=7, height=7, seed=1)
+    world.map.terrain = {key: "wall" for key in world.map.terrain}
+    world.hiring_signals.append({
+        "signal_id": "signal-blocked", "status": "pending", "arrival_turn": 0,
+        "position": [3, 3], "params": {"name": "无法抵达的员工"},
+    })
+
+    result = engine._resolve_world_hiring_signals(world)
+
+    assert result == [{
+        "signal_id": "signal-blocked", "status": "failed",
+        "reason": "地图已无可通行地点，无法完成招募",
+    }]
+    assert world.hiring_signals[0]["status"] == "failed"
+    assert world.hiring_signals[0]["resolved_turn"] == world.clock.turn
+
+
 def test_hiring_signal_persists_while_player_moves_and_resolves_on_arrival(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
