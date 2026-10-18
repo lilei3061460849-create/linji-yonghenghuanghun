@@ -309,11 +309,19 @@ class WorldState:
                 "faction": other.faction,
                 "position": list(other.position),
             }
-            if not actor.memory or actor.memory[-1] != observation:
+            # 同一世界回合可能因多段结算多次刷新视野；地点记忆夹在中间时，
+            # 仍按“目标+回合”去重，避免把同一目击重复塞满有限记忆。
+            same_turn = next((entry for entry in reversed(actor.memory)
+                              if entry.get("actor_id") == other.actor_id
+                              and entry.get("turn") == self.clock.turn
+                              and entry.get("kind") != "location_sighting"), None)
+            if same_turn is None:
                 actor.memory.append(observation)
                 actor.memory = actor.memory[-50:]
                 self.record("actor_seen", actor_id, target_actor_id=other.actor_id,
                             name=other.name, kind=other.kind, position=list(other.position))
+            elif same_turn != observation:
+                same_turn.update(observation)
         return cells
 
     def _shrink_boundary_if_due(self) -> dict[str, Any] | None:
