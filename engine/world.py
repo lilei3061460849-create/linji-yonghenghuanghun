@@ -655,7 +655,8 @@ class WorldState:
                 unvisited = [pos for pos in candidates
                              if self.map.key(pos) not in actor.visited_cells]
                 choices = unvisited or candidates
-                offset = (self.clock.turn + sum(ord(char) for char in actor_id)) % len(choices)
+                stable_identity = sum(ord(char) for char in actor.name) + actor.x * 31 + actor.y * 17
+                offset = (self.clock.turn + stable_identity) % len(choices)
                 destination = choices[offset]
             origin = actor.position
             actor.x, actor.y = destination
