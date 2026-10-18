@@ -1532,9 +1532,10 @@ class GameEngine:
                     raise ValueError("地图可通行格不足，无法放置全部单位")
                 used.add(pos)
                 actor_id = getattr(entity, "runtime_id", "") or f"{kind}:{entity.name}:{len(used)}"
+                mode = "manual" if kind in {"player", "friend", "employee", "temp_friend"} else "autonomous"
                 world.add_actor(WorldActorState(actor_id=actor_id, name=entity.name, kind=kind,
                                                 x=pos[0], y=pos[1], alive=entity.is_alive,
-                                                faction=faction))
+                                                faction=faction, mode=mode))
                 if kind == "player":
                     world.record("world_entered", actor_id, region=self.state.current_region)
             # 将当前副本可用的地点型事件放入真实地图格；纯状态/战斗触发事件不伪装成地点。
