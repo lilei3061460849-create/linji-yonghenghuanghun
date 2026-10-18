@@ -1707,7 +1707,9 @@ class GameEngine:
         try:
             world = WorldState.create(width=width, height=height, seed=seed)
             spawned_monsters = []
-            if not self.state.enemies:
+            spawned_reincarnators = []
+            had_existing_enemies = bool(self.state.enemies)
+            if not had_existing_enemies:
                 # 开放世界把当前副本怪物池中的实体生成到地图；不是每次遭遇才临时抽怪。
                 from .monsters import make_monster_entity, assign_monster_preferences
                 for monster_def in self._monster_pool_for_battle():
@@ -1716,6 +1718,34 @@ class GameEngine:
                     self.combat.init_monster_shards(monster)
                     self.state.enemies.append(monster)
                     spawned_monsters.append(monster)
+                # 正式地图（面积至少150格）还会生成其他真实轮回者。
+                # 小地图主要用于测试/自定义场景，避免自动塞入额外单位破坏调用方布置。
+                if width * height >= 150:
+                    npc_count = min(4, max(2, self._current_tier() + 1))
+                    used_names = {entity.name for entity in
+                                  ([self.state.player] if self.state.player else [])
+                                  + list(self.state.enemies)}
+                    for npc_index in range(npc_count):
+                        npc_name = f"流浪轮回者·{npc_index + 1}"
+                        suffix = npc_index + 1
+                        while npc_name in used_names:
+                            suffix += 1
+                            npc_name = f"流浪轮回者·{suffix}"
+                        used_names.add(npc_name)
+                        template = self.state.player
+                        npc = Entity(
+                            name=npc_name, entity_type="轮回者",
+                            blood_limit=max(1, int(template.blood_limit)),
+                            current_hp=max(1, int(template.blood_limit)),
+                            mana_limit=max(0, int(template.mana_limit)),
+                            current_mana=max(0, int(template.mana_limit)),
+                            speed_limit=max(0, int(template.speed_limit)),
+                            current_speed=max(0, int(template.speed_limit)),
+                            attack_count=max(0, int(template.attack_count)),
+                            attack_power=max(0, int(template.attack_power)),
+                        )
+                        self.state.enemies.append(npc)
+                        spawned_reincarnators.append(npc)
             entities = []
             if self.state.player is not None:
                 entities.append((self.state.player, "player", "player"))
@@ -1763,6 +1793,9 @@ class GameEngine:
                 elif entity in spawned_monsters:
                     world.record("monster_spawned", actor_id, name=entity.name,
                                  position=list(pos), region=self.state.current_region)
+                elif entity in spawned_reincarnators:
+                    world.record("reincarnator_spawned", actor_id, name=entity.name,
+                                 position=list(pos), region=self.state.current_region)
             # 将当前副本可用的地点型事件放入真实地图格；纯状态/战斗触发事件不伪装成地点。
             non_location_events = {"过路商人", "都市的终音", "初拥之夜"}
             location_names = [name for name in self.event_pool.build_pool(self.state.current_region)
@@ -1804,6 +1837,7 @@ class GameEngine:
                     "result": {"width": width, "height": height,
                                "world_turn": world.clock.turn,
                                "spawned_monsters": len(spawned_monsters),
+                               "spawned_reincarnators": len(spawned_reincarnators),
                                "event_locations": len(world.map.locations),
                                "final_duel_search": final_phase if final_phase.get("active") else None}}
         except (ValueError, KeyError, TypeError) as exc:
