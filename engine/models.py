@@ -280,6 +280,8 @@ class Entity:
     # 造物是具有专属身份的朋友，不是分裂道纹产生的临时朋友。
     is_created_being: bool = False
     created_by_runtime_id: str = ""
+    # 造物只有在主人明确召唤时才加入战斗；世界地图上的独立行动不因此中断。
+    is_summoned: bool = False
 
     # 基础属性
     blood_limit: int = 0         # 血限
@@ -942,6 +944,7 @@ class Entity:
             "preferences": list(getattr(self, "preferences", [])),
             "is_created_being": bool(getattr(self, "is_created_being", False)),
             "created_by_runtime_id": getattr(self, "created_by_runtime_id", ""),
+            "is_summoned": bool(getattr(self, "is_summoned", False)),
             "blood_limit": self.blood_limit,
             "current_hp": self.current_hp,
             "mana_limit": self.mana_limit,
@@ -1826,7 +1829,9 @@ class GameState:
         if self.player and self.player.is_alive and not self.is_sealed_away(self.player):
             entities.append(self.player)
         entities.extend(f for f in self.friends if f.is_alive and not f.has_retreated
-                        and not self.is_sealed_away(f))
+                        and not self.is_sealed_away(f)
+                        and (not getattr(f, "is_created_being", False)
+                             or getattr(f, "is_summoned", False)))
         entities.extend(e for e in self.employees if e.is_alive and e.is_deployed and not e.has_retreated
                         and not self.is_sealed_away(e))
         entities.extend(t for t in self.temp_friends if t.is_alive and not t.has_retreated
