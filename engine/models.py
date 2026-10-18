@@ -272,6 +272,8 @@ class Entity:
     world_x: Optional[int] = None
     world_y: Optional[int] = None
     is_neutral: bool = False  # 中立特殊角色不会自动进入任一战斗阵营
+    # 怪物/造物共用的固有偏爱；每种偏爱在同一实体上最多出现一次。
+    preferences: list[str] = field(default_factory=list)
 
     # 基础属性
     blood_limit: int = 0         # 血限
@@ -822,7 +824,7 @@ class Entity:
           透支/法术），效果重新有对象；判定位统一收敛到
           `can_gain_mana()` / `gain_mana()`，不再散落各处。
         """
-        if amount > 0 and self.has_status("愤怒"):
+        if amount > 0 and (self.has_status("愤怒") or "贪婪的偏爱" in self.preferences):
             amount = math.ceil(amount / 2)
         if self.current_mana < amount:
             return False
@@ -893,6 +895,9 @@ class Entity:
 
     def add_status(self, effect: StatusEffect):
         """添加状态效果；未显式给出极性时按规则表标注，生命周期仍由scope独立决定。"""
+        # 永恒的偏爱：所有由该实体施加的「持续X」效果改为永久持续。
+        if "永恒的偏爱" in self.preferences and effect.remaining_rounds > 0:
+            effect.remaining_rounds = -1
         if effect.polarity == EffectPolarity.NEUTRAL.value:
             buffs = {
                 "固执", "贯穿", "急速", "洞察", "飞行",
@@ -922,6 +927,7 @@ class Entity:
             "world_x": self.world_x,
             "world_y": self.world_y,
             "is_neutral": self.is_neutral,
+            "preferences": list(self.preferences),
             "blood_limit": self.blood_limit,
             "current_hp": self.current_hp,
             "mana_limit": self.mana_limit,
