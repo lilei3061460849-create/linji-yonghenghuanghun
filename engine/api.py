@@ -4477,7 +4477,7 @@ class GameEngine:
         if bonus:
             result_payload["附赠发现"] = bonus
         next_event = None
-        if self.state.pending_event_queue:
+        if self.state.pending_event_queue and not keep_merchant_open:
             next_event = self.state.pending_event_queue.pop(0)
             self.event_pool.current = next_event
             queued = self.event_pool.events[next_event]
