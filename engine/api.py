@@ -6308,9 +6308,11 @@ class GameEngine:
             if name not in {"祭坛", "过路商人"} and getattr(self.state, "world_state", {}):
                 try:
                     world = self._world_from_state()
-                    for location in world.map.locations.values():
+                    for location_id, location in world.map.locations.items():
                         if location.get("event_name") == name:
                             location["active"] = False
+                            world.deactivate_location_sightings(
+                                location_id, reason="event_completed")
                     self.state.world_state = world.to_dict()
                 except (ValueError, KeyError, TypeError):
                     pass
