@@ -410,7 +410,8 @@ class WorldState:
                                     alternatives,
                                     key=lambda pos: (len(self.map.find_path(pos, target_position) or []),
                                                      pos[1], pos[0]))
-                if actor.behavior == "guard" and target_position == actor.position:
+                if (actor.behavior in {"follow", "guard"}
+                        and target_position == actor.position):
                     continue
             # 最终会合者朝地图中心收敛；其余单位在未知区域自主探索。
             if destination is None and self.final_duel_search and actor_id in self.final_duel_finalists:
