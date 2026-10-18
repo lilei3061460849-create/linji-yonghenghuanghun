@@ -471,6 +471,12 @@ class GameEngine:
                 "params_schema": {"sub_action": region_action["id"],
                                   **region_action["params_schema"]},
             })
+        pending_learned = list(getattr(self.state, "pending_learned_daowen", []))
+        if pending_learned:
+            actions.append({"action_type": "assign_learned_daowen",
+                            "params_schema": {"name": pending_learned,
+                                              "recipient": "现存轮回者/朋友/员工/造物名称或runtime_id"},
+                            "note": "学习成果可以暂存，待未来结识朋友后再分配"})
         has_ten_thousand_souls_banner = any(
             relic.name == "万魂幡" for relic in (self.state.relics or []))
         if (has_ten_thousand_souls_banner
@@ -1442,6 +1448,8 @@ class GameEngine:
             return self._action_use_resonance(params)
         elif action_type == "redeem_attribute_points":
             return self._action_redeem_attribute_points(params)
+        elif action_type == "assign_learned_daowen":
+            return self._action_assign_learned_daowen(params)
         elif action_type == "declare_parry":
             return self._action_declare_parry(params)
         elif action_type == "prepare_attack":
@@ -4418,6 +4426,33 @@ class GameEngine:
                            "blood_limit": target_entity.blood_limit,
                            "speed_limit": target_entity.speed_limit,
                            "mana_limit": target_entity.mana_limit}}
+
+    def _action_assign_learned_daowen(self, params: dict) -> dict:
+        """把暂存的学习成果分配给现在或后来结识的朋友/员工/造物。"""
+        if self.state.phase != GamePhase.PRE_BATTLE.value:
+            return {"success": False, "error": "待分配道纹只能在局外分配"}
+        name = params.get("name")
+        recipient = str(params.get("recipient", params.get("target", "")) or "")
+        pending = getattr(self.state, "pending_learned_daowen", [])
+        if not isinstance(name, str) or name not in pending:
+            return {"success": False, "error": f"待分配池中没有道纹【{name}】"}
+        candidates = ([self.state.player] if self.state.player else [])
+        candidates += self.state.friends + self.state.employees + self.state.temp_friends
+        target = next((entity for entity in candidates if entity and entity.is_alive
+                       and recipient in (entity.name, entity.runtime_id)), None)
+        if target is None:
+            return {"success": False, "error": f"接收者【{recipient}】不存在或已离场"}
+        if name in target.dao_wen:
+            return {"success": False, "error": f"【{target.name}】已经拥有道纹【{name}】"}
+        if len(target.dao_wen) >= target.daowen_capacity:
+            return {"success": False,
+                    "error": f"【{target.name}】的道纹承载已满：血限{target.blood_limit}，上限{target.daowen_capacity}种"}
+        target.dao_wen[name] = DaoWenInstance(
+            DaoWen(name=name, formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
+        pending.remove(name)
+        return {"success": True, "action": "分配学习道纹",
+                "result": {"daowen": name, "recipient": target.name,
+                           "remaining_pending_daowen": list(pending)}}
 
     def _action_redeem_attribute_points(self, params: dict) -> dict:
         """自由动作：把存下的属性点兑成面板（不耗精力、不耗碎片）。
