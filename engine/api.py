@@ -985,6 +985,9 @@ class GameEngine:
                     "error": f"事件【{self.event_pool.current}】尚未结算，不能执行其它行动"}
         if action_type.startswith("setup_") and phase != "setup":
             return {"success": False, "error": f"【{action_type}】只能在开局阶段执行"}
+        if action_type.startswith("world_") and phase != "pre_battle":
+            return {"success": False,
+                    "error": "当前开放世界行动尚处于第一阶段，只能在局外阶段调用；战斗/世界统一主循环尚未接通"}
         if action_type in ("pre_battle_action", "resolve_event", "upgrade_doctor") and phase != "pre_battle":
             return {"success": False, "error": "局外行动/事件只能在局外阶段执行"}
         if action_type == "battle_start" and phase != "pre_battle":
