@@ -90,6 +90,7 @@ def test_world_state_roundtrip_preserves_clock_map_actors_and_fact_log():
     restored = WorldState.from_dict(world.to_dict())
     assert restored.clock.turn == 1
     assert restored.actors["p"].position == (2, 1)
+    assert restored.actors["p"].visited_cells == {"1,1", "2,1"}
     assert restored.event_log == world.event_log
     assert restored.map.to_dict() == world.map.to_dict()
 
