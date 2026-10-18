@@ -235,8 +235,8 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
                 return "你已经持有这件遗物，不可重复购买"
             if not any(r.name == relic_name for r in merchant.relics):
                 return "过路商人当前没有这件遗物；售出后不会自动补货"
-            if price > engine.state.shards:
-                return f"碎片不足，无法支付{price}（当前{engine.state.shards}）"
+            if price > merchant.shards:
+                return f"商人碎片不足，无法支付{price}（商人当前{merchant.shards}）"
             cap = player.relic_capacity
             owned = len({r.name for r in engine.state.relics})
             if relic_name not in {r.name for r in engine.state.relics} and owned >= cap:
@@ -358,15 +358,17 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         if direction == "buy":
             relic = next(r for r in merchant.relics if r.name == relic_name)
             engine.state.shards -= price
+            merchant.shards += price
             merchant.relics.remove(relic)
             engine.state.relics.append(relic)
-            applied.append(f"与过路商人成交：买入遗物{relic_name}，支付{price}碎片；商人剩余{len(merchant.relics)}件遗物")
+            applied.append(f"与过路商人成交：买入遗物{relic_name}，支付{price}碎片；商人余额{merchant.shards}，剩余{len(merchant.relics)}件遗物")
         else:
             relic = next(r for r in engine.state.relics if r.name == relic_name)
             engine.state.relics.remove(relic)
             merchant.relics.append(relic)
+            merchant.shards -= price
             engine.state.shards += price
-            applied.append(f"与过路商人成交：卖出遗物{relic_name}，获得{price}碎片；商人现有{len(merchant.relics)}件遗物")
+            applied.append(f"与过路商人成交：卖出遗物{relic_name}，获得{price}碎片；商人余额{merchant.shards}，现有{len(merchant.relics)}件遗物")
         return {"applied": applied, "instructions": instructions,
                 "trade": {"merchant": "过路商人", "direction": direction,
                           "relic_name": relic_name, "price": price, "confirmed": True}}
