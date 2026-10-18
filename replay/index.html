@@ -49,7 +49,8 @@ input[type=range]{width:100%;accent-color:var(--blue);min-height:30px}
   <h1>战局回放</h1>
   <div class="muted">极简战术视图 · 回放已结算事件，不重新运行战斗</div>
   <div class="toolbar" style="margin-top:12px">
-    <label class="file-button" for="file">打开 replay.json</label>
+    <button id="load-server" type="button">读取服务器 replay.json</button>
+    <label class="file-button" for="file">从手机选择 JSON</label>
     <input id="file" type="file" accept=".json,application/json">
     <button id="demo" type="button">载入演示</button>
     <span id="status" class="status">请选择从引擎导出的回放 JSON。</span>
@@ -205,6 +206,19 @@ input[type=range]{width:100%;accent-color:var(--blue);min-height:30px}
     if (data.events.length) show(0);
     else { $("event-title").textContent = "没有战斗事件"; $("detail").textContent = "该文件中 events 为空。"; }
   }
+  async function loadFromServer() {
+    try {
+      const response = await fetch("../replay.json", {cache:"no-store"});
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      load(await response.json());
+    } catch (error) {
+      $("status").textContent = "服务器没有可读取的 replay.json（" + error.message + "）。先运行导出命令，或从手机选择 JSON。";
+    }
+  }
+  $("load-server").addEventListener("click", loadFromServer);
+  // When hosted by a local/forwarded static server, try loading the default export.
+  if (location.protocol !== "file:") loadFromServer();
+
   $("file").addEventListener("change", async event => {
     const file = event.target.files?.[0]; if (!file) return;
     try { load(JSON.parse(await file.text())); }
