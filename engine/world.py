@@ -168,6 +168,7 @@ class WorldActorState:
     owner_actor_id: str = ""
     guard_position: Coord | None = None
     known_cells: set[str] = field(default_factory=set)
+    visited_cells: set[str] = field(default_factory=set)
     memory: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -177,12 +178,14 @@ class WorldActorState:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["known_cells"] = sorted(self.known_cells)
+        data["visited_cells"] = sorted(self.visited_cells)
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "WorldActorState":
         values = dict(data)
         values["known_cells"] = set(values.get("known_cells", []))
+        values["visited_cells"] = set(values.get("visited_cells", []))
         values["memory"] = list(values.get("memory", []))
         guard_position = values.get("guard_position")
         values["guard_position"] = tuple(guard_position) if guard_position is not None else None
@@ -244,6 +247,7 @@ class WorldState:
         if not self.map.is_passable(actor.position):
             raise ValueError("单位出生位置必须在可通行格")
         # 同格占位合法；敌对单位是否开战由遭遇检测统一处理。
+        actor.visited_cells.add(self.map.key(actor.position))
         self.actors[actor.actor_id] = actor
         self.record("actor_spawned", actor.actor_id, name=actor.name, kind=actor.kind,
                     position=list(actor.position))
@@ -329,6 +333,7 @@ class WorldState:
         # 世界规则允许多个单位占据同一格；进入同格后立即检查敌对遭遇。
         origin = actor.position
         actor.x, actor.y = destination
+        actor.visited_cells.add(self.map.key(destination))
         self.clock.advance(1)
         shrink = self._shrink_boundary_if_due()
         self.record("actor_moved", actor_id, origin=list(origin), destination=list(destination))
@@ -427,19 +432,27 @@ class WorldState:
                 if (actor.behavior in {"follow", "guard"}
                         and target_position == actor.position):
                     continue
-            # 最终会合者朝地图中心收敛；其余单位在未知区域自主探索。
+            # 最终会合者朝地图中心收敛，但优先沿未走过的格子绕开局部死路；
+            # 其他NPC也优先探索新格，走遍附近后才回访，减少原地来回循环。
             if destination is None and self.final_duel_search and actor_id in self.final_duel_finalists:
                 center = (self.map.width // 2, self.map.height // 2)
                 destination = min(
                     candidates,
-                    key=lambda pos: (abs(pos[0] - center[0]) + abs(pos[1] - center[1]),
-                                     (pos[0], pos[1])),
+                    key=lambda pos: (
+                        abs(pos[0] - center[0]) + abs(pos[1] - center[1]),
+                        self.map.key(pos) in actor.visited_cells,
+                        pos[1], pos[0],
+                    ),
                 )
             elif destination is None:
-                offset = (self.clock.turn + sum(ord(char) for char in actor_id)) % len(candidates)
-                destination = candidates[offset]
+                unvisited = [pos for pos in candidates
+                             if self.map.key(pos) not in actor.visited_cells]
+                choices = unvisited or candidates
+                offset = (self.clock.turn + sum(ord(char) for char in actor_id)) % len(choices)
+                destination = choices[offset]
             origin = actor.position
             actor.x, actor.y = destination
+            actor.visited_cells.add(self.map.key(destination))
             self.record("actor_moved", actor_id, origin=list(origin),
                         destination=list(destination), autonomous=True)
             self.visible_cells(actor_id)
