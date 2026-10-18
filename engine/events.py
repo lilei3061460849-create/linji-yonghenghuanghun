@@ -227,6 +227,8 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
             return "遗物交易必须提交非负整数price"
         if params.get("confirmed") is not True:
             return "必须在成交前显式确认交易双方、遗物名称与碎片价格（confirmed=true）"
+        if isinstance(price, bool) or not isinstance(price, int) or price < 0:
+            return "交易价格必须是非负整数碎片"
         merchant = engine.state.merchant
         if merchant is None:
             return "过路商人尚未进入本局副本，当前没有可交易的商人库存"
@@ -246,6 +248,8 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
                 return "你当前没有这件可出售遗物"
             if any(r.name == relic_name for r in merchant.relics):
                 return "商人已经持有同名遗物，交易不能复制遗物"
+            if price > merchant.shards:
+                return f"商人碎片不足，无法支付{price}（商人当前{merchant.shards}）"
     if ("销毁一件当前遗物" in text or "失去一件当前遗物" in text):
         relic_name = params.get("relic_name", "")
         if not isinstance(relic_name, str) or not any(r.name == relic_name for r in engine.state.relics):
