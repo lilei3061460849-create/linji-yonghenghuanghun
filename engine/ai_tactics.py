@@ -541,12 +541,14 @@ class TacticalAI:
                 harvest_cap = max(cap, max(1, self.mana() // cost))
             target = probe.get("target_name")
             kind = probe["kind"]
+            kill_x = 0
             if kind == "damage":         # 输出牌给血最少敌人（收割/推进）
                 foes = sorted(self.alive_enemies(), key=lambda e: e.current_hp)
                 targets = [foes[0].name] if foes else []
                 if foes and probe["dmg"] > 0:   # 收割档：恰好打死血最少者（真实预演，非线性外推）
                     _kx = self._x_to_kill(name, foes[0].current_hp, foes[0].name)
                     if _kx >= 1:
+                        kill_x = _kx
                         xs.add(_kx)
                         # 收割档只受「买得起」约束，不受均分预算的 cap 裁剪：
                         # 超线性伤害（杀伐 X²）下击杀所需 X 常高于 budget_x，
@@ -565,6 +567,7 @@ class TacticalAI:
                     out.append({"action": "use_daowen",
                                 "label": f"{name}X={x}",
                                 "kind": kind, "target": t,
+                                "finisher": bool(kill_x and x == kill_x),
                                 "params": self._params(name, x, t)})
         return out
 
@@ -934,16 +937,27 @@ class TacticalAI:
         candidates.extend(basic_candidates)
         for bonus, cand in self._resonance_candidates():
             candidates.append(cand)   # 残韵候选已按威胁预筛，附带基础分
-        # 普攻是常驻候选，不能因为道纹候选太多而在
-        # MAX_CANDIDATE_PREVIEWS 截断时消失；否则AI会出现“有攻击力却只会
-        # 重复控制”的假性策略。
-        if basic_candidates:
-            reserve = min(len(basic_candidates), MAX_CANDIDATE_PREVIEWS)
-            non_basic = [cand for cand in candidates if cand not in basic_candidates]
-            candidates = (non_basic[:MAX_CANDIDATE_PREVIEWS - reserve]
-                          + basic_candidates[:reserve])
-        else:
-            candidates = candidates[:MAX_CANDIDATE_PREVIEWS]
+        # 普攻与真实斩杀档都必须穿过预演预算闸门：否则大量按名称排序的
+        # 道纹候选会把后面的斩杀候选截掉，AI明明有一手可终结战斗却重复普攻。
+        if len(candidates) > MAX_CANDIDATE_PREVIEWS:
+            basic_ids = {id(cand) for cand in basic_candidates}
+            finisher_candidates = [
+                cand for cand in candidates
+                if cand.get("finisher") and id(cand) not in basic_ids
+            ]
+            reserve_basic = min(len(basic_candidates), MAX_CANDIDATE_PREVIEWS)
+            reserve_finishers = min(
+                len(finisher_candidates), MAX_CANDIDATE_PREVIEWS - reserve_basic)
+            reserved_ids = basic_ids | {id(cand) for cand in finisher_candidates}
+            regular_candidates = [
+                cand for cand in candidates if id(cand) not in reserved_ids
+            ]
+            regular_slots = MAX_CANDIDATE_PREVIEWS - reserve_basic - reserve_finishers
+            candidates = (
+                regular_candidates[:regular_slots]
+                + finisher_candidates[:reserve_finishers]
+                + basic_candidates[:reserve_basic]
+            )
         immediate_damage_available = False
         immediate_damage_candidates: set[int] = set()
         for cand in candidates:
