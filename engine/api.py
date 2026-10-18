@@ -3488,10 +3488,13 @@ class GameEngine:
             return {"success": False, "error": "造生只能在乱葬岗发动；持有万魂幡时不受地点限制"}
         from .monsters import MONSTER_PREFERENCE_POOL
         from .models import MONSTER_MANA_RELIC, MONSTER_MANA_RELIC_EFFECT
-        existing = next((entity for entity in self.state.friends
-                         if getattr(entity, "is_created_being", False)
-                         and getattr(entity, "created_by_runtime_id", "") == player.runtime_id
-                         and entity.is_alive), None)
+        owned_beings = [entity for entity in self.state.friends + self.state.employees
+                        if getattr(entity, "is_created_being", False)
+                        and getattr(entity, "created_by_runtime_id", "") == player.runtime_id]
+        existing = owned_beings[0] if owned_beings else None
+        if existing is not None and not existing.is_alive:
+            return {"success": False,
+                    "error": "本轮回已创造过的造物已经死亡；当前规则不允许用再次造生绕过唯一造物限制"}
         if existing is not None:
             remaining = [name for name in MONSTER_PREFERENCE_POOL
                          if name not in getattr(existing, "preferences", [])]
