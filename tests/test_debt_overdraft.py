@@ -43,7 +43,7 @@ def test_monster_xiaozai_overdraws_real_shards_into_debt():
 
 
 def test_xiaozai_chain_reaches_debt_threshold_and_binds_at_settle():
-    """链路：连续透支→负债≥20→回终结算触发还债→转为员工参战。"""
+    """链路：连续透支越过动态负债线→回终结算触发还债→转为员工参战。"""
     combat = _make_combat(_xiaozai_monster(x=1, shards=0, fake=0))
     monster = combat.state.enemies[0]
     # 2026-09-16：道纹递增已废止，消灾 X 恒为 1、每次真碎片代价恒为 5。
@@ -55,7 +55,7 @@ def test_xiaozai_chain_reaches_debt_threshold_and_binds_at_settle():
         combat._monster_round_used(monster).discard("消灾")  # 跨回合重置使用记录
     assert monster.shards <= -(combat.DEBT_THRESHOLD + monster.shards_peak)
     results = combat.settle_victory_paths()
-    assert any(r.get("type") == "debt_bind" for r in results), f"负债≥20应触发还债: {results}"
+    assert any(r.get("type") == "debt_bind" for r in results), f"负债达到动态阈值应触发还债: {results}"
     assert monster.is_debt_bound is True
     assert monster.entity_type == "员工" and monster in combat.state.get_all_player_side()
 
@@ -68,6 +68,18 @@ def test_debt_trigger_boundary_9_not_bound_10_bound():
         results = combat.settle_victory_paths()
         bound = any(r.get("type") == "debt_bind" for r in results)
         assert bound is expect, f"负债{-shards}触发期望{expect}，实际{bound}"
+
+
+def test_debt_threshold_scales_with_historical_peak():
+    """历史最高碎片余额100时，负债109不触发，负债110触发。"""
+    for shards, expect in ((-109, False), (-110, True)):
+        monster = _xiaozai_monster(shards=100)
+        monster.shards = shards
+        combat = _make_combat(monster)
+        results = combat.settle_victory_paths()
+        bound = any(r.get("type") == "debt_bind" for r in results)
+        assert bound is expect, (shards, monster.shards_peak, results)
+        assert monster.shards_peak == 100
 
 
 def test_fake_shards_still_preferred_no_debt_when_fake_sufficient():
