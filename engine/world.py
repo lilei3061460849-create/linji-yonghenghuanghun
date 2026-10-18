@@ -291,9 +291,13 @@ class WorldState:
         for actor in caught:
             self.record("actor_caught_by_shrinking_boundary", actor.actor_id,
                         ring=ring, position=list(actor.position))
+        next_ring = self.shrink_count
+        next_turn = (next_ring * self.shrink_interval
+                     if next_ring * 2 < min(self.map.width, self.map.height) - 1
+                     else None)
         return {"ring": ring, "removed_cells": len(removed),
                 "caught_actor_ids": [actor.actor_id for actor in caught],
-                "next_shrink_turn": (self.shrink_count * self.shrink_interval)}
+                "next_shrink_turn": next_turn}
 
     def move_actor(self, actor_id: str, destination: Coord) -> dict[str, Any]:
         actor = self._living_actor(actor_id)
