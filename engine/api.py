@@ -1854,7 +1854,7 @@ class GameEngine:
     def _resolve_world_npc_merchant_trades(self, world: WorldState) -> list[dict]:
         """NPC轮回者偶遇商人时可用有限碎片买入一件现存遗物；每个世界回合最多成交一次。"""
         merchant = getattr(self.state, "merchant", None)
-        if merchant is None or not merchant.relics:
+        if merchant is None:
             return []
         merchant_actor = world.actors.get(getattr(merchant, "runtime_id", ""))
         if merchant_actor is None or not merchant_actor.alive:
@@ -1884,21 +1884,38 @@ class GameEngine:
                 continue
             owned = {relic.name for relic in entity.relics}
             stock = next((relic for relic in merchant.relics if relic.name not in owned), None)
-            if stock is None or len(owned) >= int(getattr(entity, "relic_capacity", 10**9)):
-                continue
-            # 固定参考价避免NPC凭空议价；库存与货币仍由同一份真实实体状态扣转。
-            merchant.relics.remove(stock)
-            entity.relics.append(stock)
-            entity.shards -= price
-            merchant.shards += price
-            merchant.shards_peak = max(int(getattr(merchant, "shards_peak", 0)),
-                                        int(merchant.shards))
+            can_buy = (stock is not None
+                       and len(owned) < int(getattr(entity, "relic_capacity", 10**9)))
+            if can_buy and entity.shards >= price:
+                # 固定参考价避免NPC凭空议价；库存与货币由真实实体状态原子转移。
+                merchant.relics.remove(stock)
+                entity.relics.append(stock)
+                entity.shards -= price
+                merchant.shards += price
+                merchant.shards_peak = max(int(getattr(merchant, "shards_peak", 0)),
+                                            int(merchant.shards))
+                direction, traded_relic = "buy", stock
+            else:
+                # NPC也可把普通遗物卖给商人；特殊怪物偏爱遗物不是可交易库存。
+                merchant_names = {relic.name for relic in merchant.relics}
+                sellable = next((relic for relic in entity.relics
+                                 if relic.name not in merchant_names
+                                 and not ({"怪物自带", "怪物偏爱"} & set(relic.tags))), None)
+                if sellable is None or merchant.shards < price:
+                    continue
+                entity.relics.remove(sellable)
+                merchant.relics.append(sellable)
+                entity.shards += price
+                entity.shards_peak = max(int(getattr(entity, "shards_peak", 0)),
+                                         int(entity.shards))
+                merchant.shards -= price
+                direction, traded_relic = "sell", sellable
             world.record("npc_merchant_trade", actor_id,
                          merchant_actor_id=merchant_actor.actor_id,
-                         direction="buy", relic_name=stock.name, price=price,
+                         direction=direction, relic_name=traded_relic.name, price=price,
                          npc_shards=entity.shards, merchant_shards=merchant.shards)
-            results.append({"actor_id": actor_id, "direction": "buy",
-                            "relic_name": stock.name, "price": price})
+            results.append({"actor_id": actor_id, "direction": direction,
+                            "relic_name": traded_relic.name, "price": price})
         return results
 
     def _share_created_being_vision(self, world: WorldState) -> None:
