@@ -469,3 +469,38 @@ def test_world_initialization_spawns_current_dungeon_monster_population_and_even
     event_names = {location["event_name"] for location in world.map.locations.values()}
     assert event_names <= set(engine.event_pool.build_pool("乱葬岗"))
     assert "恶魔医务室" not in event_names
+
+
+def test_ai_state_projection_hides_unseen_entities_terrain_and_locations(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "fog-projection.db"),
+                        save_dir=str(tmp_path), rng_seed=79)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    seen = Entity("近处敌人", "轮回者", blood_limit=30, current_hp=30)
+    hidden = Entity("远处敌人", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.enemies = [seen, hidden]
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 9, "height": 9})["success"]
+    world = WorldState.from_dict(engine.state.world_state)
+    player_id = engine.state.player.runtime_id
+    world.actors[player_id].x, world.actors[player_id].y = 1, 1
+    world.actors[seen.runtime_id].x, world.actors[seen.runtime_id].y = 2, 1
+    world.actors[hidden.runtime_id].x, world.actors[hidden.runtime_id].y = 7, 7
+    world.map.add_location("hidden_site", {
+        "kind": "event", "name": "隐藏地点", "event_name": "秘密",
+        "x": 7, "y": 6, "discovered": False, "active": True,
+    })
+    engine._sync_world_entity_positions(world)
+    engine.state.world_state = world.to_dict()
+
+    observed = engine.get_state()["state"]
+    observed_enemy_ids = {entity["runtime_id"] for entity in observed["enemies"]}
+    assert seen.runtime_id in observed_enemy_ids
+    assert hidden.runtime_id not in observed_enemy_ids
+    assert hidden.runtime_id not in observed["world_state"]["actors"]
+    assert "7,7" not in observed["world_state"]["map"]["terrain"]
+    assert "hidden_site" not in observed["world_state"]["map"]["locations"]
+    # 投影只能改变返回副本，不得删除真实地图里的隐藏单位。
+    assert hidden.runtime_id in engine.state.world_state["actors"]
