@@ -4201,18 +4201,19 @@ class GameEngine:
         huangfu_mana = 0
         if huangfu_spell is not None:
             huangfu_mana = max(1, huangfu_spell.rank or 1)
-            if actor.current_mana < huangfu_mana:
+            effective_huangfu_mana = actor.mana_cost(huangfu_mana)
+            if actor.current_mana < effective_huangfu_mana:
                 for daowen in huangfu_temp_granted:
                     actor.dao_wen.pop(daowen, None)
                 return {"success": False,
-                        "error": f"【黄符】施法需要{huangfu_mana}点法力，{actor.name}当前{actor.current_mana}"}
+                        "error": f"【黄符】施法实际需要{effective_huangfu_mana}点法力，{actor.name}当前{actor.current_mana}"}
         budget_err = self._consume_actions_or_error(actor, spell_tier)
         if budget_err:
             for daowen in huangfu_temp_granted:
                 actor.dao_wen.pop(daowen, None)
             return budget_err
         if huangfu_spell is not None:
-            actor.current_mana -= huangfu_mana
+            actor.spend_mana(huangfu_mana)
         try:
             execution.run_all()
         finally:
@@ -4903,12 +4904,16 @@ class GameEngine:
             budget = (ac * ac + ap + math.ceil(hp / 6)) if all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in (ac, ap, hp)) else -1
             if budget > x or budget < 0 or not isinstance(panel.get("name"), str) or not panel["name"]:
                 return {"success": False, "error": f"朋友面板属性点成本必须≤X={x}"}
-            player.current_mana -= x
+            mana_paid = player.mana_cost(x)
+            if player.current_mana < mana_paid:
+                return {"success": False, "error": f"活性土壤实际需要{mana_paid}点法力，当前{player.current_mana}"}
+            player.current_mana -= mana_paid
             friend = Entity(panel["name"], "朋友", blood_limit=hp, current_hp=hp,
                             attack_count=ac, attack_power=ap)
             self.state.friends.append(friend)
             item.use()
-            result.update({"friend": friend.name, "budget": budget, "mana_paid": x})
+            result.update({"friend": friend.name, "budget": budget, "mana_paid": mana_paid,
+                           "mana_nominal_cost": x})
         elif name == "假钞贴":
             item.use(); self.state.fake_shards += 20
             result.update({"fake_shards_gained": 20, "fake_shards": self.state.fake_shards})
@@ -5024,12 +5029,14 @@ class GameEngine:
                 if trig_value != "瞬发":
                     return {"success": False, "error": f"黄符只能刻印瞬发法术，「{imprint}」是{trig_value}法术"}
                 rank = max(1, spell.rank or 1)
-                if player.current_mana < rank:
+                mana_paid = player.mana_cost(rank)
+                if player.current_mana < mana_paid:
                     return {"success": False,
-                            "error": f"刻印「{imprint}」需要{rank}点法力，当前{player.current_mana}"}
-                player.current_mana -= rank
+                            "error": f"刻印「{imprint}」实际需要{mana_paid}点法力，当前{player.current_mana}"}
+                player.current_mana -= mana_paid
                 item.effect = (item.effect or "") + f"【刻印：{spell.name}】"
-                result.update({"imprinted": spell.name, "rank": rank, "mana_spent": rank})
+                result.update({"imprinted": spell.name, "rank": rank, "mana_spent": mana_paid,
+                               "mana_nominal_cost": rank})
                 result.update({"uses_remaining": item.current_uses, "is_depleted": item.is_depleted})
                 return {"success": True, "action": f"使用消耗品【{name}】", "result": result}
             if not marked:
