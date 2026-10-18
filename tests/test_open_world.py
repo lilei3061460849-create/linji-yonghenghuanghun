@@ -1362,3 +1362,40 @@ def test_merchant_trade_checks_the_payer_balance_not_the_wrong_side(tmp_path):
                                         params={"trade_direction": "sell", "relic_name": "待售遗物",
                                                 "price": 10, "confirmed": True})
     assert "error" in cannot_sell and "商人碎片不足" in cannot_sell["error"]
+
+
+def test_autonomous_reincarnator_can_sell_a_relic_only_within_merchant_budget(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity, Relic
+
+    engine = GameEngine(db_path=str(tmp_path / "npc-merchant-sell.db"),
+                        save_dir=str(tmp_path), rng_seed=167, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    rival = Entity("R", "轮回者", blood_limit=30, current_hp=30,
+                   relics=[Relic(name="可售遗物", effect="普通效果")])
+    merchant = Entity("过路商人", "特殊角色", shards=20, relics=[])
+    engine.state.player = player
+    engine.state.enemies = [rival]
+    engine.state.merchant = merchant
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(
+        player.runtime_id, "P", "player", 1, 1, faction="player", mode="manual"))
+    world.add_actor(WorldActorState(
+        rival.runtime_id, "R", "enemy", 2, 2, faction="enemy", mode="autonomous"))
+    world.add_actor(WorldActorState(
+        merchant.runtime_id, "过路商人", "merchant", 3, 2,
+        faction="neutral", mode="autonomous"))
+
+    trades = engine._resolve_world_npc_merchant_trades(world)
+    assert len(trades) == 1
+    assert trades[0]["direction"] == "sell"
+    assert rival.shards == 10 and merchant.shards == 10
+    assert rival.relics == []
+    assert [relic.name for relic in merchant.relics] == ["可售遗物"]
+
+    merchant.shards = 5
+    rival.relics.append(Relic(name="另一件可售遗物", effect="普通效果"))
+    blocked = engine._resolve_world_npc_merchant_trades(world)
+    assert blocked == []
+    assert rival.shards == 10 and merchant.shards == 5
+    assert [relic.name for relic in rival.relics] == ["另一件可售遗物"]
