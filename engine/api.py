@@ -1487,8 +1487,8 @@ class GameEngine:
                     world.record("world_entered", actor_id, region=self.state.current_region)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_initialize",
-                    "result": {"width": width, "height": height, "actor_count": len(world.actors),
-                               "world_turn": world.clock.turn, "seed_roll": seed_roll}}
+                    "result": {"width": width, "height": height,
+                               "world_turn": world.clock.turn}}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
@@ -1496,10 +1496,10 @@ class GameEngine:
         try:
             world = self._world_from_state()
             actor_id = params.get("actor_id")
-            if not actor_id:
-                actor_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
-            if actor_id is None:
-                return {"success": False, "error": "地图上找不到玩家单位"}
+            player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            actor_id = params.get("actor_id") or player_id
+            if actor_id is None or actor_id != player_id:
+                return {"success": False, "error": "当前API只允许轮回者控制自己的地图单位"}
             x, y = params.get("x"), params.get("y")
             if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
                 return {"success": False, "error": "目标坐标x/y必须是整数"}
@@ -1513,10 +1513,10 @@ class GameEngine:
         try:
             world = self._world_from_state()
             actor_id = params.get("actor_id")
-            if not actor_id:
-                actor_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
-            if actor_id is None:
-                return {"success": False, "error": "地图上找不到玩家单位"}
+            player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            actor_id = params.get("actor_id") or player_id
+            if actor_id is None or actor_id != player_id:
+                return {"success": False, "error": "当前API只允许轮回者控制自己的地图单位"}
             turns = params.get("turns", 1)
             world.wait(actor_id, turns)
             self.state.world_state = world.to_dict()
@@ -1530,10 +1530,10 @@ class GameEngine:
         try:
             world = self._world_from_state()
             actor_id = params.get("actor_id")
-            if not actor_id:
-                actor_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
-            if actor_id is None or actor_id not in world.actors:
-                return {"success": False, "error": "地图上找不到玩家单位"}
+            player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            actor_id = params.get("actor_id") or player_id
+            if actor_id is None or actor_id != player_id or actor_id not in world.actors:
+                return {"success": False, "error": "只能查询轮回者自己的地图情报"}
             visible = set(world.visible_cells(actor_id))
             actor = world.actors[actor_id]
             known_terrain = [
@@ -1551,7 +1551,7 @@ class GameEngine:
                 {"encounter_id": e.encounter_id, "participants": list(e.participants),
                  "location": list(e.location), "started_turn": e.started_turn}
                 for e in world.encounters.values()
-                if e.active and (actor_id in e.participants or e.location in visible)
+                if e.active and actor_id in e.participants
             ]
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_status", "result": {
@@ -1570,10 +1570,10 @@ class GameEngine:
         try:
             world = self._world_from_state()
             actor_id = params.get("actor_id")
-            if not actor_id:
-                actor_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
-            if actor_id is None:
-                return {"success": False, "error": "地图上找不到玩家单位"}
+            player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            actor_id = params.get("actor_id") or player_id
+            if actor_id is None or actor_id != player_id:
+                return {"success": False, "error": "只能查看轮回者自己的视野"}
             visible = world.visible_cells(actor_id)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_vision",
