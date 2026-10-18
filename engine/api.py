@@ -1747,6 +1747,7 @@ class GameEngine:
             self._resolve_world_npc_encounters(world)
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
+            self._resolve_world_npc_merchant_trades(world)
             self._resolve_world_hiring_signals(world)
             self._resolve_world_temporary_alliances(world)
             self._share_created_being_vision(world)
@@ -1847,6 +1848,56 @@ class GameEngine:
                 if not location.get("active", True):
                     break
         return pickups
+
+    def _resolve_world_npc_merchant_trades(self, world: WorldState) -> list[dict]:
+        """NPC轮回者偶遇商人时可用有限碎片买入一件现存遗物；每个世界回合最多成交一次。"""
+        merchant = getattr(self.state, "merchant", None)
+        if merchant is None or not merchant.relics:
+            return []
+        merchant_actor = world.actors.get(getattr(merchant, "runtime_id", ""))
+        if merchant_actor is None or not merchant_actor.alive:
+            return []
+        player_id = getattr(self.state.player, "runtime_id", "") if self.state.player else ""
+        if any(encounter.active and player_id in encounter.participants
+               for encounter in world.encounters.values()):
+            return []
+        entities = list(getattr(self.state, "enemies", []) or [])
+        entities += list(getattr(self.state, "friends", []) or [])
+        entities += list(getattr(self.state, "employees", []) or [])
+        entities += list(getattr(self.state, "temp_friends", []) or [])
+        entity_by_id = {entity.runtime_id: entity for entity in entities if entity is not None}
+        results = []
+        price = 10
+        for actor_id in sorted(world.actors):
+            actor = world.actors[actor_id]
+            entity = entity_by_id.get(actor_id)
+            if (not actor.alive or actor.kind != "enemy" or actor.faction != "enemy"
+                    or actor.mode != "autonomous" or entity is None
+                    or entity.entity_type != "轮回者" or not entity.is_alive
+                    or entity.is_departed or entity.shards < price
+                    or abs(actor.x - merchant_actor.x) + abs(actor.y - merchant_actor.y) != 1):
+                continue
+            if any(encounter.active and actor_id in encounter.participants
+                   for encounter in world.encounters.values()):
+                continue
+            owned = {relic.name for relic in entity.relics}
+            stock = next((relic for relic in merchant.relics if relic.name not in owned), None)
+            if stock is None or len(owned) >= int(getattr(entity, "relic_capacity", 10**9)):
+                continue
+            # 固定参考价避免NPC凭空议价；库存与货币仍由同一份真实实体状态扣转。
+            merchant.relics.remove(stock)
+            entity.relics.append(stock)
+            entity.shards -= price
+            merchant.shards += price
+            merchant.shards_peak = max(int(getattr(merchant, "shards_peak", 0)),
+                                        int(merchant.shards))
+            world.record("npc_merchant_trade", actor_id,
+                         merchant_actor_id=merchant_actor.actor_id,
+                         direction="buy", relic_name=stock.name, price=price,
+                         npc_shards=entity.shards, merchant_shards=merchant.shards)
+            results.append({"actor_id": actor_id, "direction": "buy",
+                            "relic_name": stock.name, "price": price})
+        return results
 
     def _share_created_being_vision(self, world: WorldState) -> None:
         """把造物已探索的地形和最近目击记录报告给主人，不泄露实时全图。"""
@@ -2325,6 +2376,9 @@ class GameEngine:
             # NPC在本回合移动后踩中资源/遗物，也会真正拾取；隐藏NPC所得不会回传给玩家。
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
+            npc_trades = self._resolve_world_npc_merchant_trades(world)
+            if npc_trades:
+                result["npc_merchant_trades"] = npc_trades
             final_phase = self._refresh_world_final_duel(world)
             if final_phase.get("active") or final_phase.get("complete"):
                 result["final_duel"] = final_phase
