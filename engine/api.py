@@ -2531,6 +2531,15 @@ class GameEngine:
         """只返回玩家已知信息，不把全地图、隐藏单位或完整事实账本交给AI。"""
         try:
             world = self._world_from_state()
+            if world.final_duel_complete:
+                winner_actor = world.actors.get(world.final_duel_winner)
+                return {"success": True, "action": "world_status",
+                        "result": {"world_turn": world.clock.turn,
+                                   "final_duel": {"complete": True,
+                                                  "winner": world.final_duel_winner,
+                                                  "winner_name": (winner_actor.name
+                                                                  if winner_actor else "")},
+                                   "instruction": "最终生存阶段已结束；胜者已离开副本"}}
             actor_id = params.get("actor_id")
             player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
             actor_id = params.get("actor_id") or player_id
