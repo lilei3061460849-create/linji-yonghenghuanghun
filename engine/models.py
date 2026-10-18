@@ -343,6 +343,8 @@ class Entity:
     stolen_relics: dict = field(default_factory=dict)
 
     def __setattr__(self, name, value):
+        if name == "shards_peak" and "shards_peak" in self.__dict__:
+            value = max(int(value), int(self.__dict__.get("shards_peak", 0)))
         object.__setattr__(self, name, value)
         if name == "shards" and "shards_peak" in self.__dict__:
             if int(value) > int(self.__dict__.get("shards_peak", 0)):
