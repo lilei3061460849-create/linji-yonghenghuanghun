@@ -30,3 +30,24 @@ def test_preference_assignment_is_reproducible_and_never_duplicates():
     two = assign_monster_preferences(second, 4, DiceEngine(seed=123))
     assert one == two
     assert len(set(one)) == 4
+
+def test_greed_preference_halves_mana_cost_with_rounding_up():
+    entity = Entity(name="贪婪者", entity_type="怪物", mana_limit=10, current_mana=10)
+    entity.preferences = ["贪婪的偏爱"]
+    assert entity.spend_mana(3)
+    assert entity.current_mana == 8
+
+
+def test_time_preference_round_cooldown_blocks_until_countdown_finishes():
+    from engine.models import DaoWen
+
+    instance = __import__("engine.models", fromlist=["DaoWenInstance"]).DaoWenInstance(
+        DaoWen(name="测试", formula="", cost_type="消耗",
+               cost_formula="X", effect_formula=""),
+        cooldown_rounds_remaining=2,
+    )
+    assert not instance.can_use()
+    instance.cooldown_rounds_remaining -= 1
+    assert not instance.can_use()
+    instance.cooldown_rounds_remaining -= 1
+    assert instance.can_use()
