@@ -47,8 +47,8 @@ def test_xiaozai_chain_reaches_debt_threshold_and_binds_at_settle():
     combat = _make_combat(_xiaozai_monster(x=1, shards=0, fake=0))
     monster = combat.state.enemies[0]
     # 2026-09-16：道纹递增已废止，消灾 X 恒为 1、每次真碎片代价恒为 5。
-    # 原序列靠 X 递增（5/15/25）三轮累到 -45；现在需 4 轮：-5/-10/-15/-20。
-    for _ in range(4):
+    # 历史峰值为0，动态阈值为10；两次消灾后余额达到-10。
+    for _ in range(2):
         combat._resolve_monster_daowen_choice(
             monster, {"name": "消灾", "dodge": False, "blood_shadow": False},
             {}, set(), {})
