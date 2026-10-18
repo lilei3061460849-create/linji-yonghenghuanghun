@@ -1749,9 +1749,9 @@ class GameEngine:
             signal["status"] = "completed"
             signal["resolved_turn"] = world.clock.turn
             signal["responder_actor_id"] = actor_id
-            world.record("hiring_signal_answered", actor_id,
+            world.record("hiring_signal_answered", signal.get("owner_actor_id"),
                          signal_id=signal.get("signal_id"), name=name,
-                         position=list(requested))
+                         employee_actor_id=actor_id, position=list(requested))
             resolved.append({"signal_id": signal.get("signal_id"), "status": "completed",
                              "employee": name, "actor_id": actor_id})
         return resolved
@@ -2085,6 +2085,17 @@ class GameEngine:
                 "visible_actors": visible_actors,
                 "visible_encounters": visible_encounters,
                 "known_locations": known_locations,
+                "hiring_signals": [
+                    {"signal_id": signal.get("signal_id"),
+                     "status": signal.get("status"),
+                     "issued_turn": signal.get("issued_turn"),
+                     "arrival_turn": signal.get("arrival_turn"),
+                     "resolved_turn": signal.get("resolved_turn"),
+                     "name": (signal.get("params") or {}).get("name", ""),
+                     "failure": signal.get("failure", "")}
+                    for signal in world.hiring_signals
+                    if signal.get("owner_actor_id") == actor_id
+                ],
             }}
         except (ValueError, KeyError) as exc:
             return {"success": False, "error": str(exc)}
@@ -2513,6 +2524,7 @@ class GameEngine:
             signal_id = f"hiring-{world.clock.turn}-{len(world.hiring_signals) + 1}"
             signal = {
                 "signal_id": signal_id,
+                "owner_actor_id": player_id,
                 "status": "pending",
                 "issued_turn": world.clock.turn,
                 "arrival_turn": world.clock.turn + 2,
