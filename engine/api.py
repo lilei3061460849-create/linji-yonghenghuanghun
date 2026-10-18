@@ -288,7 +288,7 @@ class GameEngine:
                 if self.event_pool.current == "过路商人" and option["text"].startswith("遗物交易"):
                     self._init_relic_pool()
                     schema.update({"trade_direction": ["buy", "sell"],
-                                   "relic_name": f"字符串；buy可选：{[r.name for r in self.state.relics_pool]}；sell可选：{[r.name for r in self.state.relics]}",
+                                   "relic_name": f"字符串；buy可选：{[r.name for r in (self.state.merchant.relics if self.state.merchant else [])]}；sell可选：{[r.name for r in self.state.relics]}",
                                    "price": "双方协商后的非负整数碎片价格",
                                    "confirmed": True})
                     schema["note"] = "同次遭遇可连续买卖多件遗物；成交前确认价格。选择其他选项结束交易会话。买卖立即转移遗物与碎片，不得复制遗物或通过交易透支"
@@ -1795,6 +1795,33 @@ class GameEngine:
             return
         self.state.relics_pool = [Relic(name=n, effect=e) for n, e in self.RELIC_DEFS]
         self.state.relic_pool_initialized = True
+
+    def _initialize_merchant_inventory(self):
+        """过路商人首次进入本局副本时，从真实遗物池随机取得5件独立库存，不重复生成。"""
+        if self.state.merchant is not None:
+            return self.state.merchant
+        self._init_relic_pool()
+        if len(self.state.relics_pool) < 5:
+            raise ValueError("遗物池不足5件，无法生成过路商人的初始库存")
+        remaining = list(self.state.relics_pool)
+        chosen = []
+        for slot in range(5):
+            roll = self.dice.auto_roll(
+                f"merchant_initial_stock_{slot + 1}",
+                [r.name for r in remaining],
+                context=f"过路商人首次进入副本：随机取得初始遗物{slot + 1}/5",
+            )
+            index = int(roll["record"]["selected_index"])
+            chosen.append(remaining.pop(index))
+        for relic in chosen:
+            self.state.relics_pool.remove(relic)
+        self.state.merchant = Entity(
+            name="过路商人", entity_type="特殊角色", relics=chosen,
+            shards=0, shards_peak=0,
+        )
+        # 地图坐标由开放世界地图生成器写入；空值表示地图移动系统尚未分配坐标。
+        self.state.merchant_position = {}
+        return self.state.merchant
 
     def _offer_relic_discovery(self, source: str) -> dict:
         """从当前池不重复随机列出至多3件；只列候选，不替AI作选择。"""
