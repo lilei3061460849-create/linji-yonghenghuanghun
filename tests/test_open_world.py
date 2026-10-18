@@ -1513,4 +1513,5 @@ def test_final_duelist_explores_known_frontiers_after_reaching_center():
     rival = world.actors["rival"]
     # 搜索不应在中心周围循环；它应持续扩展自己的已知地图并走访更多格子。
     assert len(rival.visited_cells) > 8
-    assert max(abs(rival.x - 4), abs(rival.y - 4)) > 1
+    assert max(max(abs(WorldMap.parse(cell)[0] - 4), abs(WorldMap.parse(cell)[1] - 4))
+               for cell in rival.visited_cells) > 1
