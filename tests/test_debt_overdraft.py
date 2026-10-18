@@ -100,7 +100,7 @@ from engine.api import GameEngine
 from tests.setup_support import finish_initial_daowen
 
 
-def _debt_engine(tmp_path, debt: int = -76) -> GameEngine:
+def _debt_engine(tmp_path, debt: int = -25) -> GameEngine:
     """构造：完整开局 + pre_battle 阶段 + 玩家负债（裁定D逼真负债场景）。
 
     冒烟批实测（2026-08-23，当时【逼债】还在）：罪孽都市逼债寄存把玩家 shards
@@ -136,7 +136,7 @@ def test_debt_zero_cost_xiuxing_allowed(tmp_path):
     assert ok["result"]["attribute_points"] >= 1, "tier1 的 1 点应存进属性点池"
     blocked = e.execute_action("pre_battle_action", {"sub_action": "修行", "tier": 2, "to": "mana"})
     assert not blocked["success"] and "碎片不足" in blocked["error"]
-    assert e.state.shards == -76, "被拒的正费行动不得扣碎片"
+    assert e.state.shards == -25, "被拒的正费行动不得扣碎片"
 
 
 def test_debt_zero_cost_xiuzheng_and_tansuo_allowed(tmp_path):
