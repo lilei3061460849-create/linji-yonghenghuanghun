@@ -694,6 +694,11 @@ def test_world_resonance_drops_a_real_relic_without_granting_it_immediately(tmp_
     engine.state.phase = "pre_battle"
     engine.state.relics_pool = [Relic("测试遗物", "测试效果")]
     engine.state.relic_pool_initialized = True
+    # 本用例刻意使用只有一件遗物的定制池，预先给商人独立库存，避免把
+    # 「商人必须从真实池抽5件」与「共鸣只投放测试遗物」两个契约混在一起。
+    engine.state.merchant = Entity(
+        "过路商人", "特殊角色", shards=20,
+        relics=[Relic(f"商人遗物{i}", "普通效果") for i in range(5)])
     assert engine.execute_action("world_initialize", {"width": 9, "height": 9})["success"]
 
     result = engine.execute_action("pre_battle_action", {"sub_action": "共鸣", "tier": 1})
