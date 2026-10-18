@@ -1580,6 +1580,44 @@ class GameEngine:
             raise ValueError("开放世界尚未初始化，请先执行world_initialize")
         return WorldState.from_dict(self.state.world_state)
 
+    def _record_world_entity_outcomes(self, world: WorldState) -> None:
+        """把死亡/永久离场写入世界事实账本；同一单位的结果事件只记录一次。"""
+        entities = []
+        if self.state.player is not None:
+            entities.append(self.state.player)
+        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+            entities.extend(getattr(self.state, group_name, []) or [])
+        if getattr(self.state, "merchant", None) is not None:
+            entities.append(self.state.merchant)
+        by_id = {getattr(entity, "runtime_id", ""): entity
+                 for entity in entities if getattr(entity, "runtime_id", "")}
+        recorded = {
+            (event.get("type"), event.get("actor_id"))
+            for event in world.event_log
+            if event.get("type") in {"actor_died", "actor_departed"}
+        }
+        for actor in world.actors.values():
+            entity = by_id.get(actor.actor_id)
+            if entity is None:
+                continue
+            if entity.is_departed:
+                event_type = "actor_departed"
+                if (event_type, actor.actor_id) in recorded:
+                    continue
+                world.record(event_type, actor.actor_id, name=entity.name,
+                             position=list(actor.position),
+                             reason=getattr(entity, "departure_reason", "") or "permanent_departure")
+                recorded.add((event_type, actor.actor_id))
+            elif not entity.is_alive:
+                event_type = "actor_died"
+                if (event_type, actor.actor_id) in recorded:
+                    continue
+                death_ctx = getattr(entity, "_death_ctx", None)
+                reason = (death_ctx.get("source", "") if isinstance(death_ctx, dict) else "")
+                world.record(event_type, actor.actor_id, name=entity.name,
+                             position=list(actor.position), reason=reason or "health_depleted")
+                recorded.add((event_type, actor.actor_id))
+
     def _sync_world_entity_positions(self, world: WorldState) -> None:
         """将地图中的权威位置同步回实体存档字段，避免移动只存在于地图副本。"""
         entities = []
@@ -1600,6 +1638,7 @@ class GameEngine:
             entity.is_neutral = actor.faction == "neutral"
             # 实体命零/永久离场必须同步到地图单位，否则死者会继续移动或触发遭遇。
             actor.alive = bool(entity.is_alive and not entity.is_departed)
+        self._record_world_entity_outcomes(world)
 
     def _open_adjacent_merchant_session(self, world: WorldState) -> bool:
         """玩家与过路商人正交相邻时开启现有交易会话；商人不进入随机事件池。"""
@@ -8213,6 +8252,7 @@ class GameEngine:
             world.record("final_duel_completed", winner_id, winner=winner_id,
                          winner_name=winner_entity.name, outcome=outcome,
                          finalists=finalists)
+            self._record_world_entity_outcomes(world)
             self.state.world_state = world.to_dict()
             self.state.world_enemy_reserve = []
             self.state.world_encounter_entities = []
@@ -8525,6 +8565,7 @@ class GameEngine:
             # NPC战斗可能刚好淘汰了倒数第二名轮回者；此时进入自然会合阶段，
             # 但仍保留地图上的怪物，让它们在会合期间继续构成威胁。
             self._refresh_world_final_duel(world)
+            self._record_world_entity_outcomes(world)
             self.state.world_state = world.to_dict()
         else:
             self.state.enemies.clear()
