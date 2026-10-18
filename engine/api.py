@@ -2189,6 +2189,9 @@ class GameEngine:
             if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
                 return {"success": False, "error": "目标坐标x/y必须是整数"}
             result = world.move_actor(actor_id, (x, y))
+            if not any(encounter.active and actor_id in encounter.participants
+                       for encounter in world.encounters.values()):
+                self._resolve_world_npc_encounters(world)
             self._resolve_world_hiring_signals(world)
             self._resolve_world_temporary_alliances(world)
             self._share_created_being_vision(world)
@@ -2284,7 +2287,7 @@ class GameEngine:
                 return {"success": False, "error": "当前API只允许轮回者控制自己的地图单位"}
             turns = params.get("turns", 1)
             start_turn = world.clock.turn
-            world.wait(actor_id, turns)
+            self._advance_world_turns(world, actor_id, turns)
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
             self._resolve_world_hiring_signals(world)
@@ -2817,7 +2820,7 @@ class GameEngine:
                 return {"success": False, "error": "玩家周围10格路径范围内没有可投放的空地点"}
             start_turn = world.clock.turn
             world.record("world_action_started", player_id, action=action, duration=1)
-            world.wait(player_id, 1)
+            self._advance_world_turns(world, player_id, 1)
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
             self._resolve_world_hiring_signals(world)
@@ -2916,7 +2919,7 @@ class GameEngine:
             return {"success": False, "error": f"【{action}】耗时档位必须是正整数"}
         start_turn = world.clock.turn
         world.record("world_action_started", player_id, action=action, duration=duration)
-        world.wait(player_id, duration)
+        self._advance_world_turns(world, player_id, duration)
         self._resolve_world_shard_pickups(world)
         self._resolve_world_relic_pickups(world)
         self._resolve_world_hiring_signals(world)
