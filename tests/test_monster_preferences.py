@@ -51,3 +51,31 @@ def test_time_preference_round_cooldown_blocks_until_countdown_finishes():
     assert not instance.can_use()
     instance.cooldown_rounds_remaining -= 1
     assert instance.can_use()
+
+def test_famine_preference_reduces_target_mana_limit_by_actual_damage(tmp_path):
+    from engine.api import GameEngine
+
+    engine = GameEngine(
+        db_path=str(tmp_path / "rulings.db"),
+        save_dir=str(tmp_path / "saves"),
+        autosave=False,
+        rng_seed=17,
+        sealed_candidate_path=str(tmp_path / "sealed.json"),
+        death_book_path=str(tmp_path / "death_book.md"),
+    )
+    target = Entity(name="目标", entity_type="轮回者",
+                    blood_limit=30, current_hp=30, mana_limit=8, current_mana=8)
+    attacker = Entity(name="饥荒怪", entity_type="怪物",
+                      blood_limit=30, current_hp=30, mana_limit=5, current_mana=5)
+    attacker.preferences = ["饥荒的偏爱"]
+    engine.state.player = target
+    engine.state.enemies = [attacker]
+    detail = engine.combat._apply_hostile_damage(
+        target, 3, source=attacker,
+        ctx={"timing": "test", "source": attacker.name, "source_type": "monster",
+             "actor": attacker, "target": target, "mechanic": "damage",
+             "subtype": "test", "amount": 3, "tags": {"test"}},
+    )
+    assert target.mana_limit == 5
+    assert target.current_mana == 5
+    assert detail["famine_preference"]["mana_limit_reduced"] == 3
