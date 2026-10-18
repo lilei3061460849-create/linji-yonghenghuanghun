@@ -175,6 +175,8 @@ class QuestEngine:
         giver = definition.get("giver_actor_id")
         if giver and source_actor_id != giver:
             raise QuestError(f"必须与任务委托者{giver}实际交互后才能接取")
+        if definition.get("giver_name") and not source_actor_id:
+            raise QuestError(f"必须与任务委托者{definition['giver_name']}实际交互后才能接取")
         progress = {objective["id"]: 0 for objective in definition["objectives"]}
         state["instances"][quest_id] = {
             "status": "active",
@@ -219,7 +221,7 @@ class QuestEngine:
                 continue
             definition = self.definitions[quest_id]
             fail_match = next((item for item in definition.get("fail_on", [])
-                               if self._matches(fact, item, {}, player_actor_id) if isinstance(item, str)), None)
+                               if isinstance(item, str) and fact.get("type") == item), None)
             # dict型失败条件可以匹配事件类型与字段。
             if fail_match is None:
                 for condition in definition.get("fail_on", []):
