@@ -1660,6 +1660,50 @@ class GameEngine:
         return {"active": world.final_duel_search,
                 "finalists": list(world.final_duel_finalists)}
 
+    def _resolve_world_shard_pickups(self, world: WorldState) -> list[dict]:
+        """所有真实角色进入碎片资源格时各自领取；怪物与商人不拾取玩家资源点。"""
+        entities = ([self.state.player] if self.state.player else [])
+        entities += self.state.friends + self.state.employees + self.state.temp_friends + self.state.enemies
+        by_id = {entity.runtime_id: entity for entity in entities if entity is not None}
+        pickups = []
+        for actor in world.actors.values():
+            if not actor.alive:
+                continue
+            entity = by_id.get(actor.actor_id)
+            if entity is None or entity.entity_type not in {"轮回者", "朋友", "员工"}:
+                continue
+            found = world.map.location_at(actor.position)
+            if found is None:
+                continue
+            location_id, location = found
+            if (location.get("kind") != "resource" or not location.get("active", True)
+                    or location.get("resource_type") != "shards"):
+                continue
+            amount = max(0, int(location.get("amount", 0)))
+            if amount <= 0:
+                location["active"] = False
+                location["collected"] = True
+                continue
+            if entity is self.state.player:
+                self.state.shards += amount
+                self.state.shards_peak = max(self.state.shards_peak, self.state.shards)
+                balance = self.state.shards
+            else:
+                entity.shards += amount
+                entity.shards_peak = max(entity.shards_peak, entity.shards)
+                balance = entity.shards
+            location["active"] = False
+            location["collected"] = True
+            location["collected_by"] = actor.actor_id
+            location["collected_turn"] = world.clock.turn
+            world.record("resource_collected", actor.actor_id, location_id=location_id,
+                         resource_type="shards", amount=amount, balance=balance,
+                         position=list(actor.position))
+            pickups.append({"actor_id": actor.actor_id, "amount": amount,
+                            "player_visible": entity is self.state.player,
+                            "location_id": location_id})
+        return pickups
+
     def _resolve_world_relic_pickups(self, world: WorldState) -> list[dict]:
         """处理世界时间推进后所有单位踩中真实遗物地点的拾取，不泄露NPC的隐藏所得。"""
         entities = []
