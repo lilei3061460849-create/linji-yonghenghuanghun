@@ -92,6 +92,7 @@ def test_merchant_can_buy_and_sell_relics_at_confirmed_price():
     assert not any(r.name == relic_name for r in sell_engine.state.relics)
     assert any(r.name == relic_name for r in merchant.relics)
     assert sell_engine.state.shards == 35
+    assert merchant.shards == 5
     assert sell_engine.event_pool.current == "过路商人"
     assert sold["result"]["merchant_session_open"] is True
 
@@ -101,6 +102,7 @@ def test_merchant_can_buy_and_sell_relics_at_confirmed_price():
     assert bought_back.get("success"), bought_back
     assert any(r.name == relic_name for r in sell_engine.state.relics)
     assert sell_engine.state.shards == 25
+    assert merchant.shards == 15
     assert bought_back["result"]["merchant_session_open"] is True
 
     buy_engine = _engine(seed=33)
@@ -116,6 +118,23 @@ def test_merchant_can_buy_and_sell_relics_at_confirmed_price():
     assert not any(r.name == relic_to_buy for r in merchant_to_buy.relics)
     assert len(merchant_to_buy.relics) == 4
     assert buy_engine.state.shards == 10
+    assert merchant_to_buy.shards == 30
+
+
+def test_merchant_cannot_pay_more_than_current_shard_balance():
+    e = _engine(seed=35)
+    merchant = e._initialize_merchant_inventory()
+    merchant.shards = 5
+    relic_name = next(r.name for r in e.state.relics if r.name not in {x.name for x in merchant.relics})
+    _stage(e, "过路商人", "遗物交易：自由买入或卖出遗物")
+    result = e.execute_action("resolve_event", {
+        "event": "过路商人", "option_id": 1, "trade_direction": "sell",
+        "relic_name": relic_name, "price": 15, "confirmed": True})
+    assert not result.get("success"), result
+    assert any(r.name == relic_name for r in e.state.relics)
+    assert not any(r.name == relic_name for r in merchant.relics)
+    assert merchant.shards == 5
+    assert e.state.shards == 20
 
 
 def test_non_monster_debt_threshold_causes_death_not_kill_reward():
