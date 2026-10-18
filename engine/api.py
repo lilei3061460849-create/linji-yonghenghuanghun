@@ -7473,6 +7473,14 @@ class GameEngine:
                     if entity.world_x is not None and entity.world_y is not None:
                         actor.x, actor.y = int(entity.world_x), int(entity.world_y)
                     actor.alive = True
+            for companion in self.state.friends + self.state.employees + self.state.temp_friends:
+                companion_actor = world.actors.get(companion.runtime_id)
+                if companion_actor is not None:
+                    companion_actor.alive = bool(companion.is_alive and not companion.is_departed)
+                    if companion.world_x is not None and companion.world_y is not None:
+                        companion_actor.x, companion_actor.y = int(companion.world_x), int(companion.world_y)
+                if getattr(companion, "is_created_being", False):
+                    companion.is_summoned = False
             encounter_id = self.state.world_encounter_id
             encounter = world.encounters.get(encounter_id) if encounter_id else None
             if encounter is not None and encounter.active:
@@ -7773,6 +7781,14 @@ class GameEngine:
                         actor.x, actor.y = int(entity.world_x), int(entity.world_y)
                 else:
                     actor.alive = False
+            for companion in self.state.friends + self.state.employees + self.state.temp_friends:
+                companion_actor = world.actors.get(companion.runtime_id)
+                if companion_actor is not None:
+                    companion_actor.alive = bool(companion.is_alive and not companion.is_departed)
+                    if companion.world_x is not None and companion.world_y is not None:
+                        companion_actor.x, companion_actor.y = int(companion.world_x), int(companion.world_y)
+                if getattr(companion, "is_created_being", False):
+                    companion.is_summoned = False
             if encounter is not None and encounter.active:
                 outcome = "player_dead" if not self.state.player or not self.state.player.is_alive else "resolved"
                 world.finish_encounter(encounter_id, outcome)
