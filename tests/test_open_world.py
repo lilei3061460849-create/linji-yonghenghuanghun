@@ -725,6 +725,28 @@ def test_learned_daowen_can_be_reserved_for_a_future_friend(tmp_path):
     assert name not in engine.state.pending_learned_daowen
 
 
+def test_ten_thousand_souls_banner_unlocks_creation_outside_graveyard(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity, Relic
+
+    engine = GameEngine(db_path=str(tmp_path / "souls-banner.db"),
+                        save_dir=str(tmp_path), rng_seed=111, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
+    engine.state.phase = "pre_battle"
+    engine.state.shards = 10
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    engine.state.current_region = "扭曲都市"
+    engine.state.relics.append(Relic(name="万魂幡", effect="允许在乱葬岗外造生"))
+
+    result = engine.execute_action("pre_battle_action", {
+        "sub_action": "造生", "name": "幡下造物",
+    })
+    assert result["success"], result
+    assert any(getattr(friend, "is_created_being", False)
+               for friend in engine.state.friends)
+    assert engine.state.shards == 0
+
+
 def test_creation_builds_one_map_being_then_cultivates_unique_preferences(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
