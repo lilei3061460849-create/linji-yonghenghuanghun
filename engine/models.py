@@ -1685,7 +1685,7 @@ class GameState:
             "current_battle": self.current_battle,
             "current_region": self.current_region,
             "merchant": self.merchant.to_dict() if getattr(self, "merchant", None) else None,
-            "world_state": self.world_state,
+            "world_state": getattr(self, "world_state", {}),
             "energy": self.energy,
             "shards": self.shards,
             "shards_peak": self.shards_peak,
