@@ -3255,12 +3255,7 @@ class GameEngine:
                      if player is not None else 0)
         cost = tier_cost[tier]
         # 2026-10-05 用户令：癌变不再为【休整】提供额外恢复量，恢复额度=档位基础值。
-        # 沉沦海【潮下基地】是独立的、持续到本轮死斗结束的+12恢复量。
-        sunken_sea_rest_bonus = (
-            12 if self.state.current_region == "沉沦海"
-            and self.state.event_modifiers.get("sunken_sea_rest_bonus_active") else 0
-        )
-        heal = base_heal + sunken_sea_rest_bonus
+        heal = base_heal
         refs = ({"player:0": self.state.player}
                 if self.state.player and self.state.player.is_alive else {})
         refs.update({f"friend:{index}": entity for index, entity in enumerate(self.state.friends)
@@ -3299,7 +3294,6 @@ class GameEngine:
             healed.append({"target_ref": entry["target_ref"], "target": target.name,
                            "allocated": entry["amount"], **detail})
         payload = {"base_heal_amount": base_heal,
-                   "region_rest_bonus": sunken_sea_rest_bonus,
                    "heal_amount": heal, "shard_cost": cost, "heals": healed,
                    "shards_remaining": self.state.shards}
         return {"success": True, "action": "休整", "result": payload}
@@ -6968,34 +6962,6 @@ class GameEngine:
             "combat_runtime": copy.deepcopy(self._snapshot_combat_runtime()),
             "battle_start_params": copy.deepcopy(params),
         }
-        # 潮下基地的偷药后果：地图遭遇也会带来一只额外潮尸，并把它登记进同一遭遇。
-        if (world_battle and not world_final_duel
-                and self.state.current_region == "沉沦海"
-                and self.state.event_modifiers.get("sunken_sea_extra_tide_zombie")):
-            tide_pool = self._monster_pool_for_battle()
-            tide_def = next((definition for definition in tide_pool
-                             if definition.get("name") == "潮尸"), None)
-            player_actor = world.actors.get(player_id)
-            if tide_def is not None and player_actor is not None:
-                extra_tide = make_monster_entity(scale_monster_def_for_endless(
-                    tide_def, int(getattr(self.state, "endless_cycle", 0) or 0)))
-                assign_monster_preferences(extra_tide, self._current_tier(), self.dice)
-                extra_tide.spawned_round = 1
-                extra_tide.world_x, extra_tide.world_y = player_actor.position
-                self.combat.init_monster_shards(extra_tide)
-                from .world import WorldActorState
-                world.add_actor(WorldActorState(
-                    actor_id=extra_tide.runtime_id, name=extra_tide.name,
-                    kind="enemy", x=player_actor.x, y=player_actor.y,
-                    faction="enemy", mode="autonomous"))
-                encounter.participants.append(extra_tide.runtime_id)
-                world_participant_enemies.append(extra_tide)
-                self.state.world_encounter_entities = list(world_participant_enemies)
-                world.record("sunken_sea_extra_tide_zombie_spawned", player_id,
-                             monster_id=extra_tide.runtime_id,
-                             position=list(player_actor.position))
-                self.state.world_state = world.to_dict()
-
         self.state.phase = GamePhase.IN_COMBAT.value
         self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_START.value
         self.state.current_battle += 1
@@ -7094,24 +7060,6 @@ class GameEngine:
                 "subtype": "battle_start_loss", "amount": 4, "tags": {"consumable", "battle_start"},
             })
             modifiers["red_spring_battle_losses"] = red_spring - 1
-
-        # 潮下基地的偷药后果：本次沉沦海每场普通战斗额外加入一只潮尸。
-        if (not world_battle and region == "沉沦海"
-                and modifiers.get("sunken_sea_extra_tide_zombie")):
-            tide_def = next((definition for definition in pool
-                             if definition.get("name") == "潮尸"), None)
-            if tide_def is not None:
-                extra_tide = make_monster_entity(
-                    scale_monster_def_for_endless(tide_def, endless_cycle))
-                assign_monster_preferences(extra_tide, self._current_tier(), self.dice)
-                extra_tide.spawned_round = 1
-                self.combat.init_monster_shards(extra_tide)
-                self.state.enemies.append(extra_tide)
-                drawn_names.append("潮尸(潮下基地额外)")
-                draw_count += 1
-                if spawn_plan is not None:
-                    spawn_plan["total"] = draw_count
-                    spawn_plan["sunken_sea_extra_tide_zombie"] = True
 
         # 事件登记的"下一场额外出现的怪物"（如龙心谷"追求者·拿走口粮"）
         forced = [] if world_battle else list(self.state.forced_monsters_next_battle)
