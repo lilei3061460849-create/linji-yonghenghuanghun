@@ -513,7 +513,10 @@ class WorldState:
             # 轮回者阵营与可拾取资源的友方单位，会优先追踪自己亲眼发现的资源/遗物。
             # 目标来源只取本单位记忆；未知地点不会因为地图数据存在而被NPC直接利用。
             if (actor.faction in {"enemy", "friend", "employee", "temp_friend"}
-                    and not (self.final_duel_search and actor_id in self.final_duel_finalists)):
+                    and not (self.final_duel_search and actor_id in self.final_duel_finalists)
+                    # 明确指挥造物跟随/守卫时，服从命令优先于自主搜刮资源。
+                    and not (actor.kind == "friend" and actor.owner_actor_id
+                             and actor.behavior in {"follow", "guard"})):
                 remembered_goals = [
                     entry for entry in actor.memory
                     if entry.get("kind") == "location_sighting"
