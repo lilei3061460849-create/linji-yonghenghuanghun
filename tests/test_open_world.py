@@ -1515,3 +1515,26 @@ def test_final_duelist_explores_known_frontiers_after_reaching_center():
     assert len(rival.visited_cells) > 8
     assert max(max(abs(WorldMap.parse(cell)[0] - 4), abs(WorldMap.parse(cell)[1] - 4))
                for cell in rival.visited_cells) > 1
+
+
+
+def test_distant_final_duelist_reaches_rally_area_and_starts_final_encounter():
+    world = WorldState(clock=WorldClock(), map=_open_map(9, 9))
+    world.add_actor(WorldActorState(
+        "player", "玩家", "player", 4, 4, faction="player", mode="manual"))
+    world.add_actor(WorldActorState(
+        "rival", "最后的对手", "轮回者", 8, 8, faction="enemy", mode="autonomous"))
+    world.final_duel_search = True
+    world.final_duel_finalists = ["player", "rival"]
+
+    for _ in range(12):
+        if any(encounter.active and encounter.final_duel
+               for encounter in world.encounters.values()):
+            break
+        world.wait("player", 1)
+
+    final_encounters = [encounter for encounter in world.encounters.values()
+                        if encounter.active and encounter.final_duel]
+    assert len(final_encounters) == 1
+    assert set(final_encounters[0].participants) == {"player", "rival"}
+    assert world.final_duel_started is True
