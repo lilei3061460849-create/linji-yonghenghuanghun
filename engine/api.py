@@ -1591,6 +1591,44 @@ class GameEngine:
                      merchant_actor_id=merchant.actor_id, position=list(merchant.position))
         return True
 
+    def _refresh_world_final_duel(self, world: WorldState) -> dict:
+        """在地图存活状态变化后，启动或结算最后两名轮回者的自然会合阶段。"""
+        player = self.state.player
+        enemies = [entity for entity in (getattr(self.state, "enemies", []) or [])
+                   if entity.is_alive and not entity.is_departed]
+        if world.final_duel_complete:
+            return {"active": False, "complete": True, "winner": world.final_duel_winner}
+        eligible = (player is not None and player.is_alive
+                    and len(enemies) == 1 and enemies[0].entity_type == "轮回者")
+        if not world.final_duel_search and eligible:
+            world.final_duel_search = True
+            world.final_duel_finalists = [player.runtime_id, enemies[0].runtime_id]
+            world.record("final_duel_search_started", player.runtime_id,
+                         finalists=list(world.final_duel_finalists),
+                         note="最后两名轮回者开始自行寻找彼此；世界威胁在会合前继续结算")
+            return {"active": True, "finalists": list(world.final_duel_finalists)}
+        if world.final_duel_search and not world.final_duel_started:
+            entities = ([player] if player is not None else []) + list(
+                getattr(self.state, "enemies", []) or [])
+            live_ids = {entity.runtime_id for entity in entities
+                        if entity.is_alive and not entity.is_departed}
+            living_finalists = [actor_id for actor_id in world.final_duel_finalists
+                                if actor_id in live_ids]
+            if len(living_finalists) == 1:
+                world.final_duel_search = False
+                world.final_duel_complete = True
+                world.final_duel_winner = living_finalists[0]
+                world.record("final_duel_search_ended", living_finalists[0],
+                             winner=world.final_duel_winner,
+                             note="另一名最终候选在会合前已被世界威胁淘汰")
+                return {"active": False, "complete": True,
+                        "winner": world.final_duel_winner}
+            if len(living_finalists) < 2:
+                world.final_duel_search = False
+                world.final_duel_finalists = []
+        return {"active": world.final_duel_search,
+                "finalists": list(world.final_duel_finalists)}
+
     def _resolve_world_relic_pickups(self, world: WorldState) -> list[dict]:
         """处理世界时间推进后所有单位踩中真实遗物地点的拾取，不泄露NPC的隐藏所得。"""
         entities = []
@@ -1753,12 +1791,14 @@ class GameEngine:
                     "discovered": False, "active": True})
                 available.remove(resource_pos)
             self._sync_world_entity_positions(world)
+            final_phase = self._refresh_world_final_duel(world)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_initialize",
                     "result": {"width": width, "height": height,
                                "world_turn": world.clock.turn,
                                "spawned_monsters": len(spawned_monsters),
-                               "event_locations": len(world.map.locations)}}
+                               "event_locations": len(world.map.locations),
+                               "final_duel_search": final_phase if final_phase.get("active") else None}}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
@@ -1843,6 +1883,9 @@ class GameEngine:
                             result["location_event"] = event_name
             # NPC在本回合移动后踩中遗物，也会真正拾取；隐藏NPC所得不会回传给玩家。
             self._resolve_world_relic_pickups(world)
+            final_phase = self._refresh_world_final_duel(world)
+            if final_phase.get("active") or final_phase.get("complete"):
+                result["final_duel"] = final_phase
             # 商人自己走近玩家也会建立接触；只在实际相邻时打开交易会话。
             self._open_adjacent_merchant_session(world)
             self.state.world_state = world.to_dict()
@@ -1862,6 +1905,7 @@ class GameEngine:
             start_turn = world.clock.turn
             world.wait(actor_id, turns)
             self._resolve_world_relic_pickups(world)
+            self._refresh_world_final_duel(world)
             elapsed = world.clock.turn - start_turn
             active_encounter = next((encounter for encounter in world.encounters.values()
                                      if encounter.active and actor_id in encounter.participants), None)
@@ -2234,6 +2278,7 @@ class GameEngine:
             world.record("world_action_started", player_id, action=action, duration=1)
             world.wait(player_id, 1)
             self._resolve_world_relic_pickups(world)
+            self._refresh_world_final_duel(world)
             elapsed = world.clock.turn - start_turn
             active_encounter = next((encounter for encounter in world.encounters.values()
                                      if encounter.active and player_id in encounter.participants), None)
@@ -2328,6 +2373,7 @@ class GameEngine:
         world.record("world_action_started", player_id, action=action, duration=duration)
         world.wait(player_id, duration)
         self._resolve_world_relic_pickups(world)
+        self._refresh_world_final_duel(world)
         elapsed = world.clock.turn - start_turn
         active_encounter = next((encounter for encounter in world.encounters.values()
                                  if encounter.active and player_id in encounter.participants), None)
