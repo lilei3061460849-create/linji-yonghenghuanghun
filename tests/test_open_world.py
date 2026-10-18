@@ -104,6 +104,7 @@ def test_game_engine_exposes_world_actions_and_serializes_state(tmp_path):
     engine = GameEngine(db_path=str(tmp_path / "world.db"),
                         save_dir=str(tmp_path), rng_seed=19)
     engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.phase = "pre_battle"
     initialized = engine.execute_action("world_initialize", {"width": 7, "height": 7})
     assert initialized["success"], initialized
     status = engine.execute_action("world_status")
@@ -144,6 +145,7 @@ def test_world_api_cannot_query_or_move_another_actor(tmp_path):
     engine = GameEngine(db_path=str(tmp_path / "privacy.db"),
                         save_dir=str(tmp_path), rng_seed=23)
     engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.phase = "pre_battle"
     engine.state.enemies = [Entity("M", "怪物", blood_limit=10, current_hp=10)]
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
     hidden_id = next(k for k, v in engine.state.world_state["actors"].items()
