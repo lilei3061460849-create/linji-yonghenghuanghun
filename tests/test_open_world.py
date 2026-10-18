@@ -1400,3 +1400,35 @@ def test_autonomous_reincarnator_can_sell_a_relic_only_within_merchant_budget(tm
     assert blocked == []
     assert rival.shards == 0 and merchant.shards == 5
     assert [relic.name for relic in rival.relics] == ["另一件可售遗物"]
+
+
+def test_world_move_does_not_report_hidden_npc_merchant_trades(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "hidden-npc-trade.db"),
+                        save_dir=str(tmp_path), rng_seed=173, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    rival = Entity("R", "轮回者", blood_limit=30, current_hp=30)
+    merchant = Entity("过路商人", "特殊角色", shards=20)
+    engine.state.player = player
+    engine.state.enemies = [rival]
+    engine.state.merchant = merchant
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(
+        player.runtime_id, "P", "player", 1, 1, faction="player", mode="manual"))
+    world.add_actor(WorldActorState(
+        rival.runtime_id, "R", "enemy", 5, 5, faction="enemy", mode="manual"))
+    world.add_actor(WorldActorState(
+        merchant.runtime_id, "过路商人", "merchant", 5, 4,
+        faction="neutral", mode="manual"))
+    engine.state.world_state = world.to_dict()
+    engine._resolve_world_npc_merchant_trades = lambda _: [{
+        "actor_id": rival.runtime_id, "direction": "buy",
+        "relic_name": "隐藏遗物", "price": 10,
+    }]
+
+    moved = engine.execute_action("world_move", {"x": 1, "y": 2})
+
+    assert moved["success"], moved
+    assert "npc_merchant_trades" not in moved["result"]
