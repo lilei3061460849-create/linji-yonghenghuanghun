@@ -1598,7 +1598,10 @@ class GameEngine:
                    if entity.is_alive and not entity.is_departed]
         if world.final_duel_complete:
             return {"active": False, "complete": True, "winner": world.final_duel_winner}
-        eligible = (player is not None and player.is_alive
+        living_allies = [entity for group_name in ("friends", "employees", "temp_friends")
+                         for entity in (getattr(self.state, group_name, []) or [])
+                         if entity.is_alive and not entity.is_departed]
+        eligible = (player is not None and player.is_alive and not living_allies
                     and len(enemies) == 1 and enemies[0].entity_type == "轮回者")
         if not world.final_duel_search and eligible:
             world.final_duel_search = True
@@ -5958,6 +5961,7 @@ class GameEngine:
         self.combat.validate_battle_start_relic_choices(relic_choices)
         world_encounter_id = params.get("world_encounter_id")
         world_battle = bool(world_encounter_id)
+        world_final_duel = False
         world_participant_enemies = []
         if world_battle:
             try:
@@ -5965,6 +5969,7 @@ class GameEngine:
             except ValueError as exc:
                 return {"success": False, "error": str(exc)}
             encounter = world.encounters.get(world_encounter_id)
+            world_final_duel = bool(encounter and encounter.final_duel)
             player_id = getattr(self.state.player, "runtime_id", "") if self.state.player else ""
             if encounter is None or not encounter.active or player_id not in encounter.participants:
                 return {"success": False, "error": "world_encounter_id必须指向包含当前轮回者的有效地图遭遇"}
@@ -6098,6 +6103,30 @@ class GameEngine:
             self.combat.init_monster_shards(m)
             self.state.enemies.append(m)
             drawn_names.append(fm["name"] + "(额外出现)")
+        if world_final_duel:
+            opponent = next((entity for entity in self.state.enemies
+                             if entity.entity_type == "轮回者" and entity.is_alive), None)
+            if opponent is None or self.state.player is None or not self.state.player.is_alive:
+                return {"success": False, "error": "最终会合遭遇缺少存活的轮回者双方"}
+            player_key = self._duel_priority_key(self.state.player)
+            opponent_key = self._duel_priority_key(opponent)
+            tied = player_key == opponent_key
+            if tied:
+                first_mover = self.dice.auto_roll(
+                    "world_final_duel_first_mover", ["player_side", "opponent_side"],
+                    context="开放世界最终死斗：先手完全平局").get("selected", "player_side")
+            else:
+                first_mover = "player_side" if player_key > opponent_key else "opponent_side"
+            self.state.in_final_duel = True
+            self.state.event_modifiers["world_final_duel"] = True
+            self.state.duel_tier = self._current_tier()
+            self.state.duel_defending_snapshot = {}
+            self.state.opponent_relics = []
+            self.state.opponent_artifacts_owned = []
+            self.state.duel_turn = first_mover
+            self.state.duel_round_first = first_mover
+            self.state.duel_tie_alternating = tied
+            self.state.duel_rounds_started = 0
         arena_percent = modifiers.pop("arena_health_percent", 0)
         if arena_percent:
             for monster in self.state.enemies:
@@ -6140,11 +6169,14 @@ class GameEngine:
             "relic_logs": relic_logs,
             "spell_logs": spell_logs,
             "artifact_logs": artifact_logs,
-            "instruction": (f"首发{len(drawn_names)}只怪物已进场"
-                            + (f"；另有{len(queued_names)}只增援待命（"
-                               + "、".join(f"R{w['arrive_round']}进{w['count']}只" for w in waves)
-                               + "）" if queued_names else "（无增援）")
-                            + "；请补充选择本场战斗背景(纯叙事，不影响数值)并结算其余[战始]效果"),
+            "instruction": (("最终死斗会合已开始：双方按最终死斗回合顺序交替行动，无法逃跑；"
+                             "击败对手后调用 battle_end 结算最后生存者。")
+                            if world_final_duel else
+                            (f"首发{len(drawn_names)}只怪物已进场"
+                             + (f"；另有{len(queued_names)}只增援待命（"
+                                + "、".join(f"R{w['arrive_round']}进{w['count']}只" for w in waves)
+                                + "）" if queued_names else "（无增援）")
+                             + "；请补充选择本场战斗背景(纯叙事，不影响数值)并结算其余[战始]效果")),
         }
 
     # ==================== 最终的冠冕 / 第8场最终死斗 ====================
