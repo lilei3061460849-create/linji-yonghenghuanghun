@@ -425,8 +425,22 @@ class DamageDeathMixin:
                               getattr(target, "name", "?"), amount):
             self._hp_loss_recording += 1  # 伤害失血由 _record_hp_loss_event 接管，抑制兜底钩子
             try:
-                return self._apply_hostile_damage_inner(
+                detail = self._apply_hostile_damage_inner(
                     target, amount, damage_type, source, damage_ctx, legacy_ctx)
+                # 饥荒的偏爱：造成实际伤害后，削减目标等量法限；当前法力同步封顶。
+                # 只在统一敌对伤害入口结算，避免道纹/攻击等不同来源重复触发。
+                if (source is not None and "饥荒的偏爱" in getattr(source, "preferences", [])
+                        and isinstance(detail, dict) and not detail.get("no_op")):
+                    mana_loss = min(max(0, int(getattr(target, "mana_limit", 0))),
+                                    max(0, int(detail.get("actual_damage", 0) or 0)))
+                    if mana_loss:
+                        target.mana_limit = max(0, target.mana_limit - mana_loss)
+                        target.current_mana = min(target.current_mana, target.mana_limit)
+                        detail["famine_preference"] = {
+                            "target": target.name, "mana_limit_reduced": mana_loss,
+                            "mana_limit_after": target.mana_limit,
+                        }
+                return detail
             finally:
                 self._hp_loss_recording -= 1
                 note_delta(self, "hp", hp_before, target.current_hp)
