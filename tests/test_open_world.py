@@ -1082,6 +1082,7 @@ def test_adjacent_hostile_waits_until_current_encounter_finishes():
     assert set(world.encounters[first[0]].participants) == {"p", "m1"}
 
     world.finish_encounter(first[0], "resolved")
+    world.actors["m1"].alive = False
     second = world.detect_adjacent_encounters("p")
     assert len(second) == 1
     assert set(world.encounters[second[0]].participants) == {"p", "m2"}
