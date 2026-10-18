@@ -373,8 +373,9 @@ def test_world_interact_attack_registers_real_encounter_but_does_not_fake_battle
     })
     assert result["success"], result
     assert result["result"]["battle_started"] is False
+    assert result["result"]["world_encounter_id"] == result["result"]["encounter_id"]
     restored = WorldState.from_dict(engine.state.world_state)
-    assert restored.encounters[result["result"]["encounter_id"]].active
+    assert restored.encounters[result["result"]["world_encounter_id"]].active
 
 
 def test_world_interact_trade_requires_actual_adjacency(tmp_path):
