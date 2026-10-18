@@ -725,6 +725,11 @@ def test_player_picks_up_resonance_relic_only_by_entering_its_cell(tmp_path):
         "discovered": True, "discovered_by": [engine.state.player.runtime_id],
         "active": True,
     })
+    world.add_actor(WorldActorState(
+        "npc-memory", "流浪者", "轮回者", 5, 5, faction="neutral", mode="manual",
+        memory=[{"kind": "location_sighting", "location_id": "test-relic",
+                 "location_kind": "relic", "position": [2, 1], "active": True, "turn": 0}],
+    ))
     engine.state.world_state = world.to_dict()
 
     move = engine.execute_action("world_move", {"x": 2, "y": 1})
@@ -732,6 +737,10 @@ def test_player_picks_up_resonance_relic_only_by_entering_its_cell(tmp_path):
     assert move["result"]["relic_collected"]["name"] == "测试遗物"
     assert any(relic.name == "测试遗物" for relic in engine.state.relics)
     assert engine.state.world_state["map"]["locations"]["test-relic"]["active"] is False
+    restored = WorldState.from_dict(engine.state.world_state)
+    sighting = restored.actors["npc-memory"].memory[0]
+    assert sighting["active"] is False
+    assert sighting["inactive_reason"] == "collected"
 
 
 
