@@ -19,6 +19,8 @@ concurrency:
 
 jobs:
   deploy:
+    # Opt in only after GitHub Pages is enabled in repository settings.
+    if: vars.ENABLE_GITHUB_PAGES == 'true'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
