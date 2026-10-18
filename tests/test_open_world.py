@@ -1414,6 +1414,7 @@ def test_world_move_does_not_report_hidden_npc_merchant_trades(tmp_path):
     engine.state.player = player
     engine.state.enemies = [rival]
     engine.state.merchant = merchant
+    engine.state.phase = "pre_battle"
     world = WorldState(clock=WorldClock(), map=_open_map())
     world.add_actor(WorldActorState(
         player.runtime_id, "P", "player", 1, 1, faction="player", mode="manual"))
