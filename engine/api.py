@@ -4409,6 +4409,16 @@ class GameEngine:
         if res.get("error"):
             return {"success": False, "error": res["error"],
                     "pages": res.get("pages"), "instruction": res.get("instruction", "")}
+        # 任意事件造成的真实碎片余额变化都立即检查动态还债线；历史峰值只在余额刷新纪录时上升。
+        player = self.state.player
+        peak = max(0, int(getattr(self.state, "shards_peak", 0)))
+        if player and player.is_alive and self.state.shards <= -(10 + peak):
+            player.current_hp = 0
+            player.depart_battle("还债")
+            res.setdefault("applied", []).append(
+                f"{player.name}被祭坛嚼碎：碎片余额{self.state.shards}触及动态还债线-{10 + peak}")
+            res["debt_result"] = {"entity": player.name, "balance": self.state.shards,
+                                  "threshold": 10 + peak, "triggered": True}
         if is_reject:
             # DM 裁定 2026-09-10（用户）：事件选拒绝选项后随机获得一种残韵——
             # 「用其他道纹解决」怪物墙：放弃事件收益换构筑深度，而非数值对撞。
@@ -4430,7 +4440,7 @@ class GameEngine:
         self.event_pool.resolve(name)
         # 扭曲都市完成事件后附赠【发现】：正式随机只走DiceEngine，并等待显式选1。
         bonus = None
-        if self.state.current_region == "扭曲都市":
+        if self.state.current_region == "扭曲都市" and self.state.player and self.state.player.is_alive:
             owned = {c.name for c in self.state.consumables}
             pool = [n for n in TWISTED_TOOL_LIBRARY if n not in owned]
             if pool:
@@ -4442,6 +4452,9 @@ class GameEngine:
         result_payload = {"option": opt["text"], "applied": res["applied"], "instructions": res["instructions"],
                           "shards": self.state.shards,
                           "player_hp": self.state.player.current_hp if self.state.player else None}
+        for key in ("random", "outcome", "net_delta", "debt_result", "trade"):
+            if key in res:
+                result_payload[key] = res[key]
         if bonus:
             result_payload["附赠发现"] = bonus
         next_event = None
