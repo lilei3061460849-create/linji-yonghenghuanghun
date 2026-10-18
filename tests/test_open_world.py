@@ -127,3 +127,28 @@ def test_moving_next_to_hostile_unit_creates_one_encounter_but_merchant_stays_ne
     assert len(result["new_encounters"]) == 1
     assert world.encounters[result["new_encounters"][0]].participants == ["p", "m"]
     assert world.detect_adjacent_encounters() == []
+
+
+def test_wait_requires_positive_turns():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState("p", "玩家", "轮回者", 1, 1))
+    with pytest.raises(ValueError, match="正整数"):
+        world.wait("p", 0)
+    assert world.wait("p", 2) == 2
+
+
+def test_world_api_cannot_query_or_move_another_actor(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "privacy.db"),
+                        save_dir=str(tmp_path), rng_seed=23)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.enemies = [Entity("M", "怪物", blood_limit=10, current_hp=10)]
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    hidden_id = next(k for k, v in engine.state.world_state["actors"].items()
+                     if v["kind"] == "enemy")
+    status = engine.execute_action("world_status", {"actor_id": hidden_id})
+    assert not status["success"]
+    move = engine.execute_action("world_move", {"actor_id": hidden_id, "x": 2, "y": 1})
+    assert not move["success"]
