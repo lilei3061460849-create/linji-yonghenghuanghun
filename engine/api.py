@@ -6961,6 +6961,13 @@ class GameEngine:
             world.record("created_being_summoned", player_id, created_being=being.name,
                          created_being_id=being.runtime_id, path_distance=len(path) - 1)
             self.state.world_state = world.to_dict()
+        # 在战始产生随机怪物前保存快照；重来会恢复随机源并再次按当前代码抽取。
+        self._battle_restart_snapshot = {
+            "state": copy.deepcopy(self.state),
+            "dice": copy.deepcopy(self.dice),
+            "combat_runtime": copy.deepcopy(self._snapshot_combat_runtime()),
+            "battle_start_params": copy.deepcopy(params),
+        }
         # 潮下基地的偷药后果：地图遭遇也会带来一只额外潮尸，并把它登记进同一遭遇。
         if (world_battle and not world_final_duel
                 and self.state.current_region == "沉沦海"
@@ -6989,13 +6996,6 @@ class GameEngine:
                              position=list(player_actor.position))
                 self.state.world_state = world.to_dict()
 
-        # 在战始产生随机怪物前保存快照；重来会恢复随机源并再次按当前代码抽取。
-        self._battle_restart_snapshot = {
-            "state": copy.deepcopy(self.state),
-            "dice": copy.deepcopy(self.dice),
-            "combat_runtime": copy.deepcopy(self._snapshot_combat_runtime()),
-            "battle_start_params": copy.deepcopy(params),
-        }
         self.state.phase = GamePhase.IN_COMBAT.value
         self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_START.value
         self.state.current_battle += 1
