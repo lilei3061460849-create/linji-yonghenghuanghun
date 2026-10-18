@@ -1589,6 +1589,57 @@ class GameEngine:
                      merchant_actor_id=merchant.actor_id, position=list(merchant.position))
         return True
 
+    def _resolve_world_relic_pickups(self, world: WorldState) -> list[dict]:
+        """处理世界时间推进后所有单位踩中真实遗物地点的拾取，不泄露NPC的隐藏所得。"""
+        entities = []
+        if self.state.player is not None:
+            entities.append(self.state.player)
+        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+            entities.extend(getattr(self.state, group_name, []) or [])
+        if getattr(self.state, "merchant", None) is not None:
+            entities.append(self.state.merchant)
+        entity_by_id = {getattr(entity, "runtime_id", ""): entity for entity in entities
+                        if getattr(entity, "runtime_id", "")}
+        pickups = []
+        for location_id, location in world.map.locations.items():
+            if location.get("kind") != "relic" or not location.get("active", True):
+                continue
+            pos = (int(location.get("x", -1)), int(location.get("y", -1)))
+            for actor in world.actors.values():
+                if not actor.alive or actor.position != pos:
+                    continue
+                entity = entity_by_id.get(actor.actor_id)
+                if entity is None:
+                    continue
+                is_player = entity is self.state.player
+                inventory = self.state.relics if is_player else entity.relics
+                owned_names = {relic.name for relic in inventory}
+                relic_name = location.get("relic_name", location.get("name", ""))
+                capacity = getattr(entity, "relic_capacity", 10**9)
+                if relic_name not in owned_names and len(owned_names) < capacity:
+                    relic = Relic(name=relic_name, effect=location.get("relic_effect", ""))
+                    inventory.append(relic)
+                    location["active"] = False
+                    location["collected"] = True
+                    location["collected_by"] = actor.actor_id
+                    location["collected_turn"] = world.clock.turn
+                    world.record("resonance_relic_collected", actor.actor_id,
+                                 location_id=location_id, relic_name=relic.name,
+                                 position=list(pos))
+                    pickups.append({"actor_id": actor.actor_id, "relic_name": relic.name,
+                                    "player_visible": is_player})
+                else:
+                    known_by = location.setdefault("discovered_by", [])
+                    if actor.actor_id not in known_by:
+                        known_by.append(actor.actor_id)
+                        location["discovered"] = True
+                        world.record("resonance_relic_discovered", actor.actor_id,
+                                     location_id=location_id, relic_name=relic_name,
+                                     position=list(pos))
+                if not location.get("active", True):
+                    break
+        return pickups
+
     def _action_world_initialize(self, params: dict) -> dict:
         """创建可存档的网格世界，并将当前存活单位登记为独立地图单位。"""
         if self.state.player is None:
@@ -1786,6 +1837,8 @@ class GameEngine:
                                          location_name=location.get("name", location_id),
                                          event_name=event_name, position=[x, y])
                             result["location_event"] = event_name
+            # NPC在本回合移动后踩中遗物，也会真正拾取；隐藏NPC所得不会回传给玩家。
+            self._resolve_world_relic_pickups(world)
             # 商人自己走近玩家也会建立接触；只在实际相邻时打开交易会话。
             self._open_adjacent_merchant_session(world)
             self.state.world_state = world.to_dict()
@@ -1804,6 +1857,7 @@ class GameEngine:
             turns = params.get("turns", 1)
             start_turn = world.clock.turn
             world.wait(actor_id, turns)
+            self._resolve_world_relic_pickups(world)
             elapsed = world.clock.turn - start_turn
             active_encounter = next((encounter for encounter in world.encounters.values()
                                      if encounter.active and actor_id in encounter.participants), None)
@@ -2168,12 +2222,14 @@ class GameEngine:
                 pos for pos, distance in distances.items()
                 if 0 < distance <= 10 and world.map.is_passable(pos)
                 and world.map.location_at(pos) is None
+                and not any(actor.alive and actor.position == pos for actor in world.actors.values())
             ]
             if not candidates:
                 return {"success": False, "error": "玩家周围10格路径范围内没有可投放的空地点"}
             start_turn = world.clock.turn
             world.record("world_action_started", player_id, action=action, duration=1)
             world.wait(player_id, 1)
+            self._resolve_world_relic_pickups(world)
             elapsed = world.clock.turn - start_turn
             active_encounter = next((encounter for encounter in world.encounters.values()
                                      if encounter.active and player_id in encounter.participants), None)
@@ -2203,6 +2259,7 @@ class GameEngine:
                 pos for pos, distance in distances.items()
                 if 0 < distance <= 10 and world.map.is_passable(pos)
                 and world.map.location_at(pos) is None
+                and not any(actor.alive and actor.position == pos for actor in world.actors.values())
             ]
             if not candidates:
                 world.record("world_action_interrupted", player_id, action=action,
@@ -2265,6 +2322,7 @@ class GameEngine:
         start_turn = world.clock.turn
         world.record("world_action_started", player_id, action=action, duration=duration)
         world.wait(player_id, duration)
+        self._resolve_world_relic_pickups(world)
         elapsed = world.clock.turn - start_turn
         active_encounter = next((encounter for encounter in world.encounters.values()
                                  if encounter.active and player_id in encounter.participants), None)
