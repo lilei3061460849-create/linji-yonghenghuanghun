@@ -103,71 +103,29 @@ def test_dungeon_monster_pool_parsed():
     assert {"蛆冢", "纸人", "勾魂使者", "血僵"} <= names
 
 
-# ---------- 附煞行动 ----------
+# ---------- 旧附煞行动已删除 ----------
 
-def test_fusha_select_mode():
-    """正常路径：附煞·选择模式（75碎片）给道纹附加煞气。"""
-    e = GameEngine(db_path="/tmp/test_lz_fusha.db", rng_seed=1)
-    e.execute_action("setup_attributes", {"name": "贾凡", "blood_points": 11, "speed_points": 8, "mana_points": 6})
+def test_fusha_action_is_removed_in_favor_of_creation_system():
+    """旧附煞菜单已删除；造生/造物承接其设计位置，不再给普通道纹附加煞气。"""
+    e = GameEngine(db_path="/tmp/test_lz_fusha_removed.db", rng_seed=1)
+    e.execute_action("setup_attributes", {
+        "name": "贾凡", "blood_points": 11, "speed_points": 8, "mana_points": 6,
+    })
     finish_initial_daowen(e)
     e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
     setup = e.execute_action("setup_choose_region", {"region": "乱葬岗"})
-    e.execute_action("choose_discovered_relic", {"relic_name": setup["result"]["relic_choices"][0]})
+    e.execute_action("choose_discovered_relic", {
+        "relic_name": setup["result"]["relic_choices"][0],
+    })
     e.state.shards = 200
-    r = e.execute_action("pre_battle_action", {"sub_action": "附煞", "mode": "选择",
-                                               "sha_qi": "冥煞", "daowen_name": "杀伐"})
-    assert r["success"], r
-    assert e.state.player.dao_wen["杀伐"].sha_qi == "冥煞"
-    assert e.state.shards == 175  # 200-25
 
+    result = e.execute_action("pre_battle_action", {"sub_action": "附煞"})
 
-def test_fusha_discover_mode_candidates():
-    """正常路径：附煞·发现模式（50碎片）随机列3件候选。"""
-    e = GameEngine(db_path="/tmp/test_lz_fusha2.db", rng_seed=1)
-    e.execute_action("setup_attributes", {"name": "贾凡", "blood_points": 11, "speed_points": 8, "mana_points": 6})
-    finish_initial_daowen(e)
-    e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
-    setup = e.execute_action("setup_choose_region", {"region": "乱葬岗"})
-    e.execute_action("choose_discovered_relic", {"relic_name": setup["result"]["relic_choices"][0]})
-    e.state.shards = 200
-    r = e.execute_action("pre_battle_action", {"sub_action": "附煞", "mode": "发现"})
-    assert r["success"], r
-    cands = r["result"]["sha_qi_candidates"]
-    assert len(cands) == 3
-    assert e.state.pending_sha_qi_choices == cands
-    # 选择后附加
-    r2 = e.execute_action("choose_sha_qi", {"sha_qi": cands[0], "daowen_name": "杀伐"})
-    assert r2["success"], r2
-    assert e.state.player.dao_wen["杀伐"].sha_qi == cands[0]
-    assert e.state.shards == 190  # 200-10
-
-
-def test_fusha_invalid_sha_qi_rejected():
-    """错误输入：未知煞气被拒绝。"""
-    e = GameEngine(db_path="/tmp/test_lz_fusha3.db", rng_seed=1)
-    e.execute_action("setup_attributes", {"name": "贾凡", "blood_points": 11, "speed_points": 8, "mana_points": 6})
-    finish_initial_daowen(e)
-    e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
-    setup = e.execute_action("setup_choose_region", {"region": "乱葬岗"})
-    e.execute_action("choose_discovered_relic", {"relic_name": setup["result"]["relic_choices"][0]})
-    r = e.execute_action("pre_battle_action", {"sub_action": "附煞", "mode": "选择",
-                                               "sha_qi": "不存在的煞", "daowen_name": "杀伐"})
-    assert not r["success"]
-    assert "未知煞气" in r["error"]
-
-
-def test_fusha_region_gate():
-    """错误输入：非乱葬岗副本不能使用附煞。"""
-    e = GameEngine(db_path="/tmp/test_lz_fusha4.db", rng_seed=1)
-    e.execute_action("setup_attributes", {"name": "贾凡", "blood_points": 11, "speed_points": 8, "mana_points": 6})
-    finish_initial_daowen(e)
-    e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
-    setup = e.execute_action("setup_choose_region", {"region": "扭曲都市"})
-    e.execute_action("choose_discovered_relic", {"relic_name": setup["result"]["relic_choices"][0]})
-    r = e.execute_action("pre_battle_action", {"sub_action": "附煞", "mode": "选择",
-                                               "sha_qi": "冥煞", "daowen_name": "杀伐"})
-    assert not r["success"]
-    assert "乱葬岗专属" in r["error"]
+    assert not result["success"]
+    assert "未知局外行动" in result["error"]
+    assert e.state.shards == 200
+    assert not e.state.pending_sha_qi_choices
+    assert all(not instance.sha_qi for instance in e.state.player.dao_wen.values())
 
 
 # ---------- 专属道纹效果 ----------
