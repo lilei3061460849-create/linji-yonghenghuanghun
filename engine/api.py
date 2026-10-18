@@ -7700,6 +7700,9 @@ class GameEngine:
             self.state.world_enemy_reserve = []
             self.state.world_encounter_entities = []
             self.state.world_encounter_id = ""
+            # NPC战斗可能刚好淘汰了倒数第二名轮回者；此时进入自然会合阶段，
+            # 但仍保留地图上的怪物，让它们在会合期间继续构成威胁。
+            self._refresh_world_final_duel(world)
             self.state.world_state = world.to_dict()
         else:
             self.state.enemies.clear()
