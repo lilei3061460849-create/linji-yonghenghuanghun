@@ -224,8 +224,7 @@ class WorldState:
             raise ValueError("单位ID必须非空且唯一")
         if not self.map.is_passable(actor.position):
             raise ValueError("单位出生位置必须在可通行格")
-        if any(a.alive and a.position == actor.position for a in self.actors.values()):
-            raise ValueError("同一格不能同时容纳多个单位")
+        # 同格占位合法；敌对单位是否开战由遭遇检测统一处理。
         self.actors[actor.actor_id] = actor
         self.record("actor_spawned", actor.actor_id, name=actor.name, kind=actor.kind,
                     position=list(actor.position))
