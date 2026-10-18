@@ -79,6 +79,8 @@ def test_altar_black_swan_records_debt_and_triggers_dynamic_death():
 
 def test_merchant_can_buy_and_sell_relics_at_confirmed_price():
     sell_engine = _engine(seed=32)
+    merchant = sell_engine._initialize_merchant_inventory()
+    assert len(merchant.relics) == 5
     relic_name = sell_engine.state.relics[0].name
     _stage(sell_engine, "过路商人", "遗物交易：自由买入或卖出遗物")
     sold = sell_engine.execute_action("resolve_event", {
@@ -86,6 +88,7 @@ def test_merchant_can_buy_and_sell_relics_at_confirmed_price():
         "relic_name": relic_name, "price": 15, "confirmed": True})
     assert sold.get("success"), sold
     assert not any(r.name == relic_name for r in sell_engine.state.relics)
+    assert any(r.name == relic_name for r in merchant.relics)
     assert sell_engine.state.shards == 35
     assert sell_engine.event_pool.current == "过路商人"
     assert sold["result"]["merchant_session_open"] is True
@@ -100,14 +103,16 @@ def test_merchant_can_buy_and_sell_relics_at_confirmed_price():
 
     buy_engine = _engine(seed=33)
     buy_engine.state.player.blood_limit = 60
-    buy_engine._init_relic_pool()
-    relic_to_buy = buy_engine.state.relics_pool[0].name
+    merchant_to_buy = buy_engine._initialize_merchant_inventory()
+    relic_to_buy = merchant_to_buy.relics[0].name
     _stage(buy_engine, "过路商人", "遗物交易：自由买入或卖出遗物")
     bought = buy_engine.execute_action("resolve_event", {
         "event": "过路商人", "option_id": 1, "trade_direction": "buy",
         "relic_name": relic_to_buy, "price": 10, "confirmed": True})
     assert bought.get("success"), bought
     assert any(r.name == relic_to_buy for r in buy_engine.state.relics)
+    assert not any(r.name == relic_to_buy for r in merchant_to_buy.relics)
+    assert len(merchant_to_buy.relics) == 4
     assert buy_engine.state.shards == 10
 
 
