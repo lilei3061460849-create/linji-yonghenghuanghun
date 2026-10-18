@@ -232,9 +232,60 @@ class WorldState:
         self.visible_cells(actor_id)
         encounters = self.detect_adjacent_encounters(actor_id)
         interactions = self.detect_adjacent_interactions(actor_id, origin)
+        self._run_autonomous_units()
+        # 返回值只报告涉及行动者的遭遇，不泄露地图另一端的隐藏战斗。
+        encounters = sorted(set(encounters + [
+            encounter.encounter_id for encounter in self.encounters.values()
+            if encounter.active and actor_id in encounter.participants
+        ]))
         return {"actor_id": actor_id, "from": list(origin), "to": list(destination),
                 "world_turn": self.clock.turn, "new_encounters": encounters,
                 "new_interactions": interactions}
+
+    def _run_autonomous_units(self) -> list[dict[str, Any]]:
+        """推进当前世界回合的NPC行动；每个单位只使用自己的可见信息。"""
+        generated: list[dict[str, Any]] = []
+        # 先登记已经相邻的敌对关系，遭遇中的单位不会再被NPC调度移动。
+        self.detect_adjacent_encounters()
+        for actor_id in sorted(self.actors):
+            actor = self.actors[actor_id]
+            if not actor.alive or actor.kind == "player" or actor.mode != "autonomous":
+                continue
+            if any(e.active and actor_id in e.participants for e in self.encounters.values()):
+                continue
+            visible = set(self.visible_cells(actor_id))
+            targets = [
+                other for other in self.actors.values()
+                if other.alive and other.actor_id != actor_id
+                and other.position in visible and self._hostile_pair(actor, other)
+            ]
+            if targets:
+                created = self.detect_adjacent_encounters(actor_id)
+                if created:
+                    generated.extend({"type": "encounter_started", "encounter_id": eid}
+                                     for eid in created)
+                if any(e.active and actor_id in e.participants for e in self.encounters.values()):
+                    continue
+            occupied = {other.position for other in self.actors.values()
+                        if other.alive and other.actor_id != actor_id}
+            candidates = [p for p in self.map.neighbors(actor.position)
+                          if p not in occupied]
+            if not candidates:
+                continue
+            # 仅在当前相邻视野中选择可走格；方向轮换保证单位持续移动且可复现。
+            offset = (self.clock.turn + sum(ord(char) for char in actor_id)) % len(candidates)
+            destination = candidates[offset]
+            origin = actor.position
+            actor.x, actor.y = destination
+            self.record("actor_moved", actor_id, origin=list(origin),
+                        destination=list(destination), autonomous=True)
+            self.visible_cells(actor_id)
+            generated.append({"type": "actor_moved", "actor_id": actor_id,
+                              "from": list(origin), "to": list(destination)})
+            created = self.detect_adjacent_encounters(actor_id)
+            generated.extend({"type": "encounter_started", "encounter_id": eid}
+                             for eid in created)
+        return generated
 
     @staticmethod
     def _hostile_pair(a: WorldActorState, b: WorldActorState) -> bool:
@@ -297,8 +348,10 @@ class WorldState:
         self._living_actor(actor_id)
         if not isinstance(turns, int) or isinstance(turns, bool) or turns < 1:
             raise ValueError("等待回合数必须是正整数")
-        self.clock.advance(turns)
-        self.record("world_waited", actor_id, turns=turns)
+        for _ in range(turns):
+            self.clock.advance(1)
+            self.record("world_waited", actor_id, turns=1)
+            self._run_autonomous_units()
         return self.clock.turn
 
     def start_encounter(self, participant_ids: list[str], location: Coord) -> EncounterState:
