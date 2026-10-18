@@ -212,10 +212,15 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
     event_name = params.get("_event_name", "")
     if event_name == "祭坛" and text.startswith("投资"):
         x = params.get("x")
+        multiplier = params.get("multiplier")
         if not isinstance(x, int) or isinstance(x, bool) or x < 1:
             return "祭坛投资必须显式提交正整数x"
         if x > engine.state.shards:
             return f"碎片不足，无法投入{x}（当前{engine.state.shards}）"
+        max_multiplier = 10 + (x // 100)
+        if (not isinstance(multiplier, int) or isinstance(multiplier, bool)
+                or multiplier < 1 or multiplier > max_multiplier):
+            return f"祭坛倍率必须是1到{max_multiplier}之间的整数（本金{x}，每100本金提高1点倍率上限）"
     if event_name == "过路商人" and text.startswith("遗物交易"):
         direction = params.get("trade_direction")
         relic_name = params.get("relic_name", "")
@@ -319,37 +324,41 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             cost_share_target_ref=params.get("cost_share_target_ref", ""),
             cost_context={"timing": "pre_battle_event", "source": event_name or "事件", "source_type": "event", "tags": {"active_payment"}})
 
-    # ---- 祭坛：碎片投资，随机数由引擎抽取并记录 ----
+    # ---- 祭坛：玩家自选倍率，随机整数本身就是最终盈亏倍数 ----
     if event_name == "祭坛" and text.startswith("投资"):
-        x = params["x"]
-        engine.state.shards -= x
+        principal = int(params["x"])
+        multiplier = int(params["multiplier"])
+        engine.state.shards -= principal
         roll = engine.dice.auto_roll(
-            "altar_investment", list(range(100)), context="祭坛·碎片投资")
-        ticket = int(roll["selected"])
-        if ticket < 15:
-            outcome, delta = "暴涨", 4 * x
-            engine.state.shards += 5 * x
-        elif ticket < 40:
-            outcome, delta = "上涨", x
-            engine.state.shards += 2 * x
-        elif ticket < 75:
-            outcome, delta = "崩盘", -x
-        else:
-            outcome, delta = "黑天鹅", -3 * x
-            engine.state.shards -= 2 * x
-        applied.append(f"祭坛投资：{outcome}（投入{x}，净变化{delta:+d}，当前碎片{engine.state.shards}）")
+            "altar_investment_multiplier",
+            list(range(-multiplier, multiplier + 1)),
+            context=f"祭坛·自选倍率{multiplier}·随机盈亏倍数")
+        outcome_multiplier = int(roll["selected"])
+        # 先扣本金，再返还本金加净盈亏；净变化严格等于本金×随机数。
+        delta = principal * outcome_multiplier
+        engine.state.shards += principal * (outcome_multiplier + 1)
+        outcome = "盈利" if outcome_multiplier > 0 else "亏损" if outcome_multiplier < 0 else "持平"
+        engine.state.shards_peak = max(
+            int(getattr(engine.state, "shards_peak", 0)),
+            max(0, int(engine.state.shards)))
+        applied.append(
+            f"祭坛投资：本金{principal}，自选倍率{multiplier}，"
+            f"随机结果{outcome_multiplier:+d}倍，{outcome}{abs(delta)}碎片，"
+            f"净变化{delta:+d}，当前碎片{engine.state.shards}")
         debt_result = None
         player_peak = max(0, int(getattr(engine.state, "shards_peak", 0)))
-        if engine.state.shards <= -(10 + player_peak) and player.is_alive:
+        threshold = 10 + player_peak
+        if engine.state.shards <= -threshold and player.is_alive:
             player.current_hp = 0
             player.depart_battle("还债")
             debt_result = {"type": "debt_death", "entity": player.name,
-                           "debt": -engine.state.shards, "threshold": 10 + player_peak,
+                           "debt": -engine.state.shards, "threshold": threshold,
                            "note": f"{player.name}被祭坛嚼碎：碎片余额{engine.state.shards}触及动态还债线"}
             applied.append(debt_result["note"])
         return {"applied": applied, "instructions": instructions,
-                "random": roll["record"], "outcome": outcome, "net_delta": delta,
-                "debt_result": debt_result}
+                "random": roll["record"], "outcome": outcome,
+                "outcome_multiplier": outcome_multiplier, "multiplier": multiplier,
+                "principal": principal, "net_delta": delta, "debt_result": debt_result}
 
     # ---- 过路商人：买入/卖出遗物，价格必须事前确认 ----
     if event_name == "过路商人" and text.startswith("遗物交易"):
