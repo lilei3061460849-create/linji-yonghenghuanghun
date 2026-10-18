@@ -241,6 +241,41 @@ XIJIE_PASSIVE = Mechanism(
     priority=10,
 )
 
+def _famine_preference_effect(ctx: TriggerContext, targets: list) -> dict | None:
+    """饥荒的偏爱：造成实际伤害后，削减目标等量法限。"""
+    if ctx.source is None or ctx.target is None or ctx.event is None:
+        return None
+    actual_damage = max(0, int((ctx.event.data or {}).get("actual_damage", 0)))
+    if actual_damage <= 0:
+        return None
+    target = ctx.target
+    before = int(target.mana_limit)
+    target.mana_limit = max(0, before - actual_damage)
+    target.current_mana = min(int(target.current_mana), target.mana_limit)
+    return {
+        "type": "famine_preference",
+        "source": ctx.source.name,
+        "target": target.name,
+        "actual_damage": actual_damage,
+        "mana_limit_before": before,
+        "mana_limit_after": target.mana_limit,
+    }
+
+
+FAMINE_PREFERENCE = Mechanism(
+    name="饥荒的偏爱·削法限",
+    when=Trigger.event(CombatEventType.DAMAGE_APPLIED),
+    effect=_famine_preference_effect,
+    target=None,
+    condition=lambda ctx: (
+        ctx.source is not None and ctx.target is not None
+        and "饥荒的偏爱" in getattr(ctx.source, "preferences", [])
+    ),
+    # 与洗劫的伤害后机制同处事件窗口；先完成洗劫，再结算法限削减。
+    priority=20,
+)
+
+
 def _silent_mask_effect(ctx: TriggerContext, targets: list) -> str:
     """【缄默面具】2026-09-17 用户令改版：[战终][法限]+X。
 
@@ -477,6 +512,7 @@ MECHANISMS.register(JIAOHHEIFASI)
 MECHANISMS.register(DONGCHA)
 MECHANISMS.register(JIBIAN_MARKER)
 MECHANISMS.register(XIJIE_PASSIVE)
+MECHANISMS.register(FAMINE_PREFERENCE)
 MECHANISMS.register(SILENT_MASK)
 MECHANISMS.register(DRAGON_CLAW)
 MECHANISMS.register(QINGSUAN_SETTLE)
