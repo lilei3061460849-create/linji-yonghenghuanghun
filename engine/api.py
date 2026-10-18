@@ -1848,14 +1848,16 @@ class GameEngine:
                 self.state.temp_friends.remove(entity)
                 if entity.is_alive and not entity.is_departed:
                     self.state.enemies.append(entity)
+            already_expired = bool(alliance.get("expired"))
             actor.kind = str(alliance.get("original_kind", "enemy"))
             actor.faction = str(alliance.get("original_faction", "enemy"))
             actor.owner_actor_id = ""
             actor.behavior = "explore"
             actor.mode = "autonomous"
             actor.memory = [item for item in actor.memory if item is not alliance]
-            world.record("temporary_alliance_expired", actor.actor_id,
-                         name=actor.name, expired_turn=world.clock.turn)
+            if not already_expired:
+                world.record("temporary_alliance_expired", actor.actor_id,
+                             name=actor.name, expired_turn=world.clock.turn)
             resolved.append({"actor_id": actor.actor_id, "name": actor.name,
                              "status": "expired"})
         return resolved
@@ -2729,6 +2731,7 @@ class GameEngine:
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
             self._resolve_world_hiring_signals(world)
+            self._resolve_world_temporary_alliances(world)
             self._share_created_being_vision(world)
             self._refresh_world_final_duel(world)
             elapsed = world.clock.turn - start_turn
