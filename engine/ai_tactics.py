@@ -579,8 +579,22 @@ class TacticalAI:
         p: dict = {"daowen_name": name, "x": x, "dodge": False, "blood_shadow": False}
         if self._actor_ref:
             p["actor_ref"] = self._actor_ref   # 守擂者视角：所有道纹都指定施法者
-        if target:
-            p["target"] = target
+        if target and name != "波及":
+            refs = self.engine.combat._combat_entity_refs()
+            matches = [(ref, entity) for ref, entity in refs.items()
+                       if entity.name == target and entity.is_alive]
+            if len(matches) == 1:
+                p["target_ref"] = matches[0][0]
+            elif matches:
+                # 重名怪物很常见；名称接口会拒绝歧义目标。按当前目标选择规则
+                # 锁定同名单位中生命最低者，并把稳定引用传给引擎。
+                enemy_ids = {id(entity) for entity in self.alive_enemies()}
+                hostile_matches = [pair for pair in matches if id(pair[1]) in enemy_ids]
+                pool = hostile_matches or matches
+                p["target_ref"] = min(pool, key=lambda pair: (
+                    pair[1].current_hp, pair[0]))[0]
+            else:
+                p["target"] = target
         if name == "波及":
             refs = self.engine.combat._combat_entity_refs()
             # 视角重定向：波及目标是「本 AI 视角的敌人」；普通视角取非玩家侧，守擂视角取挑战者侧。
