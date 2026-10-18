@@ -23,6 +23,7 @@ from .models import (
     Entity, GameState, DaoWen, DaoWenInstance, Spell,
     Relic, Consumable, StatusEffect, LongJiXin
 )
+from .world import WorldState, WorldActorState
 from .enums import (GamePhase, CombatSubphase, ActionPhase, TriggerTiming,
                     InterruptType, EntityType, EffectScope, EffectPolarity)
 from .dice import DiceEngine
@@ -1265,7 +1266,17 @@ class GameEngine:
 
     def _dispatch_action(self, action_type: str, params: dict) -> dict:
         """action 名 → 处理器：唯一的 action 路由表（执行实现见各 _action_*）。"""
-        if action_type == "setup_attributes":
+        if action_type == "world_initialize":
+            return self._action_world_initialize(params)
+        elif action_type == "world_move":
+            return self._action_world_move(params)
+        elif action_type == "world_wait":
+            return self._action_world_wait(params)
+        elif action_type == "world_status":
+            return self._action_world_status(params)
+        elif action_type == "world_vision":
+            return self._action_world_vision(params)
+        elif action_type == "setup_attributes":
             return self._action_setup_attributes(params)
         elif action_type == "setup_choose_region":
             return self._action_setup_choose_region(params)
@@ -1410,6 +1421,117 @@ class GameEngine:
             return self._action_read_death_book(params)
         else:
             return {"success": False, "error": f"未知行动类型: {action_type}"}
+
+    # ==================== 开放世界基础行动 ====================
+
+    def _world_from_state(self) -> WorldState:
+        if not self.state.world_state:
+            raise ValueError("开放世界尚未初始化，请先执行world_initialize")
+        return WorldState.from_dict(self.state.world_state)
+
+    def _action_world_initialize(self, params: dict) -> dict:
+        """创建可存档的网格世界，并将当前存活单位登记为独立地图单位。"""
+        if self.state.player is None:
+            return {"success": False, "error": "请先完成角色开局，再初始化开放世界"}
+        if self.state.world_state and not params.get("reset", False):
+            return {"success": True, "action": "world_initialize",
+                    "result": {"already_initialized": True,
+                               "world_turn": self.state.world_state.get("clock", {}).get("turn", 0)}}
+        width = params.get("width", 21)
+        height = params.get("height", 21)
+        if not isinstance(width, int) or isinstance(width, bool) or not isinstance(height, int) or isinstance(height, bool):
+            return {"success": False, "error": "地图宽高必须是整数"}
+        # 地图种子通过引擎骰子产生并记录，不让AI直接伪造随机结果。
+        seed_roll = self.dice.auto_roll("open_world_map_seed", list(range(10000)),
+                                        context="开放世界地图生成种子")
+        seed = seed_roll["record"]["selected_index"]
+        try:
+            world = WorldState.create(width=width, height=height, seed=seed)
+            entities = []
+            if self.state.player is not None:
+                entities.append((self.state.player, "player", "player"))
+            for kind, group in (("friend", self.state.friends), ("employee", self.state.employees),
+                                ("temp_friend", self.state.temp_friends), ("enemy", self.state.enemies)):
+                entities.extend((entity, kind, "monster" if entity.entity_type == "怪物" else kind)
+                                for entity in group if entity.is_alive)
+            if self.state.merchant is not None:
+                entities.append((self.state.merchant, "merchant", "neutral"))
+            candidates = [(x, y) for y in range(height) for x in range(width)
+                          if world.map.is_passable((x, y))]
+            used = set()
+            for entity, kind, faction in entities:
+                pos = next((p for p in candidates if p not in used), None)
+                if pos is None:
+                    raise ValueError("地图可通行格不足，无法放置全部单位")
+                used.add(pos)
+                actor_id = getattr(entity, "runtime_id", "") or f"{kind}:{entity.name}:{len(used)}"
+                world.add_actor(WorldActorState(actor_id=actor_id, name=entity.name, kind=kind,
+                                                x=pos[0], y=pos[1], alive=entity.is_alive,
+                                                faction=faction))
+                if kind == "player":
+                    world.record("world_entered", actor_id, region=self.state.current_region)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_initialize",
+                    "result": {"width": width, "height": height, "actor_count": len(world.actors),
+                               "world_turn": world.clock.turn, "seed_roll": seed_roll}}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _action_world_move(self, params: dict) -> dict:
+        try:
+            world = self._world_from_state()
+            actor_id = params.get("actor_id")
+            if not actor_id:
+                actor_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            if actor_id is None:
+                return {"success": False, "error": "地图上找不到玩家单位"}
+            x, y = params.get("x"), params.get("y")
+            if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
+                return {"success": False, "error": "目标坐标x/y必须是整数"}
+            result = world.move_actor(actor_id, (x, y))
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_move", "result": result}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _action_world_wait(self, params: dict) -> dict:
+        try:
+            world = self._world_from_state()
+            actor_id = params.get("actor_id")
+            if not actor_id:
+                actor_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            if actor_id is None:
+                return {"success": False, "error": "地图上找不到玩家单位"}
+            turns = params.get("turns", 1)
+            world.wait(actor_id, turns)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_wait",
+                    "result": {"world_turn": world.clock.turn, "turns": turns}}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _action_world_status(self, params: dict) -> dict:
+        try:
+            world = self._world_from_state()
+            return {"success": True, "action": "world_status", "result": world.to_dict()}
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _action_world_vision(self, params: dict) -> dict:
+        try:
+            world = self._world_from_state()
+            actor_id = params.get("actor_id")
+            if not actor_id:
+                actor_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            if actor_id is None:
+                return {"success": False, "error": "地图上找不到玩家单位"}
+            visible = world.visible_cells(actor_id)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "world_vision",
+                    "result": {"actor_id": actor_id, "visible_cells": [list(p) for p in visible],
+                               "known_cells": sorted(world.actors[actor_id].known_cells)}}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
 
     # ==================== 开局行动 ====================
 
