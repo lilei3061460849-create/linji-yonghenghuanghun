@@ -1752,3 +1752,28 @@ def test_autonomous_npc_order_is_stable_when_runtime_ids_change():
     first = make_world("z-alpha", "a-beta")
     second = make_world("a-alpha", "z-beta")
     assert first == second
+
+
+def test_world_initialize_spawns_exactly_five_relics_on_neutral_merchant(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-merchant-init.db"),
+                        save_dir=str(tmp_path), rng_seed=223, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.enemies = [Entity("M", "怪物", blood_limit=10, current_hp=10)]
+    engine.state.current_region = "扭曲都市"
+    engine.state.phase = "pre_battle"
+
+    result = engine.execute_action("world_initialize", {"width": 7, "height": 7})
+
+    assert result["success"], result
+    merchant = engine.state.merchant
+    assert merchant is not None
+    assert len(merchant.relics) == 5
+    world = WorldState.from_dict(engine.state.world_state)
+    actor = world.actors[merchant.runtime_id]
+    assert actor.kind == "merchant"
+    assert actor.faction == "neutral"
+    assert actor.mode == "autonomous"
+    assert len({relic.name for relic in merchant.relics}) == 5
