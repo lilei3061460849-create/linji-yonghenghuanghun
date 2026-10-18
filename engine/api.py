@@ -450,7 +450,8 @@ class GameEngine:
                 "allocations": {"blood_points": "nonnegative integer",
                                 "speed_points": "nonnegative integer",
                                 "mana_points": "nonnegative integer",
-                                "constraint": "三者之和≤档位属性点+池内余点；1点=6血限，2点=1速限=1法限"}}},
+                                "constraint": "三者之和≤档位属性点+池内余点；1点=6血限，2点=1速限=1法限"},
+                "target": "player（默认）或已存在的朋友/员工/造物名称"}}},
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "学习", "sub": ["daowen"],
                 "tier": {"daowen": [1, 2]},
@@ -2746,7 +2747,7 @@ class GameEngine:
         # DM裁定 2026-09-10：修行给的属性点**先入池**，不强制当场花掉——
         # 档位点数（1/3/5）与 2 点一档的比价不再互相卡死，余点攒着随时兑。
         self.state.attribute_points += points
-        redeemed = self._redeem_attribute_points(vals) if allocations else None
+        redeemed = self._redeem_attribute_points(vals, target=params.get("target", "player")) if allocations else None
         if redeemed is not None and not redeemed.get("success"):
             return redeemed
         gained = ((redeemed or {}).get("result") or {}).get(
@@ -4341,15 +4342,20 @@ class GameEngine:
             payload["redemption"] = redemption
         return payload
 
-    def _redeem_attribute_points(self, allocations: dict) -> dict:
-        """把属性点池里的点兑成[血限]/[速限]/[法限]。
-
-        计价与开局初始分配同口径：1属性点=6[血限]，2属性点=1[速限]=1[法限]。
-        用户裁定 2026-09-12：局外修行不再与初始分配区分，[血限]同样可以后天提升。
-        """
+    def _redeem_attribute_points(self, allocations: dict, target: str = "player") -> dict:
+        """把属性点池兑给轮回者或指定的朋友/员工/造物。"""
         player = self.state.player
         if player is None:
             return {"success": False, "error": "尚未分配初始属性"}
+        if target in ("", "player", player.name, player.runtime_id):
+            target_entity = player
+        else:
+            target_entity = next((entity for group in
+                                  (self.state.friends, self.state.employees, self.state.temp_friends)
+                                  for entity in group
+                                  if entity.is_alive and target in (entity.name, entity.runtime_id)), None)
+            if target_entity is None:
+                return {"success": False, "error": f"属性点目标【{target}】不存在或已离场"}
         alloc_keys = ("blood_points", "speed_points", "mana_points")
         vals = {}
         for key in alloc_keys:
@@ -4371,7 +4377,7 @@ class GameEngine:
                     "instruction": "血限按1点一档不受此限；余点会留在池里，攒够2点再兑"}
         blood_gain = vals["blood_points"] * 6
         # 不朽之躯：[血限]无法增加，兑血限的点会白扔，直接拒绝而不是静默吞点。
-        if blood_gain and self.state.side_has(player, "不朽之躯"):
+        if blood_gain and self.state.side_has(target_entity, "不朽之躯"):
             return {"success": False,
                     "error": "【不朽之躯】使[血限]无法增加，不能把属性点兑成血限",
                     "instruction": "改兑 speed_points / mana_points"}
@@ -4380,18 +4386,19 @@ class GameEngine:
                   "speed": vals["speed_points"] // 2,
                   "mana": vals["mana_points"] // 2}
         if blood_gain:
-            player.blood_limit += blood_gain
-            player.current_hp += blood_gain
-        player.speed_limit += gained["speed"]
-        player.mana_limit += gained["mana"]
-        player.current_speed = player.speed_limit
-        player.current_mana = player.mana_limit
+            target_entity.blood_limit += blood_gain
+            target_entity.current_hp += blood_gain
+        target_entity.speed_limit += gained["speed"]
+        target_entity.mana_limit += gained["mana"]
+        target_entity.current_speed = target_entity.speed_limit
+        target_entity.current_mana = target_entity.mana_limit
         return {"success": True, "action": "兑换属性点",
-                "result": {"gained": gained,
+                "result": {"target": target_entity.name,
+                           "gained": gained,
                            "attribute_points": self.state.attribute_points,
-                           "blood_limit": player.blood_limit,
-                           "speed_limit": player.speed_limit,
-                           "mana_limit": player.mana_limit}}
+                           "blood_limit": target_entity.blood_limit,
+                           "speed_limit": target_entity.speed_limit,
+                           "mana_limit": target_entity.mana_limit}}
 
     def _action_redeem_attribute_points(self, params: dict) -> dict:
         """自由动作：把存下的属性点兑成面板（不耗精力、不耗碎片）。
@@ -4408,7 +4415,7 @@ class GameEngine:
                     "error": "请用 allocations 指定兑换："
                              "{'blood_points': 非负整数, 'speed_points': 偶数, 'mana_points': 偶数}",
                     "attribute_points": self.state.attribute_points}
-        return self._redeem_attribute_points(allocations)
+        return self._redeem_attribute_points(allocations, target=params.get("target", "player"))
 
     def _action_declare_parry(self, params: dict) -> dict:
         """兼容旧调用；招架现已改为每一击在 resolve_attack 中提交。"""
