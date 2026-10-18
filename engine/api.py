@@ -1596,12 +1596,20 @@ class GameEngine:
             if actor_id is None or actor_id != player_id:
                 return {"success": False, "error": "当前API只允许轮回者控制自己的地图单位"}
             turns = params.get("turns", 1)
+            start_turn = world.clock.turn
             world.wait(actor_id, turns)
+            elapsed = world.clock.turn - start_turn
+            active_encounter = next((encounter for encounter in world.encounters.values()
+                                     if encounter.active and actor_id in encounter.participants), None)
             self._sync_world_entity_positions(world)
-            self._open_adjacent_merchant_session(world)
+            if active_encounter is None:
+                self._open_adjacent_merchant_session(world)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_wait",
-                    "result": {"world_turn": world.clock.turn, "turns": turns}}
+                    "result": {"world_turn": world.clock.turn, "turns": elapsed,
+                               "requested_turns": turns,
+                               "interrupted_by_encounter": active_encounter is not None,
+                               "encounter_id": active_encounter.encounter_id if active_encounter else None}}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
