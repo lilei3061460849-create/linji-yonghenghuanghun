@@ -2368,10 +2368,32 @@ class GameEngine:
                 and (location.get("kind") != "relic"
                      or actor_id in (location.get("discovered_by") or []))
             ]
+            next_shrink_turn = None
+            if (world.shrink_interval > 0
+                    and (world.shrink_count + 1) * 2 < min(world.map.width, world.map.height) - 1):
+                next_shrink_turn = (world.shrink_count + 1) * world.shrink_interval
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_status", "result": {
                 "world_turn": world.clock.turn,
                 "map_size": {"width": world.map.width, "height": world.map.height},
+                "boundary": {
+                    "shape": "square",
+                    "shrink_interval": world.shrink_interval,
+                    "shrunk_rings": world.shrink_count,
+                    "next_shrink_turn": next_shrink_turn,
+                },
+                "final_duel": {
+                    "search_active": world.final_duel_search,
+                    "battle_started": world.final_duel_started,
+                    "complete": world.final_duel_complete,
+                    "winner": world.final_duel_winner if world.final_duel_complete else None,
+                    "instruction": (
+                        "最后两名轮回者正在自行寻找彼此；移动和世界威胁仍继续结算"
+                        if world.final_duel_search and not world.final_duel_started
+                        else "最终遭遇已开始" if world.final_duel_started and not world.final_duel_complete
+                        else "最终生存阶段已结束" if world.final_duel_complete else None
+                    ),
+                },
                 "self": {"actor_id": actor.actor_id, "name": actor.name,
                          "position": [actor.x, actor.y], "alive": actor.alive},
                 "known_terrain": known_terrain,
