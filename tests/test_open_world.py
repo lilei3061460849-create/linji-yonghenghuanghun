@@ -107,6 +107,10 @@ def test_game_engine_exposes_world_actions_and_serializes_state(tmp_path):
     engine.state.phase = "pre_battle"
     initialized = engine.execute_action("world_initialize", {"width": 7, "height": 7})
     assert initialized["success"], initialized
+    original_world = engine.state.world_state.copy()
+    reroll = engine.execute_action("world_initialize", {"width": 7, "height": 7, "reset": True})
+    assert reroll["success"] and reroll["result"]["already_initialized"]
+    assert engine.state.world_state == original_world
     status = engine.execute_action("world_status")
     assert status["success"]
     assert status["result"]["map_size"]["width"] == 7
