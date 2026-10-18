@@ -887,7 +887,7 @@ class DaoWenEngine:
                 params['x'] = x
         
         result = func(**params)
-
+        
         # 检查X上限
         cost_type = result.get("cost_type", "支付：")
         if cost_type in cls.X_LIMITS:
