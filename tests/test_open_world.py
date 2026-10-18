@@ -1815,7 +1815,7 @@ def test_world_learning_action_advances_three_turns_before_granting_daowen(tmp_p
     started = next(event for event in events if event["type"] == "world_action_started"
                    and event.get("details", {}).get("action") == "学习")
     completed = next(event for event in events if event["type"] == "world_action_completed"
-                     and event.get("action") == "学习")
+                     and event.get("details", {}).get("action") == "学习")
     assert started["details"]["duration"] == 3
     assert completed["details"]["elapsed_turns"] == 3
     assert engine.state.energy == energy_before
