@@ -67,3 +67,21 @@ def test_altar_multiplier_cap_increases_once_per_hundred_principal(tmp_path):
     assert invalid.get("error") or invalid.get("success") is False
     assert valid.get("outcome_multiplier") is not None
     assert -12 <= valid["outcome_multiplier"] <= 12
+
+
+def test_generic_event_shard_gain_updates_this_run_peak(tmp_path):
+    from engine.api import GameEngine
+    from engine.events import resolve_option_effect
+
+    engine = GameEngine(
+        db_path=str(tmp_path / "event-shard-peak.db"),
+        save_dir=str(tmp_path / "saves"), autosave=False, rng_seed=37,
+    )
+    engine.state.shards = 10
+    engine.state.shards_peak = 10
+
+    result = resolve_option_effect("获得20[碎片]", engine, event_name="债务")
+
+    assert "error" not in result, result
+    assert engine.state.shards == 30
+    assert engine.state.shards_peak == 30
