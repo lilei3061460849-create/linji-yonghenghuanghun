@@ -6652,6 +6652,7 @@ class GameEngine:
 
     def _action_battle_end(self, params: dict) -> dict:
         """战终；仍有未移出的存活敌人时不得跳过战斗直接结算（统一判定见 GameState.battle_won）。"""
+        world_battle = bool(getattr(self.state, "world_encounter_id", ""))
         living = [e.name for e in self.state.active_enemies()]
         escaping = self.state.event_modifiers.pop("escape_at_battle_end", False)
         if living and not escaping:
@@ -6904,8 +6905,40 @@ class GameEngine:
         # 2026-10-11：【苍白之花】重做为「当前法力可超出[法限]」的被动，战终精力+1 已废止。
         self.state.energy = self.state.energy_budget
 
-        # 清空敌人及本场延迟队列（正常战终前延迟队列已由门禁拦截；逃跑等强制结束也不跨场保留）。
-        self.state.enemies.clear()
+        # 普通战斗清空敌人；开放世界遭遇则把存活参与者放回地图，并恢复未参战的敌方单位。
+        if world_battle:
+            world = self._world_from_state()
+            encounter_id = self.state.world_encounter_id
+            encounter = world.encounters.get(encounter_id)
+            participants = list(getattr(self.state, "world_encounter_entities", []) or [])
+            participant_by_id = {entity.runtime_id: entity for entity in participants}
+            reserve = list(getattr(self.state, "world_enemy_reserve", []) or [])
+            player_id = getattr(self.state.player, "runtime_id", "") if self.state.player else ""
+            for actor_id in (encounter.participants if encounter else []):
+                actor = world.actors.get(actor_id)
+                if actor is None:
+                    continue
+                if actor_id == player_id and self.state.player is not None:
+                    actor.alive = self.state.player.is_alive
+                elif actor_id in participant_by_id:
+                    entity = participant_by_id[actor_id]
+                    actor.alive = bool(entity.is_alive and not entity.is_departed)
+                    if entity.world_x is not None and entity.world_y is not None:
+                        actor.x, actor.y = int(entity.world_x), int(entity.world_y)
+                else:
+                    actor.alive = False
+            if encounter is not None and encounter.active:
+                outcome = "player_dead" if not self.state.player or not self.state.player.is_alive else "resolved"
+                world.finish_encounter(encounter_id, outcome)
+            self.state.enemies = [entity for entity in reserve if entity.is_alive]
+            self.state.enemies.extend(
+                entity for entity in participants if entity.is_alive and not entity.is_departed)
+            self.state.world_enemy_reserve = []
+            self.state.world_encounter_entities = []
+            self.state.world_encounter_id = ""
+            self.state.world_state = world.to_dict()
+        else:
+            self.state.enemies.clear()
         self.state.delayed_monster_reentries = []
 
         self.state.phase = "pre_battle"
@@ -6938,7 +6971,7 @@ class GameEngine:
         }
 
         # 最终的冠冕：完成第7场后自动触发，不消耗精力、不经玩家选择
-        if self.state.current_battle == 7:
+        if not world_battle and self.state.current_battle == 7:
             battle_end_result["final_crown"] = self._trigger_final_crown()
 
         return {
