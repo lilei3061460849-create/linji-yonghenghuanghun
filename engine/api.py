@@ -1530,6 +1530,23 @@ class GameEngine:
                                                 faction=faction))
                 if kind == "player":
                     world.record("world_entered", actor_id, region=self.state.current_region)
+            # 将当前副本可用的地点型事件放入真实地图格；纯状态/战斗触发事件不伪装成地点。
+            non_location_events = {"过路商人", "都市的终音", "初拥之夜"}
+            location_names = [name for name in sorted(self.event_pool.events)
+                              if name not in non_location_events
+                              and name not in self.event_pool.triggered]
+            available = [pos for pos in candidates if pos not in used]
+            for event_name in location_names:
+                if not available:
+                    break
+                roll = self.dice.auto_roll(
+                    f"open_world_location_{event_name}", available,
+                    context=f"开放世界地点放置：{event_name}")
+                pos = tuple(roll["selected"])
+                world.map.add_location(event_name, {
+                    "kind": "event", "name": event_name, "event_name": event_name,
+                    "x": pos[0], "y": pos[1], "discovered": False, "active": True})
+                available.remove(pos)
             self._sync_world_entity_positions(world)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_initialize",
@@ -1551,6 +1568,19 @@ class GameEngine:
                 return {"success": False, "error": "目标坐标x/y必须是整数"}
             result = world.move_actor(actor_id, (x, y))
             self._sync_world_entity_positions(world)
+            location_entry = world.map.location_at((x, y))
+            if location_entry is not None:
+                location_id, location = location_entry
+                if location.get("active", True):
+                    location["discovered"] = True
+                    event_name = location.get("event_name", location.get("name", location_id))
+                    if (self.event_pool.current is None and event_name in self.event_pool.events
+                            and (event_name == "祭坛" or event_name not in self.event_pool.triggered)):
+                        self.event_pool.current = event_name
+                        world.record("location_discovered", actor_id, location_id=location_id,
+                                     location_name=location.get("name", location_id),
+                                     event_name=event_name, position=[x, y])
+                        result["location_event"] = event_name
             # 商人自己走近玩家也会建立接触；只在实际相邻时打开交易会话。
             self._open_adjacent_merchant_session(world)
             self.state.world_state = world.to_dict()
@@ -1605,6 +1635,14 @@ class GameEngine:
                 for e in world.encounters.values()
                 if e.active and actor_id in e.participants
             ]
+            known_locations = [
+                {"location_id": location_id, "name": location.get("name", location_id),
+                 "kind": location.get("kind", "special"),
+                 "position": [location.get("x"), location.get("y")],
+                 "active": location.get("active", True)}
+                for location_id, location in world.map.locations.items()
+                if location.get("discovered", False)
+            ]
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_status", "result": {
                 "world_turn": world.clock.turn,
@@ -1614,6 +1652,7 @@ class GameEngine:
                 "known_terrain": known_terrain,
                 "visible_actors": visible_actors,
                 "visible_encounters": visible_encounters,
+                "known_locations": known_locations,
             }}
         except (ValueError, KeyError) as exc:
             return {"success": False, "error": str(exc)}
@@ -4703,6 +4742,16 @@ class GameEngine:
                               and bool(res.get("trade")))
         if not keep_merchant_open:
             self.event_pool.resolve(name)
+            # 一次性地点事件结算后关闭地点；祭坛与商人按既有规则可重复遭遇。
+            if name not in {"祭坛", "过路商人"} and getattr(self.state, "world_state", {}):
+                try:
+                    world = self._world_from_state()
+                    for location in world.map.locations.values():
+                        if location.get("event_name") == name:
+                            location["active"] = False
+                    self.state.world_state = world.to_dict()
+                except (ValueError, KeyError, TypeError):
+                    pass
         # 扭曲都市完成事件后附赠【发现】：正式随机只走DiceEngine，并等待显式选1。
         # 连续交易期间尚未离开商人，不重复发放事件完成奖励。
         bonus = None
