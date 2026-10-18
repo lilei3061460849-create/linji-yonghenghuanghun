@@ -1665,6 +1665,91 @@ class GameEngine:
         return {"active": world.final_duel_search,
                 "finalists": list(world.final_duel_finalists)}
 
+    def _resolve_world_npc_encounters(self, world: WorldState) -> list[dict]:
+        """NPC之间的遭遇由现有攻击结算器逐个世界回合自动推进；玩家遭遇仍交给玩家操作。"""
+        player_id = next((actor_id for actor_id, actor in world.actors.items()
+                          if actor.kind == "player"), None)
+        entities = ([self.state.player] if self.state.player else [])
+        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+            entities.extend(getattr(self.state, group_name, []) or [])
+        entity_by_id = {entity.runtime_id: entity for entity in entities if entity is not None}
+        resolved = []
+        for encounter in list(world.encounters.values()):
+            if not encounter.active or player_id in encounter.participants:
+                continue
+            participants = [world.actors.get(actor_id) for actor_id in encounter.participants]
+            participants = [actor for actor in participants if actor is not None and actor.alive]
+            if len(participants) < 2:
+                world.finish_encounter(encounter.encounter_id, "npc_encounter_ended")
+                resolved.append({"encounter_id": encounter.encounter_id, "status": "ended"})
+                continue
+            for attacker_actor in participants:
+                if not encounter.active or not attacker_actor.alive:
+                    continue
+                attacker = entity_by_id.get(attacker_actor.actor_id)
+                if attacker is None or not attacker.is_alive or attacker.is_departed:
+                    attacker_actor.alive = False
+                    continue
+                targets = [actor for actor in participants
+                           if actor.alive and actor.actor_id != attacker_actor.actor_id
+                           and world._hostile_pair(attacker_actor, actor)]
+                if not targets:
+                    continue
+                target_actor = min(
+                    targets,
+                    key=lambda actor: (
+                        entity_by_id[actor.actor_id].current_hp
+                        / max(1, entity_by_id[actor.actor_id].blood_limit)
+                        if actor.actor_id in entity_by_id else 1.0,
+                        actor.actor_id))
+                target = entity_by_id.get(target_actor.actor_id)
+                if target is None or not target.is_alive:
+                    target_actor.alive = False
+                    continue
+                # 一名单位在一个世界回合内按其攻击次数行动；不额外推进世界时间。
+                for hit_index in range(max(1, int(getattr(attacker, "attack_count", 0)))):
+                    if not attacker.is_alive or not target.is_alive:
+                        break
+                    self.combat.resolve_attack(
+                        attacker, target, hit_index=hit_index, is_must_hit=False,
+                        dodge=False, parry=False,
+                        spell_choices={"before": {}, "after": {}})
+                target_actor.alive = bool(target.is_alive and not target.is_departed)
+                attacker_actor.alive = bool(attacker.is_alive and not attacker.is_departed)
+                world.record("npc_skirmish_attack", attacker_actor.actor_id,
+                             target_actor_id=target_actor.actor_id,
+                             target_hp=target.current_hp, target_alive=target_actor.alive)
+            survivors = [world.actors[actor_id] for actor_id in encounter.participants
+                         if actor_id in world.actors and world.actors[actor_id].alive
+                         and actor_id in entity_by_id and entity_by_id[actor_id].is_alive]
+            survivor_sides = {actor.faction for actor in survivors}
+            if len(survivor_sides) <= 1:
+                world.finish_encounter(encounter.encounter_id, "npc_skirmish_resolved")
+                world.record("npc_skirmish_resolved", survivors[0].actor_id if survivors else None,
+                             encounter_id=encounter.encounter_id,
+                             survivors=[actor.actor_id for actor in survivors])
+                resolved.append({"encounter_id": encounter.encounter_id,
+                                 "status": "resolved",
+                                 "survivors": [actor.actor_id for actor in survivors]})
+        return resolved
+
+    def _advance_world_turns(self, world: WorldState, player_id: str, turns: int) -> int:
+        """逐回合推进世界并处理NPC交战，玩家遭遇会立刻打断后续回合。"""
+        advanced = 0
+        for _ in range(turns):
+            world.wait(player_id, 1)
+            advanced += 1
+            if any(encounter.active and player_id in encounter.participants
+                   for encounter in world.encounters.values()):
+                break
+            self._resolve_world_npc_encounters(world)
+            self._resolve_world_shard_pickups(world)
+            self._resolve_world_relic_pickups(world)
+            self._resolve_world_hiring_signals(world)
+            self._resolve_world_temporary_alliances(world)
+            self._share_created_being_vision(world)
+        return advanced
+
     def _resolve_world_shard_pickups(self, world: WorldState) -> list[dict]:
         """所有真实角色进入碎片资源格时各自领取；怪物与商人不拾取玩家资源点。"""
         entities = ([self.state.player] if self.state.player else [])
