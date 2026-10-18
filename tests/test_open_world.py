@@ -367,3 +367,15 @@ def test_world_interact_trade_requires_actual_adjacency(tmp_path):
     })
     assert not far["success"]
     assert engine.event_pool.current is None
+
+
+def test_actor_sightings_are_stored_in_private_bounded_memory():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState("p", "玩家", "player", 1, 1, faction="player", mode="manual"))
+    world.add_actor(WorldActorState("m", "怪物", "enemy", 2, 1, faction="monster", mode="manual"))
+    world.visible_cells("p")
+    assert world.actors["p"].memory[-1]["actor_id"] == "m"
+    assert world.actors["m"].memory == []
+    world.actors["p"].memory = [{"turn": n} for n in range(60)]
+    world.visible_cells("p")
+    assert len(world.actors["p"].memory) <= 50
