@@ -216,9 +216,14 @@ class DaowenEffectMixin:
         if calc.get("cost_type") == "冷却":
             inst = caster.dao_wen.get(name)
             if inst is not None:
-                inst.cooldown_remaining = max(inst.cooldown_remaining,
-                                              int(calc.get("cost", 0)))
-                result["cooldown_set"] = inst.cooldown_remaining
+                cooldown = max(0, int(calc.get("cost", 0)))
+                if "时间的偏爱" in getattr(caster, "preferences", []):
+                    inst.cooldown_rounds_remaining = max(
+                        inst.cooldown_rounds_remaining, cooldown)
+                    result["cooldown_rounds_set"] = inst.cooldown_rounds_remaining
+                else:
+                    inst.cooldown_remaining = max(inst.cooldown_remaining, cooldown)
+                    result["cooldown_set"] = inst.cooldown_remaining
 
         # 【唯一】代价：规则正文「唯一：使用后，本次轮回中无法再次使用」。
         # 此前该代价种类只有一行名字映射、没有任何结算逻辑，等于空定义；
