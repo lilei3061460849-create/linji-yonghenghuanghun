@@ -1900,7 +1900,7 @@ class GameEngine:
                 merchant_names = {relic.name for relic in merchant.relics}
                 sellable = next((relic for relic in entity.relics
                                  if relic.name not in merchant_names
-                                 and not ({"怪物自带", "怪物偏爱"} & set(relic.tags))), None)
+                                 and not ({"怪物自带", "怪物偏爱"} & set(relic.tags or []))), None)
                 if sellable is None or merchant.shards < price:
                     continue
                 entity.relics.remove(sellable)
