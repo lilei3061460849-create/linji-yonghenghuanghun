@@ -33,6 +33,7 @@ def test_shard_peak_only_increases():
     assert e.state.shards_peak == 120
     e.state.shards = 5
     assert e.state.shards_peak == 120
+    assert e.state.player.shards_peak == 120
     e.state.shards_peak = 2
     assert e.state.shards_peak == 120
     ally = Entity("测试朋友", "朋友", shards=30)
@@ -54,6 +55,7 @@ def test_shard_peak_survives_save_load():
     assert loaded.get("success"), loaded
     assert e.state.shards == 120
     assert e.state.shards_peak == 120
+    assert e.state.player.shards_peak == 120
 
 
 def test_altar_black_swan_records_debt_and_triggers_dynamic_death():
