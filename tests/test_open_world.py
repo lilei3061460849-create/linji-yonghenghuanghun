@@ -227,3 +227,41 @@ def test_world_api_syncs_entity_positions_and_opens_adjacent_merchant_session(tm
     assert (engine.state.player.world_x, engine.state.player.world_y) == (2, 1)
     assert (engine.state.merchant.world_x, engine.state.merchant.world_y) == (3, 1)
     assert engine.event_pool.current == "过路商人"
+
+
+def test_world_map_roundtrip_preserves_location_discovery_and_activity():
+    world_map = _open_map()
+    world_map.add_location("old_hospital", {
+        "kind": "event", "name": "旧医院", "event_name": "恶魔医务室",
+        "x": 2, "y": 2, "discovered": True, "active": False,
+    })
+    restored = WorldMap.from_dict(world_map.to_dict())
+    assert restored.locations["old_hospital"]["discovered"] is True
+    assert restored.locations["old_hospital"]["active"] is False
+    assert restored.location_at((2, 2))[0] == "old_hospital"
+
+
+def test_arriving_at_event_location_opens_event_instead_of_exploration_action(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "locations.db"),
+                        save_dir=str(tmp_path), rng_seed=47)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    world = WorldState.from_dict(engine.state.world_state)
+    event_name = next(iter(engine.event_pool.events))
+    world.map.locations.clear()
+    world.map.add_location("test_location", {
+        "kind": "event", "name": event_name, "event_name": event_name,
+        "x": 2, "y": 1, "discovered": False, "active": True,
+    })
+    engine.state.world_state = world.to_dict()
+
+    moved = engine.execute_action("world_move", {"x": 2, "y": 1})
+    assert moved["success"], moved
+    assert moved["result"]["location_event"] == event_name
+    assert engine.event_pool.current == event_name
+    location = engine.state.world_state["map"]["locations"]["test_location"]
+    assert location["discovered"] is True
