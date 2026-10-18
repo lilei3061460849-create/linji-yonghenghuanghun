@@ -1195,3 +1195,23 @@ def test_twisted_city_places_modern_landmarks_and_exposes_descriptions_on_discov
                  if item["location_id"] == "urban_1")
     assert known["name"] == "医院"
     assert known["description"]
+
+
+def test_autonomous_reincarnator_remembers_visible_resource_and_moves_toward_it():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(
+        "p", "玩家", "player", 1, 1, faction="player", mode="manual"))
+    world.add_actor(WorldActorState(
+        "r", "流浪轮回者", "enemy", 5, 5, faction="enemy", mode="autonomous"))
+    world.map.add_location("cache", {
+        "kind": "resource", "name": "碎片残留", "resource_type": "shards",
+        "amount": 9, "x": 4, "y": 5, "active": True,
+    })
+
+    world.move_actor("p", (1, 2))
+
+    rival = world.actors["r"]
+    assert rival.position == (4, 5)
+    assert any(entry.get("kind") == "location_sighting"
+               and entry.get("location_id") == "cache"
+               for entry in rival.memory)
