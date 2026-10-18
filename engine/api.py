@@ -1535,6 +1535,15 @@ class GameEngine:
         seed = seed_roll["record"]["selected_index"]
         try:
             world = WorldState.create(width=width, height=height, seed=seed)
+            spawned_monsters = []
+            if not self.state.enemies:
+                # 开放世界把当前副本怪物池中的实体生成到地图；不是每次遭遇才临时抽怪。
+                from .monsters import make_monster_entity
+                for monster_def in self._monster_pool_for_battle():
+                    monster = make_monster_entity(monster_def)
+                    self.combat.init_monster_shards(monster)
+                    self.state.enemies.append(monster)
+                    spawned_monsters.append(monster)
             entities = []
             if self.state.player is not None:
                 entities.append((self.state.player, "player", "player"))
@@ -1579,6 +1588,9 @@ class GameEngine:
                                                 faction=faction, mode=mode))
                 if kind == "player":
                     world.record("world_entered", actor_id, region=self.state.current_region)
+                elif entity in spawned_monsters:
+                    world.record("monster_spawned", actor_id, name=entity.name,
+                                 position=list(pos), region=self.state.current_region)
             # 将当前副本可用的地点型事件放入真实地图格；纯状态/战斗触发事件不伪装成地点。
             non_location_events = {"过路商人", "都市的终音", "初拥之夜"}
             location_names = [name for name in self.event_pool.build_pool(self.state.current_region)
@@ -1599,7 +1611,9 @@ class GameEngine:
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_initialize",
                     "result": {"width": width, "height": height,
-                               "world_turn": world.clock.turn}}
+                               "world_turn": world.clock.turn,
+                               "spawned_monsters": len(spawned_monsters),
+                               "event_locations": len(world.map.locations)}}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
