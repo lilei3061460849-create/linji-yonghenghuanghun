@@ -811,6 +811,79 @@ def test_creation_builds_one_map_being_then_cultivates_unique_preferences(tmp_pa
     assert len(set(being.preferences)) == 2
 
 
+def test_reincarnator_trade_requires_fair_offer_and_transfers_atomically(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity, Relic
+
+    engine = GameEngine(db_path=str(tmp_path / "world-trade.db"),
+                        save_dir=str(tmp_path), rng_seed=131, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    rival = Entity("R", "轮回者", blood_limit=30, current_hp=30, shards=10)
+    engine.state.player = player
+    engine.state.enemies = [rival]
+    engine.state.shards = 20
+    engine.state.relics = [Relic(name="玩家遗物", effect="A")]
+    rival.relics = [Relic(name="对方遗物", effect="B")]
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(player.runtime_id, "P", "player", 1, 1,
+                                    faction="player", mode="manual"))
+    world.add_actor(WorldActorState(rival.runtime_id, "R", "enemy", 2, 1,
+                                    faction="enemy", mode="autonomous"))
+    engine.state.world_state = world.to_dict()
+
+    rejected = engine.execute_action("world_interact", {
+        "target_actor_id": rival.runtime_id, "choice": "trade",
+        "offer_shards": 0, "request_shards": 5,
+    })
+    assert rejected["success"] and rejected["result"]["accepted"] is False
+    assert engine.state.shards == 20 and rival.shards == 10
+
+    accepted = engine.execute_action("world_interact", {
+        "target_actor_id": rival.runtime_id, "choice": "trade",
+        "offer_shards": 5, "request_shards": 5,
+        "give_relic": "玩家遗物", "request_relic": "对方遗物",
+    })
+    assert accepted["success"] and accepted["result"]["accepted"] is True
+    assert engine.state.shards == 20 and rival.shards == 10
+    assert [r.name for r in engine.state.relics] == ["对方遗物"]
+    assert [r.name for r in rival.relics] == ["玩家遗物"]
+
+
+def test_intimidation_temporarily_recruits_rival_then_expires(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-intimidation.db"),
+                        save_dir=str(tmp_path), rng_seed=137, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30, attack_power=10)
+    rival = Entity("R", "轮回者", blood_limit=30, current_hp=5, attack_power=1)
+    engine.state.player = player
+    engine.state.enemies = [rival]
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(player.runtime_id, "P", "player", 1, 1,
+                                    faction="player", mode="manual"))
+    world.add_actor(WorldActorState(rival.runtime_id, "R", "enemy", 2, 1,
+                                    faction="enemy", mode="autonomous"))
+    engine.state.world_state = world.to_dict()
+    engine.dice.auto_roll = lambda key, options, context=None: {
+        "selected": "success", "record": {"selected_index": 0}
+    }
+
+    result = engine.execute_action("world_interact", {
+        "target_actor_id": rival.runtime_id, "choice": "intimidate",
+    })
+    assert result["success"] and result["result"]["accepted"] is True
+    assert rival in engine.state.temp_friends
+    assert rival not in engine.state.enemies
+    assert WorldState.from_dict(engine.state.world_state).actors[rival.runtime_id].faction == "temp_friend"
+
+    waited = engine.execute_action("world_wait", {"turns": 3})
+    assert waited["success"], waited
+    assert rival not in engine.state.temp_friends
+    assert rival in engine.state.enemies
+    assert WorldState.from_dict(engine.state.world_state).actors[rival.runtime_id].faction == "enemy"
+
+
 def test_created_being_can_follow_and_report_exploration_to_owner(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
