@@ -40,6 +40,12 @@ input[type=range]{width:100%;accent-color:var(--blue);min-height:30px}
 .event-row .event-summary{overflow-wrap:anywhere;font-size:13px}
 .empty{padding:22px 10px;text-align:center;color:var(--muted)}
 .status{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.map-wrap{background:#0d1014;border:1px solid var(--line);border-radius:12px;padding:8px;overflow:hidden}
+#map{display:block;width:100%;height:auto;max-height:58vh;touch-action:pan-y}
+.map-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+.map-note{font-size:12px;color:var(--muted);margin-top:8px}
+
 @media(min-width:700px){main{padding:22px 18px}.arena{grid-template-columns:minmax(0,1fr) 72px minmax(0,1fr)}.fighter{padding:18px}.fighter .sigil{width:58px;height:58px;font-size:26px}.fighter .name{font-size:17px}}
 </style>
 </head>
@@ -56,6 +62,24 @@ input[type=range]{width:100%;accent-color:var(--blue);min-height:30px}
     <span id="status" class="status">请选择从引擎导出的回放 JSON。</span>
   </div>
 </header>
+<section class="panel">
+  <div class="toolbar" style="justify-content:space-between;margin-bottom:10px">
+    <div><h2>副本地图</h2><div id="map-round" class="muted">地图示意 · 等待回放</div></div>
+    <span class="muted">网格视图</span>
+  </div>
+  <div class="map-wrap">
+    <svg id="map" viewBox="0 0 600 440" role="img" aria-label="副本网格地图"></svg>
+    <div class="map-legend">
+      <span class="muted"><i class="legend-dot" style="background:#78aaff"></i>轮回者</span>
+      <span class="muted"><i class="legend-dot" style="background:#ff7777"></i>怪物</span>
+      <span class="muted"><i class="legend-dot" style="background:#f3c86a"></i>其他</span>
+      <span class="muted">红色外框：副本边界示意</span>
+    </div>
+  </div>
+  <div class="map-note" id="map-note">当前为地图界面原型。接入世界地图坐标前，角色位置和边界收缩仅作示意，不代表真实战局位置。</div>
+</section>
+
+
 
 <section class="panel">
   <div class="toolbar" style="justify-content:space-between;margin-bottom:10px">
@@ -150,6 +174,63 @@ input[type=range]{width:100%;accent-color:var(--blue);min-height:30px}
     if (e.ctx) rows.push("因果上下文: " + JSON.stringify(e.ctx));
     return rows.length ? rows.join("\n") : "该事件没有额外数值字段。";
   }
+  function renderMap(e) {
+    const svg = $("map");
+    const ns = "http://www.w3.org/2000/svg";
+    svg.replaceChildren();
+    const width = 600, height = 440, cols = 15, rows = 11;
+    const left = 30, top = 20, cellW = 36, cellH = 36;
+    const progress = events().length > 1 ? index / (events().length - 1) : 0;
+    // Prototype only: real world-map coordinates/boundary events are not in the replay schema yet.
+    const inset = 0.02 + progress * 0.22;
+    const x1 = left + width * inset, y1 = top + height * inset;
+    const x2 = left + width * (1 - inset), y2 = top + height * (1 - inset);
+    const add = (tag, attrs, parent=svg, textContent=null) => {
+      const node = document.createElementNS(ns, tag);
+      Object.entries(attrs).forEach(([k,v]) => node.setAttribute(k, String(v)));
+      if (textContent !== null) node.textContent = textContent;
+      parent.appendChild(node); return node;
+    };
+    add("rect",{x:left,y:top,width:cols*cellW,height:rows*cellH,rx:4,fill:"#111820",stroke:"#3a4350","stroke-width":1});
+    for(let c=0;c<=cols;c++) add("line",{x1:left+c*cellW,y1:top,x2:left+c*cellW,y2:top+rows*cellH,stroke:"#6f7b8d","stroke-opacity":.2,"stroke-width":1});
+    for(let r=0;r<=rows;r++) add("line",{x1:left,y1:top+r*cellH,x2:left+cols*cellW,y2:top+r*cellH,stroke:"#6f7b8d","stroke-opacity":.2,"stroke-width":1});
+    add("rect",{x:x1,y:y1,width:x2-x1,height:y2-y1,fill:"#ff7777","fill-opacity":.035,stroke:"#ff7777","stroke-width":3,rx:2});
+    add("text",{x:left,y:top+rows*cellH+22,fill:"#aab4c3","font-size":12},"边界收缩示意 · " + Math.round(progress*100) + "%");
+    const roster = participants();
+    if (!roster.length) {
+      add("text",{x:300,y:210,fill:"#aab4c3","font-size":16,"text-anchor":"middle"},"载入回放后显示角色标记");
+    } else {
+      const actor = findParticipant(e?.actor_name), target = findParticipant(e?.target_name);
+      const chosen = [];
+      [actor,target,...roster].forEach(p=>{if(p && !chosen.some(q=>q.name===p.name)) chosen.push(p);});
+      const visible = chosen.slice(0,10);
+      const positions = [];
+      visible.forEach((p,i)=>{
+        // Stable placeholder placement, deliberately not claimed as recorded coordinates.
+        const col = visible.length===1 ? 7 : 3 + ((i*5)%(cols-5));
+        const row = 2 + ((i*3)%(rows-4));
+        const cx = left + col*cellW + cellW/2, cy = top + row*cellH + cellH/2;
+        positions.push({x:cx,y:cy});
+        const side = sideClass(p), color = side==="player" ? "#78aaff" : side==="enemy" ? "#ff7777" : "#f3c86a";
+        const active = p.name===e?.actor_name || p.name===e?.target_name;
+        if(active) add("circle",{cx,cy,r:18,fill:color,"fill-opacity":.13});
+        add("circle",{cx,cy,r:12,fill:"#101216",stroke:color,"stroke-width":2});
+        add("text",{x:cx,y:cy+4,fill:color,"font-size":12,"font-weight":700,"text-anchor":"middle"},sigil(p));
+        add("text",{x:cx,y:cy+27,fill:"#edf1f7","font-size":10,"text-anchor":"middle"},p.name.length>8?p.name.slice(0,8)+"…":p.name);
+      });
+      if(actor && target && actor.name!==target.name) {
+        const ai=visible.findIndex(p=>p.name===actor.name), ti=visible.findIndex(p=>p.name===target.name);
+        if(ai>=0 && ti>=0) add("line",{x1:positions[ai].x,y1:positions[ai].y,x2:positions[ti].x,y2:positions[ti].y,stroke:"#f3c86a","stroke-width":2,"stroke-dasharray":"5 4","stroke-opacity":.9});
+        // Re-append tokens over the connection line.
+        visible.forEach((p,i)=>{
+          const {x:cx,y:cy}=positions[i], side=sideClass(p), color=side==="player"?"#78aaff":side==="enemy"?"#ff7777":"#f3c86a";
+          add("circle",{cx,cy,r:12,fill:"#101216",stroke:color,"stroke-width":2});
+          add("text",{x:cx,y:cy+4,fill:color,"font-size":12,"font-weight":700,"text-anchor":"middle"},sigil(p));
+        });
+      }
+    }
+    $("map-round").textContent = "第 " + (e?.round_no || 0) + " 回合 · 事件 " + (events().length ? index+1 : 0) + " / " + events().length;
+  }
   function renderList() {
     const root = $("events");
     root.replaceChildren();
@@ -185,6 +266,7 @@ input[type=range]{width:100%;accent-color:var(--blue);min-height:30px}
     $("event-title").textContent = eventLabel(e);
     $("event-summary").textContent = summary(e);
     $("detail").textContent = detailText(e);
+    renderMap(e);
     $("timeline").value = index;
     $("prev").disabled = index === 0; $("next").disabled = index === list.length-1;
     renderList();
@@ -203,7 +285,7 @@ input[type=range]{width:100%;accent-color:var(--blue);min-height:30px}
     $("restart").disabled = data.events.length === 0;
     $("prev").disabled = true; $("next").disabled = data.events.length < 2;
     renderList();
-    if (data.events.length) show(0);
+    if (data.events.length) show(0); else renderMap(null);
     else { $("event-title").textContent = "没有战斗事件"; $("detail").textContent = "该文件中 events 为空。"; }
   }
   async function loadFromServer() {
