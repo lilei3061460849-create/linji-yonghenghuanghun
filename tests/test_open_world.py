@@ -1455,3 +1455,74 @@ def test_npc_pathfinding_does_not_use_unseen_terrain():
 
     assert world.map.find_path((5, 5), (2, 5)) is not None
     assert world._find_known_path("r", (5, 5), (2, 5)) is None
+
+
+def test_sunken_sea_rescue_base_adds_twelve_rest_healing_until_run_ends(tmp_path):
+    from engine.api import GameEngine
+    from engine.events import resolve_option_effect
+    from engine.models import Entity
+
+    engine = GameEngine(
+        db_path=str(tmp_path / "sunken-sea-rescue.db"),
+        save_dir=str(tmp_path / "saves"), autosave=False, rng_seed=29,
+    )
+    engine.state.phase = "pre_battle"
+    engine.state.current_region = "沉沦海"
+    engine.state.shards = 50
+    engine.state.shards_peak = 50
+    engine.state.player = Entity(
+        name="潜水员", entity_type="轮回者",
+        blood_limit=40, current_hp=20, mana_limit=10, current_mana=10,
+    )
+    assert "潮下基地" in engine.event_pool.build_pool("沉沦海")
+
+    event_result = resolve_option_effect(
+        "救助基地：失去20[碎片]。直到通过沉沦海死斗前，局外可以在基地中休整，【休整】额外产生12点恢复量。",
+        engine, event_name="潮下基地",
+    )
+    assert "error" not in event_result, event_result
+    assert engine.state.shards == 30
+    assert engine.state.event_modifiers["sunken_sea_rest_bonus_active"] is True
+
+    rest = engine.execute_action("pre_battle_action", {
+        "sub_action": "休整", "tier": 1,
+        "heal_allocations": [{"target_ref": "player:0", "amount": 20}],
+    })
+    assert rest["success"], rest
+    assert rest["result"]["base_heal_amount"] == 8
+    assert rest["result"]["region_rest_bonus"] == 12
+    assert rest["result"]["heal_amount"] == 20
+    assert engine.state.player.current_hp == 40
+
+
+def test_sunken_sea_stolen_medicine_adds_tide_zombie_and_tracks_shard_peak(tmp_path):
+    from engine.api import GameEngine
+    from engine.events import resolve_option_effect
+    from engine.models import Entity
+
+    engine = GameEngine(
+        db_path=str(tmp_path / "sunken-sea-stolen-medicine.db"),
+        save_dir=str(tmp_path / "saves"), autosave=False, rng_seed=31,
+    )
+    engine.state.phase = "pre_battle"
+    engine.state.current_region = "沉沦海"
+    engine.state.shards = 10
+    engine.state.shards_peak = 10
+    engine.state.player = Entity(
+        name="潜水员", entity_type="轮回者",
+        blood_limit=40, current_hp=40, mana_limit=10, current_mana=10,
+    )
+
+    event_result = resolve_option_effect(
+        "盗窃药物：获得20[碎片]。此后本次沉沦海的每场战斗额外加入1只【潮尸】。",
+        engine, event_name="潮下基地",
+    )
+    assert "error" not in event_result, event_result
+    assert engine.state.shards == 30
+    assert engine.state.shards_peak == 30
+    assert engine.state.event_modifiers["sunken_sea_extra_tide_zombie"] is True
+
+    battle = engine.execute_action("battle_start", {})
+    assert battle["success"], battle
+    assert battle["result"]["spawn_plan"]["sunken_sea_extra_tide_zombie"] is True
+    assert any(entity.name == "潮尸" for entity in engine.state.enemies)
