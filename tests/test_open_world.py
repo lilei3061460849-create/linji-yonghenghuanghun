@@ -762,6 +762,22 @@ def test_creation_builds_one_map_being_then_cultivates_unique_preferences(tmp_pa
     assert len(set(being.preferences)) == 2
 
 
+def test_created_being_joins_combat_only_when_explicitly_summoned():
+    from engine.models import Entity, GameState
+
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    being = Entity("造物", "朋友", blood_limit=30, current_hp=30)
+    being.is_created_being = True
+    being.created_by_runtime_id = player.runtime_id
+    state = GameState(player=player, friends=[being])
+
+    assert being not in state.get_all_player_side()
+    being.is_summoned = True
+    assert being in state.get_all_player_side()
+    being.is_summoned = False
+    assert being not in state.get_all_player_side()
+
+
 def test_cultivation_points_can_be_assigned_to_created_being(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
