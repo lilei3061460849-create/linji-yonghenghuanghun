@@ -503,7 +503,8 @@ class WorldState:
                         if self._hostile_pair(current, other):
                             component_ids.add(other_id)
                             frontier.append(other_id)
-                component = [remaining[item] for item in component_ids]
+                component = [actor for item, actor in remaining.items()
+                             if item in component_ids]
                 if len(component) >= 2:
                     encounter = self.start_encounter(
                         [actor.actor_id for actor in component], position)
