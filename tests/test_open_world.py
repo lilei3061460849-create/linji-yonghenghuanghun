@@ -1086,3 +1086,30 @@ def test_adjacent_hostile_waits_until_current_encounter_finishes():
     second = world.detect_adjacent_encounters("p")
     assert len(second) == 1
     assert set(world.encounters[second[0]].participants) == {"p", "m2"}
+
+
+def test_world_status_exposes_boundary_and_final_search_without_revealing_hidden_positions(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-status-final.db"),
+                        save_dir=str(tmp_path), rng_seed=149, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    rival = Entity("R", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.enemies = [rival]
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+
+    world = WorldState.from_dict(engine.state.world_state)
+    world.final_duel_search = True
+    world.final_duel_finalists = [engine.state.player.runtime_id, rival.runtime_id]
+    world.actors[rival.runtime_id].x, world.actors[rival.runtime_id].y = 5, 5
+    engine.state.world_state = world.to_dict()
+
+    status = engine.execute_action("world_status", {})
+    assert status["success"], status
+    result = status["result"]
+    assert result["boundary"]["shape"] == "square"
+    assert result["boundary"]["next_shrink_turn"] == 10
+    assert result["final_duel"]["search_active"] is True
+    assert "final_duel_finalists" not in result
+    assert [5, 5] not in [actor["position"] for actor in result["visible_actors"]]
