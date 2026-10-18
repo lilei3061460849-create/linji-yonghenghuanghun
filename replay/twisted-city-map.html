@@ -60,12 +60,12 @@ button{cursor:pointer;touch-action:manipulation}button.primary{border-color:#9d8
       <div class="muted">选择地图上的事件地点，或从下方清单打开。</div>
     </section>
     <section class="panel">
-      <h2>扭曲都市专属事件地点</h2>
+      <h2>地图事件地点：通用事件 + 副本专属事件</h2>
       <div id="sites" class="site-list"></div>
     </section>
     <section class="panel">
       <h2>本原型的规则边界</h2>
-      <div class="note">这是地图生成与地点交互的独立原型，不会触发或结算真实游戏事件。七个地点取自《副本/扭曲都市.md》；“都市的终音”和“初拥之夜”不放到地图上，因为它们依赖死斗结果或角色状态，不是地点遭遇。</div>
+      <div class="note">这是地图生成与地点交互的独立原型，不会触发或结算真实游戏事件。展示当前规则中的10个通用事件与7个扭曲都市普通专属事件。通用事件的机制保持共通，地点外观按扭曲都市废土环境呈现；“都市的终音”和“初拥之夜”仍不地点化，因为它们依赖死斗结果或角色状态。</div>
       <p class="muted">建筑表现遵守废土设定：医院、学校、停车场等是废弃建筑遗迹，不是仍在正常营业的机构。地图面积固定，地形数量与占比允许每次随机变化。</p>
     </section>
   </aside>
@@ -83,12 +83,24 @@ const EVENTS=[
  {id:"mailbox",name:"生锈邮筒",icon:"✉",building:"坍塌街区旧邮筒",kind:"地点触发",desc:"倒塌建筑旁的旧邮筒里传来指甲抓挠声。空洞的声音声称能把信寄给“过去的自己”。",options:["写信：流血5，可写最多40字，寄给下一场轮回的自己","拒绝：无事发生"]},
  {id:"sewer",name:"尖叫下水道",icon:"▽",building:"排水井口 / 地下管线",kind:"条件地点",desc:"井盖被顶开，黑色油性物质从地下排水通道溢出，深处传来类似人类的尖叫。原文的五种道纹门槛保留。",options:["前置条件：拥有五种道纹及以上","献出声音：失忆X，获得缄默面具","法力净化：枯竭3，获得焦黑发丝","避开井口：无事发生"]}
 ];
-const GENERIC=[
- {name:"住宅楼",icon:"▦",type:"building"},{name:"学校遗址",icon:"▤",type:"school"},
- {name:"停车场",icon:"▥",type:"parking"},{name:"仓库",icon:"▧",type:"building"},
- {name:"工厂",icon:"⚙",type:"utility"},{name:"控制室",icon:"▣",type:"utility"},
- {name:"便利店废墟",icon:"▤",type:"building"},{name:"公交站",icon:"▥",type:"building"},
- {name:"配电室",icon:"ϟ",type:"utility"},{name:"办公楼",icon:"▦",type:"building"}
+const GENERIC_EVENTS=[
+ {id:"nameless-grave",name:"无名冢",icon:"⚔",building:"废弃街区的失落者遗址",kind:"通用事件",desc:"残破兵器插在塌陷路面与碎石之间，每一处标记都指向一个失败的轮回者。地点外观适配扭曲都市，事件身份与选项仍属于通用事件。",options:["拔出兵器：失去10碎片，随机获得一件遗物","为你而战：销毁一件当前遗物（包括遗物池中），设计一种新的遗物加入遗物池，获得15碎片","拒绝：无事发生"]},
+ {id:"forgotten-bookshop",name:"遗忘书屋",icon:"▤",building:"坍塌街角的旧档案室",kind:"通用事件",desc:"旧书与潮湿档案散落在坍塌房间里。无面店员将三本以皮革缝合的古籍推到你面前。不同副本可以替换场景外壳，不改变事件本身。",options:["阅读《战争残卷》：流血15，选择获得两种法术定义","阅读《禁忌法典》：失忆1，自选一件遗物与20碎片","阅读《自我剖析》：枯竭1，自选残韵×1","拒绝：无事发生"]},
+ {id:"altar",name:"祭坛",icon:"†",building:"废墟广场中的黑石祭坛",kind:"通用事件",desc:"黑石结构从地面裂缝中升起，中央嵌着一柄干瘪石刃。声音直接在脑中响起，要求以某种代价换取力量。",options:["献祭血肉：衰老8，获得1点速限","献祭神智：枯竭5，获得2点速限","拒绝：无事发生"]},
+ {id:"travelling-merchant",name:"过路商人",icon:"♙",building:"道路交汇处的临时货摊",kind:"通用事件",desc:"一个独眼商人拖着载满杂物的车，在道路交汇处短暂停留。货物被破布盖住，金属反光与微光从缝隙里漏出。",options:["限制选择权：失去8碎片，限制下一场战斗怪物的选择权","以物易物：失去一件当前遗物，随机获得一件新遗物","拒绝：无事发生"]},
+ {id:"crimson-rain",name:"猩红暴雨",icon:"☂",building:"积水街道与腐蚀雨幕",kind:"通用事件",desc:"异色暴雨突然砸落，积水泛起不自然的红褐色，雨滴接触皮肤时带来灼痛。具体天气表现可随副本环境调整，事件代价不变。",options:["硬扛：流血20","用法力撑起屏障：枯竭3","躲入漏雨的废墟：失去1次精力"]},
+ {id:"nameless-stelae",name:"无名碑林",icon:"▥",building:"被苔藓与裂纹覆盖的纪念碑群",kind:"通用事件",desc:"密集石碑记录着无数死者未能放下的执念。靠近时，碑面符文逐一共鸣。",options:["触摸：流血15，获得残韵·曲解×1与15碎片","拒绝：无事发生"]},
+ {id:"echo-gallery",name:"回音长廊",icon:"♬",building:"废弃建筑内部的镜廊",kind:"通用事件",desc:"破碎镜面映出你在前几次轮回中的死亡片段。走廊尽头有一只仍会自行运转的旧八音盒。",options:["聆听安魂曲：在《死者之书》中留下一条错误遗言，获得10碎片","打碎镜子：流血5，清除《死者之书》中一条遗言","捂住耳朵：无事发生"]},
+ {id:"memory-pawnshop",name:"回忆当铺",icon:"◉",building:"无门的地下交易柜台",kind:"通用事件",desc:"一处没有门的柜台后坐着由眼球与脑髓构成的阴影。它能称量记忆，并以碎片作为交易凭据。",options:["典当：获得10碎片，本次轮回无法再获得前世记忆","赎回：支付10碎片，获得一段前世记忆","拒绝：无事发生"]},
+ {id:"surgery",name:"手术",icon:"✚",building:"废弃地下医疗间",kind:"通用事件",desc:"破损的手术台旁，培养皿中有一颗长满触手、仍在跳动的心脏。设备无人维护，却仍残留着异常能量。",options:["强制移植：使一名微光者队友被植入一种随机的怪物道纹（该道纹每场战斗三回合后若保持原样，则仍变为怪物）","抽取灵魂：失去一名微光者队友，获得其血限50%的碎片","拒绝：无事发生"]},
+ {id:"soulless-mire",name:"无魂泥潭",icon:"≈",building:"沥青坑与蠕动黑泥",kind:"通用事件",desc:"地面塌陷成散发焦胶气味的黑色深坑，淤泥缓慢蠕动，隔绝灵魂波动。采集它需要付出肉体代价。",options:["采集绝息淤泥：流血10，获得绝息淤泥（可随时使用；使用后屏蔽自身灵魂位置，可使本次战终立刻逃脱）","拒绝：无事发生"]}
+];
+const CITY_FEATURES=[
+  {name:"住宅楼遗迹",icon:"▦",type:"building"},{name:"学校遗址",icon:"▤",type:"school"},
+  {name:"停车场",icon:"▥",type:"parking"},{name:"仓库废墟",icon:"▧",type:"building"},
+  {name:"废弃工厂",icon:"⚙",type:"utility"},{name:"失效控制室",icon:"▣",type:"utility"},
+  {name:"便利店残骸",icon:"▤",type:"building"},{name:"公交站遗迹",icon:"▥",type:"building"},
+  {name:"配电室",icon:"ϟ",type:"utility"},{name:"办公楼残骸",icon:"▦",type:"building"}
 ];
 const mapEl=document.getElementById("map"),sitesEl=document.getElementById("sites"),detailEl=document.getElementById("details"),statusEl=document.getElementById("status");
 let cells=[],landmarks=[],edge=0,seed=20261018,rng=Math.random;
@@ -101,17 +113,17 @@ function generate(){
  // Street blocks are fixed-size; roads remain connected while footprints and ground terrain vary.
  const blocks=[];for(let by=0;by<BLOCKS;by++)for(let bx=0;bx<BLOCKS;bx++)blocks.push({bx,by});
  for(let i=blocks.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[blocks[i],blocks[j]]=[blocks[j],blocks[i]]}
- const eventOrder=[...EVENTS];for(let i=eventOrder.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[eventOrder[i],eventOrder[j]]=[eventOrder[j],eventOrder[i]]}
+ const eventPool=[...GENERIC_EVENTS,...EVENTS];const eventOrder=[...eventPool];for(let i=eventOrder.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[eventOrder[i],eventOrder[j]]=[eventOrder[j],eventOrder[i]]}
  blocks.forEach((b,bi)=>{
    const x0=b.bx*5+1,y0=b.by*5+1;
    const w=2+Math.floor(rng()*2),h=2+Math.floor(rng()*2);
    const ox=Math.floor(rng()*(5-w)),oy=Math.floor(rng()*(5-h));
-   let building=bi<EVENTS.length?eventOrder[bi]:pick(GENERIC);
+   let building=bi<eventPool.length?eventOrder[bi]:pick(CITY_FEATURES);
    const buildingId="b"+bi;
    for(let y=y0+oy;y<y0+oy+h;y++)for(let x=x0+ox;x<x0+ox+w;x++){const c=cells[idx(x,y)];c.type=building.type||"landmark";c.building=buildingId;c.icon=building.icon||""}
    // Vary unused block tiles independently without changing total map area.
    for(let y=y0;y<y0+4;y++)for(let x=x0;x<x0+4;x++){const c=cells[idx(x,y)];if(c.building)continue;const roll=rng();c.type=roll<.12?"rubble":roll<.21?"weeds":roll<.27?"puddle":"sidewalk"}
-   if(bi<EVENTS.length){
+   if(bi<eventPool.length){
      const ev=building;const sides=[];
      if(b.by>0)sides.push(0);if(b.by<BLOCKS-1)sides.push(1);
      if(b.bx>0)sides.push(2);if(b.bx<BLOCKS-1)sides.push(3);
