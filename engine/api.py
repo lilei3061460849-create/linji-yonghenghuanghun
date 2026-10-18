@@ -286,11 +286,13 @@ class GameEngine:
                     schema["x"] = "正整数，且不超过当前真实碎片余额；每次抵达最多投资一次"
                     schema["note"] = "祭坛投资概率：15%净赚4X、25%净赚X、35%净亏X、25%净亏3X；黑天鹅额外2X直接计入真实负余额，可能触发动态还债"
                 if self.event_pool.current == "过路商人" and option["text"].startswith("遗物交易"):
+                    self._init_relic_pool()
                     schema.update({"trade_direction": ["buy", "sell"],
-                                   "relic_name": "买入时从商人可售遗物中选择，卖出时从当前持有遗物中选择",
+                                   "relic_name": {"buy": [r.name for r in self.state.relics_pool],
+                                                  "sell": [r.name for r in self.state.relics]},
                                    "price": "双方协商后的非负整数碎片价格",
                                    "confirmed": True})
-                    schema["note"] = "成交前确认价格；买卖立即转移遗物与碎片，不得复制遗物或通过交易透支"
+                    schema["note"] = "同次遭遇可连续买卖多件遗物；成交前确认价格。选择其他选项结束交易会话。买卖立即转移遗物与碎片，不得复制遗物或通过交易透支"
                 actions.append({"action_type": "resolve_event",
                                 "params_schema": schema,
                                 "option": option["text"],
@@ -4446,10 +4448,16 @@ class GameEngine:
             res["applied"].append(
                 f"无所求：+1属性点（属性点池 {self.state.attribute_points}；"
                 "按正文 2点=1速限=1法限、1点=6血限，兑换仅限战前）")
-        self.event_pool.resolve(name)
+        # 过路商人交易是一个持续会话：同次遭遇可连续买卖多件遗物，直到选择其他选项离开。
+        keep_merchant_open = (name == "过路商人" and text.startswith("遗物交易")
+                              and bool(res.get("trade")))
+        if not keep_merchant_open:
+            self.event_pool.resolve(name)
         # 扭曲都市完成事件后附赠【发现】：正式随机只走DiceEngine，并等待显式选1。
+        # 连续交易期间尚未离开商人，不重复发放事件完成奖励。
         bonus = None
-        if self.state.current_region == "扭曲都市" and self.state.player and self.state.player.is_alive:
+        if (not keep_merchant_open and self.state.current_region == "扭曲都市"
+                and self.state.player and self.state.player.is_alive):
             owned = {c.name for c in self.state.consumables}
             pool = [n for n in TWISTED_TOOL_LIBRARY if n not in owned]
             if pool:
@@ -4464,6 +4472,8 @@ class GameEngine:
         for key in ("random", "outcome", "net_delta", "debt_result", "trade"):
             if key in res:
                 result_payload[key] = res[key]
+        if name == "过路商人":
+            result_payload["merchant_session_open"] = keep_merchant_open
         if bonus:
             result_payload["附赠发现"] = bonus
         next_event = None
