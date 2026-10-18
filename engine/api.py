@@ -1855,6 +1855,8 @@ class GameEngine:
                  "active": location.get("active", True)}
                 for location_id, location in world.map.locations.items()
                 if location.get("discovered", False)
+                and (location.get("kind") != "relic"
+                     or actor_id in (location.get("discovered_by") or []))
             ]
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_status", "result": {
@@ -2185,6 +2187,31 @@ class GameEngine:
                                    "required_turns": 1, "encounter_id": active_encounter.encounter_id,
                                    "reward_applied": False},
                         "instruction": "共鸣被遭遇打断，未投放遗物；请先处理地图遭遇"}
+            # 等待期间边界可能收缩；投放范围必须按结算后的真实地图重新计算。
+            player_actor = world.actors[player_id]
+            distances = {player_actor.position: 0}
+            queue = deque([player_actor.position])
+            while queue:
+                pos = queue.popleft()
+                if distances[pos] >= 10:
+                    continue
+                for nxt in world.map.neighbors(pos):
+                    if nxt not in distances:
+                        distances[nxt] = distances[pos] + 1
+                        queue.append(nxt)
+            candidates = [
+                pos for pos, distance in distances.items()
+                if 0 < distance <= 10 and world.map.is_passable(pos)
+                and world.map.location_at(pos) is None
+            ]
+            if not candidates:
+                world.record("world_action_interrupted", player_id, action=action,
+                             elapsed_turns=elapsed, reason="no_valid_relic_drop_cell")
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_action_interrupted",
+                        "result": {"sub_action": action, "elapsed_turns": elapsed,
+                                   "required_turns": 1, "reward_applied": False,
+                                   "completion_error": "边界收缩后没有合法遗物投放格"}}
             relic_names = [relic.name for relic in self.state.relics_pool]
             relic_roll = self.dice.auto_roll("world_resonance_relic", relic_names,
                                              context="开放世界共鸣：选择投放遗物")
