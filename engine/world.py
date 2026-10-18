@@ -409,7 +409,8 @@ class WorldState:
             return False
         if a.faction == "monster" or b.faction == "monster":
             other = b if a.faction == "monster" else a
-            return other.faction in {"player", "friend", "employee", "temp_friend"}
+            # 怪物威胁所有轮回者阵营；不能只追杀玩家而放过地图上的其他轮回者。
+            return other.faction in {"player", "enemy", "friend", "employee", "temp_friend"}
         friendly = {"player", "friend", "employee", "temp_friend"}
         return ((a.faction in friendly and b.faction == "enemy")
                 or (b.faction in friendly and a.faction == "enemy"))
