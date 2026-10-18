@@ -6624,7 +6624,7 @@ class GameEngine:
     SAVE_FORMAT_VERSION = 5
 
     def _migrate_legacy_daowen_status_order(self) -> None:
-        """给旧 pickle 状态补齐序列字段，优先从状态来源角色的同名道纹恢复位置。"""
+        """迁移旧 pickle：补齐历史碎片峰值与道纹序列字段，优先从状态来源角色恢复道纹位置。"""
         state = self.state
         # 旧版 pickle 没有历史碎片峰值；只能以读档时真实余额作为可恢复的基线。
         if "shards_peak" not in getattr(state, "__dict__", {}):
