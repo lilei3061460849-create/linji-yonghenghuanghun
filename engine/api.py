@@ -1186,12 +1186,7 @@ class GameEngine:
             _scale = 1
         self.combat.resolution.begin_action(action_type, params, scale=_scale)
         try:
-            combat_event_start = len(getattr(self.state, "combat_events", []))
             result = self._dispatch_action(action_type, params)
-            if result.get("success", False):
-                new_combat_events = list(getattr(self.state, "combat_events", []))[combat_event_start:]
-                self._record_combat_quest_facts(new_combat_events)
-                self._record_successful_action_fact(action_type, params, result)
 
             if not result.get("success", False) and transaction:
                 self._restore_state_in_place(state_before)
