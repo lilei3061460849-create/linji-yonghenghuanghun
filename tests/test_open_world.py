@@ -1729,4 +1729,6 @@ def test_npc_merchant_completes_at_most_one_trade_per_world_turn(tmp_path):
     assert merchant.shards == 10
     assert len(merchant.relics) == 1
     assert sum(len(entity.relics) for entity in (first, second)) == 1
-    assert sorted((first.shards, second.shards)) == [10, 20]
+    # NPC交易优先级由地图位置决定，不受随机runtime_id影响。
+    assert first.shards == 10
+    assert second.shards == 20
