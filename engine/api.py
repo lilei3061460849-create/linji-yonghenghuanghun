@@ -1919,6 +1919,8 @@ class GameEngine:
                          npc_shards=entity.shards, merchant_shards=merchant.shards)
             results.append({"actor_id": actor_id, "direction": direction,
                             "relic_name": traded_relic.name, "price": price})
+            # 商人每回合最多完成一笔NPC交易；按actor_id排序，结果可复现。
+            break
         return results
 
     def _share_created_being_vision(self, world: WorldState) -> None:
