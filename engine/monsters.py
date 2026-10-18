@@ -235,6 +235,17 @@ def assign_monster_preferences(entity, tier: int, dice) -> list[str]:
         selected.append(choice)
         remaining.remove(choice)
     entity.preferences = selected
+    # 「痛苦的偏爱」沿用原有[回始]效果，但只在该偏爱被抽中时授予；
+    # 不能再让一阶怪物固定拥有它、同时又额外抽取一项偏爱。
+    from .models import MONSTER_MANA_RELIC, MONSTER_MANA_RELIC_EFFECT, Relic
+    if "痛苦的偏爱" in selected:
+        if not any(relic.name == MONSTER_MANA_RELIC for relic in entity.relics):
+            entity.relics.append(Relic(
+                name=MONSTER_MANA_RELIC, effect=MONSTER_MANA_RELIC_EFFECT,
+                tags=["怪物偏爱"]))
+    else:
+        entity.relics = [relic for relic in entity.relics
+                         if relic.name != MONSTER_MANA_RELIC]
     return selected
 
 
