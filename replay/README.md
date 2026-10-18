@@ -28,7 +28,7 @@ python tools/export_replay.py --slot current --battle 3 --output replay-3.json
 python -m http.server 8000
 ```
 
-然后在同一运行环境中打开 `/replay/` 路径。若 Python 运行在远程容器中，需要通过开发平台的端口转发功能从手机访问该端口。单纯在 GitHub 文件页面查看 HTML 不会运行播放器。
+然后在同一运行环境中打开 `/replay/` 路径。页面会自动尝试读取项目根目录的 `replay.json`，因此不必把远程文件先下载到手机。如果 Python 运行在远程容器中，需要通过开发平台的端口转发功能从手机访问该端口。单纯在 GitHub 文件页面查看 HTML 不会运行播放器。
 
 ## 第一版范围
 
