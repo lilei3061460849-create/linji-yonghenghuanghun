@@ -154,3 +154,16 @@ def test_world_api_cannot_query_or_move_another_actor(tmp_path):
     assert not status["success"]
     move = engine.execute_action("world_move", {"actor_id": hidden_id, "x": 2, "y": 1})
     assert not move["success"]
+
+
+def test_entering_adjacency_triggers_neutral_interaction_once():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState("p", "玩家", "轮回者", 1, 1, faction="player"))
+    world.add_actor(WorldActorState("shop", "过路商人", "merchant", 3, 1, faction="neutral"))
+    first = world.move_actor("p", (2, 1))
+    assert len(first["new_interactions"]) == 1
+    assert first["new_interactions"][0]["target_actor_id"] == "shop"
+    assert first["new_interactions"][0]["available_outcomes"] == ["交谈", "交易", "合作", "攻击"]
+    # 仍处于同一交互范围时移动，不重复触发；离开后重新进入才会再次触发。
+    second = world.move_actor("p", (3, 0))
+    assert second["new_interactions"] == []
