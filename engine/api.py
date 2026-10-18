@@ -1094,7 +1094,7 @@ class GameEngine:
             return {"success": False, "error": "局外行动/事件只能在局外阶段执行"}
         if action_type == "battle_start" and phase != "pre_battle":
             return {"success": False, "error": "只有局外阶段可以进入战始"}
-        if action_type == "battle_start" and self.state.energy > 0:
+        if action_type == "battle_start" and self.state.energy > 0 and not params.get("world_encounter_id"):
             return {"success": False, "error": f"尚有{self.state.energy}点精力，耗尽后才能进入战斗"}
         if action_type == "use_daowen":
             name = params.get("daowen_name", "")
