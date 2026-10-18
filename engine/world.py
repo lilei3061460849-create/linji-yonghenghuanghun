@@ -163,6 +163,10 @@ class WorldActorState:
     alive: bool = True
     faction: str = "neutral"
     mode: str = "autonomous"
+    # 造物行为模式：explore=自主探索，follow=跟随主人，guard=守卫指定格。
+    behavior: str = "explore"
+    owner_actor_id: str = ""
+    guard_position: Coord | None = None
     known_cells: set[str] = field(default_factory=set)
     memory: list[dict[str, Any]] = field(default_factory=list)
 
@@ -180,6 +184,10 @@ class WorldActorState:
         values = dict(data)
         values["known_cells"] = set(values.get("known_cells", []))
         values["memory"] = list(values.get("memory", []))
+        guard_position = values.get("guard_position")
+        values["guard_position"] = tuple(guard_position) if guard_position is not None else None
+        values.setdefault("behavior", "explore")
+        values.setdefault("owner_actor_id", "")
         return cls(**values)
 
 
@@ -379,16 +387,41 @@ class WorldState:
                           if p not in occupied]
             if not candidates:
                 continue
-            # 仅在当前相邻视野中选择可走格；方向轮换保证单位持续移动且可复现。
-            offset = (self.clock.turn + sum(ord(char) for char in actor_id)) % len(candidates)
-            if self.final_duel_search and actor_id in self.final_duel_finalists:
+            # 造物可自主探索、跟随主人或守卫指定地点。行为只使用已知主人坐标与本地寻路。
+            destination = None
+            if actor.kind == "friend" and actor.owner_actor_id:
+                owner = self.actors.get(actor.owner_actor_id)
+                target_position = None
+                if actor.behavior == "follow" and owner is not None and owner.alive:
+                    target_position = owner.position
+                elif actor.behavior == "guard":
+                    target_position = actor.guard_position or actor.position
+                if target_position is not None and target_position != actor.position:
+                    path = self.map.find_path(actor.position, target_position)
+                    if path and len(path) > 1:
+                        preferred = path[1]
+                        if preferred not in occupied or preferred == target_position:
+                            destination = preferred
+                        else:
+                            alternatives = [pos for pos in candidates
+                                            if (route := self.map.find_path(pos, target_position)) is not None]
+                            if alternatives:
+                                destination = min(
+                                    alternatives,
+                                    key=lambda pos: (len(self.map.find_path(pos, target_position) or []),
+                                                     pos[1], pos[0]))
+                if actor.behavior == "guard" and target_position == actor.position:
+                    continue
+            # 最终会合者朝地图中心收敛；其余单位在未知区域自主探索。
+            if destination is None and self.final_duel_search and actor_id in self.final_duel_finalists:
                 center = (self.map.width // 2, self.map.height // 2)
                 destination = min(
                     candidates,
                     key=lambda pos: (abs(pos[0] - center[0]) + abs(pos[1] - center[1]),
                                      (pos[0], pos[1])),
                 )
-            else:
+            elif destination is None:
+                offset = (self.clock.turn + sum(ord(char) for char in actor_id)) % len(candidates)
                 destination = candidates[offset]
             origin = actor.position
             actor.x, actor.y = destination
