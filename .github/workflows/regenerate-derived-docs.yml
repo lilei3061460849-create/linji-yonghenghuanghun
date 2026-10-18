@@ -2,9 +2,25 @@ name: Regenerate derived documentation
 
 on:
   push:
-    branches: [feat/open-world-core]
+    branches: [main, chore/github-native-backlog]
     paths:
       - .github/workflows/regenerate-derived-docs.yml
+      - AI_EXPERIENCE.md
+      - 规则正文.md
+      - 推演规范.md
+      - 死者之书.md
+      - 全道纹索引.md
+      - 物品索引.md
+      - 法术索引.md
+      - 副本索引.md
+      - 副本/*.md
+      - 故事文档.md
+      - sim/gen_rules.py
+      - sim/gen_ai_context.py
+
+concurrency:
+  group: regenerate-derived-docs-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
