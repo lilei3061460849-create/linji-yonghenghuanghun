@@ -101,6 +101,7 @@ class QuestEngine:
         return {
             "instances": {},
             "event_log": [],
+            "facts": [],
             "story_flags": [],
             "next_event_id": 1,
         }
@@ -108,6 +109,7 @@ class QuestEngine:
     def _ensure_state(self, state: dict[str, Any]) -> dict[str, Any]:
         state.setdefault("instances", {})
         state.setdefault("event_log", [])
+        state.setdefault("facts", [])
         state.setdefault("story_flags", [])
         state.setdefault("next_event_id", 1)
         return state
@@ -215,6 +217,7 @@ class QuestEngine:
                      world_turn: int = 0, player_actor_id: str | None = None) -> list[dict[str, Any]]:
         """仅处理引擎已记录的事实；返回本次产生的任务事实，供世界日志追加。"""
         state = self._ensure_state(state)
+        state["facts"].append(deepcopy(fact))
         generated: list[dict[str, Any]] = []
         for quest_id, instance in list(state["instances"].items()):
             if instance.get("status") != "active":
