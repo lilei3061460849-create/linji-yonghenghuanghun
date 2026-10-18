@@ -390,3 +390,55 @@ def test_actor_sightings_are_stored_in_private_bounded_memory():
     world.actors["p"].memory = [{"turn": n} for n in range(60)]
     world.visible_cells("p")
     assert len(world.actors["p"].memory) <= 50
+
+
+def test_world_encounter_uses_real_enemy_and_returns_survivors_to_map(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-battle.db"),
+                        save_dir=str(tmp_path), rng_seed=71)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    target = Entity("R1", "轮回者", blood_limit=30, current_hp=30)
+    reserve = Entity("R2", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.enemies = [target, reserve]
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 9, "height": 9})["success"]
+
+    world = WorldState.from_dict(engine.state.world_state)
+    player_id = engine.state.player.runtime_id
+    target_id, reserve_id = target.runtime_id, reserve.runtime_id
+    world.actors[player_id].x, world.actors[player_id].y = 1, 1
+    world.actors[target_id].x, world.actors[target_id].y = 2, 1
+    world.actors[reserve_id].x, world.actors[reserve_id].y = 7, 7
+    world.actors[target_id].mode = "manual"
+    world.actors[reserve_id].mode = "manual"
+    engine.state.player.world_x, engine.state.player.world_y = 1, 1
+    target.world_x, target.world_y = 2, 1
+    reserve.world_x, reserve.world_y = 7, 7
+    engine.state.world_state = world.to_dict()
+
+    attacked = engine.execute_action("world_interact", {
+        "target_actor_id": target_id, "choice": "attack",
+    })
+    assert attacked["success"], attacked
+    encounter_id = attacked["result"]["encounter_id"]
+    started = engine.execute_action("battle_start", {
+        "world_encounter_id": encounter_id, "relic_choices": {},
+    })
+    assert started["success"], started
+    assert engine.state.enemies == [target]
+    assert engine.state.world_enemy_reserve == [reserve]
+
+    target.is_alive = False
+    target.current_hp = 0
+    ended = engine.execute_action("battle_end", {})
+    assert ended["success"], ended
+    assert engine.state.phase == "pre_battle"
+    assert engine.state.enemies == [reserve]
+    assert engine.state.world_enemy_reserve == []
+    assert engine.state.world_encounter_id == ""
+    restored = WorldState.from_dict(engine.state.world_state)
+    assert restored.encounters[encounter_id].active is False
+    assert restored.actors[target_id].alive is False
+    assert restored.actors[reserve_id].alive is True
