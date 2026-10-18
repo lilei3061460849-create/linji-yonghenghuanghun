@@ -332,6 +332,8 @@ class WorldState:
                         and memory.get("location_id") == location_id):
                     memory["active"] = False
                     memory["inactive_reason"] = reason
+                    if reason == "removed_by_shrink":
+                        memory["removed_by_shrink"] = True
 
     def _shrink_boundary_if_due(self) -> dict[str, Any] | None:
         """世界回合到达固定边界时，移除当前方形地图最外一圈。"""
