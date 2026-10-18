@@ -5599,6 +5599,7 @@ class GameEngine:
                 if entity.runtime_id not in set(participant_ids)
             ]
             self.state.world_encounter_id = world_encounter_id
+            self.state.world_encounter_entities = list(world_participant_enemies)
         # 在战始产生随机怪物前保存快照；重来会恢复随机源并再次按当前代码抽取。
         self._battle_restart_snapshot = {
             "state": copy.deepcopy(self.state),
