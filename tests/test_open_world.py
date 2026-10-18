@@ -501,6 +501,35 @@ def test_world_initialization_spawns_current_dungeon_monster_population_and_even
     assert "恶魔医务室" not in event_names
 
 
+def test_npc_only_world_encounters_use_combat_engine_and_do_not_stall(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "npc-skirmish.db"),
+                        save_dir=str(tmp_path), rng_seed=139, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    rival = Entity("R", "轮回者", blood_limit=30, current_hp=30,
+                   attack_count=1, attack_power=20, current_mana=20, mana_limit=20)
+    monster = Entity("M", "怪物", blood_limit=5, current_hp=5,
+                     attack_count=1, attack_power=1, current_mana=1, mana_limit=1)
+    engine.state.player = player
+    engine.state.enemies = [rival, monster]
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(player.runtime_id, "P", "player", 1, 1,
+                                    faction="player", mode="manual"))
+    world.add_actor(WorldActorState(rival.runtime_id, "R", "enemy", 3, 3,
+                                    faction="enemy", mode="autonomous"))
+    world.add_actor(WorldActorState(monster.runtime_id, "M", "enemy", 4, 3,
+                                    faction="monster", mode="autonomous"))
+    encounter = world.start_encounter([rival.runtime_id, monster.runtime_id], monster.position)
+
+    resolved = engine._resolve_world_npc_encounters(world)
+    assert resolved and resolved[0]["encounter_id"] == encounter.encounter_id
+    assert not encounter.active
+    assert monster.is_alive is False
+    assert world.actors[monster.runtime_id].alive is False
+
+
 def test_autonomous_reincarnator_collects_shard_cache_on_its_cell(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
