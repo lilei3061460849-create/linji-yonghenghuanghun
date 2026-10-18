@@ -8226,6 +8226,9 @@ class GameEngine:
             self.state.world_enemy_reserve = []
             self.state.world_encounter_entities = []
             self.state.world_encounter_id = ""
+            # 战斗结束后立即检查仍与存活单位同格/相邻的敌人；每名单位只进入一场活跃遭遇，
+            # 因此多敌围堵会按遭遇顺序继续，不会留下重复活跃的战斗锁。
+            world.detect_adjacent_encounters()
             # NPC战斗可能刚好淘汰了倒数第二名轮回者；此时进入自然会合阶段，
             # 但仍保留地图上的怪物，让它们在会合期间继续构成威胁。
             self._refresh_world_final_duel(world)
