@@ -1925,6 +1925,7 @@ class GameEngine:
             if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
                 return {"success": False, "error": "目标坐标x/y必须是整数"}
             result = world.move_actor(actor_id, (x, y))
+            self._resolve_world_hiring_signals(world)
             self._sync_world_entity_positions(world)
             location_entry = world.map.location_at((x, y))
             if location_entry is not None:
@@ -2018,6 +2019,7 @@ class GameEngine:
             start_turn = world.clock.turn
             world.wait(actor_id, turns)
             self._resolve_world_relic_pickups(world)
+            self._resolve_world_hiring_signals(world)
             self._refresh_world_final_duel(world)
             elapsed = world.clock.turn - start_turn
             active_encounter = next((encounter for encounter in world.encounters.values()
@@ -2393,6 +2395,7 @@ class GameEngine:
             world.record("world_action_started", player_id, action=action, duration=1)
             world.wait(player_id, 1)
             self._resolve_world_relic_pickups(world)
+            self._resolve_world_hiring_signals(world)
             self._refresh_world_final_duel(world)
             elapsed = world.clock.turn - start_turn
             active_encounter = next((encounter for encounter in world.encounters.values()
@@ -2488,6 +2491,7 @@ class GameEngine:
         world.record("world_action_started", player_id, action=action, duration=duration)
         world.wait(player_id, duration)
         self._resolve_world_relic_pickups(world)
+        self._resolve_world_hiring_signals(world)
         self._refresh_world_final_duel(world)
         elapsed = world.clock.turn - start_turn
         active_encounter = next((encounter for encounter in world.encounters.values()
@@ -2503,6 +2507,36 @@ class GameEngine:
                                "encounter_id": active_encounter.encounter_id,
                                "reward_applied": False},
                     "instruction": "行动被遭遇打断，未结算本次收益；请先处理地图遭遇"}
+
+        if action == "雇佣":
+            player_actor = world.actors[player_id]
+            signal_id = f"hiring-{world.clock.turn}-{len(world.hiring_signals) + 1}"
+            signal = {
+                "signal_id": signal_id,
+                "status": "pending",
+                "issued_turn": world.clock.turn,
+                "arrival_turn": world.clock.turn + 2,
+                "position": [player_actor.x, player_actor.y],
+                "params": {
+                    "name": params.get("name", ""),
+                    "blood_alloc": params.get("blood_alloc", 0),
+                    "atk_bundles": params.get("atk_bundles", 0),
+                },
+            }
+            world.hiring_signals.append(signal)
+            world.record("hiring_signal_emitted", player_id, signal_id=signal_id,
+                         name=signal["params"]["name"],
+                         arrival_turn=signal["arrival_turn"],
+                         position=list(signal["position"]))
+            self._sync_world_entity_positions(world)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": "雇佣·发出招募信号",
+                    "result": {"signal_id": signal_id, "status": "pending",
+                               "issued_turn": signal["issued_turn"],
+                               "expected_arrival_turn": signal["arrival_turn"],
+                               "position": list(signal["position"]),
+                               "world_turn": world.clock.turn},
+                    "instruction": "招募信号已发出并会持续有效；无需停留等待，可继续行动。响应者到达信号地点后才正式加入。"}
 
         result = self._execute_pre_battle_immediate(dict(params), world_mode=True)
         if not result.get("success", False):
