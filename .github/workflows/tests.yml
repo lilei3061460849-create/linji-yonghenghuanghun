@@ -43,5 +43,5 @@ jobs:
         run: python -m pytest -q tests/test_open_world.py tests/test_monster_preferences.py tests/test_altar.py tests/test_relicization_behavior_boundaries.py
 
       - name: Run full repository suite on demand
-        if: github.event_name == 'workflow_dispatch' && inputs.full_suite == 'true'
+        if: (github.event_name == 'workflow_dispatch' && inputs.full_suite == 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/feat/open-world-core')
         run: python -m pytest -q
