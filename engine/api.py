@@ -6230,8 +6230,12 @@ class GameEngine:
         elif not (stripped.startswith("拒绝")   # 拒绝：/拒绝:/拒绝下注 皆计
                   or any(stripped.startswith(k) for k in GameEngine.REJECT_OPTION_KEYWORDS)):
             return False
+        # 「按通用规则获得拒绝奖励」是规则说明，不是该选项自身的收益；
+        # 否则这段说明里的「获得」会把真正的无事发生选项误判为有偿拒绝，
+        # 导致【无所求】不发属性点、通用拒绝奖励也被跳过。
+        paid_text = stripped.replace("按通用规则获得拒绝奖励", "")
         # 显式排除带代价/收益的「拒绝改造」
-        if any(k in stripped for k in GameEngine.REJECT_BUT_PAID_KEYWORDS):
+        if any(k in paid_text for k in GameEngine.REJECT_BUT_PAID_KEYWORDS):
             return False
         return True
 
