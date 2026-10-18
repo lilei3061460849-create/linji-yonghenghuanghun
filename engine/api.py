@@ -5216,7 +5216,8 @@ class GameEngine:
             "speed_limit": e.speed_limit, "current_speed": e.current_speed,
             "attack_count": e.attack_count, "attack_power": e.attack_power,
             "shield": e.shield, "is_flying": e.is_flying, "is_alive": e.is_alive,
-            "shards": e.shards, "is_debt_bound": e.is_debt_bound,
+            "shards": e.shards, "shards_peak": e.shards_peak,
+            "is_debt_bound": e.is_debt_bound,
             # ④修复：异变是代价资源、封存前已实付——
             # 带伤续战必须带着异变续战，否则封存=免费洗白迷失进度。
             # （癌变 total_healed 不随封存走：DM 已裁定它是局内减益、每场归零。）
@@ -5244,6 +5245,7 @@ class GameEngine:
                    attack_count=d["attack_count"], attack_power=d["attack_power"],
                    shield=d.get("shield", 0), is_flying=d.get("is_flying", False),
                    is_alive=d.get("is_alive", True), shards=d.get("shards", 0),
+                   shards_peak=d.get("shards_peak", max(0, int(d.get("shards", 0)))),
                    is_debt_bound=d.get("is_debt_bound", False))
         e.mutation_count = d.get("mutation_count", 0)   # ④修复：旧档无此键回退0
         for name, x in d.get("dao_wen", {}).items():
@@ -5296,6 +5298,7 @@ class GameEngine:
             "relics": [r.to_dict() for r in s.relics],
             "resonance": dict(s.resonance),
             "shards": s.shards,
+            "shards_peak": s.shards_peak,
             "death_book_wisdom": list(s.death_book_wisdom),
             "death_book_legacies": [dict(entry) for entry in s.death_book_legacies],
             "attribute_points": s.attribute_points,
@@ -5326,6 +5329,11 @@ class GameEngine:
         if snapshot.get("player"):
             opponent_player = self._deserialize_entity_full(snapshot["player"])
             opponent_player.entity_type = "轮回者"
+            # 死斗快照顶层的碎片余额属于轮回者本体；战斗时映射到对手实体账本。
+            opponent_player.shards = int(snapshot.get("shards", opponent_player.shards))
+            opponent_player.shards_peak = max(
+                int(getattr(opponent_player, "shards_peak", 0)),
+                int(snapshot.get("shards_peak", max(0, opponent_player.shards))))
             _uniquify(opponent_player)
         for f in snapshot.get("friends", []):
             _uniquify(self._deserialize_entity_full(f))
@@ -6618,6 +6626,9 @@ class GameEngine:
     def _migrate_legacy_daowen_status_order(self) -> None:
         """给旧 pickle 状态补齐序列字段，优先从状态来源角色的同名道纹恢复位置。"""
         state = self.state
+        # 旧版 pickle 没有历史碎片峰值；只能以读档时真实余额作为可恢复的基线。
+        if not hasattr(state, "shards_peak"):
+            state.shards_peak = max(0, int(getattr(state, "shards", 0)))
         entities = [getattr(state, "player", None)]
         for field_name in ("friends", "employees", "temp_friends", "enemies", "dead_monsters"):
             entities.extend(getattr(state, field_name, []) or [])
@@ -6639,6 +6650,8 @@ class GameEngine:
             for entity in unique_entities
         }
         for entity in unique_entities:
+            if not hasattr(entity, "shards_peak"):
+                entity.shards_peak = max(0, int(getattr(entity, "shards", 0)))
             owner_order = order_by_entity[id(entity)]
             for status in entity.status_effects:
                 # 旧 pickle 反序列化不会自动填充新 dataclass 字段。
