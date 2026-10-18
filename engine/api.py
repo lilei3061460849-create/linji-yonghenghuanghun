@@ -2098,6 +2098,10 @@ class GameEngine:
                 signal["status"] = "failed"
                 signal["resolved_turn"] = world.clock.turn
                 signal["failure"] = "雇佣结算未生成员工实体"
+                world.record("hiring_signal_failed", None, signal_id=signal.get("signal_id"),
+                             name=name, reason=signal["failure"])
+                resolved.append({"signal_id": signal.get("signal_id"), "status": "failed",
+                                 "reason": signal["failure"]})
                 continue
             actor_id = f"hire:{signal.get('signal_id')}"
             employee.runtime_id = actor_id
