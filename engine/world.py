@@ -324,6 +324,15 @@ class WorldState:
                 same_turn.update(observation)
         return cells
 
+    def deactivate_location_sightings(self, location_id: str, *, reason: str = "inactive") -> None:
+        """地点失效时同步所有单位的旧目击记录，避免NPC追逐已消失的目标。"""
+        for actor in self.actors.values():
+            for memory in actor.memory:
+                if (memory.get("kind") == "location_sighting"
+                        and memory.get("location_id") == location_id):
+                    memory["active"] = False
+                    memory["inactive_reason"] = reason
+
     def _shrink_boundary_if_due(self) -> dict[str, Any] | None:
         """世界回合到达固定边界时，移除当前方形地图最外一圈。"""
         if self.shrink_interval < 1 or self.clock.turn <= 0:
@@ -353,13 +362,8 @@ class WorldState:
                             location_id=location_id, position=list(pos))
         # NPC只根据自己的记忆决策。若地点被边界吞没，必须同步其旧目击记录，
         # 否则它会把已失效的资源/遗物当作目标，持续向地图外缘移动。
-        if removed_location_ids:
-            for actor in self.actors.values():
-                for memory in actor.memory:
-                    if (memory.get("kind") == "location_sighting"
-                            and memory.get("location_id") in removed_location_ids):
-                        memory["active"] = False
-                        memory["removed_by_shrink"] = True
+        for location_id in removed_location_ids:
+            self.deactivate_location_sightings(location_id, reason="removed_by_shrink")
         caught = [actor for actor in self.actors.values()
                   if actor.alive and actor.position in set(removed)]
         self.shrink_count += 1
