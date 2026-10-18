@@ -24,6 +24,7 @@ from .models import (
     Relic, Consumable, StatusEffect, LongJiXin
 )
 from .world import WorldState, WorldActorState
+from .quests import QuestEngine, QuestError, load_quest_definitions
 from .enums import (GamePhase, CombatSubphase, ActionPhase, TriggerTiming,
                     InterruptType, EntityType, EffectScope, EffectPolarity)
 from .dice import DiceEngine
@@ -988,6 +989,8 @@ class GameEngine:
         if action_type.startswith("world_") and phase != "pre_battle":
             return {"success": False,
                     "error": "当前开放世界行动尚处于第一阶段，只能在局外阶段调用；战斗/世界统一主循环尚未接通"}
+        if action_type in {"quest_accept", "quest_claim"} and phase != "pre_battle":
+            return {"success": False, "error": "当前任务接取/领奖入口只在局外阶段开放；任务与战斗主循环尚未完全接通"}
         if action_type in ("pre_battle_action", "resolve_event", "upgrade_doctor") and phase != "pre_battle":
             return {"success": False, "error": "局外行动/事件只能在局外阶段执行"}
         if action_type == "battle_start" and phase != "pre_battle":
@@ -1282,7 +1285,13 @@ class GameEngine:
 
     def _dispatch_action(self, action_type: str, params: dict) -> dict:
         """action 名 → 处理器：唯一的 action 路由表（执行实现见各 _action_*）。"""
-        if action_type == "world_initialize":
+        if action_type == "quest_list":
+            return self._action_quest_list(params)
+        elif action_type == "quest_accept":
+            return self._action_quest_accept(params)
+        elif action_type == "quest_claim":
+            return self._action_quest_claim(params)
+        elif action_type == "world_initialize":
             return self._action_world_initialize(params)
         elif action_type == "world_move":
             return self._action_world_move(params)
@@ -1438,6 +1447,98 @@ class GameEngine:
         else:
             return {"success": False, "error": f"未知行动类型: {action_type}"}
 
+    # ==================== 开放世界任务 ====================
+
+    def _quest_engine(self) -> QuestEngine:
+        return QuestEngine(load_quest_definitions())
+
+    def _world_turn(self) -> int:
+        return int(getattr(self.state, "world_state", {}).get("clock", {}).get("turn", 0))
+
+    def _process_world_quest_facts(self, world: WorldState,
+                                   facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """只把世界引擎已产生的事实送入任务系统；任务结果再追加为世界事实。"""
+        quest_engine = self._quest_engine()
+        player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+        generated: list[dict[str, Any]] = []
+        for fact in facts:
+            generated.extend(quest_engine.process_fact(
+                self.state.quest_state, fact, world.clock.turn, player_actor_id=player_id))
+        generated.extend(quest_engine.advance_time(self.state.quest_state, world.clock.turn))
+        for event in generated:
+            world.record(event["type"], player_id, quest_id=event["quest_id"], **event.get("details", {}))
+        return generated
+
+    def _action_quest_list(self, params: dict) -> dict:
+        tasks = self._quest_engine().list_tasks(self.state.quest_state, self._world_turn())
+        return {"success": True, "action": "quest_list", "result": tasks}
+
+    def _action_quest_accept(self, params: dict) -> dict:
+        quest_id = params.get("quest_id", "")
+        quest_engine = self._quest_engine()
+        definition = quest_engine.definitions.get(quest_id)
+        if definition is None:
+            return {"success": False, "error": f"任务不存在：{quest_id}"}
+        source_actor_id = None
+        giver_id = definition.get("giver_actor_id")
+        giver_name = definition.get("giver_name")
+        if giver_id or giver_name:
+            try:
+                world = self._world_from_state()
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
+            player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
+            player = world.actors.get(player_id) if player_id else None
+            if player is None:
+                return {"success": False, "error": "地图上找不到玩家单位"}
+            candidates = []
+            for actor in world.actors.values():
+                if not actor.alive:
+                    continue
+                if giver_id and actor.actor_id != giver_id:
+                    continue
+                if giver_name and actor.name != giver_name:
+                    continue
+                if abs(actor.x - player.x) + abs(actor.y - player.y) == 1:
+                    candidates.append(actor)
+            if len(candidates) != 1:
+                return {"success": False,
+                        "error": "必须与任务委托者在上下左右相邻格实际交互后才能接取"}
+            source_actor_id = candidates[0].actor_id
+        try:
+            instance = quest_engine.accept(self.state.quest_state, quest_id,
+                                           world_turn=self._world_turn(),
+                                           source_actor_id=source_actor_id)
+            return {"success": True, "action": "quest_accept",
+                    "result": {"quest_id": quest_id, **instance}}
+        except QuestError as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _action_quest_claim(self, params: dict) -> dict:
+        if self.state.player is None:
+            return {"success": False, "error": "当前没有可领取任务奖励的轮回者"}
+        quest_id = params.get("quest_id", "")
+        try:
+            rewards = self._quest_engine().claim(self.state.quest_state, quest_id,
+                                                  world_turn=self._world_turn())
+        except QuestError as exc:
+            return {"success": False, "error": str(exc)}
+        shards = int(rewards.get("shards", 0))
+        points = int(rewards.get("attribute_points", 0))
+        if shards:
+            self.state.shards += shards
+        if points:
+            self.state.attribute_points += points
+        if getattr(self.state, "world_state", {}):
+            world = self._world_from_state()
+            world.record("quest_reward_claimed", getattr(self.state.player, "runtime_id", None),
+                         quest_id=quest_id, rewards=rewards)
+            self.state.world_state = world.to_dict()
+        return {"success": True, "action": "quest_claim",
+                "result": {"quest_id": quest_id, "rewards": rewards,
+                           "shards": self.state.shards,
+                           "attribute_points": self.state.attribute_points}}
+
     # ==================== 开放世界基础行动 ====================
 
     def _world_from_state(self) -> WorldState:
@@ -1488,6 +1589,7 @@ class GameEngine:
                                                 faction=faction))
                 if kind == "player":
                     world.record("world_entered", actor_id, region=self.state.current_region)
+            self._process_world_quest_facts(world, list(world.event_log))
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_initialize",
                     "result": {"width": width, "height": height,
@@ -1506,9 +1608,12 @@ class GameEngine:
             x, y = params.get("x"), params.get("y")
             if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
                 return {"success": False, "error": "目标坐标x/y必须是整数"}
+            log_start = len(world.event_log)
             result = world.move_actor(actor_id, (x, y))
+            quest_events = self._process_world_quest_facts(world, list(world.event_log[log_start:]))
             self.state.world_state = world.to_dict()
-            return {"success": True, "action": "world_move", "result": result}
+            return {"success": True, "action": "world_move",
+                    "result": {**result, "quest_events": quest_events}}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
@@ -1521,10 +1626,13 @@ class GameEngine:
             if actor_id is None or actor_id != player_id:
                 return {"success": False, "error": "当前API只允许轮回者控制自己的地图单位"}
             turns = params.get("turns", 1)
+            log_start = len(world.event_log)
             world.wait(actor_id, turns)
+            quest_events = self._process_world_quest_facts(world, list(world.event_log[log_start:]))
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_wait",
-                    "result": {"world_turn": world.clock.turn, "turns": turns}}
+                    "result": {"world_turn": world.clock.turn, "turns": turns,
+                               "quest_events": quest_events}}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
