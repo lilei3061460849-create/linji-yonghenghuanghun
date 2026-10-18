@@ -436,6 +436,9 @@ class Entity:
     is_chizu_of: str = ""
 
     def __post_init__(self):
+        # 每个实体的本局历史最高碎片余额至少包含其初始真实余额。
+        # 不能只依赖 __setattr__：dataclass 构造与旧存档恢复路径都要满足同一不变量。
+        self.shards_peak = max(0, int(self.shards_peak), int(self.shards))
         if self.battle_start_blood_limit == 0:
             self.battle_start_blood_limit = self.blood_limit
         # ---- 2026-09-16 属性模型统一的向上兼容 ----
