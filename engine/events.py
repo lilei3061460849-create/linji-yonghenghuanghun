@@ -226,6 +226,8 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
             return "必须在成交前显式确认交易双方、遗物名称与碎片价格（confirmed=true）"
         if direction == "buy":
             engine._init_relic_pool()
+            if any(r.name == relic_name for r in engine.state.relics):
+                return "你已经持有这件遗物，不可重复购买"
             if not any(r.name == relic_name for r in engine.state.relics_pool):
                 return "商人当前没有这件可售遗物"
             if price > engine.state.shards:
