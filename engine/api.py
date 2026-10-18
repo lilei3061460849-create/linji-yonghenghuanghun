@@ -1625,9 +1625,18 @@ class GameEngine:
     def _refresh_world_final_duel(self, world: WorldState) -> dict:
         """在地图存活状态变化后，启动或结算最后两名轮回者的自然会合阶段。"""
         player = self.state.player
-        enemies = [entity for entity in (getattr(self.state, "enemies", []) or [])
-                   if entity.is_alive and not entity.is_departed]
-        living_rivals = [entity for entity in enemies if entity.entity_type == "轮回者"]
+        # 轮回者即使通过交涉成为朋友或临时盟友，也仍然是存活的轮回者；
+        # 最终死斗人数不能只统计 enemies，否则结盟会让死斗永远无法触发。
+        all_entities = []
+        for group_name in ("enemies", "friends", "temp_friends", "employees"):
+            all_entities.extend(getattr(self.state, group_name, []) or [])
+        living_rivals_by_id = {
+            entity.runtime_id: entity for entity in all_entities
+            if entity is not None and entity is not player
+            and entity.entity_type == "轮回者"
+            and entity.is_alive and not entity.is_departed
+        }
+        living_rivals = list(living_rivals_by_id.values())
         if world.final_duel_complete:
             return {"active": False, "complete": True, "winner": world.final_duel_winner}
         # 最终死斗以剩余轮回者人数判定，不要求玩家先抛弃朋友/员工/造物；
@@ -1635,8 +1644,25 @@ class GameEngine:
         eligible = (player is not None and player.is_alive
                     and len(living_rivals) == 1)
         if not world.final_duel_search and eligible:
+            rival = living_rivals[0]
+            # 最终死斗优先于先前结成的盟约。把最后一名轮回者移回敌方阵营，
+            # 让地图遭遇检测和既有战斗引擎都能按真正的死斗处理。
+            for group_name in ("friends", "temp_friends", "employees"):
+                group = getattr(self.state, group_name, []) or []
+                if rival in group:
+                    group.remove(rival)
+            enemies = getattr(self.state, "enemies", [])
+            if rival not in enemies:
+                enemies.append(rival)
+            rival_actor = world.actors.get(rival.runtime_id)
+            if rival_actor is not None:
+                rival_actor.kind = "enemy"
+                rival_actor.faction = "enemy"
+                rival_actor.owner_actor_id = ""
+                rival_actor.behavior = "explore"
+                rival_actor.mode = "autonomous"
             world.final_duel_search = True
-            world.final_duel_finalists = [player.runtime_id, living_rivals[0].runtime_id]
+            world.final_duel_finalists = [player.runtime_id, rival.runtime_id]
             for encounter in world.encounters.values():
                 if encounter.active and set(world.final_duel_finalists).issubset(set(encounter.participants)):
                     encounter.final_duel = True
@@ -1646,10 +1672,11 @@ class GameEngine:
                          note="最后两名轮回者开始自行寻找彼此；世界威胁在会合前继续结算")
             return {"active": True, "finalists": list(world.final_duel_finalists)}
         if world.final_duel_search and not world.final_duel_started:
-            entities = ([player] if player is not None else []) + list(
-                getattr(self.state, "enemies", []) or [])
+            entities = ([player] if player is not None else [])
+            for group_name in ("enemies", "friends", "temp_friends", "employees"):
+                entities.extend(getattr(self.state, group_name, []) or [])
             live_ids = {entity.runtime_id for entity in entities
-                        if entity.is_alive and not entity.is_departed}
+                        if entity is not None and entity.is_alive and not entity.is_departed}
             living_finalists = [actor_id for actor_id in world.final_duel_finalists
                                 if actor_id in live_ids]
             if len(living_finalists) == 1:
