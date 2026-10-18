@@ -1606,6 +1606,10 @@ class GameEngine:
         if not world.final_duel_search and eligible:
             world.final_duel_search = True
             world.final_duel_finalists = [player.runtime_id, enemies[0].runtime_id]
+            for encounter in world.encounters.values():
+                if encounter.active and set(world.final_duel_finalists).issubset(set(encounter.participants)):
+                    encounter.final_duel = True
+                    world.final_duel_started = True
             world.record("final_duel_search_started", player.runtime_id,
                          finalists=list(world.final_duel_finalists),
                          note="最后两名轮回者开始自行寻找彼此；世界威胁在会合前继续结算")
@@ -1808,6 +1812,8 @@ class GameEngine:
     def _action_world_move(self, params: dict) -> dict:
         try:
             world = self._world_from_state()
+            if world.final_duel_complete:
+                return {"success": False, "error": "最终生存阶段已经结算，地图行动已结束"}
             actor_id = params.get("actor_id")
             player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
             actor_id = params.get("actor_id") or player_id
@@ -1899,6 +1905,8 @@ class GameEngine:
     def _action_world_wait(self, params: dict) -> dict:
         try:
             world = self._world_from_state()
+            if world.final_duel_complete:
+                return {"success": False, "error": "最终生存阶段已经结算，不能继续等待世界回合"}
             actor_id = params.get("actor_id")
             player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
             actor_id = params.get("actor_id") or player_id
@@ -2244,6 +2252,8 @@ class GameEngine:
             world = self._world_from_state()
         except ValueError as exc:
             return {"success": False, "error": str(exc)}
+        if world.final_duel_complete:
+            return {"success": False, "error": "最终生存阶段已经结算，不能继续耗时行动"}
         player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
         if player_id is None:
             return {"success": False, "error": "地图上找不到轮回者单位"}
