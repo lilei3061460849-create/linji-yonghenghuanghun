@@ -777,7 +777,7 @@ def test_hiring_signal_records_failure_if_successful_settlement_creates_no_emplo
         "reason": "雇佣结算未生成员工实体",
     }]
     assert world.hiring_signals[0]["status"] == "failed"
-    assert any(event["event_type"] == "hiring_signal_failed"
+    assert any(event["type"] == "hiring_signal_failed"
                for event in world.event_log)
 
 
