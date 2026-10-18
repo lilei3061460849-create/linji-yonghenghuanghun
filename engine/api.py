@@ -5480,6 +5480,10 @@ class GameEngine:
         budget_error = self._consume_action_or_error(attacker)
         if budget_error:
             return budget_error
+        # 「目标死亡时」按是否被选中判定，而不是是否命中；必须在逐击结算前记账，
+        # 否则首击击杀目标时，死亡钩子先于此处记账执行，会漏掉自愈触发。
+        note_action_targets(self.state, attacker,
+                            [refs.get(hit["target_ref"]) for hit in hits])
         results = []
         for index, hit in enumerate(hits):
             target = refs[hit["target_ref"]]
@@ -5499,9 +5503,6 @@ class GameEngine:
         self._advance_duel_turn()
         if self.state.in_final_duel and not self._duel_side_can_act("player_side") and not self._duel_side_can_act("opponent_side"):
             self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
-        # 自愈X「目标死亡时」（2026-10-14 用户裁定）：记持有者本轮选中的目标。
-        note_action_targets(self.state, attacker,
-                            [refs.get(hit["target_ref"]) for hit in hits])
         return {"success": True, "action": f"{attacker.name}结算一轮攻击",
                 "result": {"attacker": attacker.name, "hits": results}}
 
