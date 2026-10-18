@@ -567,7 +567,11 @@ class TacticalAI:
                     out.append({"action": "use_daowen",
                                 "label": f"{name}X={x}",
                                 "kind": kind, "target": t,
-                                "finisher": bool(kill_x and x == kill_x),
+                                # 斩杀档优先；若当前血量超过单次可击杀范围，也保留最大伤害档，
+                                # 避免候选截断让AI第二手仍重复低伤普攻。
+                                "priority_damage": bool(
+                                    kind == "damage" and
+                                    (x == max(xs) or (kill_x and x == kill_x))),
                                 "params": self._params(name, x, t)})
         return out
 
@@ -941,21 +945,21 @@ class TacticalAI:
         # 道纹候选会把后面的斩杀候选截掉，AI明明有一手可终结战斗却重复普攻。
         if len(candidates) > MAX_CANDIDATE_PREVIEWS:
             basic_ids = {id(cand) for cand in basic_candidates}
-            finisher_candidates = [
+            priority_damage_candidates = [
                 cand for cand in candidates
-                if cand.get("finisher") and id(cand) not in basic_ids
+                if cand.get("priority_damage") and id(cand) not in basic_ids
             ]
             reserve_basic = min(len(basic_candidates), MAX_CANDIDATE_PREVIEWS)
-            reserve_finishers = min(
-                len(finisher_candidates), MAX_CANDIDATE_PREVIEWS - reserve_basic)
-            reserved_ids = basic_ids | {id(cand) for cand in finisher_candidates}
+            reserve_priority_damage = min(
+                len(priority_damage_candidates), MAX_CANDIDATE_PREVIEWS - reserve_basic)
+            reserved_ids = basic_ids | {id(cand) for cand in priority_damage_candidates}
             regular_candidates = [
                 cand for cand in candidates if id(cand) not in reserved_ids
             ]
-            regular_slots = MAX_CANDIDATE_PREVIEWS - reserve_basic - reserve_finishers
+            regular_slots = MAX_CANDIDATE_PREVIEWS - reserve_basic - reserve_priority_damage
             candidates = (
                 regular_candidates[:regular_slots]
-                + finisher_candidates[:reserve_finishers]
+                + priority_damage_candidates[:reserve_priority_damage]
                 + basic_candidates[:reserve_basic]
             )
         immediate_damage_available = False
