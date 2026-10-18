@@ -68,7 +68,7 @@ class DaoWenInstance:
     def can_use(self) -> bool:
         return (not self.is_frozen and not self.spent_unique
                 and self.cooldown_remaining <= 0
-                and self.cooldown_rounds_remaining <= 0)
+                and getattr(self, "cooldown_rounds_remaining", 0) <= 0)
 
 
 @dataclass
