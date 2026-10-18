@@ -1571,3 +1571,17 @@ def test_traveling_merchant_is_neutral_immediately_when_created(tmp_path):
     assert merchant.shards == 20
     assert len(merchant.relics) == 5
 
+
+
+
+def test_entity_shard_peak_is_monotonic_through_the_active_setattr_hook():
+    from engine.models import Entity
+
+    entity = Entity("欠债单位", "轮回者", shards=30)
+    assert entity.shards_peak == 30
+    entity.shards = -5
+    assert entity.shards_peak == 30
+    entity.shards_peak = 1
+    assert entity.shards_peak == 30
+    entity.shards = 45
+    assert entity.shards_peak == 45
