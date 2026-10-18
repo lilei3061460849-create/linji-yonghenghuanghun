@@ -1619,7 +1619,8 @@ class GameEngine:
                 relic_name = location.get("relic_name", location.get("name", ""))
                 capacity = getattr(entity, "relic_capacity", 10**9)
                 if relic_name not in owned_names and len(owned_names) < capacity:
-                    relic = Relic(name=relic_name, effect=location.get("relic_effect", ""))
+                    relic = Relic(name=relic_name, effect=location.get("relic_effect", ""),
+                                  tags=list(location.get("relic_tags") or []))
                     inventory.append(relic)
                     location["active"] = False
                     location["collected"] = True
@@ -1811,7 +1812,8 @@ class GameEngine:
                             owned_names = {relic.name for relic in owned_relics}
                             if location.get("relic_name") not in owned_names and len(owned_names) < capacity:
                                 relic = Relic(name=location["relic_name"],
-                                              effect=location.get("relic_effect", ""))
+                                              effect=location.get("relic_effect", ""),
+                                              tags=list(location.get("relic_tags") or []))
                                 owned_relics.append(relic)
                                 location["active"] = False
                                 location["collected"] = True
@@ -2284,7 +2286,8 @@ class GameEngine:
             location_id = f"resonance_relic_{world.clock.turn}_{len(world.map.locations) + 1}"
             world.map.add_location(location_id, {
                 "kind": "relic", "name": relic.name, "relic_name": relic.name,
-                "relic_effect": relic.effect, "x": position[0], "y": position[1],
+                "relic_effect": relic.effect, "relic_tags": list(relic.tags),
+                "x": position[0], "y": position[1],
                 "discovered": True, "discovered_by": [player_id], "active": True,
             })
             world.record("resonance_relic_dropped", player_id, location_id=location_id,
