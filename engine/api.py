@@ -2028,6 +2028,7 @@ class GameEngine:
                 return {"success": False, "error": "目标坐标x/y必须是整数"}
             result = world.move_actor(actor_id, (x, y))
             self._resolve_world_hiring_signals(world)
+            self._share_created_being_vision(world)
             self._sync_world_entity_positions(world)
             location_entry = world.map.location_at((x, y))
             if location_entry is not None:
@@ -2122,6 +2123,7 @@ class GameEngine:
             world.wait(actor_id, turns)
             self._resolve_world_relic_pickups(world)
             self._resolve_world_hiring_signals(world)
+            self._share_created_being_vision(world)
             self._refresh_world_final_duel(world)
             elapsed = world.clock.turn - start_turn
             active_encounter = next((encounter for encounter in world.encounters.values()
@@ -2290,11 +2292,15 @@ class GameEngine:
             if actor_id is None or actor_id != player_id:
                 return {"success": False, "error": "只能查看轮回者自己的视野"}
             visible = world.visible_cells(actor_id)
+            self._share_created_being_vision(world)
             self._sync_world_entity_positions(world)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_vision",
                     "result": {"actor_id": actor_id, "visible_cells": [list(p) for p in visible],
-                               "known_cells": sorted(world.actors[actor_id].known_cells)}}
+                               "known_cells": sorted(world.actors[actor_id].known_cells),
+                               "reported_sightings": [
+                                   dict(item) for item in world.actors[actor_id].memory
+                                   if item.get("reported_by")]}}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
@@ -2510,6 +2516,7 @@ class GameEngine:
             world.wait(player_id, 1)
             self._resolve_world_relic_pickups(world)
             self._resolve_world_hiring_signals(world)
+            self._share_created_being_vision(world)
             self._refresh_world_final_duel(world)
             elapsed = world.clock.turn - start_turn
             active_encounter = next((encounter for encounter in world.encounters.values()
@@ -2606,6 +2613,7 @@ class GameEngine:
         world.wait(player_id, duration)
         self._resolve_world_relic_pickups(world)
         self._resolve_world_hiring_signals(world)
+        self._share_created_being_vision(world)
         self._refresh_world_final_duel(world)
         elapsed = world.clock.turn - start_turn
         active_encounter = next((encounter for encounter in world.encounters.values()
@@ -2674,7 +2682,9 @@ class GameEngine:
                     world.add_actor(WorldActorState(
                         actor_id=being.runtime_id, name=being.name, kind="friend",
                         x=player_actor.x, y=player_actor.y, alive=being.is_alive,
-                        faction="friend", mode="autonomous"))
+                        faction="friend", mode="autonomous", behavior="explore",
+                        owner_actor_id=player_id))
+        self._share_created_being_vision(world)
         world.record("world_action_completed", player_id, action=action,
                      elapsed_turns=elapsed)
         self._open_adjacent_merchant_session(world)
