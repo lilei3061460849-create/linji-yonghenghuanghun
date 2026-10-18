@@ -1773,7 +1773,10 @@ class GameEngine:
                         "result": {"choice": choice, "target": target.name,
                                    "session": "过路商人"}}
             if choice == "attack":
-                target.faction = "monster" if target.kind == "enemy" and target.faction == "monster" else "enemy"
+                if target.kind != "enemy":
+                    return {"success": False,
+                            "error": "当前只有敌方单位可直接进入战斗；攻击商人/友方的阵营转换规则尚未接入"}
+                target.faction = "monster" if target.faction == "monster" else "enemy"
                 encounter = world.start_encounter([player_id, target_id], target.position)
                 world.record("hostility_declared", player_id, target_actor_id=target_id,
                              target_name=target.name, encounter_id=encounter.encounter_id)
