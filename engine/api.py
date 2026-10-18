@@ -183,6 +183,9 @@ class GameEngine:
                        if actor.kind == "player" and actor.alive), None)
         if player is None:
             return state_data
+        # 决策观察会刷新该轮可见单位与私有记忆，但不会推进世界时间。
+        world.visible_cells(player.actor_id)
+        self.state.world_state = world.to_dict()
         visible_positions = {player.position, *world.map.adjacent_vision(player.position)}
         visible_actor_ids = {
             actor.actor_id for actor in world.actors.values()
@@ -193,7 +196,7 @@ class GameEngine:
         known_keys.update(world.map.key(pos) for pos in visible_positions)
 
         # GameState.to_dict() 引用原 world_state，必须深拷贝后再投影，不能修改真实存档。
-        world_payload = copy.deepcopy(state_data.get("world_state", {}))
+        world_payload = copy.deepcopy(world.to_dict())
         map_payload = world_payload.get("map", {})
         map_payload["terrain"] = {
             key: terrain for key, terrain in map_payload.get("terrain", {}).items()
