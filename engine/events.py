@@ -143,13 +143,16 @@ class EventPool:
 
     def build_pool(self, region: str) -> list[str]:
         """当前池 = 未触发通用 + 未触发本区域专属（通用在前）"""
-        pool = [n for n in EVENT_NAMES["通用"] if n in self.events and n not in self.triggered]
-        pool += [n for n in EVENT_NAMES.get(region, []) if n in self.events and n not in self.triggered]
+        # 过路商人是地图上的独立中立角色，不属于随机地点事件池；由世界地图相遇逻辑显式打开交易会话。
+        pool = [n for n in EVENT_NAMES["通用"]
+                if n in self.events and n not in self.triggered and n != "过路商人"]
+        pool += [n for n in EVENT_NAMES.get(region, [])
+                 if n in self.events and n not in self.triggered and n != "过路商人"]
         return pool
 
     def resolve(self, name: str):
-        """标记事件已触发。祭坛是可反复抵达的投资地点，每次访问单独结算一次。"""
-        if name != "祭坛":
+        """标记事件已触发；祭坛可重复投资，过路商人可在地图上反复遭遇。"""
+        if name not in {"祭坛", "过路商人"}:
             self.triggered.add(name)
         if self.current == name:
             self.current = None
