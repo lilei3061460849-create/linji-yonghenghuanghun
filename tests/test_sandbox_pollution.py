@@ -108,7 +108,9 @@ def test_preview_event_resolution_does_not_consume_the_event(out_of_battle_engin
     pool = engine.event_pool
     name = pool.build_pool(engine.state.current_region or "龙心谷")[0]
     pool.current = name
-    reject_option = next(o for o in pool.events[name]["options"]\n                         if engine._is_reject_option_text(o["text"]))\n    option_id = reject_option["id"]
+    reject_option = next(o for o in pool.events[name]["options"]
+                         if engine._is_reject_option_text(o["text"]))
+    option_id = reject_option["id"]
     triggered_before = set(pool.triggered)
 
     out = ActionPreview(engine).preview("resolve_event",
