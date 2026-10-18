@@ -1457,3 +1457,39 @@ def test_npc_pathfinding_does_not_use_unseen_terrain():
     assert world._find_known_path("r", (5, 5), (2, 5)) is None
 
 
+
+
+
+def test_trade_does_not_count_temporary_transfer_balance_as_shard_peak(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-trade-peak.db"),
+                        save_dir=str(tmp_path), rng_seed=149, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    rival = Entity("R", "轮回者", blood_limit=30, current_hp=30, shards=10)
+    rival.shards_peak = 10
+    engine.state.player = player
+    engine.state.phase = "pre_battle"
+    engine.state.enemies = [rival]
+    engine.state.shards = 10
+    engine.state.shards_peak = 10
+
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(player.runtime_id, "P", "player", 1, 1,
+                                    faction="player", mode="manual"))
+    world.add_actor(WorldActorState(rival.runtime_id, "R", "enemy", 2, 1,
+                                    faction="enemy", mode="autonomous"))
+    engine.state.world_state = world.to_dict()
+
+    result = engine.execute_action("world_interact", {
+        "target_actor_id": rival.runtime_id, "choice": "trade",
+        "offer_shards": 10, "request_shards": 10,
+    })
+
+    assert result["success"] and result["result"]["accepted"] is True
+    # 双方最终余额均未变化；交易中先入账的临时值不得伪造历史最高持有量。
+    assert engine.state.shards == 10
+    assert rival.shards == 10
+    assert engine.state.shards_peak == 10
+    assert rival.shards_peak == 10
