@@ -1290,7 +1290,9 @@ def test_twisted_tool_library():
     ev2 = next(n for n, ev in engine2.event_pool.events.items()
                if ev["region"] == "扭曲都市" and n != ev_name)
     engine2.event_pool.current = ev2
-    reject_option = next(o for o in engine2.event_pool.events[ev2]["options"]\n                         if engine2._is_reject_option_text(o["text"]))\n    r2 = engine2.execute_action("resolve_event", {"event": ev2, "option_id": reject_option["id"]})
+    reject_option = next(o for o in engine2.event_pool.events[ev2]["options"]
+                         if engine2._is_reject_option_text(o["text"]))
+    r2 = engine2.execute_action("resolve_event", {"event": ev2, "option_id": reject_option["id"]})
     assert r2["success"]
     bad = engine2.execute_action("choose_discovered_item", {"item_name": "不存在的道具"})
     assert not bad["success"] and engine2.state.pending_item_choices
