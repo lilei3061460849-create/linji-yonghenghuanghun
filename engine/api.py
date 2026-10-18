@@ -6757,11 +6757,25 @@ class GameEngine:
             if encounter is None or not encounter.active or player_id not in encounter.participants:
                 return {"success": False, "error": "world_encounter_id必须指向包含当前轮回者的有效地图遭遇"}
             enemy_by_id = {entity.runtime_id: entity for entity in self.state.enemies}
+            companion_ids = {
+                entity.runtime_id
+                for group_name in ("friends", "employees", "temp_friends")
+                for entity in (getattr(self.state, group_name, []) or [])
+            }
             participant_ids = [actor_id for actor_id in encounter.participants if actor_id != player_id]
-            if not participant_ids or any(actor_id not in enemy_by_id for actor_id in participant_ids):
+            if (not participant_ids
+                    or any(actor_id not in enemy_by_id and actor_id not in companion_ids
+                           for actor_id in participant_ids)):
                 return {"success": False,
-                        "error": "当前战斗接入仅支持已登记在敌方单位列表中的遭遇参与者；目标未映射到现有战斗实体"}
-            world_participant_enemies = [enemy_by_id[actor_id] for actor_id in participant_ids]
+                        "error": "地图遭遇含有未映射到轮回者、队友或敌方实体的参与者"}
+            # 友方地图单位可被同场遭遇记录，但由现有战斗阵营规则决定是否实际参战；
+            # 只有敌方实体从敌方列表中移入本次战斗，避免把队友误当敌人。
+            world_participant_enemies = [
+                enemy_by_id[actor_id] for actor_id in participant_ids
+                if actor_id in enemy_by_id
+            ]
+            if not world_participant_enemies:
+                return {"success": False, "error": "地图遭遇没有可交给战斗引擎的敌方实体"}
             if any(not entity.is_alive for entity in world_participant_enemies):
                 return {"success": False, "error": "地图遭遇包含已死亡的敌方单位"}
             self.state.world_enemy_reserve = [
