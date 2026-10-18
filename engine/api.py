@@ -1678,6 +1678,24 @@ class GameEngine:
                     "kind": "event", "name": event_name, "event_name": event_name,
                     "x": pos[0], "y": pos[1], "discovered": False, "active": True})
                 available.remove(pos)
+            # 世界地图同时生成真实资源点；进入地点后立即拾取，且该点只结算一次。
+            resource_count = max(1, min(5, (width * height) // 150))
+            for resource_index in range(resource_count):
+                if not available:
+                    break
+                resource_roll = self.dice.auto_roll(
+                    f"open_world_resource_location_{resource_index}", available,
+                    context=f"开放世界碎片资源点位置#{resource_index + 1}")
+                resource_pos = tuple(resource_roll["selected"])
+                amount_roll = self.dice.auto_roll(
+                    f"open_world_resource_amount_{resource_index}", list(range(5, 16)),
+                    context=f"开放世界碎片资源点储量#{resource_index + 1}")
+                world.map.add_location(f"resource_shards_{resource_index + 1}", {
+                    "kind": "resource", "name": "碎片残留", "resource_type": "shards",
+                    "amount": int(amount_roll["selected"]),
+                    "x": resource_pos[0], "y": resource_pos[1],
+                    "discovered": False, "active": True})
+                available.remove(resource_pos)
             self._sync_world_entity_positions(world)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_initialize",
@@ -1706,14 +1724,30 @@ class GameEngine:
                 location_id, location = location_entry
                 if location.get("active", True):
                     location["discovered"] = True
-                    event_name = location.get("event_name", location.get("name", location_id))
-                    if (self.event_pool.current is None and event_name in self.event_pool.events
-                            and (event_name == "祭坛" or event_name not in self.event_pool.triggered)):
-                        self.event_pool.current = event_name
-                        world.record("location_discovered", actor_id, location_id=location_id,
-                                     location_name=location.get("name", location_id),
-                                     event_name=event_name, position=[x, y])
-                        result["location_event"] = event_name
+                    if location.get("kind") == "resource" and location.get("resource_type") == "shards":
+                        amount = max(0, int(location.get("amount", 0)))
+                        self.state.shards += amount
+                        self.state.shards_peak = max(
+                            int(getattr(self.state, "shards_peak", 0)),
+                            max(0, int(self.state.shards)))
+                        location["active"] = False
+                        location["collected"] = True
+                        location["collected_by"] = actor_id
+                        location["collected_turn"] = world.clock.turn
+                        world.record("resource_collected", actor_id, location_id=location_id,
+                                     resource_type="shards", amount=amount,
+                                     position=[x, y])
+                        result["resource_collected"] = {"name": location.get("name", "碎片残留"),
+                                                        "shards": amount}
+                    else:
+                        event_name = location.get("event_name", location.get("name", location_id))
+                        if (self.event_pool.current is None and event_name in self.event_pool.events
+                                and (event_name == "祭坛" or event_name not in self.event_pool.triggered)):
+                            self.event_pool.current = event_name
+                            world.record("location_discovered", actor_id, location_id=location_id,
+                                         location_name=location.get("name", location_id),
+                                         event_name=event_name, position=[x, y])
+                            result["location_event"] = event_name
             # 商人自己走近玩家也会建立接触；只在实际相邻时打开交易会话。
             self._open_adjacent_merchant_session(world)
             self.state.world_state = world.to_dict()
