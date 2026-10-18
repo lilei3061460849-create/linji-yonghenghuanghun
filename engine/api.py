@@ -5574,6 +5574,31 @@ class GameEngine:
         relic_choices = params.get("relic_choices", {})
         # 先完成全部静态校验，再抽怪；非法遗物参数不得消耗正式随机源。
         self.combat.validate_battle_start_relic_choices(relic_choices)
+        world_encounter_id = params.get("world_encounter_id")
+        world_battle = bool(world_encounter_id)
+        world_participant_enemies = []
+        if world_battle:
+            try:
+                world = self._world_from_state()
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
+            encounter = world.encounters.get(world_encounter_id)
+            player_id = getattr(self.state.player, "runtime_id", "") if self.state.player else ""
+            if encounter is None or not encounter.active or player_id not in encounter.participants:
+                return {"success": False, "error": "world_encounter_id必须指向包含当前轮回者的有效地图遭遇"}
+            enemy_by_id = {entity.runtime_id: entity for entity in self.state.enemies}
+            participant_ids = [actor_id for actor_id in encounter.participants if actor_id != player_id]
+            if not participant_ids or any(actor_id not in enemy_by_id for actor_id in participant_ids):
+                return {"success": False,
+                        "error": "当前战斗接入仅支持已登记在敌方单位列表中的遭遇参与者；目标未映射到现有战斗实体"}
+            world_participant_enemies = [enemy_by_id[actor_id] for actor_id in participant_ids]
+            if any(not entity.is_alive for entity in world_participant_enemies):
+                return {"success": False, "error": "地图遭遇包含已死亡的敌方单位"}
+            self.state.world_enemy_reserve = [
+                entity for entity in self.state.enemies
+                if entity.runtime_id not in set(participant_ids)
+            ]
+            self.state.world_encounter_id = world_encounter_id
         # 在战始产生随机怪物前保存快照；重来会恢复随机源并再次按当前代码抽取。
         self._battle_restart_snapshot = {
             "state": copy.deepcopy(self.state),
