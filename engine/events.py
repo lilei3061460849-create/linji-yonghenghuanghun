@@ -229,7 +229,7 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
             return "必须在成交前显式确认交易双方、遗物名称与碎片价格（confirmed=true）"
         if isinstance(price, bool) or not isinstance(price, int) or price < 0:
             return "交易价格必须是非负整数碎片"
-        merchant = engine.state.merchant
+        merchant = getattr(engine.state, "merchant", None)
         if merchant is None:
             return "过路商人尚未进入本局副本，当前没有可交易的商人库存"
         if direction == "buy":
