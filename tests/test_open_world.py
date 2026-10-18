@@ -35,17 +35,27 @@ def test_movement_is_adjacent_passable_and_time_costs_one_turn():
         world.move_actor("p", (4, 1))
 
 
-def test_units_cannot_overlap_and_blocked_terrain_rejects_move():
-    world = WorldState(clock=WorldClock(),
-                       map=_open_map())
-    world.map.terrain["2,1"] = "wall"
-    world.add_actor(WorldActorState("p", "玩家", "轮回者", 1, 1))
-    world.add_actor(WorldActorState("m", "怪物", "怪物", 2, 1))
-    with pytest.raises(ValueError, match="占据"):
-        world.move_actor("p", (2, 1))
-    world.map.terrain["2,1"] = "wall"
+def test_units_may_overlap_and_same_cell_triggers_encounter_but_walls_block():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(
+        "p", "玩家", "轮回者", 1, 1, faction="player", mode="manual"))
+    world.add_actor(WorldActorState(
+        "m", "怪物", "怪物", 2, 1, faction="monster", mode="manual"))
+
+    # 进入已被怪物占据的格子是合法移动，并立即触发遭遇。
+    result = world.move_actor("p", (2, 1))
+    assert world.actors["p"].position == world.actors["m"].position == (2, 1)
+    assert len(result["new_encounters"]) == 1
+    encounter = world.encounters[result["new_encounters"][0]]
+    assert encounter.active
+    assert set(encounter.participants) == {"p", "m"}
+
+    # 墙壁仍然不可通行；用独立世界避免遭遇状态阻止移动。
+    blocked = WorldState(clock=WorldClock(), map=_open_map())
+    blocked.map.terrain["2,1"] = "wall"
+    blocked.add_actor(WorldActorState("p", "玩家", "轮回者", 1, 1))
     with pytest.raises(ValueError, match="不可通行"):
-        world.move_actor("p", (2, 1))
+        blocked.move_actor("p", (2, 1))
 
 
 def test_vision_is_four_orthogonal_cells_and_private_per_actor():
