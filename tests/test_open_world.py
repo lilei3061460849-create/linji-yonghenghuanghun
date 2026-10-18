@@ -481,6 +481,43 @@ def test_world_initialization_spawns_current_dungeon_monster_population_and_even
     assert "恶魔医务室" not in event_names
 
 
+def test_resource_location_is_collected_once_on_arrival_and_updates_shard_peak(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-resource.db"),
+                        save_dir=str(tmp_path), rng_seed=79)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30, shards=4)
+    engine.state.shards = 4
+    engine.state.shards_peak = 8
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+
+    world = WorldState.from_dict(engine.state.world_state)
+    world.map.locations.clear()
+    world.map.add_location("cache", {
+        "kind": "resource", "name": "碎片残留", "resource_type": "shards",
+        "amount": 12, "x": 2, "y": 1, "discovered": False, "active": True,
+    })
+    engine.state.world_state = world.to_dict()
+
+    first = engine.execute_action("world_move", {"x": 2, "y": 1})
+    assert first["success"], first
+    assert first["result"]["resource_collected"]["shards"] == 12
+    assert engine.state.shards == 16
+    assert engine.state.shards_peak == 16
+    location = engine.state.world_state["map"]["locations"]["cache"]
+    assert location["active"] is False
+    assert location["collected"] is True
+
+    # 离开后再回来也不会重复领取。
+    assert engine.execute_action("world_move", {"x": 2, "y": 2})["success"]
+    back = engine.execute_action("world_move", {"x": 2, "y": 1})
+    assert back["success"], back
+    assert "resource_collected" not in back["result"]
+    assert engine.state.shards == 16
+
+
 def test_ai_state_projection_hides_unseen_entities_terrain_and_locations(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
