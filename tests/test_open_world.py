@@ -1241,3 +1241,40 @@ def test_random_world_generation_keeps_all_passable_cells_connected():
             if world_map.is_passable((x, y))
         }
         assert reached == passable
+
+
+def test_autonomous_reincarnator_can_buy_one_finite_stock_relic_from_merchant(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity, Relic
+
+    engine = GameEngine(db_path=str(tmp_path / "npc-merchant-trade.db"),
+                        save_dir=str(tmp_path), rng_seed=149, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    rival = Entity("R", "轮回者", blood_limit=30, current_hp=30, shards=10)
+    merchant = Entity("过路商人", "特殊角色", shards=20,
+                      relics=[Relic(name="测试遗物", effect="测试效果")])
+    engine.state.player = player
+    engine.state.enemies = [rival]
+    engine.state.merchant = merchant
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(
+        player.runtime_id, "P", "player", 1, 1, faction="player", mode="manual"))
+    world.add_actor(WorldActorState(
+        rival.runtime_id, "R", "enemy", 2, 2, faction="enemy", mode="autonomous"))
+    world.add_actor(WorldActorState(
+        merchant.runtime_id, "过路商人", "merchant", 5, 5,
+        faction="neutral", mode="autonomous"))
+
+    assert engine._resolve_world_npc_merchant_trades(world) == []
+    assert rival.shards == 10 and len(merchant.relics) == 1
+
+    world.actors[merchant.runtime_id].x = 3
+    world.actors[merchant.runtime_id].y = 2
+    trades = engine._resolve_world_npc_merchant_trades(world)
+    assert len(trades) == 1
+    assert trades[0]["relic_name"] == "测试遗物"
+    assert rival.shards == 0
+    assert merchant.shards == 30
+    assert [relic.name for relic in rival.relics] == ["测试遗物"]
+    assert merchant.relics == []
+    assert any(event["type"] == "npc_merchant_trade" for event in world.event_log)
