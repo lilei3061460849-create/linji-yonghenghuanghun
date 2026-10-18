@@ -145,6 +145,7 @@ class QuestEngine:
                 "title": definition["title"],
                 "description": definition.get("description", ""),
                 "giver_actor_id": definition.get("giver_actor_id"),
+                "giver_name": definition.get("giver_name"),
                 "objectives": deepcopy(definition["objectives"]),
                 "rewards": deepcopy(definition.get("rewards", {})),
                 "status": instance.get("status") if instance else "locked" if not self._is_unlocked(state, definition) else "available",
