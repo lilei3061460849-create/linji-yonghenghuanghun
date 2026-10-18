@@ -442,3 +442,30 @@ def test_world_encounter_uses_real_enemy_and_returns_survivors_to_map(tmp_path):
     assert restored.encounters[encounter_id].active is False
     assert restored.actors[target_id].alive is False
     assert restored.actors[reserve_id].alive is True
+
+
+def test_world_initialization_spawns_current_dungeon_monster_population_and_event_sites(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-population.db"),
+                        save_dir=str(tmp_path), rng_seed=73)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.current_region = "乱葬岗"
+    engine.state.phase = "pre_battle"
+    expected_pool = engine._monster_pool_for_battle()
+    result = engine.execute_action("world_initialize", {"width": 21, "height": 21})
+    assert result["success"], result
+    assert result["result"]["spawned_monsters"] == len(expected_pool)
+    assert len(engine.state.enemies) == len(expected_pool)
+
+    world = WorldState.from_dict(engine.state.world_state)
+    for monster in engine.state.enemies:
+        actor = world.actors[monster.runtime_id]
+        assert actor.faction == "monster"
+        assert (actor.x, actor.y) != (1, 1)
+    positions = [actor.position for actor in world.actors.values() if actor.alive]
+    assert len(positions) == len(set(positions))
+    event_names = {location["event_name"] for location in world.map.locations.values()}
+    assert event_names <= set(engine.event_pool.build_pool("乱葬岗"))
+    assert "恶魔医务室" not in event_names
