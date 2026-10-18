@@ -468,6 +468,9 @@ class GameEngine:
                                                                   "actor_id": "optional; defaults to player"}},
                 {"action_type": "world_wait", "params_schema": {"turns": "positive integer (default 1)",
                                                                   "actor_id": "optional; defaults to player"}},
+                {"action_type": "world_interact", "params_schema": {
+                    "target_actor_id": "actor_id from visible_actors",
+                    "choice": ["talk", "trade", "cooperate", "intimidate", "attack"]}},
             ])
         return {"phase": GamePhase.PRE_BATTLE.value, "energy": self.state.energy, "actions": actions}
 
@@ -1296,6 +1299,8 @@ class GameEngine:
             return self._action_world_status(params)
         elif action_type == "world_vision":
             return self._action_world_vision(params)
+        elif action_type == "world_interact":
+            return self._action_world_interact(params)
         elif action_type == "setup_attributes":
             return self._action_setup_attributes(params)
         elif action_type == "setup_choose_region":
@@ -1661,6 +1666,78 @@ class GameEngine:
                 "known_locations": known_locations,
             }}
         except (ValueError, KeyError) as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _action_world_interact(self, params: dict) -> dict:
+        """与实际相邻的地图单位交互；只记录已发生的意图，不替对方伪造同意。"""
+        try:
+            world = self._world_from_state()
+            player_id = next((key for key, actor in world.actors.items()
+                              if actor.kind == "player" and actor.alive), None)
+            target_id = params.get("target_actor_id")
+            choice = params.get("choice")
+            allowed = {"talk", "trade", "cooperate", "intimidate", "attack"}
+            if choice not in allowed:
+                return {"success": False, "error": f"choice必须是{sorted(allowed)}之一"}
+            if not player_id or not isinstance(target_id, str) or target_id not in world.actors:
+                return {"success": False, "error": "必须指定一个真实存在的目标单位"}
+            if target_id == player_id:
+                return {"success": False, "error": "不能与自己交互"}
+            player, target = world.actors[player_id], world.actors[target_id]
+            if not target.alive:
+                return {"success": False, "error": "目标单位已离场"}
+            if abs(player.x - target.x) + abs(player.y - target.y) != 1:
+                return {"success": False, "error": "目标必须位于上下左右相邻格"}
+            if any(encounter.active and target_id in encounter.participants
+                   for encounter in world.encounters.values()):
+                return {"success": False, "error": "目标正处于遭遇中，不能开启普通交互"}
+            if choice == "trade":
+                if target.kind != "merchant":
+                    world.record("trade_requested", player_id, target_actor_id=target_id,
+                                 target_name=target.name)
+                    self.state.world_state = world.to_dict()
+                    return {"success": True, "action": "world_interact",
+                            "result": {"choice": choice, "target": target.name,
+                                       "pending_counterparty_consent": True,
+                                       "completed": False},
+                            "instruction": "已记录交易请求；轮回者间双边报价与对方同意流程尚未实现，不能直接转移资产"}
+                if self.event_pool.current is not None:
+                    return {"success": False, "error": "当前已有待结算事件，不能开启商人交易"}
+                self.event_pool.current = "过路商人"
+                world.record("merchant_encountered", player_id, merchant_actor_id=target_id,
+                             position=list(target.position))
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_interact",
+                        "result": {"choice": choice, "target": target.name,
+                                   "session": "过路商人"}}
+            if choice == "attack":
+                target.faction = "monster" if target.kind == "enemy" and target.faction == "monster" else "enemy"
+                encounter = world.start_encounter([player_id, target_id], target.position)
+                world.record("hostility_declared", player_id, target_actor_id=target_id,
+                             target_name=target.name, encounter_id=encounter.encounter_id)
+                self.state.world_state = world.to_dict()
+                return {"success": True, "action": "world_interact",
+                        "result": {"choice": choice, "encounter_id": encounter.encounter_id,
+                                   "participants": list(encounter.participants),
+                                   "battle_started": False},
+                        "instruction": "遭遇已登记；战斗参与者接入现有战斗引擎尚未完成，暂不能直接结算伤害"}
+            event_type = {"talk": "conversation_requested",
+                          "cooperate": "alliance_proposed",
+                          "intimidate": "intimidation_attempted"}[choice]
+            event = world.record(event_type, player_id, target_actor_id=target_id,
+                                 target_name=target.name, position=list(target.position))
+            self.state.world_state = world.to_dict()
+            if choice == "talk":
+                return {"success": True, "action": "world_interact",
+                        "result": {"choice": choice, "event_id": event["event_id"],
+                                   "target": target.name,
+                                   "narrative_input": "根据已记录事实生成对话，不得虚构移动、交易或承诺"}}
+            return {"success": True, "action": "world_interact",
+                    "result": {"choice": choice, "event_id": event["event_id"],
+                               "target": target.name, "completed": False,
+                               "pending_counterparty_decision": True},
+                    "instruction": "只记录了交涉意图；目标是否同意、勒索是否成功尚无对方决策与结算机制"}
+        except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
     def _action_world_vision(self, params: dict) -> dict:
