@@ -3803,9 +3803,11 @@ class GameEngine:
         else:
             candidates = ([player] + self.state.friends + self.state.employees
                           + self.state.temp_friends)
-            target_entity = next((entity for entity in candidates
-                                  if entity.is_alive and recipient in
-                                  (entity.name, entity.runtime_id)), None)
+            # 保留公开动作契约中的 recipient="player" 别名。
+            # 玩家显示名和 runtime_id 都可能变化，不能把稳定的 API 别名当成实体 ID 查找。
+            target_entity = player if recipient == "player" and player.is_alive else next(
+                (entity for entity in candidates
+                 if entity.is_alive and recipient in (entity.name, entity.runtime_id)), None)
             if target_entity is None:
                 self.state.energy += 1
                 return {"success": False,
