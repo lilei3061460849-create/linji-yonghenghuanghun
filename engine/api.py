@@ -1196,8 +1196,11 @@ class GameEngine:
             _scale = 1
         self.combat.resolution.begin_action(action_type, params, scale=_scale)
         try:
+            combat_event_start = len(getattr(self.state, "combat_events", []))
             result = self._dispatch_action(action_type, params)
             if result.get("success", False):
+                new_combat_events = list(getattr(self.state, "combat_events", []))[combat_event_start:]
+                self._record_combat_quest_facts(new_combat_events)
                 self._record_successful_action_fact(action_type, params, result)
 
             if not result.get("success", False) and transaction:
@@ -1482,6 +1485,47 @@ class GameEngine:
         for event in generated:
             world.record(event["type"], player_id, quest_id=event["quest_id"], **event.get("details", {}))
         return generated
+
+    def _record_combat_quest_facts(self, events: list[Any]) -> None:
+        """把战斗事件总线中的真实事件映射为任务事实，禁止AI手工伪造击杀/胜负。"""
+        if not events:
+            return
+        quest_engine = self._quest_engine()
+        player = self.state.player
+        player_id = getattr(player, "runtime_id", None) if player else None
+        entities = ([player] if player else []) + list(self.state.friends) + list(self.state.employees) + list(self.state.temp_friends) + list(self.state.enemies)
+
+        def runtime_id_for(name: str) -> str | None:
+            entity = next((item for item in entities if item is not None and item.name == name), None)
+            return getattr(entity, "runtime_id", None) if entity else None
+
+        for event in events:
+            payload = event.to_dict() if hasattr(event, "to_dict") else dict(event)
+            event_type = payload.get("event_type", "combat_event")
+            actor_name = payload.get("actor_name", "")
+            target_name = payload.get("target_name", "")
+            actor_id = runtime_id_for(actor_name)
+            details = {
+                "battle_no": payload.get("battle_no", 0),
+                "round_no": payload.get("round_no", 0),
+                "actor_name": actor_name,
+                "target_name": target_name,
+                "actor_id": actor_id,
+                "target_actor_id": runtime_id_for(target_name),
+                "data": payload.get("data", {}),
+                "ctx": payload.get("ctx"),
+            }
+            fact = {"type": event_type, "actor_id": actor_id,
+                    "world_turn": self._world_turn(), "details": details}
+            if getattr(self.state, "world_state", {}):
+                world = self._world_from_state()
+                world.record(event_type, actor_id, **details)
+                self._process_world_quest_facts(world, [fact])
+                self.state.world_state = world.to_dict()
+            else:
+                quest_engine.advance_time(self.state.quest_state, self._world_turn())
+                quest_engine.process_fact(self.state.quest_state, fact, self._world_turn(),
+                                          player_actor_id=player_id)
 
     def _record_successful_action_fact(self, action_type: str, params: dict,
                                        result: dict) -> None:
