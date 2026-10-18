@@ -472,6 +472,29 @@ class GameEngine:
                     "target_actor_id": "actor_id from visible_actors",
                     "choice": ["talk", "trade", "cooperate", "intimidate", "attack"]}},
             ])
+        if getattr(self.state, "world_state", {}):
+            world = WorldState.from_dict(self.state.world_state)
+            player_id = next((key for key, actor in world.actors.items()
+                              if actor.kind == "player" and actor.alive), None)
+            encounter = next((item for item in world.encounters.values()
+                              if item.active and player_id in item.participants), None)
+            if encounter is not None:
+                schema: dict[str, Any] = {
+                    "world_encounter_id": encounter.encounter_id,
+                    "relic_choices": "逐件显式提交可选战始遗物",
+                }
+                global_spells = self.combat.prepare_global_trigger_spells(TriggerTiming.BATTLE_START.value)
+                if global_spells:
+                    schema["spell_choices"] = {
+                        "_instruction": "存在战始全局法术候选，按现有战斗协议提交",
+                        "candidates": global_spells,
+                    }
+                actions = [{"action_type": "battle_start", "params_schema": schema,
+                            "note": "地图遭遇已发生；使用遭遇参与者进入现有战斗引擎"}]
+            else:
+                # 开放世界不允许脱离地图遭遇随机开启旧式战斗。
+                actions = [action for action in actions
+                           if action.get("action_type") != "battle_start"]
         return {"phase": GamePhase.PRE_BATTLE.value, "energy": self.state.energy, "actions": actions}
 
     def _get_region_actions(self) -> list[dict]:
