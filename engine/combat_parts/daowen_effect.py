@@ -110,10 +110,11 @@ class DaowenEffectMixin:
         result = {"daowen": name, "effects": []}
         # 永恒的偏爱只延长该持有者本次发动后新增/刷新的持续状态，
         # 不会把其他角色施加给他的负面状态错误地永久化。
-        preference_entities = list(dict.fromkeys(
-            self.state.get_all_player_side() + self.state.get_all_enemy_side()
-            + list(getattr(self.state, "temp_friends", []) or [])
-        ))
+        preference_entities = list({
+            entity.runtime_id: entity
+            for entity in (self.state.get_all_player_side() + self.state.get_all_enemy_side()
+                           + list(getattr(self.state, "temp_friends", []) or []))
+        }.values())
         preference_status_before = {
             entity.runtime_id: {
                 id(status): status.remaining_rounds for status in entity.status_effects
