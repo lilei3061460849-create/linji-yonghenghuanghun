@@ -5642,25 +5642,27 @@ class GameEngine:
         queued_names = []
         draw_count = 0
         spawn_plan = None
-        if pool:
+        if world_battle:
+            self.state.enemies.extend(world_participant_enemies)
+            draw_count = len(world_participant_enemies)
+            drawn_names = [entity.name for entity in world_participant_enemies]
+            spawn_plan = {"total": draw_count, "first_count": draw_count,
+                          "queue_rounds": [], "waves": [], "world_encounter_id": world_encounter_id}
+        elif pool:
             spawn_plan = roll_spawn_plan(self.dice, self.state.current_battle, self._current_tier())
             draw_count = spawn_plan["total"]
             drawn_defs = []
             for i in range(draw_count):
                 roll = self.dice.auto_roll(f"monster_draw_{self.state.current_battle}_{i}", pool,
                                             context=f"出怪(第{self.state.current_battle}场,第{i + 1}只)")
-                # 无尽模式：面板按轮次递增（非无尽时 cycle<=1，原样返回）
                 drawn_defs.append(scale_monster_def_for_endless(roll["selected"], endless_cycle))
-            # 出怪配方：S=随机(1,N) 只在[战始]进场，其余进增援队列，
-            # 每波在上一波之后等待 T_i=随机(1,5) 回合进场 R_i 只（一波可多只）。
-            # 旧的"R1只出第1只、R4/R7/R10各增援1只"固定波次已废止；抽怪随机流不变（全抽、仅延迟进场）。
             first_count = min(int(spawn_plan["first_count"]), draw_count)
             queue_rounds = spawn_plan["queue_rounds"]
             for i, monster_def in enumerate(drawn_defs):
                 if i < first_count:
                     m = make_monster_entity(monster_def)
                     m.spawned_round = 1
-                    self.combat.init_monster_shards(m)  # 罪孽都市：[战始]自带碎片=专属道纹数值之和×2（洗劫/赎金等的碎片来源）
+                    self.combat.init_monster_shards(m)
                     self.state.enemies.append(m)
                     drawn_names.append(monster_def["name"])
                 else:
@@ -5672,7 +5674,7 @@ class GameEngine:
         # 事件登记的下一场修正全部在战始一次性消费。
         modifiers = self.state.event_modifiers
         reveal_full_information = bool(modifiers.pop("next_battle_full_information", False))
-        if modifiers.pop("bounty_extra_monster", False) and pool:
+        if not world_battle and modifiers.pop("bounty_extra_monster", False) and pool:
             roll = self.dice.auto_roll(
                 f"bounty_monster_{self.state.current_battle}", pool,
                 context="通缉悬赏榜额外帮派怪物",
@@ -5702,8 +5704,9 @@ class GameEngine:
             modifiers["red_spring_battle_losses"] = red_spring - 1
 
         # 事件登记的"下一场额外出现的怪物"（如龙心谷"追求者·拿走口粮"）
-        forced = list(self.state.forced_monsters_next_battle)
-        self.state.forced_monsters_next_battle = []
+        forced = [] if world_battle else list(self.state.forced_monsters_next_battle)
+        if not world_battle:
+            self.state.forced_monsters_next_battle = []
         for fm in forced:
             m = make_monster_entity(scale_monster_def_for_endless(fm, endless_cycle))
             self.combat.init_monster_shards(m)
