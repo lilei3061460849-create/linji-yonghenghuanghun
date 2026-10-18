@@ -140,7 +140,7 @@ def test_remaining_special_events_are_registered_and_debt_threshold_is_source_dr
     }
     registered = {entry["name"] for entry in special_events.all()}
     assert expected <= registered
-    assert special_events.threshold("huanzhai") == 20
+    assert special_events.threshold("huanzhai") == 10
     assert MonsterLifeMixin.DEBT_THRESHOLD == special_events.threshold("huanzhai")
 
 
