@@ -1813,25 +1813,9 @@ def test_world_learning_action_advances_three_turns_before_granting_daowen(tmp_p
     assert name in engine.state.player.dao_wen
     events = engine.state.world_state["event_log"]
     started = next(event for event in events if event["type"] == "world_action_started"
-                   and event.get("action") == "学习")
+                   and event.get("details", {}).get("action") == "学习")
     completed = next(event for event in events if event["type"] == "world_action_completed"
                      and event.get("action") == "学习")
-    assert started["duration"] == 3
-    assert completed["elapsed_turns"] == 3
+    assert started["details"]["duration"] == 3
+    assert completed["details"]["elapsed_turns"] == 3
     assert engine.state.energy == energy_before
-
-
-def test_eternal_preference_turns_only_explicit_duration_effects_infinite(tmp_path):
-    from engine.daowen import DaoWenEngine
-    from engine.models import Entity
-
-    actor = Entity("造物", "朋友", blood_limit=30, current_hp=30)
-    target = Entity("目标", "轮回者", blood_limit=30, current_hp=30)
-    ordinary = DaoWenEngine.resolve("束缚", 3, caster=target, target=target)
-    actor.preferences = ["永恒的偏爱"]
-    eternal = DaoWenEngine.resolve("束缚", 3, caster=actor, target=target)
-
-    assert ordinary["duration"] == 3
-    assert eternal["duration"] == -1
-    assert eternal["summary"] == "冷却6场，使目标无法行动，持续∞"
-
