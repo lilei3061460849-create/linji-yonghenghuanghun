@@ -1969,6 +1969,17 @@ def test_world_fact_log_records_death_and_departure_once(tmp_path):
     assert world.actors[dead.runtime_id].alive is False
     assert world.actors[departed.runtime_id].alive is False
 
+    # 战终时死亡参与者会从state.enemies移除，仍需通过结算快照写入账本。
+    removed_from_roster = Entity("已从名单移除", "轮回者", blood_limit=10, current_hp=0)
+    removed_from_roster.is_alive = False
+    world.add_actor(WorldActorState(
+        removed_from_roster.runtime_id, removed_from_roster.name, "enemy", 4, 1,
+        faction="enemy", mode="autonomous", alive=False))
+    engine._record_world_entity_outcomes(world, extra_entities=[removed_from_roster])
+    assert any(event["type"] == "actor_died"
+               and event["actor_id"] == removed_from_roster.runtime_id
+               for event in world.event_log)
+
 
 def test_deleted_affix_action_and_choice_endpoint_stay_unavailable(tmp_path):
     from engine.api import GameEngine
