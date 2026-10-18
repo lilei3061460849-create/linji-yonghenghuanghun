@@ -575,3 +575,54 @@ def test_square_boundary_shrinks_outer_ring_every_ten_world_turns_and_roundtrips
     restored = WorldState.from_dict(world.to_dict())
     assert restored.shrink_count == 1
     assert restored.map.terrain_at((0, 1)) == "void"
+
+
+
+def test_world_resonance_drops_a_real_relic_without_granting_it_immediately(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity, Relic
+
+    engine = GameEngine(db_path=str(tmp_path / "resonance-drop.db"),
+                        save_dir=str(tmp_path), rng_seed=91, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
+    engine.state.phase = "pre_battle"
+    engine.state.relics_pool = [Relic("测试遗物", "测试效果")]
+    engine.state.relic_pool_initialized = True
+    assert engine.execute_action("world_initialize", {"width": 9, "height": 9})["success"]
+
+    result = engine.execute_action("pre_battle_action", {"sub_action": "共鸣", "tier": 1})
+    assert result["success"], result
+    assert result["result"]["acquired"] is False
+    assert result["result"]["relic"] == "测试遗物"
+    assert result["result"]["path_distance"] <= 10
+    assert not any(relic.name == "测试遗物" for relic in engine.state.relics)
+    location = engine.state.world_state["map"]["locations"][result["result"]["location_id"]]
+    assert location["kind"] == "relic"
+    assert location["active"] is True
+    assert engine.state.relics_pool == []
+
+
+def test_player_picks_up_resonance_relic_only_by_entering_its_cell(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "resonance-pickup.db"),
+                        save_dir=str(tmp_path), rng_seed=93, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    world = WorldState.from_dict(engine.state.world_state)
+    world.map.locations.clear()
+    world.map.add_location("test-relic", {
+        "kind": "relic", "name": "测试遗物", "relic_name": "测试遗物",
+        "relic_effect": "测试效果", "x": 2, "y": 1,
+        "discovered": True, "discovered_by": [engine.state.player.runtime_id],
+        "active": True,
+    })
+    engine.state.world_state = world.to_dict()
+
+    move = engine.execute_action("world_move", {"x": 2, "y": 1})
+    assert move["success"], move
+    assert move["result"]["relic_collected"]["name"] == "测试遗物"
+    assert any(relic.name == "测试遗物" for relic in engine.state.relics)
+    assert engine.state.world_state["map"]["locations"]["test-relic"]["active"] is False
