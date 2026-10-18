@@ -451,7 +451,7 @@ class GameEngine:
                                 "speed_points": "nonnegative integer",
                                 "mana_points": "nonnegative integer",
                                 "constraint": "三者之和≤档位属性点+池内余点；1点=6血限，2点=1速限=1法限"},
-                "target": "player（默认）或已存在的朋友/员工/造物名称"}}},
+                "target": "player（默认）或已存在的朋友/员工/造物名称"}},
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "学习", "sub": ["daowen"],
                 "tier": {"daowen": [1, 2]},
