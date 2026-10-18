@@ -128,14 +128,18 @@ def test_full_pool_shaifa_outscores_basic_attack(engine, monkeypatch):
     decisions = [line for line in ai.log if "实时决策" in line]
     assert decisions, decisions
     assert "普攻" in decisions[0], decisions
+    kill_probe = ai._probe("杀伐")
+    kill_candidates = [c["label"] for c in ai._daowen_candidates()
+                       if c["label"].startswith("杀伐")]
+    assert kill_probe and kill_probe.get("kind") == "damage", kill_probe
+    assert "杀伐X=8" in kill_candidates, kill_candidates
     assert any("杀伐" in line for line in decisions[1:]), {
         "decisions": decisions,
         "mana": ai.mana(),
         "remaining_actions": ai.remaining_actions(),
         "dao_wen": list(ai.player.dao_wen),
-        "kill_probe": ai._probe("杀伐"),
-        "kill_candidates": [c["label"] for c in ai._daowen_candidates()
-                            if c["label"].startswith("杀伐")],
+        "kill_probe": kill_probe,
+        "kill_candidates": kill_candidates,
         "preview_rejected": ai.preview_rejected,
     }
 
