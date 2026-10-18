@@ -470,6 +470,14 @@ class GameEngine:
                 "params_schema": {"sub_action": region_action["id"],
                                   **region_action["params_schema"]},
             })
+        has_ten_thousand_souls_banner = any(
+            relic.name == "万魂幡" for relic in (self.state.relics or []))
+        if (has_ten_thousand_souls_banner
+                and not any(action.get("params_schema", {}).get("sub_action") == "造生"
+                            for action in actions)):
+            actions.append({"action_type": "pre_battle_action",
+                            "params_schema": {"sub_action": "造生", "name": "optional string"},
+                            "note": "持有万魂幡，可在乱葬岗以外发动造生"})
         if any(entity.name == "医生" and entity.is_alive for entity in self.state.employees):
             actions.append({"action_type": "upgrade_doctor",
                             "params_schema": {"mode": ["attack_count", "attack_power"]},
@@ -527,7 +535,7 @@ class GameEngine:
             actions = [a for a in actions
                        if a.get("params_schema", {}).get("sub_action") != "探索"]
         if getattr(self.state, "world_state", {}):
-            # 开放世界中不再提供独立「探索」菜单；事件由地图地点触发。
+            # 开放世界中不再提供独立「探索」菜单；事件由地图地点触发，旧附煞已由造生取代。
             actions = [action for action in actions
                        if action.get("params_schema", {}).get("sub_action") not in {"探索", "附煞"}]
         if not getattr(self.state, "world_state", {}):
@@ -591,9 +599,9 @@ class GameEngine:
         if self.state.current_region == "龙心谷":
             return [{"id": "炼心", "params_schema": {}}]
         if self.state.current_region == "乱葬岗":
-            return [{"id": "附煞", "params_schema": {
-                "mode": ["发现", "选择"], "sha_qi": "选择模式必填：法煞/魂煞/冥煞/血煞/锁煞/心煞",
-                "daowen_name": "要附煞的道纹名"}}]
+            return [{"id": "造生", "params_schema": {
+                "name": "首次造生时可选；造物名字，须与场上其他角色不同"},
+                "note": "首次造生消耗10碎片并创造一个造物；后续每次消耗25碎片，为同一造物随机增加一种未拥有的偏爱"}]
         return []
 
     def _get_battle_start_actions(self) -> dict:
@@ -2356,11 +2364,12 @@ class GameEngine:
             "维修": lambda p: 1,
             "雇佣": lambda p: 1,
             "炼心": lambda p: 1,
+            "造生": lambda p: 1,
         }
         if action == "探索":
             return {"success": False, "error": "开放世界已删除独立探索行动；请移动到地图地点"}
         if action == "附煞":
-            return {"success": False, "error": "附煞已删除，待造生/造物系统接替；当前不能使用旧行动"}
+            return {"success": False, "error": "附煞已删除；请使用造生培养造物偏爱"}
         if action not in durations:
             # 献祭等尚未裁定为耗时的条件性操作暂时保留即时结算。
             return self._execute_pre_battle_immediate(params, world_mode=True)
@@ -2596,15 +2605,17 @@ class GameEngine:
             "维修": self._pre_battle_weixiu,
             "雇佣": self._pre_battle_guyong,
             "炼心": self._pre_battle_lianxin,
-            "附煞": self._pre_battle_fusha,
+            "造生": self._pre_battle_zaosheng,
             "献祭": self._pre_battle_sacrifice,
         }
         # 2026-09-28：局外【忘忧】已删除，忘忧香效果为溢出回复转格挡。
 
         # 副本专属行动门禁（规则正文：维修=扭曲都市、雇佣=罪孽都市、炼心=龙心谷专属）。
         # 缺少该校验会让任意副本都能用他人专属行动，统计与平衡数据将失真。
-        REGION_EXCLUSIVE = {"维修": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "附煞": "乱葬岗"}
+        REGION_EXCLUSIVE = {"维修": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "造生": "乱葬岗"}
         need_region = REGION_EXCLUSIVE.get(action)
+        if action == "造生" and any(relic.name == "万魂幡" for relic in (self.state.relics or [])):
+            need_region = None
         if need_region and self.state.current_region != need_region:
             if not world_mode:
                 self.state.energy += 1
