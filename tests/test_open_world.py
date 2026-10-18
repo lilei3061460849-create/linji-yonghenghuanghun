@@ -501,6 +501,31 @@ def test_world_initialization_spawns_current_dungeon_monster_population_and_even
     assert "恶魔医务室" not in event_names
 
 
+def test_autonomous_reincarnator_collects_shard_cache_on_its_cell(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "npc-shards.db"),
+                        save_dir=str(tmp_path), rng_seed=127, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    npc = Entity("NPC", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.enemies = [npc]
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    world = WorldState.from_dict(engine.state.world_state)
+    actor = world.actors[npc.runtime_id]
+    world.map.add_location("npc-shard-cache", {
+        "name": "碎片残留", "kind": "resource", "resource_type": "shards",
+        "amount": 7, "x": actor.x, "y": actor.y, "active": True,
+    })
+
+    pickups = engine._resolve_world_shard_pickups(world)
+    assert any(item["actor_id"] == npc.runtime_id and not item["player_visible"]
+               for item in pickups)
+    assert npc.shards == 7
+    assert npc.shards_peak == 7
+    assert world.map.locations["npc-shard-cache"]["active"] is False
+
+
 def test_resource_location_is_collected_once_on_arrival_and_updates_shard_peak(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity, GameState
