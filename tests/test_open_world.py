@@ -167,3 +167,12 @@ def test_entering_adjacency_triggers_neutral_interaction_once():
     # 仍处于同一交互范围时移动，不重复触发；离开后重新进入才会再次触发。
     second = world.move_actor("p", (3, 0))
     assert second["new_interactions"] == []
+
+
+def test_monsters_never_receive_attack_outcome_against_merchant():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState("m", "怪物", "怪物", 1, 1, faction="monster"))
+    world.add_actor(WorldActorState("shop", "过路商人", "merchant", 3, 1, faction="neutral"))
+    result = world.move_actor("m", (2, 1))
+    assert len(result["new_interactions"]) == 1
+    assert "攻击" not in result["new_interactions"][0]["available_outcomes"]
