@@ -1885,3 +1885,39 @@ def test_final_duel_search_marks_survivor_as_departed_from_world_map(tmp_path):
     status = engine.execute_action("world_status", {})
     assert status["success"], status
     assert status["result"]["final_duel"]["winner_name"] == player.name
+
+
+def test_timed_action_does_not_award_reward_after_final_duel_completes(tmp_path, monkeypatch):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "final-duel-interrupt.db"),
+                        save_dir=str(tmp_path), rng_seed=157)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=20)
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    player_id = engine.state.player.runtime_id
+    points_before = engine.state.attribute_points
+
+    def finish_final_duel(world):
+        world.final_duel_complete = True
+        world.final_duel_winner = player_id
+        world.actors[player_id].alive = False
+        return {"active": False, "complete": True, "winner": player_id}
+
+    monkeypatch.setattr(engine, "_refresh_world_final_duel", finish_final_duel)
+    result = engine.execute_action("pre_battle_action", {
+        "sub_action": "修行", "tier": 1,
+        "allocations": {"blood_points": 1, "speed_points": 0, "mana_points": 0},
+    })
+
+    assert result["success"], result
+    assert result["action"] == "world_action_interrupted"
+    assert result["result"]["reason"] == "final_duel_completed"
+    assert result["result"]["reward_applied"] is False
+    assert engine.state.attribute_points == points_before
+    settled = WorldState.from_dict(engine.state.world_state)
+    assert settled.final_duel_complete is True
+    assert any(event["type"] == "world_action_interrupted"
+               and event["details"].get("reason") == "final_duel_completed"
+               for event in settled.event_log)
