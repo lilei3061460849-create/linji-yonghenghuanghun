@@ -5579,7 +5579,7 @@ class GameEngine:
             + list(getattr(self.state, "temp_friends", []) or []))}.values()
         for entity in round_entities:
             for instance in entity.dao_wen.values():
-                if instance.cooldown_rounds_remaining > 0:
+                if getattr(instance, "cooldown_rounds_remaining", 0) > 0:
                     instance.cooldown_rounds_remaining -= 1
         # 全局法术【回始】：普通战斗与死斗双方共用同一个回始，因此持有者扫描
         # 覆盖玩家侧与死斗对手侧；死斗对手视角下这就是其"敌回始"，见下方
@@ -5928,6 +5928,9 @@ class GameEngine:
             "lethal_counters": {k: list(v) for k, v in e.lethal_counters().items()},
             "lethal_progress": e.lethal_progress(),
             "dao_wen": {k: v.x_value for k, v in e.dao_wen.items()},
+            "daowen_cooldowns": {k: {"battles": v.cooldown_remaining,
+                                      "rounds": getattr(v, "cooldown_rounds_remaining", 0)}
+                                  for k, v in e.dao_wen.items()},
             "spells": [s.to_dict() for s in e.spells],
             "relics": [r.to_dict() for r in e.relics],
             "status_effects": [{"name": s.name, "value": s.value,
@@ -5953,8 +5956,12 @@ class GameEngine:
                    is_debt_bound=d.get("is_debt_bound", False))
         e.mutation_count = d.get("mutation_count", 0)   # ④修复：旧档无此键回退0
         for name, x in d.get("dao_wen", {}).items():
+            cooldowns = d.get("daowen_cooldowns", {}).get(name, {})
             e.dao_wen[name] = DaoWenInstance(
-                DaoWen(name=name, formula="", cost_type="消耗", cost_formula="X", effect_formula=""), x_value=x)
+                DaoWen(name=name, formula="", cost_type="消耗", cost_formula="X", effect_formula=""),
+                x_value=x,
+                cooldown_remaining=int(cooldowns.get("battles", 0)),
+                cooldown_rounds_remaining=int(cooldowns.get("rounds", 0)))
         # 旧封存未记录道纹位置；对同名道纹状态从实体当前序列恢复位置。
         # 新格式优先使用显式 daowen_order，避免状态名与来源道纹名不同时猜测。
         daowen_order_by_name = {name: index for index, name in enumerate(e.dao_wen)}
