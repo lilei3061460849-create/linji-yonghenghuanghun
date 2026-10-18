@@ -120,7 +120,7 @@ class Relic:
 # 每只怪物出厂自带的遗物：[回始]获得法限等量的法力和异变。
 # 定义在此而非 monsters.py：授予发生在 Entity.__post_init__，效果判定在 combat.py，
 # 两侧都要引用，放 models 可避免 monsters ↔ combat 的循环导入。
-MONSTER_MANA_RELIC = "某人的偏爱"
+MONSTER_MANA_RELIC = "痛苦的偏爱"
 MONSTER_MANA_RELIC_EFFECT = "[回始]获得等同[法限]的法力和【异变】"
 
 
