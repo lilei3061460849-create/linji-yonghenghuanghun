@@ -288,8 +288,7 @@ class GameEngine:
                 if self.event_pool.current == "过路商人" and option["text"].startswith("遗物交易"):
                     self._init_relic_pool()
                     schema.update({"trade_direction": ["buy", "sell"],
-                                   "relic_name": {"buy": [r.name for r in self.state.relics_pool],
-                                                  "sell": [r.name for r in self.state.relics]},
+                                   "relic_name": f"字符串；buy可选：{[r.name for r in self.state.relics_pool]}；sell可选：{[r.name for r in self.state.relics]}",
                                    "price": "双方协商后的非负整数碎片价格",
                                    "confirmed": True})
                     schema["note"] = "同次遭遇可连续买卖多件遗物；成交前确认价格。选择其他选项结束交易会话。买卖立即转移遗物与碎片，不得复制遗物或通过交易透支"
