@@ -898,7 +898,7 @@ class DaoWenEngine:
                 and "永恒的偏爱" in getattr(caster, "preferences", [])
                 and isinstance(duration, int) and not isinstance(duration, bool)
                 and duration > 0 and isinstance(summary, str)
-                and re.search(r"持续\\s*\\d+", summary)):
+                and re.search(r"持续\s*\d+", summary)):
             result["duration"] = -1
             result["summary"] = re.sub(r"持续\\s*\\d+(?:回合)?", "持续∞", summary, count=1)
         
