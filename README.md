@@ -61,7 +61,7 @@ validation       = tests/                # 文档、数据、引擎三方一致�
 | 世界观与正典战报 | [故事文档](故事文档.md) | 设定正典 |
 | AI 决策、维护与推演铁律 | [AI 知识库](AI_EXPERIENCE.md) | 开发/维护规范 |
 | 引擎架构与 API | [引擎说明](engine/README.md) | 代码参考 |
-| 当前待办与验收记录 | [报告](报告.md) | 项目台账 |
+| 当前待办与执行状态 | [GitHub Issues](https://github.com/lilei3061460849-create/linji-yonghenghuanghun/issues) | 项目任务唯一台账 |
 
 ## 最短游玩路径
 
