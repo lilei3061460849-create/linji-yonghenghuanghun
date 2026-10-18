@@ -2140,7 +2140,8 @@ class GameEngine:
                                          location_name=location.get("name", location_id),
                                          event_name=event_name, position=[x, y])
                             result["location_event"] = event_name
-            # NPC在本回合移动后踩中遗物，也会真正拾取；隐藏NPC所得不会回传给玩家。
+            # NPC在本回合移动后踩中资源/遗物，也会真正拾取；隐藏NPC所得不会回传给玩家。
+            self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
             final_phase = self._refresh_world_final_duel(world)
             if final_phase.get("active") or final_phase.get("complete"):
@@ -2165,6 +2166,7 @@ class GameEngine:
             turns = params.get("turns", 1)
             start_turn = world.clock.turn
             world.wait(actor_id, turns)
+            self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
             self._resolve_world_hiring_signals(world)
             self._share_created_being_vision(world)
@@ -2558,6 +2560,7 @@ class GameEngine:
             start_turn = world.clock.turn
             world.record("world_action_started", player_id, action=action, duration=1)
             world.wait(player_id, 1)
+            self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
             self._resolve_world_hiring_signals(world)
             self._share_created_being_vision(world)
@@ -2655,6 +2658,7 @@ class GameEngine:
         start_turn = world.clock.turn
         world.record("world_action_started", player_id, action=action, duration=duration)
         world.wait(player_id, duration)
+        self._resolve_world_shard_pickups(world)
         self._resolve_world_relic_pickups(world)
         self._resolve_world_hiring_signals(world)
         self._share_created_being_vision(world)
