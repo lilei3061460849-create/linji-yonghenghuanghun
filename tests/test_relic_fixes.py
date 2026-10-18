@@ -172,7 +172,7 @@ def test_wangyouxiang_registered_in_revised_relic_pool():
     engine = _new_engine("wangyou_registered")
     names = {n for n, _ in engine.RELIC_DEFS}
     assert "忘忧香" in names
-    assert len(engine.RELIC_DEFS) == 25   # 万钧印已改为消耗品
+    assert len(engine.RELIC_DEFS) == 26   # 万钧印已改为消耗品；忘忧香属于现行遗物池
     assert "血契" in names
     assert "钱袋" not in names
 
