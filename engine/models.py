@@ -814,8 +814,15 @@ class Entity:
         """清空格挡（回终）"""
         self.shield = 0
     
+    def mana_cost(self, amount: int) -> int:
+        """返回实际法力支出；愤怒状态与贪婪的偏爱均使正数消耗减半、向上取整。"""
+        amount = max(0, int(amount))
+        if amount > 0 and (self.has_status("愤怒") or "贪婪的偏爱" in self.preferences):
+            amount = math.ceil(amount / 2)
+        return amount
+
     def spend_mana(self, amount: int) -> bool:
-        """消耗法力。愤怒：法力消耗减半（向上取整）。
+        """消耗法力。愤怒与贪婪的偏爱：法力消耗减半（向上取整）。
 
         版本史（【勾魂】）：
         - 旧版「[回始]失去2X法力，持续∞」——已废止。
@@ -827,8 +834,7 @@ class Entity:
           透支/法术），效果重新有对象；判定位统一收敛到
           `can_gain_mana()` / `gain_mana()`，不再散落各处。
         """
-        if amount > 0 and (self.has_status("愤怒") or "贪婪的偏爱" in self.preferences):
-            amount = math.ceil(amount / 2)
+        amount = self.mana_cost(amount)
         if self.current_mana < amount:
             return False
         self.current_mana -= amount
