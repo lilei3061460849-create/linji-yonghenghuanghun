@@ -1,7 +1,7 @@
-"""怪物碎片代价透支成负债（DM裁定2026-08-22 方案A）+ 还债触发阈值20 的回归锚点。
+"""怪物碎片代价透支成负债 + 动态还债阈值10+历史最高碎片余额 的回归锚点。
 
 背景：引擎曾对所有碎片类代价做余额门禁——怪物碎片守恒≥0，【还债】
-（规则正文：负债≥20 触发，转为我方[员工]参战）在 20万+ 局实跑中零触发。
+（规则正文：余额达到 -(10+本局历史最高碎片余额) 时触发）在 20万+ 局实跑中零触发。
 修复：仅怪物侧，真碎片轨道余额不足时不再拒绝发动，shards 扣成负数（负债）。
 玩家/朋友/员工/api 侧仍维持"余额不足拒绝发动"。
 """
@@ -53,16 +53,16 @@ def test_xiaozai_chain_reaches_debt_threshold_and_binds_at_settle():
             monster, {"name": "消灾", "dodge": False, "blood_shadow": False},
             {}, set(), {})
         combat._monster_round_used(monster).discard("消灾")  # 跨回合重置使用记录
-    assert monster.shards <= -combat.DEBT_THRESHOLD
+    assert monster.shards <= -(combat.DEBT_THRESHOLD + monster.shards_peak)
     results = combat.settle_victory_paths()
     assert any(r.get("type") == "debt_bind" for r in results), f"负债≥20应触发还债: {results}"
     assert monster.is_debt_bound is True
     assert monster.entity_type == "员工" and monster in combat.state.get_all_player_side()
 
 
-def test_debt_trigger_boundary_19_not_bound_20_bound():
-    """边界条件：负债19不触发、20正好触发（阈值含端点）。"""
-    for shards, expect in ((-19, False), (-20, True)):
+def test_debt_trigger_boundary_9_not_bound_10_bound():
+    """历史峰值为0时，负债9不触发、负债10正好触发。"""
+    for shards, expect in ((-9, False), (-10, True)):
         combat = _make_combat(_xiaozai_monster(shards=shards))
         monster = combat.state.enemies[0]
         results = combat.settle_victory_paths()
