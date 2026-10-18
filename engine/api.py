@@ -2570,6 +2570,19 @@ class GameEngine:
                     "result": {"sub_action": action, "elapsed_turns": elapsed,
                                "required_turns": duration, "reward_applied": False,
                                "completion_error": result.get("error", "")}}
+        if action == "造生":
+            # 新造物作为真实地图单位加入；再次造生只培养既有单位，不额外复制生命。
+            for being in self.state.friends:
+                if (getattr(being, "is_created_being", False)
+                        and getattr(being, "created_by_runtime_id", "") == player_id
+                        and being.runtime_id not in world.actors):
+                    player_actor = world.actors[player_id]
+                    being.world_region = self.state.current_region
+                    being.world_x, being.world_y = player_actor.x, player_actor.y
+                    world.add_actor(WorldActorState(
+                        actor_id=being.runtime_id, name=being.name, kind="friend",
+                        x=player_actor.x, y=player_actor.y, alive=being.is_alive,
+                        faction="friend", mode="autonomous"))
         world.record("world_action_completed", player_id, action=action,
                      elapsed_turns=elapsed)
         self._open_adjacent_merchant_session(world)
@@ -3461,6 +3474,92 @@ class GameEngine:
                 "instruction": "直到你下一次实际支付数值为X的代价后，获得对应类型的【××龙心】(耐久X)"
             }
         }
+
+    def _pre_battle_zaosheng(self, params: dict) -> dict:
+        """造生：创建唯一造物，或以再次造生为同一造物培养新的固有偏爱。"""
+        player = self.state.player
+        if player is None:
+            return {"success": False, "error": "没有玩家"}
+        if not self.state.world_state:
+            return {"success": False, "error": "造生需要先初始化开放世界"}
+        has_banner = any(relic.name == "万魂幡" for relic in (self.state.relics or []))
+        if self.state.current_region != "乱葬岗" and not has_banner:
+            return {"success": False, "error": "造生只能在乱葬岗发动；持有万魂幡时不受地点限制"}
+        from .monsters import MONSTER_PREFERENCE_POOL
+        from .models import MONSTER_MANA_RELIC, MONSTER_MANA_RELIC_EFFECT
+        existing = next((entity for entity in self.state.friends
+                         if getattr(entity, "is_created_being", False)
+                         and getattr(entity, "created_by_runtime_id", "") == player.runtime_id
+                         and entity.is_alive), None)
+        if existing is not None:
+            remaining = [name for name in MONSTER_PREFERENCE_POOL
+                         if name not in getattr(existing, "preferences", [])]
+            if not remaining:
+                return {"success": False, "error": "造物已拥有当前全部偏爱；不会重复获得同一种偏爱"}
+            cost = 25
+            if self.state.shards < cost:
+                return {"success": False, "error": f"培养造物需要{cost}碎片"}
+            roll = self.dice.auto_roll(
+                f"created_being_preference_{existing.runtime_id}_{len(existing.preferences) + 1}",
+                remaining, context=f"{existing.name}再次造生：随机获得一种未拥有的偏爱")
+            preference = str(roll["selected"])
+            existing.preferences.append(preference)
+            if preference == "痛苦的偏爱" and not any(
+                    relic.name == MONSTER_MANA_RELIC for relic in existing.relics):
+                existing.relics.append(Relic(
+                    name=MONSTER_MANA_RELIC, effect=MONSTER_MANA_RELIC_EFFECT,
+                    tags=["怪物偏爱"]))
+            self.state.shards -= cost
+            return {"success": True, "action": "造生·培养造物",
+                    "result": {"created_being": existing.name,
+                               "new_preference": preference,
+                               "preferences": list(existing.preferences),
+                               "shard_cost": cost, "shards": self.state.shards}}
+
+        cost = 10
+        if self.state.shards < cost:
+            return {"success": False, "error": f"首次造生需要{cost}碎片"}
+        requested_name = params.get("name")
+        name = str(requested_name).strip() if requested_name else f"{player.name}的造物"
+        if not name:
+            return {"success": False, "error": "造物名称不能为空"}
+        all_entities = (([player] if player else []) + self.state.friends + self.state.employees
+                        + self.state.temp_friends + self.state.enemies)
+        if any(entity.name == name for entity in all_entities):
+            return {"success": False, "error": f"角色名称【{name}】已被占用"}
+        remaining = list(MONSTER_PREFERENCE_POOL)
+        roll = self.dice.auto_roll("created_being_initial_preference", remaining,
+                                   context=f"{name}诞生：随机获得一种固有偏爱")
+        preference = str(roll["selected"])
+        half = lambda value: max(0, math.ceil(int(value) / 2))
+        being = Entity(
+            name=name, entity_type="朋友",
+            blood_limit=max(1, half(player.blood_limit)),
+            current_hp=max(1, half(player.blood_limit)),
+            mana_limit=half(player.mana_limit), current_mana=half(player.mana_limit),
+            speed_limit=half(player.speed_limit), current_speed=half(player.speed_limit),
+            attack_count=half(player.attack_count), attack_power=half(player.attack_power),
+        )
+        being.is_created_being = True
+        being.created_by_runtime_id = player.runtime_id
+        being.preferences = [preference]
+        if preference == "痛苦的偏爱":
+            being.relics.append(Relic(
+                name=MONSTER_MANA_RELIC, effect=MONSTER_MANA_RELIC_EFFECT,
+                tags=["怪物偏爱"]))
+        self.state.friends.append(being)
+        self.state.shards -= cost
+        return {"success": True, "action": "造生·创造造物",
+                "result": {"created_being": being.name,
+                           "created_being_id": being.runtime_id,
+                           "new_preference": preference,
+                           "preferences": list(being.preferences),
+                           "shard_cost": cost, "shards": self.state.shards,
+                           "attributes": {"blood_limit": being.blood_limit,
+                                          "mana_limit": being.mana_limit,
+                                          "speed_limit": being.speed_limit,
+                                          "attack_count": being.attack_count,
+                                          "attack_power": being.attack_power}}}
 
     # 乱葬岗·附煞：煞气库（6种）
     SHA_QI_LIBRARY = {
