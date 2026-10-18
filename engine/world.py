@@ -531,9 +531,54 @@ class WorldState:
                 continue
             # 造物可自主探索、跟随主人或守卫指定地点。行为只使用已知主人坐标与本地寻路。
             destination = None
+            # 追踪最近亲眼目击的敌对单位，但只使用记忆中的位置；情报超过3回合便失效，
+            # 避免NPC凭空读取迷雾里的实时坐标，也避免无限追逐过期目标。
+            latest_sightings: dict[str, dict[str, Any]] = {}
+            for entry in actor.memory:
+                target_id = str(entry.get("actor_id", ""))
+                if (not target_id or target_id == actor_id
+                        or not isinstance(entry.get("position"), (list, tuple))
+                        or len(entry["position"]) != 2):
+                    continue
+                seen_turn = int(entry.get("turn", -1))
+                if seen_turn < 0 or self.clock.turn - seen_turn > 3 or seen_turn > self.clock.turn:
+                    continue
+                previous = latest_sightings.get(target_id)
+                if previous is None or int(previous.get("turn", -1)) < seen_turn:
+                    latest_sightings[target_id] = entry
+            hostile_goals = []
+            for target_id, entry in latest_sightings.items():
+                goal_pos = (int(entry["position"][0]), int(entry["position"][1]))
+                if (goal_pos == actor.position or not self.map.in_bounds(goal_pos)
+                        or not self.map.is_passable(goal_pos)):
+                    continue
+                remembered_target = WorldActorState(
+                    actor_id=target_id, name=str(entry.get("name", "")),
+                    kind=str(entry.get("kind", "enemy")),
+                    x=goal_pos[0], y=goal_pos[1], alive=True,
+                    faction=str(entry.get("faction", "neutral")))
+                if self._hostile_pair(actor, remembered_target):
+                    distance = abs(goal_pos[0] - actor.x) + abs(goal_pos[1] - actor.y)
+                    hostile_goals.append((distance, -int(entry.get("turn", 0)),
+                                          goal_pos[1], goal_pos[0], target_id, goal_pos))
+            if hostile_goals:
+                _, _, _, _, _, goal_pos = min(hostile_goals)
+                path = self._find_known_path(actor_id, actor.position, goal_pos)
+                if path is not None and len(path) > 1 and path[1] in candidates:
+                    destination = path[1]
+                if destination is None:
+                    current_distance = abs(goal_pos[0] - actor.x) + abs(goal_pos[1] - actor.y)
+                    closer = [candidate for candidate in candidates
+                              if abs(goal_pos[0] - candidate[0])
+                              + abs(goal_pos[1] - candidate[1]) < current_distance]
+                    if closer:
+                        destination = min(closer, key=lambda pos: (
+                            abs(goal_pos[0] - pos[0]) + abs(goal_pos[1] - pos[1]),
+                            self.map.key(pos) in actor.visited_cells, pos[1], pos[0]))
             # 轮回者阵营与可拾取资源的友方单位，会优先追踪自己亲眼发现的资源/遗物。
             # 目标来源只取本单位记忆；未知地点不会因为地图数据存在而被NPC直接利用。
-            if (actor.faction in {"enemy", "friend", "employee", "temp_friend"}
+            if (destination is None
+                    and actor.faction in {"enemy", "friend", "employee", "temp_friend"}
                     and not (self.final_duel_search and actor_id in self.final_duel_finalists)
                     # 明确指挥造物跟随/守卫时，服从命令优先于自主搜刮资源。
                     and not (actor.kind == "friend" and actor.owner_actor_id
