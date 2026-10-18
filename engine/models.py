@@ -62,10 +62,13 @@ class DaoWenInstance:
     # 与冷却同族但作用域更大——冷却按战斗场数递减，唯一是轮回级一次性，
     # 跨场不恢复，只有开新轮回（状态重置）才清零。
     spent_unique: bool = False
+    # 时间的偏爱：将按战斗场数计的冷却改为逐回合递减。
+    cooldown_rounds_remaining: int = 0
 
     def can_use(self) -> bool:
         return (not self.is_frozen and not self.spent_unique
-                and self.cooldown_remaining <= 0)
+                and self.cooldown_remaining <= 0
+                and self.cooldown_rounds_remaining <= 0)
 
 
 @dataclass
