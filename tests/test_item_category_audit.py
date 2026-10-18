@@ -55,6 +55,10 @@ def test_daowen_registry_every_daowen_has_positive_cost_channel():
     """40 条现行道纹 X=1 时必有金额>0 的代价通道（法力/失忆/异变/疲惫/流血/衰老/碎片/枯竭）。"""
     DaoWenEngine.register_all()
     assert len(DaoWenEngine._registry) == 40  # 删除独立【自食】并入【再生】，并移除已遗物化触发型道纹
+    # 删除/遗物化边界必须是硬约束，防止后续注册时意外复活旧道纹。
+    assert "坠落" not in DaoWenEngine._registry
+    assert "眩晕" not in DaoWenEngine._registry
+    assert "飞行" not in DaoWenEngine._registry
     for name, fn in sorted(DaoWenEngine._registry.items()):
         kw = {}
         if "target" in inspect.signature(fn).parameters:
