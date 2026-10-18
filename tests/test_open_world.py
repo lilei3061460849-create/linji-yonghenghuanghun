@@ -660,6 +660,8 @@ def test_hiring_signal_persists_while_player_moves_and_resolves_on_arrival(tmp_p
     engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
     engine.state.phase = "pre_battle"
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    # 先用空副本初始化小地图，再设置专属行动所属副本，避免测试被自动怪物人口干扰。
+    engine.state.current_region = "罪孽都市"
 
     issued = engine.execute_action("pre_battle_action", {
         "sub_action": "雇佣", "name": "测试员工",
