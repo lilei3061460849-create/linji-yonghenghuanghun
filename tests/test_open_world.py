@@ -1796,6 +1796,7 @@ def test_world_learning_action_advances_three_turns_before_granting_daowen(tmp_p
     engine.state.player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
     engine.state.current_region = "罪孽都市"
     engine.state.phase = "pre_battle"
+    energy_before = engine.state.energy
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
     name = next(name for name in DaoWenEngine.list_all()
                 if not learnability_error(name, owned=set(),
@@ -1817,7 +1818,7 @@ def test_world_learning_action_advances_three_turns_before_granting_daowen(tmp_p
                      and event.get("action") == "学习")
     assert started["duration"] == 3
     assert completed["elapsed_turns"] == 3
-    assert engine.state.energy == 3
+    assert engine.state.energy == energy_before
 
 
 def test_eternal_preference_turns_only_explicit_duration_effects_infinite(tmp_path):
