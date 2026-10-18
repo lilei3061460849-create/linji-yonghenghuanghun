@@ -478,13 +478,21 @@ def test_world_initialization_spawns_current_dungeon_monster_population_and_even
     result = engine.execute_action("world_initialize", {"width": 21, "height": 21})
     assert result["success"], result
     assert result["result"]["spawned_monsters"] == len(expected_pool)
-    assert len(engine.state.enemies) == len(expected_pool)
+    assert result["result"]["spawned_reincarnators"] >= 2
+    monsters = [entity for entity in engine.state.enemies if entity.entity_type == "怪物"]
+    reincarnators = [entity for entity in engine.state.enemies if entity.entity_type == "轮回者"]
+    assert len(monsters) == len(expected_pool)
+    assert len(reincarnators) == result["result"]["spawned_reincarnators"]
 
     world = WorldState.from_dict(engine.state.world_state)
-    for monster in engine.state.enemies:
+    for monster in monsters:
         actor = world.actors[monster.runtime_id]
         assert actor.faction == "monster"
         assert (actor.x, actor.y) != (1, 1)
+    for reincarnator in reincarnators:
+        actor = world.actors[reincarnator.runtime_id]
+        assert actor.faction == "enemy"
+        assert actor.mode == "autonomous"
     positions = [actor.position for actor in world.actors.values() if actor.alive]
     assert len(positions) == len(set(positions))
     event_names = {location["event_name"] for location in world.map.locations.values()
