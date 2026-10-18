@@ -1472,10 +1472,11 @@ class GameEngine:
         quest_engine = self._quest_engine()
         player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
         generated: list[dict[str, Any]] = []
+        # 先判定已逾期任务，再处理本回合事实；不能让超时后发生的事实倒灌成按时完成。
+        generated.extend(quest_engine.advance_time(self.state.quest_state, world.clock.turn))
         for fact in facts:
             generated.extend(quest_engine.process_fact(
                 self.state.quest_state, fact, world.clock.turn, player_actor_id=player_id))
-        generated.extend(quest_engine.advance_time(self.state.quest_state, world.clock.turn))
         for event in generated:
             world.record(event["type"], player_id, quest_id=event["quest_id"], **event.get("details", {}))
         return generated
