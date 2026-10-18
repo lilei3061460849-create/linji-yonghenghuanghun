@@ -1821,22 +1821,16 @@ def test_world_learning_action_advances_three_turns_before_granting_daowen(tmp_p
 
 
 def test_eternal_preference_turns_only_explicit_duration_effects_infinite(tmp_path):
-    from engine.api import GameEngine
+    from engine.daowen import DaoWenEngine
     from engine.models import Entity
 
-    engine = GameEngine(db_path=str(tmp_path / "eternal-preference.db"),
-                        save_dir=str(tmp_path), rng_seed=127, autosave=False)
     actor = Entity("造物", "朋友", blood_limit=30, current_hp=30)
+    target = Entity("目标", "轮回者", blood_limit=30, current_hp=30)
+    ordinary = DaoWenEngine.resolve("束缚", 3, caster=target, target=target)
     actor.preferences = ["永恒的偏爱"]
+    eternal = DaoWenEngine.resolve("束缚", 3, caster=actor, target=target)
 
-    lasting = engine._apply_intrinsic_preference_calculation(actor, {
-        "duration": 3, "summary": "使目标无法行动，持续3回合",
-    })
-    instant = engine._apply_intrinsic_preference_calculation(actor, {
-        "duration": 1, "summary": "立即造成1点伤害",
-    })
+    assert ordinary["duration"] == 3
+    assert eternal["duration"] == -1
+    assert eternal["summary"] == "冷却6场，使目标无法行动，持续∞"
 
-    assert lasting["duration"] == -1
-    assert lasting["summary"] == "使目标无法行动，持续∞"
-    assert instant["duration"] == 1
-    assert instant["summary"] == "立即造成1点伤害"
