@@ -201,7 +201,8 @@ def test_autonomous_units_pause_when_participating_in_active_encounter():
     world.add_actor(WorldActorState("m", "怪物", "怪物", 2, 1, faction="monster"))
     encounter = world.start_encounter(["p", "m"], (2, 1))
     before = world.actors["m"].position
-    world.wait("p", 1)
+    with pytest.raises(ValueError, match="遭遇中"):
+        world.wait("p", 1)
     assert world.actors["m"].position == before
     assert encounter.active
 
