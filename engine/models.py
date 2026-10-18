@@ -990,6 +990,9 @@ class GameState:
     current_round: int = 0
     current_battle: int = 0     # 第几场战斗
     current_region: str = ""    # 当前副本
+    # 过路商人是独立中立角色，不属于轮回者/怪物阵营；库存与世界坐标单独保存。
+    merchant: Optional[Entity] = None
+    merchant_position: dict = field(default_factory=dict)  # 开放世界接通后使用：{x, y, region}
     energy: int = 3             # 局外精力
     
     # 轮回者
@@ -1671,6 +1674,8 @@ class GameState:
             "current_round": self.current_round,
             "current_battle": self.current_battle,
             "current_region": self.current_region,
+            "merchant": self.merchant.to_dict() if self.merchant else None,
+            "merchant_position": dict(self.merchant_position),
             "energy": self.energy,
             "shards": self.shards,
             "shards_peak": self.shards_peak,
