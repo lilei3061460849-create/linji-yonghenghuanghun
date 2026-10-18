@@ -68,10 +68,19 @@ def test_altar_black_swan_records_debt_and_triggers_dynamic_death():
     e.state.shards = 20
     assert e.state.shards_peak == 20
     _stage(e, "祭坛", "投资：投入X[碎片]")
-    e.dice.auto_roll = lambda name, options, context="": {
-        "selected": 75, "record": {"seed": 31, "selected": 75, "context": context}}
+    def forced_altar_loss(name, options, context=""):
+        # 当前祭坛直接抽取盈亏倍数；倍率3下固定选择-3，其他随机请求选合法末项。
+        selected = -3 if name == "altar_investment_multiplier" and -3 in options else options[-1]
+        return {
+            "selected": selected,
+            "record": {
+                "seed": 31, "selected": selected, "selected_index": options.index(selected),
+                "context": context,
+            },
+        }
+    e.dice.auto_roll = forced_altar_loss
     result = e.execute_action("resolve_event", {
-        "event": "祭坛", "option_id": 1, "x": 20})
+        "event": "祭坛", "option_id": 1, "x": 20, "multiplier": 3})
     assert result.get("success"), result
     assert e.state.shards == -40
     assert e.state.shards_peak == 20
