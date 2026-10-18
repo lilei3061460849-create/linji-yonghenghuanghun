@@ -342,13 +342,24 @@ class WorldState:
                     if self.map.terrain.get(key) != "void":
                         self.map.terrain[key] = "void"
                         removed.append(pos)
+        removed_location_ids: set[str] = set()
         for location_id, location in self.map.locations.items():
             pos = (int(location.get("x", -1)), int(location.get("y", -1)))
             if pos in removed and location.get("active", True):
                 location["active"] = False
                 location["removed_by_shrink"] = True
+                removed_location_ids.add(location_id)
                 self.record("location_removed_by_shrink", None,
                             location_id=location_id, position=list(pos))
+        # NPC只根据自己的记忆决策。若地点被边界吞没，必须同步其旧目击记录，
+        # 否则它会把已失效的资源/遗物当作目标，持续向地图外缘移动。
+        if removed_location_ids:
+            for actor in self.actors.values():
+                for memory in actor.memory:
+                    if (memory.get("kind") == "location_sighting"
+                            and memory.get("location_id") in removed_location_ids):
+                        memory["active"] = False
+                        memory["removed_by_shrink"] = True
         caught = [actor for actor in self.actors.values()
                   if actor.alive and actor.position in set(removed)]
         self.shrink_count += 1
