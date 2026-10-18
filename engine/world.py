@@ -477,7 +477,11 @@ class WorldState:
         if any(encounter.active and player_ids.intersection(encounter.participants)
                for encounter in self.encounters.values()):
             return generated
-        for actor_id in sorted(self.actors):
+        # 不按随机UUID调度NPC；固定按地图位置和显示名排序，避免同一随机种子下行动顺序漂移。
+        for actor_id in sorted(
+                self.actors,
+                key=lambda aid: (self.actors[aid].y, self.actors[aid].x,
+                                self.actors[aid].name, aid)):
             actor = self.actors[actor_id]
             if not actor.alive or actor.kind == "player" or actor.mode != "autonomous":
                 continue
