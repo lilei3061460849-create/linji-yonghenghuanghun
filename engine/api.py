@@ -1876,7 +1876,7 @@ class GameEngine:
             if (not actor.alive or actor.kind != "enemy" or actor.faction != "enemy"
                     or actor.mode != "autonomous" or entity is None
                     or entity.entity_type != "轮回者" or not entity.is_alive
-                    or entity.is_departed or entity.shards < price
+                    or entity.is_departed
                     or abs(actor.x - merchant_actor.x) + abs(actor.y - merchant_actor.y) != 1):
                 continue
             if any(encounter.active and actor_id in encounter.participants
