@@ -786,6 +786,47 @@ def test_creation_builds_one_map_being_then_cultivates_unique_preferences(tmp_pa
     assert len(set(being.preferences)) == 2
 
 
+def test_created_being_can_follow_and_report_exploration_to_owner(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "created-being-behavior.db"),
+                        save_dir=str(tmp_path), rng_seed=113, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
+    being = Entity("造物", "朋友", blood_limit=30, current_hp=30)
+    being.is_created_being = True
+    being.created_by_runtime_id = player.runtime_id
+    engine.state.player = player
+    engine.state.friends = [being]
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(player.runtime_id, player.name, "player", 1, 1,
+                                    faction="player", mode="manual"))
+    world.add_actor(WorldActorState(being.runtime_id, being.name, "friend", 5, 5,
+                                    faction="friend", mode="autonomous",
+                                    behavior="explore", owner_actor_id=player.runtime_id))
+    being.world_x, being.world_y = 5, 5
+    engine.state.world_state = world.to_dict()
+
+    commanded = engine.execute_action("world_command_created_being", {"behavior": "follow"})
+    assert commanded["success"], commanded
+    before = WorldState.from_dict(engine.state.world_state)
+    owner_before = before.actors[player.runtime_id].position
+    being_before = before.actors[being.runtime_id].position
+    assert before.actors[player.runtime_id].known_cells
+    assert before.actors[being.runtime_id].owner_actor_id == player.runtime_id
+
+    waited = engine.execute_action("world_wait", {"turns": 1})
+    assert waited["success"], waited
+    after = WorldState.from_dict(engine.state.world_state)
+    being_after = after.actors[being.runtime_id].position
+    assert abs(being_after[0] - owner_before[0]) + abs(being_after[1] - owner_before[1]) < (
+        abs(being_before[0] - owner_before[0]) + abs(being_before[1] - owner_before[1]))
+    assert after.actors[player.runtime_id].known_cells >= before.actors[player.runtime_id].known_cells
+    vision = engine.execute_action("world_vision", {})
+    assert vision["success"], vision
+    assert "reported_sightings" in vision["result"]
+
+
 def test_created_being_joins_combat_only_when_explicitly_summoned():
     from engine.models import Entity, GameState
 
