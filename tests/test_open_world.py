@@ -490,7 +490,7 @@ def test_ai_state_projection_hides_unseen_entities_terrain_and_locations(tmp_pat
     world.actors[hidden.runtime_id].x, world.actors[hidden.runtime_id].y = 7, 7
     world.map.add_location("hidden_site", {
         "kind": "event", "name": "隐藏地点", "event_name": "秘密",
-        "x": 7, "y": 6, "discovered": False, "active": True,
+        "x": 2, "y": 2, "discovered": False, "active": True,
     })
     engine._sync_world_entity_positions(world)
     engine.state.world_state = world.to_dict()
