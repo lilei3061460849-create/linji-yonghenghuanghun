@@ -1001,6 +1001,8 @@ class GameState:
     current_region: str = ""    # 当前副本
     # 过路商人是独立中立角色，不属于轮回者/怪物阵营；库存与世界坐标单独保存。
     merchant: Optional[Entity] = None
+    # 开放世界状态采用纯dict快照，避免地图/行动模块与战斗实体模型形成循环依赖。
+    world_state: dict = field(default_factory=dict)
     energy: int = 3             # 局外精力
     
     # 轮回者
@@ -1683,6 +1685,7 @@ class GameState:
             "current_battle": self.current_battle,
             "current_region": self.current_region,
             "merchant": self.merchant.to_dict() if getattr(self, "merchant", None) else None,
+            "world_state": self.world_state,
             "energy": self.energy,
             "shards": self.shards,
             "shards_peak": self.shards_peak,
