@@ -202,6 +202,9 @@ class WorldState:
     event_log: list[dict[str, Any]] = field(default_factory=list)
     next_event_id: int = 1
     next_encounter_id: int = 1
+    # 每10个世界回合移除方形地图最外一圈；计数随存档保存。
+    shrink_interval: int = 10
+    shrink_count: int = 0
 
     @classmethod
     def create(cls, *, width: int = 21, height: int = 21, seed: int = 0) -> "WorldState":
@@ -253,6 +256,45 @@ class WorldState:
                             name=other.name, kind=other.kind, position=list(other.position))
         return cells
 
+    def _shrink_boundary_if_due(self) -> dict[str, Any] | None:
+        """世界回合到达固定边界时，移除当前方形地图最外一圈。"""
+        if self.shrink_interval < 1 or self.clock.turn <= 0:
+            return None
+        if self.clock.turn % self.shrink_interval != 0:
+            return None
+        ring = self.shrink_count
+        if ring * 2 >= min(self.map.width, self.map.height) - 1:
+            return None
+        removed: list[Coord] = []
+        for y in range(self.map.height):
+            for x in range(self.map.width):
+                if x == ring or y == ring or x == self.map.width - 1 - ring or y == self.map.height - 1 - ring:
+                    pos = (x, y)
+                    key = self.map.key(pos)
+                    if self.map.terrain.get(key) != "void":
+                        self.map.terrain[key] = "void"
+                        removed.append(pos)
+        for location_id, location in self.map.locations.items():
+            pos = (int(location.get("x", -1)), int(location.get("y", -1)))
+            if pos in removed and location.get("active", True):
+                location["active"] = False
+                location["removed_by_shrink"] = True
+                self.record("location_removed_by_shrink", None,
+                            location_id=location_id, position=list(pos))
+        caught = [actor for actor in self.actors.values()
+                  if actor.alive and actor.position in set(removed)]
+        self.shrink_count += 1
+        self.map.version += 1
+        self.record("world_ring_shrunk", None, ring=ring,
+                    removed_cells=len(removed), caught_actor_ids=[a.actor_id for a in caught])
+        # 单位不会凭空瞬移或直接死亡；被圈层追上时记录危险状态，仍可向内撤离。
+        for actor in caught:
+            self.record("actor_caught_by_shrinking_boundary", actor.actor_id,
+                        ring=ring, position=list(actor.position))
+        return {"ring": ring, "removed_cells": len(removed),
+                "caught_actor_ids": [actor.actor_id for actor in caught],
+                "next_shrink_turn": (self.shrink_count * self.shrink_interval)}
+
     def move_actor(self, actor_id: str, destination: Coord) -> dict[str, Any]:
         actor = self._living_actor(actor_id)
         if any(encounter.active and actor_id in encounter.participants
@@ -268,6 +310,7 @@ class WorldState:
         origin = actor.position
         actor.x, actor.y = destination
         self.clock.advance(1)
+        shrink = self._shrink_boundary_if_due()
         self.record("actor_moved", actor_id, origin=list(origin), destination=list(destination))
         self.visible_cells(actor_id)
         encounters = self.detect_adjacent_encounters(actor_id)
@@ -278,9 +321,12 @@ class WorldState:
             encounter.encounter_id for encounter in self.encounters.values()
             if encounter.active and actor_id in encounter.participants
         ]))
-        return {"actor_id": actor_id, "from": list(origin), "to": list(destination),
-                "world_turn": self.clock.turn, "new_encounters": encounters,
-                "new_interactions": interactions}
+        result = {"actor_id": actor_id, "from": list(origin), "to": list(destination),
+                  "world_turn": self.clock.turn, "new_encounters": encounters,
+                  "new_interactions": interactions}
+        if shrink is not None:
+            result["boundary_shrunk"] = shrink
+        return result
 
     def _run_autonomous_units(self) -> list[dict[str, Any]]:
         """推进当前世界回合的NPC行动；每个单位只使用自己的可见信息。"""
@@ -406,6 +452,9 @@ class WorldState:
             raise ValueError("当前处于遭遇中，不能直接等待世界时间")
         for _ in range(turns):
             self.clock.advance(1)
+            shrink = self._shrink_boundary_if_due()
+            if shrink is not None:
+                self.record("boundary_shrink_during_wait", actor_id, **shrink)
             self.record("world_waited", actor_id, turns=1)
             self._run_autonomous_units()
             if any(encounter.active and actor_id in encounter.participants
@@ -454,6 +503,8 @@ class WorldState:
             "event_log": list(self.event_log),
             "next_event_id": self.next_event_id,
             "next_encounter_id": self.next_encounter_id,
+            "shrink_interval": self.shrink_interval,
+            "shrink_count": self.shrink_count,
         }
 
     @classmethod
@@ -473,4 +524,6 @@ class WorldState:
             event_log=list(data.get("event_log", [])),
             next_event_id=int(data.get("next_event_id", 1)),
             next_encounter_id=int(data.get("next_encounter_id", 1)),
+            shrink_interval=max(1, int(data.get("shrink_interval", 10))),
+            shrink_count=max(0, int(data.get("shrink_count", 0))),
         )
