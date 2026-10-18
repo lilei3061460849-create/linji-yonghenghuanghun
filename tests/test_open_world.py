@@ -58,6 +58,32 @@ def test_units_may_overlap_and_same_cell_triggers_encounter_but_walls_block():
         blocked.move_actor("p", (2, 1))
 
 
+def test_boundary_shrink_invalidates_npcs_stale_location_memories():
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.shrink_interval = 1
+    world.add_actor(WorldActorState("npc", "流浪者", "轮回者", 2, 2,
+                                    faction="enemy", mode="autonomous",
+                                    memory=[{
+                                        "kind": "location_sighting",
+                                        "location_id": "edge-relic",
+                                        "location_kind": "relic",
+                                        "position": [0, 2],
+                                        "active": True,
+                                        "turn": 0,
+                                    }]))
+    world.map.add_location("edge-relic", {
+        "kind": "relic", "name": "边界遗物", "x": 0, "y": 2, "active": True,
+    })
+
+    world.clock.advance(1)
+    result = world._shrink_boundary_if_due()
+
+    assert result is not None
+    assert world.map.locations["edge-relic"]["active"] is False
+    assert world.actors["npc"].memory[0]["active"] is False
+    assert world.actors["npc"].memory[0]["removed_by_shrink"] is True
+
+
 def test_vision_is_four_orthogonal_cells_and_private_per_actor():
     world = WorldState(clock=__import__("engine.world", fromlist=["WorldClock"]).WorldClock(),
                        map=_open_map())
