@@ -1152,3 +1152,46 @@ def test_world_encounter_handoff_accepts_companions_without_forcing_created_bein
     assert started["success"], started
     assert engine.state.enemies == [monster]
     assert being not in engine.state.get_all_player_side()
+
+
+def test_twisted_city_places_modern_landmarks_and_exposes_descriptions_on_discovery(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "twisted-city-landmarks.db"),
+                        save_dir=str(tmp_path), rng_seed=157, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    enemy = Entity("M", "怪物", blood_limit=10, current_hp=10)
+    engine.state.player = player
+    engine.state.enemies = [enemy]
+    engine.state.current_region = "扭曲都市"
+    assert engine.execute_action("world_initialize", {"width": 15, "height": 15})["success"]
+
+    world = WorldState.from_dict(engine.state.world_state)
+    landmarks = {
+        location["name"]: location for location in world.map.locations.values()
+        if location.get("kind") == "landmark"
+    }
+    assert {"医院", "学校", "停车场", "地铁站"}.issubset(landmarks)
+    phone_booth = world.map.locations["绝望来电"]
+    assert phone_booth["name"] == "公共电话亭"
+    assert phone_booth["event_name"] == "绝望来电"
+
+    landmark = landmarks["医院"]
+    destination = (landmark["x"], landmark["y"])
+    neighbor = next(
+        pos for pos in world.map.neighbors(destination)
+        if pos != (1, 1)
+    )
+    player_actor = world.actors[player.runtime_id]
+    player_actor.x, player_actor.y = neighbor
+    engine.state.world_state = world.to_dict()
+
+    moved = engine.execute_action("world_move", {"x": destination[0], "y": destination[1]})
+    assert moved["success"], moved
+    status = engine.execute_action("world_status", {})
+    assert status["success"], status
+    known = next(item for item in status["result"]["known_locations"]
+                 if item["location_id"] == "urban_1")
+    assert known["name"] == "医院"
+    assert known["description"]
