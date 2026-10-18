@@ -1862,6 +1862,7 @@ def test_final_duel_search_marks_survivor_as_departed_from_world_map(tmp_path):
     rival.is_alive = False
     engine.state.player = player
     engine.state.enemies = [rival]
+    engine.state.phase = "pre_battle"
     world = WorldState(clock=WorldClock(), map=_open_map())
     world.add_actor(WorldActorState(
         player.runtime_id, player.name, "player", 1, 1,
