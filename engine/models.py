@@ -323,6 +323,7 @@ class Entity:
     chenglu_paid: int = 0       # 本场已按此兑换过的生命总额（每10一档，战始归零）
 
     # 多路径胜利追踪
+    shards_peak: int = 0          # 本局历史最高真实碎片余额 M，只升不降
     shards: int = 0              # 怪物自带碎片（罪孽都市）/ 负值表示负债（还债）
     fake_shards: int = 0         # 假碎片（罪孽都市：假钞产出；战斗中失去碎片时优先失去假碎片）
     total_healed: int = 0        # 累计受到的恢复量（癌变；含过量部分，按原值计，双倍机制已删）
@@ -340,6 +341,12 @@ class Entity:
     # 结构：{遗物名: {"remaining": int, "from_side": "player"|"enemy", "from_entity_name": str}}
     # 夺取期间归夺取方（caster）持有并触发被动；[回终] -1，归零归还原持有者。
     stolen_relics: dict = field(default_factory=dict)
+
+    def __setattr__(self, name, value):
+        object.__setattr__(self, name, value)
+        if name == "shards" and "shards_peak" in self.__dict__:
+            if int(value) > int(self.__dict__.get("shards_peak", 0)):
+                object.__setattr__(self, "shards_peak", int(value))
 
     def lose_shards(self, amount: int) -> int:
         """失去碎片（假碎片优先，余额不足则不足额损失）。返回实际失去的真碎片数。"""
@@ -924,6 +931,7 @@ class Entity:
             "battle_start_blood_limit": self.battle_start_blood_limit,
             "deployed_at_round": self.deployed_at_round,
             "shards": self.shards,
+            "shards_peak": self.shards_peak,
             "fake_shards": self.fake_shards,
             "total_healed": self.total_healed,
             "mutation_count": self.mutation_count,
@@ -1000,8 +1008,15 @@ class GameState:
     personality_traits: dict[str, dict] = field(default_factory=dict)
     
     # 资源
+    shards_peak: int = 0        # 玩家本局历史最高真实碎片余额 M，只升不降
     shards: int = 20            # 碎片
     fake_shards: int = 0        # 假碎片（罪孽都市假钞X产出；战斗中失去碎片时优先失去假碎片）
+
+    def __setattr__(self, name, value):
+        object.__setattr__(self, name, value)
+        if name == "shards" and "shards_peak" in self.__dict__:
+            if int(value) > int(self.__dict__.get("shards_peak", 0)):
+                object.__setattr__(self, "shards_peak", int(value))
 
     def lose_shards(self, amount: int) -> int:
         """玩家失去碎片（假碎片优先）。返回实际失去的真碎片数。"""
@@ -1646,6 +1661,7 @@ class GameState:
             "current_region": self.current_region,
             "energy": self.energy,
             "shards": self.shards,
+            "shards_peak": self.shards_peak,
             "fake_shards": self.fake_shards,
             "blacklist_level": self.blacklist_level,
             "is_blacklisted": self.is_blacklisted,
