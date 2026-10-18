@@ -1177,12 +1177,17 @@ def test_twisted_city_places_modern_landmarks_and_exposes_descriptions_on_discov
     assert phone_booth["name"] == "公共电话亭"
     assert phone_booth["event_name"] == "绝望来电"
 
-    landmark = landmarks["医院"]
-    destination = (landmark["x"], landmark["y"])
-    neighbor = next(
-        pos for pos in world.map.neighbors(destination)
-        if pos != (1, 1)
+    occupied = {
+        actor.position for actor in world.actors.values()
+        if actor.alive and actor.actor_id != player.runtime_id
+    }
+    landmark = next(
+        location for location in landmarks.values()
+        if any(pos not in occupied for pos in world.map.neighbors(
+            (int(location["x"]), int(location["y"]))))
     )
+    destination = (landmark["x"], landmark["y"])
+    neighbor = next(pos for pos in world.map.neighbors(destination) if pos not in occupied)
     player_actor = world.actors[player.runtime_id]
     player_actor.x, player_actor.y = neighbor
     engine.state.world_state = world.to_dict()
