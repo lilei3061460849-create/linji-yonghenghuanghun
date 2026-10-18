@@ -282,6 +282,15 @@ class GameEngine:
                 schema: dict = {"event": self.event_pool.current, "option_id": option["id"]}
                 if has_wusuoqiu and self._is_reject_option_text(option["text"]):
                     schema["note"] = "持【无所求】：本选项另获1点属性点（入属性点池，按正文2点一档兑速限/法限、1点一档兑血限）"
+                if self.event_pool.current == "祭坛" and option["text"].startswith("投资"):
+                    schema["x"] = "正整数，且不超过当前真实碎片余额；每次抵达最多投资一次"
+                    schema["note"] = "祭坛投资概率：15%净赚4X、25%净赚X、35%净亏X、25%净亏3X；黑天鹅额外2X直接计入真实负余额，可能触发动态还债"
+                if self.event_pool.current == "过路商人" and option["text"].startswith("遗物交易"):
+                    schema.update({"trade_direction": ["buy", "sell"],
+                                   "relic_name": "买入时从商人可售遗物中选择，卖出时从当前持有遗物中选择",
+                                   "price": "双方协商后的非负整数碎片价格",
+                                   "confirmed": True})
+                    schema["note"] = "成交前确认价格；买卖立即转移遗物与碎片，不得复制遗物或通过交易透支"
                 actions.append({"action_type": "resolve_event",
                                 "params_schema": schema,
                                 "option": option["text"],
