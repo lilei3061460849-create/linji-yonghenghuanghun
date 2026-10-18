@@ -2385,13 +2385,13 @@ class GameEngine:
                                      | set(world.map.adjacent_vision(player_actor.position))
                                      if player_actor is not None else set())
                 # NPC在视野外完成的交易只写入世界事实账本，不直接泄露给玩家。
+                merchant_actor_id = getattr(self.state.merchant, "runtime_id", "")
                 visible_trades = [
                     trade for trade in npc_trades
                     if trade["actor_id"] in world.actors
                     and world.actors[trade["actor_id"]].position in visible_positions
                     and merchant_actor_id in world.actors
                     and world.actors[merchant_actor_id].position in visible_positions
-                    for merchant_actor_id in [getattr(self.state.merchant, "runtime_id", "")]
                 ]
                 if visible_trades:
                     result["npc_merchant_trades"] = visible_trades
