@@ -244,8 +244,8 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
                 return "你已经持有这件遗物，不可重复购买"
             if not any(r.name == relic_name for r in merchant.relics):
                 return "过路商人当前没有这件遗物；售出后不会自动补货"
-            if price > merchant.shards:
-                return f"商人碎片不足，无法支付{price}（商人当前{merchant.shards}）"
+            if price > engine.state.shards:
+                return f"你没有足够碎片购买该遗物：需要{price}，当前{engine.state.shards}"
             cap = player.relic_capacity
             owned = len({r.name for r in engine.state.relics})
             if relic_name not in {r.name for r in engine.state.relics} and owned >= cap:
