@@ -79,3 +79,62 @@ def test_famine_preference_reduces_target_mana_limit_by_actual_damage(tmp_path):
     assert target.mana_limit == 5
     assert target.current_mana == 5
     assert detail["famine_preference"]["mana_limit_reduced"] == 3
+
+
+def test_eternal_preference_makes_new_dao_wen_duration_permanent(tmp_path):
+    from engine.api import GameEngine
+    from engine.daowen import DaoWenEngine
+    from engine.models import DaoWen, DaoWenInstance
+
+    engine = GameEngine(
+        db_path=str(tmp_path / "eternal-preference.db"),
+        save_dir=str(tmp_path / "saves"), autosave=False, rng_seed=19,
+    )
+    caster = Entity(name="永恒者", entity_type="轮回者",
+                    blood_limit=30, current_hp=30, mana_limit=10, current_mana=10)
+    target = Entity(name="目标", entity_type="轮回者",
+                    blood_limit=30, current_hp=30, mana_limit=10, current_mana=10)
+    caster.preferences = ["永恒的偏爱"]
+    caster.dao_wen["束缚"] = DaoWenInstance(DaoWen(
+        name="束缚", formula="束缚X", cost_type="冷却",
+        cost_formula="2X", effect_formula="使目标无法行动，持续X"))
+    engine.state.player = caster
+    engine.state.enemies = [target]
+
+    calc = DaoWenEngine.resolve("束缚", 2, target=target, caster=caster)
+    result = engine.combat.apply_daowen_effect("束缚", calc, caster, target)
+
+    status = next(s for s in target.status_effects if s.name == "束缚")
+    assert status.remaining_rounds == -1
+    assert any(effect.get("type") == "eternal_preference"
+               for effect in result["effects"])
+
+
+def test_time_preference_converts_dao_wen_cooldown_to_rounds(tmp_path):
+    from engine.api import GameEngine
+    from engine.daowen import DaoWenEngine
+    from engine.models import DaoWen, DaoWenInstance
+
+    engine = GameEngine(
+        db_path=str(tmp_path / "time-preference.db"),
+        save_dir=str(tmp_path / "saves"), autosave=False, rng_seed=23,
+    )
+    caster = Entity(name="时间行者", entity_type="轮回者",
+                    blood_limit=30, current_hp=30, mana_limit=10, current_mana=10)
+    target = Entity(name="目标", entity_type="轮回者",
+                    blood_limit=30, current_hp=30, mana_limit=10, current_mana=10)
+    caster.preferences = ["时间的偏爱"]
+    instance = DaoWenInstance(DaoWen(
+        name="束缚", formula="束缚X", cost_type="冷却",
+        cost_formula="2X", effect_formula="使目标无法行动，持续X"))
+    caster.dao_wen["束缚"] = instance
+    engine.state.player = caster
+    engine.state.enemies = [target]
+
+    calc = DaoWenEngine.resolve("束缚", 2, target=target, caster=caster)
+    result = engine.combat.apply_daowen_effect("束缚", calc, caster, target)
+
+    assert result["cooldown_rounds_set"] == 4
+    assert instance.cooldown_rounds_remaining == 4
+    assert instance.cooldown_remaining == 0
+    assert not instance.can_use()
