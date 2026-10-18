@@ -1596,16 +1596,18 @@ class GameEngine:
         player = self.state.player
         enemies = [entity for entity in (getattr(self.state, "enemies", []) or [])
                    if entity.is_alive and not entity.is_departed]
+        living_rivals = [entity for entity in enemies if entity.entity_type == "轮回者"]
         if world.final_duel_complete:
             return {"active": False, "complete": True, "winner": world.final_duel_winner}
         living_allies = [entity for group_name in ("friends", "employees", "temp_friends")
                          for entity in (getattr(self.state, group_name, []) or [])
                          if entity.is_alive and not entity.is_departed]
+        # 最终死斗以剩余轮回者人数判定；地图怪物仍然存在时，仍会在会合期间继续构成威胁。
         eligible = (player is not None and player.is_alive and not living_allies
-                    and len(enemies) == 1 and enemies[0].entity_type == "轮回者")
+                    and len(living_rivals) == 1)
         if not world.final_duel_search and eligible:
             world.final_duel_search = True
-            world.final_duel_finalists = [player.runtime_id, enemies[0].runtime_id]
+            world.final_duel_finalists = [player.runtime_id, living_rivals[0].runtime_id]
             for encounter in world.encounters.values():
                 if encounter.active and set(world.final_duel_finalists).issubset(set(encounter.participants)):
                     encounter.final_duel = True
