@@ -1322,5 +1322,5 @@ def test_entity_death_is_synchronized_to_world_actor_and_prevents_future_movemen
     engine._sync_world_entity_positions(world)
 
     assert world.actors[rival.runtime_id].alive is False
-    with pytest.raises(ValueError, match="不存在或已经死亡"):
+    with pytest.raises(ValueError, match="不存在或已死亡"):
         world.move_actor(rival.runtime_id, (3, 2))
