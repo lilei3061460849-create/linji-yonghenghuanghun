@@ -344,8 +344,18 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
                 continue
             destination = _next_player_step(engine, world)
             if destination is None:
-                stop_reason = "no reachable living rival or hostile unit"
-                break
+                # Waiting lets autonomous rivals move and fight when no hostile is
+                # immediately reachable; do not terminate a live world prematurely.
+                wait_result = engine.execute_action("world_wait", {"turns": 1})
+                timeline.append({"type": "world_wait", "turn": world.clock.turn,
+                                 "result": wait_result})
+                if not wait_result.get("success"):
+                    stop_reason = f"world wait failed: {wait_result.get('error', 'unknown error')}"
+                    break
+                world = WorldState.from_dict(engine.state.world_state)
+                if world.final_duel_complete:
+                    break
+                continue
             moved = call(engine, "world_move", {
                 "actor_id": engine.state.player.runtime_id,
                 "x": destination[0], "y": destination[1],
