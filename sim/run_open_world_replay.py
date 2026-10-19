@@ -362,7 +362,7 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
                 and (item.get("result") or {}).get("success")
                 for item in timeline
             )
-            resonance_result = (resonance_action.get("result") or {})
+            resonance_result = ((resonance_action.get("result") or {}).get("result") or {})
             resonance_location_id = resonance_result.get("location_id")
             destination = None
             if not resource_collected:
@@ -401,7 +401,7 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
             ) or any(location.get("kind") == "resource" and location.get("collected")
                      for location in world.map.locations.values()),
             "resonance_relic_dropped": bool(
-                (resonance_action.get("result") or {}).get("location_id")),
+                ((resonance_action.get("result") or {}).get("result") or {}).get("location_id")),
             "resonance_relic_picked_up": any(
                 ((item.get("result") or {}).get("result") or {}).get("relic_collected")
                 for item in move_entries
