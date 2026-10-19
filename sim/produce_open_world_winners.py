@@ -67,6 +67,18 @@ def validate_open_world_winner_snapshot(snapshot: dict[str, Any]) -> None:
         raise ValueError("winner sample does not record a valid 25-point initial build")
 
 
+def _summarize_exception(exc: Exception) -> str:
+    """Keep audit reports compact while retaining the actionable engine error."""
+    raw = str(exc)
+    if "已[命零]" in raw or "player_dead" in raw:
+        category = "player died before a complete terminal"
+    else:
+        match = re.search(r"'error': '([^']+)'", raw)
+        category = match.group(1) if match else raw.splitlines()[0]
+    category = category[:240]
+    return f"{type(exc).__name__}: {category}"
+
+
 def _read_existing_files(directory: Path) -> tuple[list[int], list[int], list[str]]:
     indices: list[int] = []
     seeds: list[int] = []
@@ -127,10 +139,10 @@ def main() -> None:
             )
             validate_complete_playthrough(payload)
         except Exception as exc:
-            reason = f"{type(exc).__name__}: {exc}"
+            reason = _summarize_exception(exc)
             failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
             final = (payload or {}).get("final_state") or {}
-            status = "incomplete_or_invalid"
+            status = "player_died" if "player died before a complete terminal" in reason else "incomplete_or_invalid"
             attempt.update({
                 "status": status,
                 "error": reason,
