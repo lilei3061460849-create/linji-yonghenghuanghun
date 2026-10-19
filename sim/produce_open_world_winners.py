@@ -95,7 +95,7 @@ def main() -> None:
 
     while winners < args.count and games_played < args.max_games:
         region = REGIONS[(seed - 1) % len(REGIONS)]
-        player_name = f"轮回者{seed:04d}"
+        player_name = "测试轮回者"
         payload = None
         attempt: dict[str, Any] = {"seed": seed, "region": region, "player_name": player_name}
         games_played += 1
