@@ -533,7 +533,9 @@ def validate_complete_playthrough(payload: dict[str, Any]) -> None:
         raise RuntimeError("open-world run spawned fewer than two other reincarnators")
     if int(population.get("special_locations", 0)) < 1:
         raise RuntimeError("open-world run spawned no special locations")
-    if not battles or int(final.get("battle_count", 0)) != len(battles):
+    if not battles:
+        raise RuntimeError("no battle replays were exported")
+    if int(final.get("battle_count", 0)) != len(battles):
         raise RuntimeError("battle count does not match the exported battle replays")
     ordinary_encounters = [
         item for item in payload.get("driver_timeline", [])
