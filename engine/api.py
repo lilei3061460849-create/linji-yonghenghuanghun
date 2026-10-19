@@ -186,7 +186,8 @@ class GameEngine:
         # 决策观察会刷新该轮可见单位与私有记忆，但不会推进世界时间。
         world.visible_cells(player.actor_id)
         self.state.world_state = world.to_dict()
-        visible_positions = {player.position, *world.map.adjacent_vision(player.position)}
+        visible_positions = {player.position, *world.map.adjacent_vision(
+            player.position, player.vision_range)}
         visible_actor_ids = {
             actor.actor_id for actor in world.actors.values()
             if actor.alive and actor.position in visible_positions
@@ -618,7 +619,7 @@ class GameEngine:
         if self.state.current_region == "乱葬岗":
             return [{"id": "造生", "params_schema": {
                 "name": "首次造生时可选；造物名字，须与场上其他角色不同"},
-                "note": "首次造生消耗10碎片并创造一个造物；后续每次消耗25碎片，为同一造物随机增加一种未拥有的偏爱"}]
+                "note": "首次造生消耗10碎片并创造一个固定专属道纹、初始偏爱的造物；后续每次消耗25碎片，血限+6、法限+1、速限+1，视野范围+1格"}]
         return []
 
     def _get_battle_start_actions(self) -> dict:
@@ -3298,19 +3299,25 @@ class GameEngine:
                                "required_turns": duration, "reward_applied": False,
                                "completion_error": result.get("error", "")}}
         if action == "造生":
-            # 新造物作为真实地图单位加入；再次造生只培养既有单位，不额外复制生命。
+            # 新造物作为真实地图单位加入；再次造生只强化既有单位，不额外复制生命。
             for being in self.state.friends:
-                if (getattr(being, "is_created_being", False)
-                        and getattr(being, "created_by_runtime_id", "") == player_id
-                        and being.runtime_id not in world.actors):
-                    player_actor = world.actors[player_id]
-                    being.world_region = self.state.current_region
-                    being.world_x, being.world_y = player_actor.x, player_actor.y
-                    world.add_actor(WorldActorState(
-                        actor_id=being.runtime_id, name=being.name, kind="friend",
-                        x=player_actor.x, y=player_actor.y, alive=being.is_alive,
-                        faction="friend", mode="autonomous", behavior="explore",
-                        owner_actor_id=player_id))
+                if (not getattr(being, "is_created_being", False)
+                        or getattr(being, "created_by_runtime_id", "") != player_id):
+                    continue
+                existing_actor = world.actors.get(being.runtime_id)
+                if existing_actor is not None:
+                    existing_actor.vision_range = max(
+                        1, int(getattr(being, "created_being_vision_range", 1)))
+                    continue
+                player_actor = world.actors[player_id]
+                being.world_region = self.state.current_region
+                being.world_x, being.world_y = player_actor.x, player_actor.y
+                world.add_actor(WorldActorState(
+                    actor_id=being.runtime_id, name=being.name, kind="friend",
+                    x=player_actor.x, y=player_actor.y, alive=being.is_alive,
+                    faction="friend", mode="autonomous", behavior="explore",
+                    owner_actor_id=player_id,
+                    vision_range=max(1, int(getattr(being, "created_being_vision_range", 1)))))
         self._share_created_being_vision(world)
         world.record("world_action_completed", player_id, action=action,
                      elapsed_turns=elapsed)
@@ -4229,7 +4236,7 @@ class GameEngine:
         }
 
     def _pre_battle_zaosheng(self, params: dict) -> dict:
-        """造生：创建唯一造物，或以再次造生为同一造物培养新的固有偏爱。"""
+        """造生：首次创造唯一造物并确定专属道纹/初始偏爱；后续提升三维与视野。"""
         player = self.state.player
         if player is None:
             return {"success": False, "error": "没有玩家"}
@@ -4249,29 +4256,33 @@ class GameEngine:
             return {"success": False,
                     "error": "本轮回已创造过的造物已经死亡；当前规则不允许用再次造生绕过唯一造物限制"}
         if existing is not None:
-            remaining = [name for name in MONSTER_PREFERENCE_POOL
-                         if name not in getattr(existing, "preferences", [])]
-            if not remaining:
-                return {"success": False, "error": "造物已拥有当前全部偏爱；不会重复获得同一种偏爱"}
             cost = 25
             if self.state.shards < cost:
                 return {"success": False, "error": f"培养造物需要{cost}碎片"}
-            roll = self.dice.auto_roll(
-                f"created_being_preference_{existing.runtime_id}_{len(existing.preferences) + 1}",
-                remaining, context=f"{existing.name}再次造生：随机获得一种未拥有的偏爱")
-            preference = str(roll["selected"])
-            existing.preferences.append(preference)
-            if preference == "痛苦的偏爱" and not any(
-                    relic.name == MONSTER_MANA_RELIC for relic in existing.relics):
-                existing.relics.append(Relic(
-                    name=MONSTER_MANA_RELIC, effect=MONSTER_MANA_RELIC_EFFECT,
-                    tags=["怪物偏爱"]))
+            # 造生强化的是这只造物本身，而不是不断叠加偏爱让不同造物趋同。
+            existing.blood_limit += 6
+            existing.current_hp = min(existing.blood_limit, existing.current_hp + 6)
+            existing.mana_limit += 1
+            existing.current_mana = min(existing.mana_limit, existing.current_mana + 1)
+            existing.speed_limit += 1
+            existing.current_speed = min(existing.speed_limit, existing.current_speed + 1)
+            vision_range = max(1, int(getattr(existing, "created_being_vision_range", 1))) + 1
+            existing.created_being_vision_range = vision_range
             self.state.shards -= cost
+            # 同步地图单位的持久化视野范围；外层世界行动结算也会再同步一次。
+            world_data = self.state.world_state
+            actor_data = world_data.get("actors", {}).get(existing.runtime_id, {})
+            actor_data["vision_range"] = vision_range
             return {"success": True, "action": "造生·培养造物",
                     "result": {"created_being": existing.name,
-                               "new_preference": preference,
+                               "growth": {"blood_limit": 6, "mana_limit": 1,
+                                          "speed_limit": 1, "vision_range": 1},
+                               "vision_range": vision_range,
                                "preferences": list(existing.preferences),
-                               "shard_cost": cost, "shards": self.state.shards}}
+                               "shard_cost": cost, "shards": self.state.shards,
+                               "attributes": {"blood_limit": existing.blood_limit,
+                                              "mana_limit": existing.mana_limit,
+                                              "speed_limit": existing.speed_limit}}}
 
         cost = 10
         if self.state.shards < cost:
@@ -4285,7 +4296,7 @@ class GameEngine:
         if any(entity.name == name for entity in all_entities):
             return {"success": False, "error": f"角色名称【{name}】已被占用"}
 
-        # 造物的专属道纹只在首次造生时确定一次；后续造生只培养偏爱。
+        # 造物的专属道纹只在首次造生时确定一次；后续造生提升三维与视野，不新增偏爱。
         # 优先从当前副本真实怪物面板中抽取，确保这项能力确实属于该世界的怪物生态。
         signature_values: dict[str, int | None] = {}
         for monster_def in self.monster_pool.get(self.state.current_region, []):
@@ -4315,6 +4326,7 @@ class GameEngine:
         )
         being.is_created_being = True
         being.created_by_runtime_id = player.runtime_id
+        being.created_being_vision_range = 1
         being.dao_wen[signature_name] = DaoWenInstance(
             dao_wen=DaoWen(name=signature_name, formula="", cost_type="",
                            cost_formula="", effect_formula=""),

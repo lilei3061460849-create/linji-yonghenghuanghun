@@ -280,6 +280,8 @@ class Entity:
     # 造物是具有专属身份的朋友，不是分裂道纹产生的临时朋友。
     is_created_being: bool = False
     created_by_runtime_id: str = ""
+    # 造物视野成长值会随存档保存；每次后续造生增加1格。
+    created_being_vision_range: int = 1
     # 造物只有在主人明确召唤时才加入战斗；世界地图上的独立行动不因此中断。
     is_summoned: bool = False
 
@@ -943,6 +945,7 @@ class Entity:
             "preferences": list(getattr(self, "preferences", [])),
             "is_created_being": bool(getattr(self, "is_created_being", False)),
             "created_by_runtime_id": getattr(self, "created_by_runtime_id", ""),
+            "created_being_vision_range": max(1, int(getattr(self, "created_being_vision_range", 1))),
             "is_summoned": bool(getattr(self, "is_summoned", False)),
             "blood_limit": self.blood_limit,
             "current_hp": self.current_hp,

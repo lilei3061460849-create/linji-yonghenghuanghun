@@ -891,7 +891,7 @@ def test_ten_thousand_souls_banner_unlocks_creation_outside_graveyard(tmp_path):
     assert engine.state.shards == 0
 
 
-def test_creation_builds_one_map_being_then_cultivates_unique_preferences(tmp_path):
+def test_creation_builds_one_map_being_then_cultivates_stats_and_vision_not_preferences(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
 
@@ -922,6 +922,11 @@ def test_creation_builds_one_map_being_then_cultivates_unique_preferences(tmp_pa
     assert first["result"]["signature_daowen"] == signature_daowen
     assert being.runtime_id in engine.state.world_state["actors"]
 
+    original_stats = (being.blood_limit, being.mana_limit, being.speed_limit)
+    being.current_hp = max(0, being.blood_limit - 3)
+    being.current_mana = max(0, being.mana_limit - 1)
+    being.current_speed = max(0, being.speed_limit - 1)
+    original_resources = (being.current_hp, being.current_mana, being.current_speed)
     second = engine.execute_action("pre_battle_action", {"sub_action": "造生"})
     assert second["success"], second
     assert engine.state.shards == 65
@@ -929,9 +934,20 @@ def test_creation_builds_one_map_being_then_cultivates_unique_preferences(tmp_pa
               if getattr(friend, "is_created_being", False)]
     assert len(beings) == 1
     being = beings[0]
-    assert len(being.preferences) == 2
-    assert len(set(being.preferences)) == 2
-    # 再次造生只培养新的偏爱，不会反复抽取/替换专属道纹。
+    assert len(being.preferences) == 1
+    assert (being.blood_limit, being.mana_limit, being.speed_limit) == tuple(
+        value + growth for value, growth in zip(original_stats, (6, 1, 1)))
+    assert (being.current_hp, being.current_mana, being.current_speed) == tuple(
+        min(limit, current + growth)
+        for limit, current, growth in zip(
+            (being.blood_limit, being.mana_limit, being.speed_limit),
+            original_resources, (6, 1, 1)))
+    assert being.created_being_vision_range == 2
+    actor_data = engine.state.world_state["actors"][being.runtime_id]
+    assert actor_data["vision_range"] == 2
+    assert second["result"]["growth"] == {
+        "blood_limit": 6, "mana_limit": 1, "speed_limit": 1, "vision_range": 1}
+    # 再次造生不新增偏爱，也不会反复抽取/替换专属道纹。
     assert list(being.dao_wen) == [signature_daowen]
 
 
@@ -2001,3 +2017,19 @@ def test_deleted_affix_action_and_choice_endpoint_stay_unavailable(tmp_path):
     assert ("附煞已删除" in affix["error"]
             or "未知局外行动" in affix["error"])
     assert legacy_choice["success"] is False
+
+
+
+def test_world_vision_range_expands_with_manhattan_distance_and_respects_walls():
+    world_map = _open_map()
+    world_map.terrain[world_map.key((2, 1))] = "wall"
+    world = WorldState(clock=WorldClock(), map=world_map)
+    world.add_actor(WorldActorState("scout", "造物", "friend", 1, 1,
+                                    faction="friend", vision_range=2))
+    visible = set(world.visible_cells("scout"))
+    assert (1, 1) in visible
+    assert (2, 1) in visible
+    # 墙后方不会被透视，即使目标仍处于数值半径之内。
+    assert (3, 1) not in visible
+    # 另一方向的第二格仍然可见。
+    assert (1, 3) in visible
