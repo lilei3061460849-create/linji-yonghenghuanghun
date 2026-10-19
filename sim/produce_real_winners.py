@@ -135,6 +135,37 @@ def build_spell_choices(target_option: dict, player_ref: str, mana_budget: int) 
     return out
 
 
+def _resolve_pending_redemption(engine):
+    """Resolve the engine's mandatory redemption interruption before any other action."""
+    pending = engine.state.pending_redemption
+    if not pending:
+        return None
+    used = {entity.name for group in
+            (engine.state.friends, engine.state.employees, engine.state.temp_friends,
+             engine.state.enemies)
+            for entity in group}
+    if engine.state.player:
+        used.add(engine.state.player.name)
+    index = 1
+    name = f"救赎员工{index}"
+    while name in used:
+        index += 1
+        name = f"救赎员工{index}"
+    result = engine.execute_action("resolve_redemption", {"option": 1, "name": name})
+    if result.get("success"):
+        return result
+    return engine.execute_action("resolve_redemption", {"option": 2})
+
+
+def _has_remaining_enemies(engine) -> bool:
+    """Queued waves count as remaining enemies even when the current wave is dead."""
+    return bool(
+        any(enemy.is_alive for enemy in engine.state.enemies)
+        or engine.state.monster_reinforcements
+        or engine.state.delayed_monster_reentries
+    )
+
+
 def _resolve_monster_turn_with_spells(engine):
     """怪物阶段解析器：与 build_learner._resolve_monster_turn 相同，
     但攻击玩家时会触发玩家的反应型法术（先发制人/后发制人/生生不息）。"""
@@ -160,9 +191,8 @@ def _resolve_monster_turn_with_spells(engine):
             if option["dodge_submission"] == "per_target":
                 from sim.monster_targets import pick_wave_dodge_targets
                 dao["dodge_targets"] = pick_wave_dodge_targets(option)
-            if option["resolves_as"] == "变形":
-                enemy_index = int(actor["actor_ref"].split(":", 1)[1])
-                hit_count = engine.state.enemies[enemy_index].attack_power
+            # Use the hit count from prepare_monster_phase. Attack power is damage,
+            # not the number of hit choices required by the engine.
         monster = refs.get(actor["actor_ref"])
         per_hit = monster.attack_power if monster is not None else 0
         target_ref = choose_attack_target(actor["attack_target_options"], refs)
@@ -213,9 +243,7 @@ def _resolve_monster_turn_with_spells(engine):
             if option["dodge_submission"] == "per_target":
                 from sim.monster_targets import pick_wave_dodge_targets
                 dao["dodge_targets"] = pick_wave_dodge_targets(option)
-            if option["resolves_as"] == "变形":
-                enemy_index = int(actor["actor_ref"].split(":", 1)[1])
-                hit_count_fb = engine.state.enemies[enemy_index].attack_power
+            # Same rule in fallback: preserve prepare_monster_phase's hit count.
         target_ref = choose_attack_target(actor["attack_target_options"], refs)
         target_option = next((o for o in actor["attack_target_options"] if o["ref"] == target_ref), None)   # 无合法攻击目标时为None（引擎prepare已置base_attack_actions=0）
         attacks = [{"hits": [{
@@ -464,16 +492,24 @@ def play_first_tier(seed: int, region: str, sealed_path: str,
         for _ in range(40):
             if not e.state.player or not e.state.player.is_alive:
                 break
-            if not [x for x in e.state.enemies if x.is_alive]:
+            if not _has_remaining_enemies(e):
                 break
             from sim.optional_actions import start_round as _sr
             rs, _rs_artifacts = _sr(e)
             if not rs.get("success"):
                 return {"cleared": cleared, "won": False, "invalid": True,
                         "reason": f"round_start: {rs.get('error')}"}
+            redemption = _resolve_pending_redemption(e)
+            if redemption is not None and not redemption.get("success"):
+                return {"cleared": cleared, "won": False, "invalid": True,
+                        "reason": f"redemption after round_start: {redemption.get('error')}"}
             # 罪孽都市专属：战斗内先用残韵解锁门禁（获得第一种专属道纹后局外才能学赎金）
             if debt_build:
                 unlock_sin_city_daowen(e)
+                redemption = _resolve_pending_redemption(e)
+                if redemption is not None and not redemption.get("success"):
+                    return {"cleared": cleared, "won": False, "invalid": True,
+                            "reason": f"redemption after resonance: {redemption.get('error')}"}
             # 玩家回合：保留法术法力（手操留一手），其余满法输出
             p = e.state.player
             actual_mana = p.current_mana
@@ -489,25 +525,46 @@ def play_first_tier(seed: int, region: str, sealed_path: str,
             # 把保留法力还给玩家，供怪物阶段反应法术使用
             if reserve > 0:
                 p.current_mana = min(p.mana_limit, p.current_mana + reserve)
-            if not [x for x in e.state.enemies if x.is_alive]:
-                break
+            redemption = _resolve_pending_redemption(e)
+            if redemption is not None and not redemption.get("success"):
+                return {"cleared": cleared, "won": False, "invalid": True,
+                        "reason": f"redemption after player action: {redemption.get('error')}"}
             if not e.state.player or not e.state.player.is_alive:
                 break
+            if not _has_remaining_enemies(e):
+                break
             e.execute_action("resolve_ally_phases", {})
-            if not [x for x in e.state.enemies if x.is_alive]:
+            redemption = _resolve_pending_redemption(e)
+            if redemption is not None and not redemption.get("success"):
+                return {"cleared": cleared, "won": False, "invalid": True,
+                        "reason": f"redemption after ally phase: {redemption.get('error')}"}
+            if not _has_remaining_enemies(e):
                 break
             mp = _resolve_monster_turn_with_spells(e)
             if not mp.get("success"):
                 return {"cleared": cleared, "won": False, "invalid": True,
                         "reason": f"monster_phase: {mp.get('error')}"}
+            redemption = _resolve_pending_redemption(e)
+            if redemption is not None and not redemption.get("success"):
+                return {"cleared": cleared, "won": False, "invalid": True,
+                        "reason": f"redemption after monster phase: {redemption.get('error')}"}
             if mp["result"].get("player_dead"):
                 break
             e.execute_action("round_end", {})
+            redemption = _resolve_pending_redemption(e)
+            if redemption is not None and not redemption.get("success"):
+                return {"cleared": cleared, "won": False, "invalid": True,
+                        "reason": f"redemption after round_end: {redemption.get('error')}"}
 
         if not e.state.player or not e.state.player.is_alive:
             return {"cleared": cleared, "won": False, "invalid": False}
-        if [x for x in e.state.enemies if x.is_alive]:
-            return {"cleared": cleared, "won": False, "invalid": False}
+        if _has_remaining_enemies(e):
+            return {"cleared": cleared, "won": False, "invalid": True,
+                    "reason": "round limit reached with living enemies or pending reinforcements"}
+        redemption = _resolve_pending_redemption(e)
+        if redemption is not None and not redemption.get("success"):
+            return {"cleared": cleared, "won": False, "invalid": True,
+                    "reason": f"redemption before battle_end: {redemption.get('error')}"}
         ended = e.execute_action("battle_end", {})
         if not ended.get("success"):
             return {"cleared": cleared, "won": False, "invalid": True,
