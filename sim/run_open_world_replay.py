@@ -44,6 +44,32 @@ def encounter_for_player(engine: GameEngine):
                  if encounter.active and pid in encounter.participants), None)
 
 
+def _next_location_step(world: WorldState, actor_id: str, kinds: set[str],
+                        location_id: str | None = None) -> tuple[int, int] | None:
+    """Return the first step toward the nearest active location of one of the requested kinds."""
+    actor = world.actors.get(actor_id)
+    if actor is None or not actor.alive:
+        return None
+    candidates = []
+    for current_id, location in world.map.locations.items():
+        if location_id is not None and current_id != location_id:
+            continue
+        if location.get("kind") not in kinds or not location.get("active", True):
+            continue
+        if location.get("collected") or location.get("resolved"):
+            continue
+        try:
+            target = (int(location["x"]), int(location["y"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        path = world.map.find_path(actor.position, target)
+        if path and len(path) > 1:
+            candidates.append((len(path), str(current_id), path[1]))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (item[0], item[1]))[2]
+
+
 def decline_spells(target_option: dict[str, Any]) -> dict[str, dict[str, dict[str, bool]]]:
     options = target_option.get("spell_options") or {}
     return {timing: {spell["spell_name"]: {"use": False}
@@ -256,6 +282,22 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
         replays: list[dict[str, Any]] = []
         stop_reason = ""
 
+        # 让完整局实际覆盖局外世界功能，而不只在地图上追敌：
+        # 共鸣把真实遗物投放到地图，雇佣生成持续存在的响应信号。
+        resonance_action = call(engine, "pre_battle_action", {
+            "sub_action": "共鸣", "tier": 1,
+        })
+        timeline.append({"type": "world_feature_action",
+                         "world_turn": WorldState.from_dict(engine.state.world_state).clock.turn,
+                         "action": "共鸣", "result": resonance_action})
+        hiring_action = call(engine, "pre_battle_action", {
+            "sub_action": "雇佣", "name": "回放雇员",
+            "blood_alloc": 20, "atk_bundles": 0,
+        })
+        timeline.append({"type": "world_feature_action",
+                         "world_turn": WorldState.from_dict(engine.state.world_state).clock.turn,
+                         "action": "雇佣", "result": hiring_action})
+
         while engine.state.player.is_alive:
             world = WorldState.from_dict(engine.state.world_state)
             if world.final_duel_complete:
@@ -277,6 +319,20 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
             if world.clock.turn >= max_world_turns:
                 stop_reason = f"safety ceiling reached at world turn {max_world_turns}; run incomplete"
                 break
+            # 雇佣信号抵达后，完成其真实道纹选择，避免员工停在半结算状态。
+            if engine.state.pending_daowen_choices:
+                employee_name = sorted(engine.state.pending_daowen_choices)[0]
+                choices = engine.state.pending_daowen_choices[employee_name]
+                if choices:
+                    chosen = call(engine, "choose_hired_daowen", {
+                        "name": employee_name, "daowen": choices[0],
+                    })
+                    timeline.append({"type": "world_feature_action",
+                                     "world_turn": world.clock.turn,
+                                     "action": "choose_hired_daowen",
+                                     "result": chosen})
+                    continue
+
             encounter = encounter_for_player(engine)
             if encounter is not None:
                 outcome = fight(engine, encounter.encounter_id, timeline, replays)
@@ -290,7 +346,37 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
                     stop_reason = "map combat did not reach a legal battle end"
                     break
                 continue
-            destination = _next_player_step(engine, world)
+            # 固定种子单局必须真实结算资源、共鸣遗物拾取和地图事件。
+            # 最终死斗一旦启动，仍由上面的正式规则优先处理，不为审计而推迟终局。
+            move_entries = [item for item in timeline if item.get("type") == "world_move"]
+            resource_collected = any(
+                ((item.get("result") or {}).get("result") or {}).get("resource_collected")
+                for item in move_entries
+            )
+            relic_collected = any(
+                ((item.get("result") or {}).get("result") or {}).get("relic_collected")
+                for item in move_entries
+            )
+            event_resolved = any(
+                item.get("type") == "map_event_resolution"
+                and (item.get("result") or {}).get("success")
+                for item in timeline
+            )
+            resonance_result = (resonance_action.get("result") or {})
+            resonance_location_id = resonance_result.get("location_id")
+            destination = None
+            if not resource_collected:
+                destination = _next_location_step(world, engine.state.player.runtime_id,
+                                                  {"resource"})
+            if destination is None and not relic_collected and resonance_location_id:
+                destination = _next_location_step(
+                    world, engine.state.player.runtime_id, {"relic"},
+                    location_id=str(resonance_location_id))
+            if destination is None and not event_resolved:
+                destination = _next_location_step(world, engine.state.player.runtime_id,
+                                                  {"event"})
+            if destination is None:
+                destination = _next_player_step(engine, world)
             if destination is None:
                 stop_reason = "no reachable living rival or hostile unit"
                 break
@@ -307,6 +393,28 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
             stop_reason = "final duel completed"
         elif not engine.state.player.is_alive:
             stop_reason = stop_reason or "player died"
+        move_entries = [item for item in timeline if item.get("type") == "world_move"]
+        feature_coverage = {
+            "resource_collected": any(
+                ((item.get("result") or {}).get("result") or {}).get("resource_collected")
+                for item in move_entries
+            ) or any(location.get("kind") == "resource" and location.get("collected")
+                     for location in world.map.locations.values()),
+            "resonance_relic_dropped": bool(
+                (resonance_action.get("result") or {}).get("location_id")),
+            "resonance_relic_picked_up": any(
+                ((item.get("result") or {}).get("result") or {}).get("relic_collected")
+                for item in move_entries
+            ),
+            "hiring_signal_completed": any(
+                signal.get("status") == "completed" for signal in world.hiring_signals),
+            "map_event_resolved": any(
+                item.get("type") == "map_event_resolution"
+                and (item.get("result") or {}).get("success")
+                for item in timeline),
+            "npc_skirmish_resolved": any(
+                event.get("type") == "npc_skirmish_resolved" for event in world.event_log),
+        }
         final = {
             "player": {"name": engine.state.player.name,
                        "runtime_id": engine.state.player.runtime_id,
@@ -353,6 +461,7 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
                     "locations": [{"location_id": location_id, **dict(location)}
                                   for location_id, location in world.map.locations.items()]},
             "final_state": final,
+            "feature_coverage": feature_coverage,
             "timeline": _chronological_timeline(world.event_log, timeline, replays),
             "driver_timeline": timeline,
             "world_event_log": world.event_log,
@@ -446,7 +555,10 @@ def write_replay(payload: dict[str, Any], out_dir: Path = OUT) -> tuple[Path, Pa
              f"- 游戏完成：{summary['game_complete']}",
              f"- 胜者：{summary['winner_name']}",
              f"- 结束原因：{summary['stop_reason']}",
-             f"- 玩家最终状态：{summary['player']}", "", "## 最终地图",
+             f"- 玩家最终状态：{summary['player']}", "", "## 世界功能实际结算",
+             *[f"- {name}：{'通过' if passed else '未覆盖'}"
+               for name, passed in (payload.get("feature_coverage") or {}).items()],
+             "", "## 最终地图",
              "P=玩家位置（若仍在场），R=其他轮回者，M=怪物，$=中立单位；#=墙，:=废墟。", "",
              *("    " + line.rstrip() if line.strip() else ""
                for line in payload["map"]["final_ascii"].splitlines()),
@@ -486,6 +598,13 @@ def validate_complete_playthrough(payload: dict[str, Any]) -> None:
         raise RuntimeError("final duel did not produce exactly one recorded winner")
     if len(final.get("living_reincarnators_at_end", [])) != 1:
         raise RuntimeError("terminal world state does not contain exactly one living reincarnator")
+    coverage = payload.get("feature_coverage") or {}
+    required_features = ("resource_collected", "resonance_relic_dropped",
+                         "resonance_relic_picked_up", "hiring_signal_completed",
+                         "map_event_resolved")
+    missing = [feature for feature in required_features if coverage.get(feature) is not True]
+    if missing:
+        raise RuntimeError(f"open-world feature audit incomplete: {', '.join(missing)}")
 
 
 def main() -> None:
