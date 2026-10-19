@@ -1136,6 +1136,27 @@ def test_cultivation_points_can_be_assigned_to_created_being(tmp_path):
     assert engine.state.attribute_points == 0
 
 
+def test_replay_driver_explores_unvisited_frontier_when_no_hostile_is_reachable(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+    from sim.run_open_world_replay import _next_player_step
+
+    engine = GameEngine(db_path=str(tmp_path / "frontier-driver.db"),
+                        save_dir=str(tmp_path), rng_seed=105, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.player = player
+    engine.state.enemies = []
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(player.runtime_id, "P", "player", 1, 1,
+                                    faction="player", mode="manual"))
+
+    destination = _next_player_step(engine, world)
+
+    assert destination is not None
+    assert destination != world.actors[player.runtime_id].position
+    assert world.map.is_passable(destination)
+
+
 def test_final_duel_search_starts_when_only_two_reincarnators_remain_even_if_monsters_survive(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
