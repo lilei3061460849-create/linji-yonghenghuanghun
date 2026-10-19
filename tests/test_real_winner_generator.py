@@ -12,7 +12,7 @@ def test_real_winner_generator_scans_existing_samples_without_name_error(tmp_pat
     (tmp_path / "winner_03.json").write_text(
         json.dumps({"origin": {"seed": 17}}, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(sys, "argv", [
-        "produce_real_winners.py", "--count", "0", "--max-games", "0"
+        "produce_real_winners.py", "--legacy-seven-battle-mode", "--count", "0", "--max-games", "0"
     ])
 
     produce_real_winners.main()
@@ -31,7 +31,7 @@ def test_real_winner_generator_fails_when_requested_samples_are_missing(tmp_path
     monkeypatch.setattr(produce_real_winners, "play_first_tier",
                         lambda *args, **kwargs: {"cleared": 0, "won": False, "invalid": False})
     monkeypatch.setattr(sys, "argv", [
-        "produce_real_winners.py", "--count", "1", "--max-games", "1"
+        "produce_real_winners.py", "--legacy-seven-battle-mode", "--count", "1", "--max-games", "1"
     ])
 
     with pytest.raises(SystemExit) as exc:
