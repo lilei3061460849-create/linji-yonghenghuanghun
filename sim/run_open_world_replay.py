@@ -609,6 +609,11 @@ def validate_complete_playthrough(payload: dict[str, Any]) -> None:
 
 def main() -> None:
     payload = run_playthrough()
+    print(json.dumps({
+        "prevalidation_final_state": payload.get("final_state"),
+        "feature_coverage": payload.get("feature_coverage"),
+        "driver_event_types": sorted({item.get("type", "") for item in payload.get("driver_timeline", [])}),
+    }, ensure_ascii=False, indent=2))
     validate_complete_playthrough(payload)
     json_path, markdown_path = write_replay(payload)
     print(json.dumps({
