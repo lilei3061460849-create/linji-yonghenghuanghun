@@ -177,9 +177,17 @@ def main() -> None:
             out = WINNER_DIR / f"winner_{next_index:02d}.json"
             out.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
             digest = hashlib.sha256(out.read_bytes()).hexdigest()
+            replay_path = WINNER_DIR / f"winner_{next_index:02d}_replay.json"
+            replay_payload = {key: value for key, value in payload.items()
+                              if key != "winner_snapshot"}
+            replay_path.write_text(
+                json.dumps(replay_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            replay_digest = hashlib.sha256(replay_path.read_bytes()).hexdigest()
             samples.append({
                 "file": out.name,
                 "sha256": digest,
+                "replay_file": replay_path.name,
+                "replay_sha256": replay_digest,
                 "seed": seed,
                 "region": region,
                 "world_turn": final.get("world_turn"),
