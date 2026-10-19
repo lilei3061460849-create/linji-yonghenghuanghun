@@ -1694,12 +1694,12 @@ class GameEngine:
             return {"active": False, "complete": True, "winner": world.final_duel_winner}
         # 若地图威胁在最终会合启动前清空了其他轮回者，唯一存活者直接获胜；
         # 不得因“必须恰好两人”而把世界卡在没有可达目标的状态。
-        has_seen_rival_actor = any(
-            actor_id != (player.runtime_id if player is not None else "")
-            and actor.kind in ("enemy", "reincarnator", "friend", "employee", "temp_friend")
-            and actor.faction != "monster"
-            for actor_id, actor in world.actors.items()
-        )
+        known_rival_ids = {
+            entity.runtime_id for entity in all_entities
+            if entity is not None and entity is not player
+            and entity.entity_type == "轮回者"
+        }
+        has_seen_rival_actor = any(actor_id in known_rival_ids for actor_id in world.actors)
         if (not world.final_duel_search and not world.final_duel_started
                 and world.clock.turn > 0 and has_seen_rival_actor
                 and player is not None and player.is_alive and not living_rivals):
