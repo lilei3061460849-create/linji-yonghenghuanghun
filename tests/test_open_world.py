@@ -2059,7 +2059,8 @@ from sim.run_open_world_replay import SEED, run_playthrough
 
 
 def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
-    replay = run_playthrough(SEED, include_winner_snapshot=True)
+    replay = run_playthrough(SEED, include_winner_snapshot=True,
+                             blood_points=10, speed_points=8, mana_points=7)
     final = replay["final_state"]
 
     assert final["game_complete"] is True
@@ -2088,6 +2089,10 @@ def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
     assert replay["initial_population"]["special_locations"] >= 1
     setup = replay["driver_timeline"][0]["setup"]
     assert setup["attributes"]["total"] == 25
+    assert any(item["kind"] == "daowen" and item["success"]
+               for item in setup["growth_actions"])
+    assert any(item["kind"] == "spell" and item["success"]
+               for item in setup["growth_actions"])
 
     assert final["battle_count"] == len(replay["battles"]) >= 1
     assert any(entry.get("type") == "battle_start" and not entry.get("final_duel", False)
@@ -2126,7 +2131,7 @@ def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
         "winner_departed": True,
     }]
 
-    repeated = run_playthrough(SEED)
+    repeated = run_playthrough(SEED, blood_points=10, speed_points=8, mana_points=7)
     assert repeated["final_state"]["world_turn"] == final["world_turn"]
     assert repeated["final_state"]["player"]["hp"] == final["player"]["hp"]
     assert repeated["final_state"]["winner_name"] == final["winner_name"]
