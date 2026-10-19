@@ -300,6 +300,26 @@ def test_world_map_roundtrip_preserves_location_discovery_and_activity():
     assert restored.location_at((2, 2))[0] == "old_hospital"
 
 
+def test_merchant_trade_action_schema_lists_inventory(tmp_path):
+    """Merchant option construction stays compatible with the repo's local Python."""
+    from engine.api import GameEngine
+    from engine.models import Entity, Relic
+
+    engine = GameEngine(db_path=str(tmp_path / "merchant-actions.db"),
+                        save_dir=str(tmp_path), autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.merchant = Entity(
+        "过路商人", "特殊角色", relics=[Relic("地图遗物", "测试效果")])
+    engine.event_pool.current = "过路商人"
+
+    menu = engine.get_available_actions()
+    trade = next(action for action in menu["actions"]
+                 if action["option"].startswith("遗物交易"))
+
+    assert "地图遗物" in trade["params_schema"]["relic_name"]
+    assert "buy可选" in trade["params_schema"]["relic_name"]
+
+
 def test_arriving_at_event_location_opens_event_instead_of_exploration_action(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity

@@ -363,8 +363,10 @@ class GameEngine:
                     schema["note"] = "随机整数直接决定盈亏倍数，范围为-倍率至+倍率；本金100、倍率3、结果-2即净亏200，结果0不赚不亏。亏损可形成负碎片余额，并沿用动态债务线"
                 if self.event_pool.current == "过路商人" and option["text"].startswith("遗物交易"):
                     self._init_relic_pool()
+                    merchant = getattr(self.state, "merchant", None)
+                    merchant_relics = [r.name for r in merchant.relics] if merchant else []
                     schema.update({"trade_direction": ["buy", "sell"],
-                                   "relic_name": f"字符串；buy可选：{[r.name for r in (getattr(self.state, "merchant", None).relics if getattr(self.state, "merchant", None) else [])]}；sell可选：{[r.name for r in self.state.relics]}",
+                                   "relic_name": f"字符串；buy可选：{merchant_relics}；sell可选：{[r.name for r in self.state.relics]}",
                                    "price": "双方协商后的非负整数碎片价格",
                                    "confirmed": True})
                     schema["note"] = "同次遭遇可连续买卖多件遗物；成交前确认价格。选择其他选项结束交易会话。买卖立即转移遗物与碎片，不得复制遗物或通过交易透支"
