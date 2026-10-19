@@ -35,10 +35,13 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
 
-      - name: Generate real first-tier winners
+      - name: Prepare isolated sample output
+        run: rm -rf artifacts/real_winners && mkdir -p artifacts/real_winners
+
+      - name: Generate real first-tier winners from complete open-world runs
         env:
           REAL_WINNER_DIR: artifacts/real_winners
-        run: python sim/produce_open_world_winners.py --count 3 --max-games 500
+        run: set -o pipefail && python sim/produce_open_world_winners.py --count 3 --max-games 500 2>&1 | tee artifacts/real_winners/run.log
 
       - name: Upload winner snapshots for audit
         if: always()
