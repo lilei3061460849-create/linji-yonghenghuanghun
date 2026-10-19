@@ -1701,6 +1701,7 @@ class GameEngine:
         }
         has_seen_rival_actor = any(actor_id in known_rival_ids for actor_id in world.actors)
         if (not world.final_duel_search and not world.final_duel_started
+                and world.map.width * world.map.height >= 150
                 and world.clock.turn > 0 and has_seen_rival_actor
                 and player is not None and player.is_alive and not living_rivals):
             world.final_duel_complete = True
