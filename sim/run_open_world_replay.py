@@ -457,8 +457,40 @@ def write_replay(payload: dict[str, Any], out_dir: Path = OUT) -> tuple[Path, Pa
     return json_path, markdown_path
 
 
+def validate_complete_playthrough(payload: dict[str, Any]) -> None:
+    """Reject a replay that merely ran for a while instead of reaching a legal world ending."""
+    final = payload.get("final_state") or {}
+    population = payload.get("initial_population") or {}
+    battles = payload.get("battles") or []
+    if final.get("game_complete") is not True:
+        raise RuntimeError(f"open-world run is incomplete: {final.get('stop_reason', 'unknown stop')}")
+    if final.get("stop_reason") != "final duel completed":
+        raise RuntimeError(f"unexpected terminal reason: {final.get('stop_reason')}")
+    if int(population.get("monsters", 0)) < 1:
+        raise RuntimeError("open-world run spawned no monsters")
+    if int(population.get("other_reincarnators", 0)) < 2:
+        raise RuntimeError("open-world run spawned fewer than two other reincarnators")
+    if int(population.get("special_locations", 0)) < 1:
+        raise RuntimeError("open-world run spawned no special locations")
+    if not battles or int(final.get("battle_count", 0)) != len(battles):
+        raise RuntimeError("battle count does not match the exported battle replays")
+    if int(final.get("combat_event_count", 0)) != sum(
+            int(battle.get("event_count", 0)) for battle in battles):
+        raise RuntimeError("combat event count does not match the exported battle replays")
+    if int(battles[-1].get("round_count", 0)) < 1 or int(battles[-1].get("event_count", 0)) < 1:
+        raise RuntimeError("final duel has no actual combat rounds/events")
+    duel_entries = [entry for entry in payload.get("driver_timeline", [])
+                    if entry.get("type") == "final_duel"]
+    if len(duel_entries) != 1 or duel_entries[0].get("result", {}).get("winner") not in {
+            "challenger", "defender"}:
+        raise RuntimeError("final duel did not produce exactly one recorded winner")
+    if len(final.get("living_reincarnators_at_end", [])) != 1:
+        raise RuntimeError("terminal world state does not contain exactly one living reincarnator")
+
+
 def main() -> None:
     payload = run_playthrough()
+    validate_complete_playthrough(payload)
     json_path, markdown_path = write_replay(payload)
     print(json.dumps({
         "final_state": payload["final_state"],
