@@ -7,6 +7,13 @@ on:
       - ".github/workflows/open-world-full-replay.yml"
       - "engine/**"
       - "sim/produce_real_winners.py"
+  push:
+    branches: [main]
+    paths:
+      - "sim/run_open_world_replay.py"
+      - ".github/workflows/open-world-full-replay.yml"
+      - "engine/**"
+      - "sim/produce_real_winners.py"
   workflow_dispatch:
 
 permissions:
@@ -33,9 +40,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: open-world-full-replay-seed-20261019
+          name: open-world-full-replay-seed-1
           path: |
-            artifacts/open_world_replay/open_world_full_replay.json
-            artifacts/open_world_replay/open_world_full_replay.md
-          if-no-files-found: warn
+            data/open_world_replay/open_world_full_replay.json
+            data/open_world_replay/open_world_full_replay.md
+          if-no-files-found: error
           retention-days: 30
