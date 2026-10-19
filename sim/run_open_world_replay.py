@@ -187,13 +187,37 @@ def _setup_player(engine: GameEngine, *, region: str = "罪孽都市",
     daowen = call(engine, "setup_choose_initial_daowen", {"daowen_name": daowen_choice})
     resonance = call(engine, "setup_choose_resonance", {"resonance_type": "转换"})
     region_result = call(engine, "setup_choose_region", {"region": region})
+
+    # Learn through real engine actions before map time starts, so winner snapshots
+    # contain an auditable progression build rather than only the initial DaoWen.
+    growth_actions = []
+    for name in ("庇护", "再生"):
+        if name in engine.state.player.dao_wen:
+            continue
+        result = engine.execute_action("pre_battle_action", {
+            "sub_action": "学习", "sub": "daowen", "tier": 1, "names": [name],
+        })
+        growth_actions.append({"kind": "daowen", "name": name,
+                               "success": bool(result.get("success")),
+                               "error": result.get("error")})
+    for name, required in (("生生不息", "再生"), ("后发制人", "庇护")):
+        if name in engine.state.player.spells or required not in engine.state.player.dao_wen:
+            continue
+        result = engine.execute_action("pre_battle_action", {
+            "sub_action": "学习", "sub": "spell", "tier": 1, "names": [name],
+        })
+        growth_actions.append({"kind": "spell", "name": name,
+                               "success": bool(result.get("success")),
+                               "error": result.get("error")})
+
     return {"attributes": {"blood_points": blood_points, "speed_points": speed_points,
                             "mana_points": mana_points,
                             "total": blood_points + speed_points + mana_points},
             "relic_candidates": relic_choices, "relic_choice": relic_choice,
             "relic_result": relic, "daowen_candidates": relic["result"]["daowen_choices"],
             "daowen_choice": daowen_choice, "daowen_result": daowen,
-            "resonance_result": resonance, "region_result": region_result}
+            "resonance_result": resonance, "region_result": region_result,
+            "growth_actions": growth_actions}
 
 
 def _next_player_step(engine: GameEngine, world: WorldState) -> tuple[int, int] | None:
