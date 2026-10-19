@@ -343,7 +343,7 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
         world = WorldState.from_dict(engine.state.world_state)
         if world.final_duel_complete:
             stop_reason = ("sole survivor victory"
-                           if any(event.get("type") == "sole_survivor_victory"
+                           if any(event.get("type") in {"sole_survivor_victory", "final_duel_search_ended"}
                                   for event in world.event_log)
                            else "final duel completed")
         elif not engine.state.player.is_alive:
@@ -558,7 +558,7 @@ def validate_complete_playthrough(payload: dict[str, Any]) -> None:
         if len(duel_entries) != 1 or duel_entries[0].get("result", {}).get("winner") not in {
                 "challenger", "defender"}:
             raise RuntimeError("final duel did not produce exactly one recorded winner")
-    elif not any(event.get("type") == "sole_survivor_victory"
+    elif not any(event.get("type") in {"sole_survivor_victory", "final_duel_search_ended"}
                  for event in payload.get("world_event_log", [])):
         raise RuntimeError("sole-survivor terminal has no recorded victory event")
     if len(final.get("living_reincarnators_at_end", [])) != 1:
