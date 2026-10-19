@@ -143,12 +143,25 @@ def main() -> None:
             failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
             final = (payload or {}).get("final_state") or {}
             status = "player_died" if "player died before a complete terminal" in reason else "incomplete_or_invalid"
+            failed_battles = (payload or {}).get("battles") or []
+            failed_timeline = (payload or {}).get("driver_timeline") or []
             attempt.update({
                 "status": status,
                 "error": reason,
                 "world_turn": final.get("world_turn"),
                 "stop_reason": final.get("stop_reason"),
+                "winner_id": final.get("winner_id"),
+                "winner_name": final.get("winner_name"),
                 "battle_count": final.get("battle_count"),
+                "exported_battle_replays": len(failed_battles),
+                "ordinary_battle_starts": sum(
+                    1 for entry in failed_timeline
+                    if entry.get("type") == "battle_start" and not entry.get("final_duel", False)
+                ),
+                "living_reincarnator_count": len(final.get("living_reincarnators_at_end") or []),
+                "living_reincarnators": [
+                    item.get("name") for item in (final.get("living_reincarnators_at_end") or [])
+                ],
             })
             outcome_counts[status] = outcome_counts.get(status, 0) + 1
             attempts.append(attempt)
