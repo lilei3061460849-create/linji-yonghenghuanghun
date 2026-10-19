@@ -40,6 +40,11 @@ jobs:
           mkdir -p artifacts/open_world_replay
       - name: Run one deterministic open-world playthrough through existing combat
         run: set -o pipefail && python sim/run_open_world_replay.py 2>&1 | tee artifacts/open_world_replay/run.log
+      - name: Audit real resource, relic, hiring, and event integrations
+        if: always()
+        run: |
+          set -o pipefail
+          python -m pytest -q tests/test_open_world.py -k "arriving_at_event_location or resource_location_is_collected_once or world_resonance_drops_a_real_relic or player_picks_up_resonance_relic or hiring_signal_persists_while_player_moves" --junitxml=artifacts/open_world_replay/location-feature-audit.xml 2>&1 | tee artifacts/open_world_replay/location-feature-audit.txt
       - name: Upload complete world and combat replay
         if: always()
         uses: actions/upload-artifact@v4
@@ -49,5 +54,7 @@ jobs:
             data/open_world_replay/open_world_full_replay.json
             data/open_world_replay/open_world_full_replay.md
             artifacts/open_world_replay/run.log
+            artifacts/open_world_replay/location-feature-audit.xml
+            artifacts/open_world_replay/location-feature-audit.txt
           if-no-files-found: warn
           retention-days: 30
