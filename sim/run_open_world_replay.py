@@ -265,6 +265,20 @@ def _next_player_step(engine: GameEngine, world: WorldState) -> tuple[int, int] 
             hostile_paths.append((len(path), entity.name, path))
     if hostile_paths:
         return min(hostile_paths, key=lambda item: (item[0], item[1]))[2][1]
+
+    # No visible/reachable hostile is not a terminal condition. Explore the nearest
+    # unvisited passable cell so NPCs and world threats can continue to evolve.
+    frontier_paths = []
+    for y in range(world.map.height):
+        for x in range(world.map.width):
+            cell = (x, y)
+            if not world.map.is_passable(cell) or world.map.key(cell) in player_actor.visited_cells:
+                continue
+            path = world.map.find_path(player_actor.position, cell)
+            if path and len(path) > 1:
+                frontier_paths.append((len(path), y, x, path))
+    if frontier_paths:
+        return min(frontier_paths, key=lambda item: (item[0], item[1], item[2]))[3][1]
     return None
 
 
