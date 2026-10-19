@@ -112,9 +112,9 @@ def main() -> None:
                 region=region,
                 player_name=player_name,
                 include_winner_snapshot=True,
-                blood_points=10,
-                speed_points=8,
-                mana_points=7,
+                blood_points=11,
+                speed_points=6,
+                mana_points=8,
             )
             validate_complete_playthrough(payload)
         except Exception as exc:
