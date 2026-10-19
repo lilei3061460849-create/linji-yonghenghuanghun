@@ -3299,20 +3299,25 @@ class GameEngine:
                                "required_turns": duration, "reward_applied": False,
                                "completion_error": result.get("error", "")}}
         if action == "造生":
-            # 新造物作为真实地图单位加入；再次造生只培养既有单位，不额外复制生命。
+            # 新造物作为真实地图单位加入；再次造生只强化既有单位，不额外复制生命。
             for being in self.state.friends:
-                if (getattr(being, "is_created_being", False)
-                        and getattr(being, "created_by_runtime_id", "") == player_id
-                        and being.runtime_id not in world.actors):
-                    player_actor = world.actors[player_id]
-                    being.world_region = self.state.current_region
-                    being.world_x, being.world_y = player_actor.x, player_actor.y
-                    world.add_actor(WorldActorState(
-                        actor_id=being.runtime_id, name=being.name, kind="friend",
-                        x=player_actor.x, y=player_actor.y, alive=being.is_alive,
-                        faction="friend", mode="autonomous", behavior="explore",
-                        owner_actor_id=player_id,
-                        vision_range=max(1, int(getattr(being, "created_being_vision_range", 1)))))
+                if (not getattr(being, "is_created_being", False)
+                        or getattr(being, "created_by_runtime_id", "") != player_id):
+                    continue
+                existing_actor = world.actors.get(being.runtime_id)
+                if existing_actor is not None:
+                    existing_actor.vision_range = max(
+                        1, int(getattr(being, "created_being_vision_range", 1)))
+                    continue
+                player_actor = world.actors[player_id]
+                being.world_region = self.state.current_region
+                being.world_x, being.world_y = player_actor.x, player_actor.y
+                world.add_actor(WorldActorState(
+                    actor_id=being.runtime_id, name=being.name, kind="friend",
+                    x=player_actor.x, y=player_actor.y, alive=being.is_alive,
+                    faction="friend", mode="autonomous", behavior="explore",
+                    owner_actor_id=player_id,
+                    vision_range=max(1, int(getattr(being, "created_being_vision_range", 1)))))
         self._share_created_being_vision(world)
         world.record("world_action_completed", player_id, action=action,
                      elapsed_turns=elapsed)
