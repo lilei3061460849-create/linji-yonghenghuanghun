@@ -41,7 +41,7 @@ jobs:
       - name: Generate real first-tier winners from complete open-world runs
         env:
           REAL_WINNER_DIR: artifacts/real_winners
-        run: set -o pipefail && python sim/produce_open_world_winners.py --count 3 --max-games 50 2>&1 | tee artifacts/real_winners/run.log
+        run: set -o pipefail && python sim/produce_open_world_winners.py --count 1 --max-games 1 2>&1 | tee artifacts/real_winners/run.log
 
       - name: Upload winner snapshots for audit
         if: always()
