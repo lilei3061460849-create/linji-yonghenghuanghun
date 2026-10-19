@@ -134,7 +134,7 @@ def main() -> None:
             if entry.get("type") == "battle_start" and not entry.get("final_duel", False)
         )
         player_won = (
-            final.get("winner_name") == player_name
+            final.get("winner_id") == (final.get("player") or {}).get("runtime_id")
             and bool((payload.get("winner_snapshot") or {}).get("player", {}).get("is_alive"))
         )
         attempt.update({
