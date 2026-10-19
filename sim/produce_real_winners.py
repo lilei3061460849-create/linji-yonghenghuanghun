@@ -663,5 +663,12 @@ def main():
             print(f"  {k}: {v}")
 
 
+    # A green workflow must mean the requested number of genuine winners exists.
+    # Do not let a 500-game run with zero winners masquerade as successful sampling.
+    if args.count > 0 and winners < args.count:
+        print(f"错误：要求 {args.count} 位真实胜者，实际仅生成 {winners} 位。")
+        raise SystemExit(2)
+
+
 if __name__ == "__main__":
     main()

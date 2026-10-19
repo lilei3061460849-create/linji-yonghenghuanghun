@@ -20,3 +20,20 @@ def test_real_winner_generator_scans_existing_samples_without_name_error(tmp_pat
     # 扫描旧格式文件时应安全跳过其来源信息，而不是覆盖或删除既有数据。
     assert (tmp_path / "winner_01.json").exists()
     assert (tmp_path / "winner_03.json").exists()
+
+
+
+def test_real_winner_generator_fails_when_requested_samples_are_missing(tmp_path, monkeypatch):
+    import pytest
+    from sim import produce_real_winners
+
+    monkeypatch.setattr(produce_real_winners, "WINNER_DIR", str(tmp_path))
+    monkeypatch.setattr(produce_real_winners, "play_first_tier",
+                        lambda *args, **kwargs: {"cleared": 0, "won": False, "invalid": False})
+    monkeypatch.setattr(sys, "argv", [
+        "produce_real_winners.py", "--count", "1", "--max-games", "1"
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        produce_real_winners.main()
+    assert exc.value.code == 2
