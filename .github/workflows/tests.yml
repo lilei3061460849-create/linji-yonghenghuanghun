@@ -40,7 +40,7 @@ jobs:
 
       - name: Run open-world and preference regressions
         if: github.event_name != 'workflow_dispatch' || inputs.full_suite != 'true'
-        run: python -m pytest -q tests/test_open_world.py tests/test_monster_preferences.py tests/test_altar.py tests/test_relicization_behavior_boundaries.py tests/test_real_winner_generator.py tests/test_ai_basic_attack_candidate.py tests/test_replay.py
+        run: python -m pytest -q tests/test_open_world.py tests/test_open_world_full_replay.py tests/test_monster_preferences.py tests/test_altar.py tests/test_relicization_behavior_boundaries.py tests/test_real_winner_generator.py tests/test_ai_basic_attack_candidate.py tests/test_replay.py
 
       - name: Run full repository suite on demand
         if: github.event_name == 'workflow_dispatch' && inputs.full_suite == 'true'

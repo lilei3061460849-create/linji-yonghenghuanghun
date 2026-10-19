@@ -1269,7 +1269,17 @@ class GameEngine:
         # 豁免：自创法术 dm_approved 重提是"结算中断"的动作，不该被自己挡住
         # 注：旧 is_custom_approve 旁路口（局外自创法术的 dm_approved 重提）
         # 已于 2026-09-16 随局外自创入口一并删除，不再需要豁免待裁定门禁。
-        if self._pending_interrupts and action_type != "restart_battle":
+        # 世界最终死斗中的轮回者可能已命零并触发【死之传承】；先允许战终把胜负
+        # 和存活者写回世界，再让调用方处理遗言。普通 pending interrupt 仍封锁行动。
+        pending_world_duel_death = (
+            action_type == "battle_end"
+            and bool(self.state.event_modifiers.get("world_final_duel"))
+            and self.state.phase == GamePhase.IN_COMBAT.value
+            and all(getattr(interrupt.interrupt_type, "value", interrupt.interrupt_type)
+                    == "死之传承" for interrupt in self._pending_interrupts)
+        )
+        if (self._pending_interrupts and action_type != "restart_battle"
+                and not pending_world_duel_death):
             player_dead = (self.state.player is None) or (not self.state.player.is_alive)
             return {
                 "success": False,
@@ -8188,6 +8198,8 @@ class GameEngine:
                 entity = entity_by_id.get(actor_id)
                 if actor is None:
                     continue
+                if entity is not None:
+                    actor.name = entity.name
                 if entity is None or not entity.is_alive or entity.is_departed:
                     actor.alive = False
                 else:
