@@ -718,7 +718,7 @@ def main():
         "invalid_reasons": invalid_reasons,
         "samples": sample_hashes,
         "existing_sample_files_seen": sorted(
-            fn for fn in os.listdir(WINNER_DIR) if re.fullmatch(r"winner_\\d+\\.json", fn)
+            fn for fn in os.listdir(WINNER_DIR) if re.fullmatch(r"winner_\d+\.json", fn)
         ),
     }
     report_path = os.path.join(WINNER_DIR, "sampling_report.json")
