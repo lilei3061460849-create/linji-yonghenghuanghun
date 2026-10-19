@@ -6,6 +6,11 @@ on:
     paths:
       - "sim/produce_open_world_winners.py"
       - "sim/run_open_world_replay.py"
+      - "engine/api.py"
+      - "engine/world.py"
+      - "engine/models.py"
+      - "engine/combat.py"
+      - "engine/monsters.py"
       - ".github/workflows/real-winner-samples.yml"
   workflow_dispatch:
 
