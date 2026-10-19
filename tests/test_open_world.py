@@ -563,6 +563,7 @@ def test_npc_only_world_encounters_use_combat_engine_and_do_not_stall(tmp_path):
     engine.state.player = player
     engine.state.enemies = [rival, monster]
     world = WorldState(clock=WorldClock(), map=_open_map())
+    world.clock.turn = 1
     world.add_actor(WorldActorState(player.runtime_id, "P", "player", 1, 1,
                                     faction="player", mode="manual"))
     world.add_actor(WorldActorState(rival.runtime_id, "R", "enemy", 3, 3,
