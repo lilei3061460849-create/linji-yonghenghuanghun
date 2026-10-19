@@ -91,3 +91,26 @@ def test_real_winner_snapshot_validator_requires_seven_battles_and_seal_provenan
     }
     with pytest.raises(ValueError, match="all seven"):
         validate_winner_snapshot(snapshot)
+
+
+
+def test_seal_queue_is_unwrapped_to_a_top_level_winner_snapshot():
+    from sim.produce_real_winners import extract_sealed_snapshot, validate_winner_snapshot
+
+    character = {
+        "player": {"entity_type": "轮回者", "is_alive": True},
+        "friends": [], "employees": [], "relics": [],
+        "origin": {
+            "seed": 4, "region": "罪孽都市", "generator": "sim/produce_real_winners.py",
+            "cleared": 7, "sealed": True,
+            "initial_attributes": {"blood_points": 11, "speed_points": 8, "mana_points": 6},
+            "initial_attribute_points": 25,
+        },
+    }
+    wrapped = {"candidates": {"2": [character]}, "progression": {"unlocked_tier": 1}}
+
+    extracted = extract_sealed_snapshot(wrapped, 2)
+
+    assert "candidates" not in extracted
+    assert extracted["player"]["entity_type"] == "轮回者"
+    validate_winner_snapshot(extracted)
