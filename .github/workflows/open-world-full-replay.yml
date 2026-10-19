@@ -35,9 +35,11 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
       - name: Remove stale replay outputs
-        run: rm -f data/open_world_replay/open_world_full_replay.json data/open_world_replay/open_world_full_replay.md
+        run: |
+          rm -f data/open_world_replay/open_world_full_replay.json data/open_world_replay/open_world_full_replay.md
+          mkdir -p artifacts/open_world_replay
       - name: Run one deterministic open-world playthrough through existing combat
-        run: python sim/run_open_world_replay.py
+        run: set -o pipefail && python sim/run_open_world_replay.py 2>&1 | tee artifacts/open_world_replay/run.log
       - name: Upload complete world and combat replay
         if: always()
         uses: actions/upload-artifact@v4
@@ -46,5 +48,6 @@ jobs:
           path: |
             data/open_world_replay/open_world_full_replay.json
             data/open_world_replay/open_world_full_replay.md
-          if-no-files-found: error
+            artifacts/open_world_replay/run.log
+          if-no-files-found: warn
           retention-days: 30
