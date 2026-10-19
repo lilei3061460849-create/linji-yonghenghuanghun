@@ -163,11 +163,12 @@ def fight(engine: GameEngine, encounter_id: str, timeline: list[dict[str, Any]],
     return outcome
 
 
-def _setup_player(engine: GameEngine, *, blood_points: int = 13,
-                  speed_points: int = 6, mana_points: int = 6) -> dict[str, Any]:
+def _setup_player(engine: GameEngine, *, region: str = "罪孽都市",
+                  player_name: str = PLAYER_NAME, blood_points: int = 9,
+                  speed_points: int = 8, mana_points: int = 8) -> dict[str, Any]:
     """Use public setup actions and validate the supplied 25-point attribute split."""
     setup = call(engine, "setup_attributes", {
-        "name": PLAYER_NAME, "blood_points": blood_points,
+        "name": player_name, "blood_points": blood_points,
         "speed_points": speed_points, "mana_points": mana_points,
     })
     relic_choices = setup["result"]["relic_choices"]
@@ -176,14 +177,14 @@ def _setup_player(engine: GameEngine, *, blood_points: int = 13,
     daowen_choice = engine.state.pending_initial_daowen_choices[0]
     daowen = call(engine, "setup_choose_initial_daowen", {"daowen_name": daowen_choice})
     resonance = call(engine, "setup_choose_resonance", {"resonance_type": "转换"})
-    region = call(engine, "setup_choose_region", {"region": "罪孽都市"})
+    region_result = call(engine, "setup_choose_region", {"region": region})
     return {"attributes": {"blood_points": blood_points, "speed_points": speed_points,
                             "mana_points": mana_points,
                             "total": blood_points + speed_points + mana_points},
             "relic_candidates": relic_choices, "relic_choice": relic_choice,
             "relic_result": relic, "daowen_candidates": relic["result"]["daowen_choices"],
             "daowen_choice": daowen_choice, "daowen_result": daowen,
-            "resonance_result": resonance, "region_result": region}
+            "resonance_result": resonance, "region_result": region_result}
 
 
 def _next_player_step(engine: GameEngine, world: WorldState) -> tuple[int, int] | None:
@@ -234,7 +235,9 @@ def _next_player_step(engine: GameEngine, world: WorldState) -> tuple[int, int] 
 
 
 def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
-                    *, blood_points: int = 9, speed_points: int = 8,
+                    *, region: str = "罪孽都市", player_name: str = PLAYER_NAME,
+                    include_winner_snapshot: bool = False,
+                    blood_points: int = 9, speed_points: int = 8,
                     mana_points: int = 8) -> dict[str, Any]:
     """Return the full machine-readable game record; no output files are written here."""
     with tempfile.TemporaryDirectory(prefix="open-world-replay-") as temp_dir:
@@ -245,8 +248,9 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
             death_book_path=os.path.join(temp_dir, "death_book.md"),
             rng_seed=seed,
         )
-        setup = _setup_player(engine, blood_points=blood_points,
-                              speed_points=speed_points, mana_points=mana_points)
+        setup = _setup_player(engine, region=region, player_name=player_name,
+                              blood_points=blood_points, speed_points=speed_points,
+                              mana_points=mana_points)
         init = call(engine, "world_initialize", {"width": 21, "height": 21})
         world = WorldState.from_dict(engine.state.world_state)
         timeline: list[dict[str, Any]] = [{
@@ -336,11 +340,11 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
             "battle_count": len(replays),
             "combat_event_count": sum(replay["event_count"] for replay in replays),
         }
-        return {
+        payload = {
             "title": "开放世界完整单局回放",
             "schema_version": 1,
             "seed": seed,
-            "run_config": {"region": "罪孽都市", "map_size": [21, 21],
+            "run_config": {"region": region, "map_size": [21, 21],
                             "max_world_turns": max_world_turns,
                             "max_world_turns_is_safety_only": True},
             "initial_population": {
@@ -358,6 +362,11 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
             "world_event_log": world.event_log,
             "battles": replays,
         }
+        if (include_winner_snapshot and world.final_duel_complete
+                and final.get("winner_name") == engine.state.player.name
+                and engine.state.player.is_alive):
+            payload["winner_snapshot"] = engine._serialize_full_character()
+        return payload
 
 
 def _chronological_timeline(world_log: list[dict[str, Any]],
