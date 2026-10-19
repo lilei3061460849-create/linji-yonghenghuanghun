@@ -2074,6 +2074,8 @@ def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
         assert winner_snapshot["player"]["name"] == final["winner_name"]
         assert winner_snapshot["player"]["entity_type"] == "轮回者"
         assert winner_snapshot["player"]["is_alive"] is True
+        assert len(winner_snapshot["player"].get("dao_wen") or {}) >= 2
+        assert len(winner_snapshot["player"].get("spells") or []) >= 1
         assert "candidates" not in winner_snapshot
     else:
         assert "winner_snapshot" not in replay
