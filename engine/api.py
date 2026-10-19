@@ -363,8 +363,10 @@ class GameEngine:
                     schema["note"] = "随机整数直接决定盈亏倍数，范围为-倍率至+倍率；本金100、倍率3、结果-2即净亏200，结果0不赚不亏。亏损可形成负碎片余额，并沿用动态债务线"
                 if self.event_pool.current == "过路商人" and option["text"].startswith("遗物交易"):
                     self._init_relic_pool()
+                    merchant = getattr(self.state, "merchant", None)
+                    merchant_relics = [r.name for r in merchant.relics] if merchant else []
                     schema.update({"trade_direction": ["buy", "sell"],
-                                   "relic_name": f"字符串；buy可选：{[r.name for r in (getattr(self.state, "merchant", None).relics if getattr(self.state, "merchant", None) else [])]}；sell可选：{[r.name for r in self.state.relics]}",
+                                   "relic_name": f"字符串；buy可选：{merchant_relics}；sell可选：{[r.name for r in self.state.relics]}",
                                    "price": "双方协商后的非负整数碎片价格",
                                    "confirmed": True})
                     schema["note"] = "同次遭遇可连续买卖多件遗物；成交前确认价格。选择其他选项结束交易会话。买卖立即转移遗物与碎片，不得复制遗物或通过交易透支"
@@ -1267,7 +1269,17 @@ class GameEngine:
         # 豁免：自创法术 dm_approved 重提是"结算中断"的动作，不该被自己挡住
         # 注：旧 is_custom_approve 旁路口（局外自创法术的 dm_approved 重提）
         # 已于 2026-09-16 随局外自创入口一并删除，不再需要豁免待裁定门禁。
-        if self._pending_interrupts and action_type != "restart_battle":
+        # 世界最终死斗中的轮回者可能已命零并触发【死之传承】；先允许战终把胜负
+        # 和存活者写回世界，再让调用方处理遗言。普通 pending interrupt 仍封锁行动。
+        pending_world_duel_death = (
+            action_type == "battle_end"
+            and bool(self.state.event_modifiers.get("world_final_duel"))
+            and self.state.phase == GamePhase.IN_COMBAT.value
+            and all(getattr(interrupt.interrupt_type, "value", interrupt.interrupt_type)
+                    == "死之传承" for interrupt in self._pending_interrupts)
+        )
+        if (self._pending_interrupts and action_type != "restart_battle"
+                and not pending_world_duel_death):
             player_dead = (self.state.player is None) or (not self.state.player.is_alive)
             return {
                 "success": False,
@@ -8186,6 +8198,8 @@ class GameEngine:
                 entity = entity_by_id.get(actor_id)
                 if actor is None:
                     continue
+                if entity is not None:
+                    actor.name = entity.name
                 if entity is None or not entity.is_alive or entity.is_departed:
                     actor.alive = False
                 else:
