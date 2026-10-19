@@ -16,6 +16,7 @@
     python3 sim/produce_real_winners.py --max-games 200
 """
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -31,8 +32,12 @@ from sim.monster_targets import pick_monster_daowen_target  # noqa: E402
 from sim.build_learner import _decline_spells, _resolve_pending_event, round_start_relic_choices
 
 REGIONS = ["罪孽都市", "扭曲都市", "龙心谷"]
-WINNER_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          "data", "real_winners")
+WINNER_DIR = os.environ.get(
+    "REAL_WINNER_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                 "data", "real_winners"),
+)
+STARTER_ATTRIBUTES = {"blood_points": 11, "speed_points": 8, "mana_points": 6}
 
 # 学习顺序：先发制人(法术,免费,需杀伐=起手道纹) → 庇护/再生(道纹,免费)
 #          → 生生不息(法术,免费) → 后发制人(法术,免费)
@@ -225,52 +230,46 @@ def _resolve_monster_turn_with_spells(engine):
 
 
 def choose_pre_battle(e, battle_no, todo_spells, todo_daowen, rng=None):
-    """局外行动：优先学法术/道纹（免费），其余按真实策略权重选（修行/休整/探索/共鸣/雇佣）。
+    """局外行动：先完成免费成长，再用精力雇佣/探索/修行。
 
-    与 baseline 对齐的成长顺序：第1场先修行(+2法限)再学道纹（实测保证第1场能打）；
-    法术从第2场起补学（先发制人=免费，需要杀伐=起手道纹）。
-    探索/雇佣/共鸣会让胜者像真实玩家一样带朋友/员工/遗物，而不是光杆司令。"""
+    第1场先修行(+2法限)与 baseline 对齐。此后优先学习可用道纹和法术；
+    只有免费学习目标处理完毕，才花精力雇佣或探索。旧顺序把罪孽都市的
+    雇佣和龙心谷的探索放在学习前，会先耗尽精力，导致角色带着空技能栏开战。
+    """
     rng = rng or random.Random()
     p = e.state.player
     if battle_no == 1 and not getattr(p, "_b1_xiuxing", False):
         p._b1_xiuxing = True
         return "修行", {"tier": 1}
-    # 罪孽都市：雇佣高攻员工当靶子（威胁分压过玩家 → 怪物集火员工替轮回者抗伤）
-    if e.state.current_region == "罪孽都市" and len(e.state.employees) < 3:
-        # 20点预算：5攻次10攻力(15点)+60血(5点) → 威胁50+转化道纹10=60 > 玩家30-40
-        return "雇佣", {"name": f"铁卫{len(e.state.employees) + 1}",
-                        "blood_alloc": 5, "atk_bundles": 5}
-    # 【领悟】已于 2026-09-10 删除（DM裁定）：残韵不再能凭精力白拿。
-    # 后果：债务流原先靠局外领悟在第1场前攒齐 转换+反转 来解锁罪孽都市专属道纹，
-    # 这条路已经断了——现在只能靠开局必选或副本事件获取残韵
-    # （【三相残韵盘】已于2026-10-13删除，【逼债】同日删除由【典当】顶替）。
+
     from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
     if todo_daowen:
         name = todo_daowen[0]
-        # 罪孽都市专属道纹：未残韵解锁前不能学（学习门禁）。
-        # 【领悟】已删除，无法再靠局外行动补残韵 → 直接放弃该目标改选其它行动。
-        from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
         if name in REGION_EXCLUSIVE_DAOWEN["罪孽都市"]:
             if not (REGION_EXCLUSIVE_DAOWEN["罪孽都市"] & set(p.dao_wen)):
-                todo_daowen.pop(0)  # 学不了就放弃
+                todo_daowen.pop(0)
                 return choose_pre_battle(e, battle_no, todo_spells, todo_daowen, rng)
         return "学习", {"sub": "daowen", "tier": 1, "names": [name]}
-    # 龙心谷：优先探索拿带保护道纹的朋友（岩行者背负1/赴火者逆鳞1）——护卫命令的载体。
-    # 断桥余烬是龙心谷专属事件，探索随机遭遇；拿到任一朋友即停。
-    if e.state.current_region == "龙心谷" and not e.state.friends:
-        return "探索", {"tier": 1}
+
     if todo_spells:
         name = todo_spells[0]
         req = SPELL_REQUIRES.get(name, [])
-        if all(r in p.dao_wen for r in req):
+        if all(required in p.dao_wen for required in req):
             return "学习", {"sub": "spell", "tier": 1, "names": [name]}
-        todo_spells.pop(0)  # 所需道纹未就绪，跳过（后续学完道纹再试）
+        todo_spells.pop(0)
         return choose_pre_battle(e, battle_no, todo_spells, todo_daowen, rng)
+
+    # 免费成长已完成，现在才用精力建立副本策略。
+    # 罪孽都市：雇佣高攻员工当靶子，让怪物优先攻击员工替轮回者抗伤。
+    if e.state.current_region == "罪孽都市" and len(e.state.employees) < 3:
+        return "雇佣", {"name": f"铁卫{len(e.state.employees) + 1}",
+                        "blood_alloc": 5, "atk_bundles": 5}
+    # 龙心谷：免费成长完成后探索，争取取得带保护道纹的朋友。
+    if e.state.current_region == "龙心谷" and not e.state.friends:
+        return "探索", {"tier": 1}
     if p and p.current_hp < p.blood_limit * 0.6:
         return "休整", {"tier": 1, "heal_allocations": [
             {"target_ref": "player:0", "amount": 8}]}
-    # 碎片→战力（spend_shards 模式，由 play_first_tier 传入全局标记；这里保守：
-    # 主循环在每次局外结束后额外尝试花碎片，见 play_first_tier）。
     return "修行", {"tier": 1}
 
 
@@ -339,8 +338,9 @@ def play_first_tier(seed: int, region: str, sealed_path: str,
     db_path = db_path or f"/tmp/winner_{seed}_{os.getpid()}_{random.random():.6f}.db"
     e = GameEngine(db_path=db_path, rng_seed=seed,
                    sealed_candidate_path=sealed_path)
-    e.execute_action("setup_attributes",
-                     {"name": "贾凡", "blood_points": 10, "speed_points": 8, "mana_points": 6})
+    e.execute_action("setup_attributes", {
+        "name": "贾凡", **STARTER_ATTRIBUTES,
+    })
     finish_initial_daowen(e)
     e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
     setup = e.execute_action("setup_choose_region", {"region": region})
@@ -568,6 +568,26 @@ def play_first_tier(seed: int, region: str, sealed_path: str,
     return {"cleared": cleared, "won": True, "invalid": False}
 
 
+def validate_winner_snapshot(snapshot: dict) -> None:
+    """Reject legacy wrappers and snapshots without a verifiable seven-battle origin."""
+    if not isinstance(snapshot, dict) or "candidates" in snapshot:
+        raise ValueError("legacy candidates wrapper is not a real winner snapshot")
+    player = snapshot.get("player")
+    origin = snapshot.get("origin") or {}
+    if not isinstance(player, dict) or player.get("entity_type") != "轮回者":
+        raise ValueError("winner snapshot is missing its top-level reincarnator")
+    if not isinstance(origin.get("seed"), int) or not origin.get("region"):
+        raise ValueError("winner snapshot is missing seed/region provenance")
+    if origin.get("generator") != "sim/produce_real_winners.py":
+        raise ValueError("winner snapshot has no recognized generator provenance")
+    if origin.get("cleared") != 7:
+        raise ValueError("winner snapshot did not clear all seven first-tier battles")
+    if not origin.get("sealed"):
+        raise ValueError("winner snapshot was not sealed by the final-crown flow")
+    if player.get("is_alive") is False:
+        raise ValueError("winner snapshot contains a dead reincarnator")
+
+
 def winner_summary(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         d = json.load(f)
@@ -594,6 +614,11 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(WINNER_DIR, exist_ok=True)
+    outcome_counts: dict[str, int] = {}
+    clear_counts: dict[str, int] = {}
+    region_counts: dict[str, int] = {}
+    sample_hashes: list[dict[str, str]] = []
+    invalid_reasons: dict[str, int] = {}
     # 真实胜者必须可累积：绝不清空已有样本。
     # 文件编号与随机种子都从现存记录之后继续，避免覆盖或重复跑同一批种子。
     existing_indices = []
@@ -626,26 +651,48 @@ def main():
             os.remove(sealed_path)
         r = play_first_tier(seed, region, sealed_path, spend_shards=not args.no_spend)
         played += 1
+        outcome_key = ("won" if r.get("won") else
+                       "invalid" if r.get("invalid") else
+                       "duel_lost" if r.get("duel") == "lost" else "died_or_stalled")
+        outcome_counts[outcome_key] = outcome_counts.get(outcome_key, 0) + 1
+        clear_key = str(r.get("cleared", 0))
+        clear_counts[clear_key] = clear_counts.get(clear_key, 0) + 1
+        region_counts[region] = region_counts.get(region, 0) + 1
+        if r.get("reason"):
+            reason_key = str(r["reason"])
+            invalid_reasons[reason_key] = invalid_reasons.get(reason_key, 0) + 1
         tag = "✅通关" if r.get("won") else "❌阵亡"
         extra = ""
         if r.get("won") and os.path.exists(sealed_path):
-            winners += 1
             out = os.path.join(WINNER_DIR, f"winner_{next_index:02d}.json")
             with open(sealed_path, encoding="utf-8") as f:
                 snapshot = json.load(f)
-            # 保存可审计的来源信息；文件只在真实通关且封存快照存在时写入。
+            # 来源字段来自本次真实引擎运行；不允许旧包装结构被计入本批胜者。
             snapshot["origin"] = {
                 "region": region,
                 "seed": seed,
                 "rank": next_index,
                 "cleared": r.get("cleared"),
+                "sealed": bool(r.get("sealed")),
                 "duel_won": r.get("duel_won", False),
                 "terminal_artifact": r.get("terminal_artifact", False),
                 "sealed_name": r.get("sealed_name"),
                 "generator": "sim/produce_real_winners.py",
+                "generator_version": 2,
+                "initial_attributes": dict(STARTER_ATTRIBUTES),
+                "initial_attribute_points": sum(STARTER_ATTRIBUTES.values()),
             }
+            validate_winner_snapshot(snapshot)
             with open(out, "w", encoding="utf-8") as f:
                 json.dump(snapshot, f, ensure_ascii=False, indent=2)
+            with open(out, "rb") as f:
+                sample_hashes.append({
+                    "file": os.path.basename(out),
+                    "sha256": hashlib.sha256(f.read()).hexdigest(),
+                    "seed": str(seed),
+                    "region": region,
+                })
+            winners += 1
             last_out = out
             next_index += 1
             s = winner_summary(out)
@@ -655,7 +702,30 @@ def main():
         print(f"#{played:>3} seed={seed:<4} {region} 通关{ r['cleared']}/7 {tag}{extra}")
         seed += 1
 
+    report = {
+        "schema_version": 1,
+        "generator": "sim/produce_real_winners.py",
+        "generator_version": 2,
+        "requested_winners": args.count,
+        "max_games": args.max_games,
+        "games_played": played,
+        "winners_generated_this_run": winners,
+        "starter_attributes": dict(STARTER_ATTRIBUTES),
+        "starter_attribute_points": sum(STARTER_ATTRIBUTES.values()),
+        "outcome_counts": outcome_counts,
+        "cleared_battle_counts": clear_counts,
+        "region_counts": region_counts,
+        "invalid_reasons": invalid_reasons,
+        "samples": sample_hashes,
+        "existing_sample_files_seen": sorted(
+            fn for fn in os.listdir(WINNER_DIR) if re.fullmatch(r"winner_\\d+\\.json", fn)
+        ),
+    }
+    report_path = os.path.join(WINNER_DIR, "sampling_report.json")
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
     print(f"\n完成：{played} 局跑出 {winners} 位真实一阶胜者 → {WINNER_DIR}/")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
     if winners and last_out:
         print(f"本批最后一位胜者：{os.path.basename(last_out)}")
         s = winner_summary(last_out)
