@@ -4,10 +4,14 @@ on:
   push:
     branches: [main, ops/real-winner-samples]
     paths:
-      - "sim/produce_real_winners.py"
-      - "tests/test_real_winner_generator.py"
+      - "sim/produce_open_world_winners.py"
+      - "sim/run_open_world_replay.py"
       - ".github/workflows/real-winner-samples.yml"
   workflow_dispatch:
+
+concurrency:
+  group: real-winner-samples-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   # Artifacts only; generated snapshots are reviewed before committing.
@@ -34,7 +38,7 @@ jobs:
       - name: Generate real first-tier winners
         env:
           REAL_WINNER_DIR: artifacts/real_winners
-        run: python sim/produce_real_winners.py --count 3 --max-games 500
+        run: python sim/produce_open_world_winners.py --count 3 --max-games 500
 
       - name: Upload winner snapshots for audit
         if: always()
