@@ -2060,7 +2060,7 @@ from sim.run_open_world_replay import SEED, run_playthrough
 
 def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
     replay = run_playthrough(SEED, include_winner_snapshot=True,
-                             blood_points=10, speed_points=8, mana_points=7)
+                             blood_points=11, speed_points=6, mana_points=8)
     final = replay["final_state"]
 
     assert final["game_complete"] is True
