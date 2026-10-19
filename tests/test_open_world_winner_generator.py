@@ -27,6 +27,7 @@ def _valid_snapshot():
                 "mana_points": 8,
             },
             "initial_attribute_points": 25,
+            "available_predefined_spells": ["生生不息", "后发制人"],
         },
     }
 
@@ -74,7 +75,7 @@ def test_generator_writes_snapshot_paired_replay_and_hash_report(tmp_path, monke
         "driver_timeline": [
             {"setup": {"attributes": {
                 "blood_points": 9, "speed_points": 8, "mana_points": 8, "total": 25,
-            }}},
+            }, "spell_capabilities": ["生生不息", "后发制人"]}},
             {"type": "battle_start", "final_duel": False},
             {"type": "final_duel", "final_duel": True},
         ],
