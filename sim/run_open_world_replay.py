@@ -194,6 +194,8 @@ def _setup_player(engine: GameEngine, *, region: str = "罪孽都市",
     for name in ("庇护", "再生"):
         if name in engine.state.player.dao_wen:
             continue
+        if len(engine.state.player.dao_wen) >= engine.state.player.daowen_capacity:
+            break
         result = engine.execute_action("pre_battle_action", {
             "sub_action": "学习", "sub": "daowen", "tier": 1, "names": [name],
         })
