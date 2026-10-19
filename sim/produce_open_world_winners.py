@@ -12,13 +12,16 @@ import hashlib
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from sim.run_open_world_replay import run_playthrough, validate_complete_playthrough
 
 REGIONS = ["罪孽都市", "扭曲都市", "龙心谷"]
-ROOT = Path(__file__).resolve().parents[1]
 WINNER_DIR = Path(os.environ.get("REAL_WINNER_DIR", ROOT / "data" / "real_winners"))
 
 
