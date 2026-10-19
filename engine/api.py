@@ -1692,6 +1692,22 @@ class GameEngine:
         living_rivals = list(living_rivals_by_id.values())
         if world.final_duel_complete:
             return {"active": False, "complete": True, "winner": world.final_duel_winner}
+        # 若地图威胁在最终会合启动前清空了其他轮回者，唯一存活者直接获胜；
+        # 不得因“必须恰好两人”而把世界卡在没有可达目标的状态。
+        if (not world.final_duel_search and not world.final_duel_started
+                and player is not None and player.is_alive and not living_rivals):
+            world.final_duel_complete = True
+            world.final_duel_winner = player.runtime_id
+            winner_actor = world.actors.get(player.runtime_id)
+            if winner_actor is not None:
+                winner_actor.alive = False
+            world.record("sole_survivor_victory", player.runtime_id,
+                         winner=player.runtime_id, winner_name=player.name,
+                         note="只剩一名存活轮回者，无需进行最终死斗")
+            world.record("final_duel_winner_departed", player.runtime_id,
+                         winner_name=player.name, reason="sole_survivor")
+            return {"active": False, "complete": True, "winner": player.runtime_id,
+                    "sole_survivor": True}
         # 最终死斗以剩余轮回者人数判定，不要求玩家先抛弃朋友/员工/造物；
         # 怪物仍然存在时，也会在两名轮回者自然会合期间继续构成威胁。
         eligible = (player is not None and player.is_alive
