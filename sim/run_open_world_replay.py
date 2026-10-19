@@ -202,15 +202,14 @@ def _setup_player(engine: GameEngine, *, region: str = "罪孽都市",
         growth_actions.append({"kind": "daowen", "name": name,
                                "success": bool(result.get("success")),
                                "error": result.get("error")})
-    for name, required in (("生生不息", "再生"), ("后发制人", "庇护")):
-        if name in engine.state.player.spells or required not in engine.state.player.dao_wen:
-            continue
-        result = engine.execute_action("pre_battle_action", {
-            "sub_action": "学习", "sub": "spell", "tier": 1, "names": [name],
-        })
-        growth_actions.append({"kind": "spell", "name": name,
-                               "success": bool(result.get("success")),
-                               "error": result.get("error")})
+    spell_capabilities = [
+        spell_name for spell_name, required in (
+            ("先发制人", "杀伐"),
+            ("生生不息", "再生"),
+            ("后发制人", "庇护"),
+        )
+        if required in engine.state.player.dao_wen
+    ]
 
     return {"attributes": {"blood_points": blood_points, "speed_points": speed_points,
                             "mana_points": mana_points,
@@ -219,7 +218,7 @@ def _setup_player(engine: GameEngine, *, region: str = "罪孽都市",
             "relic_result": relic, "daowen_candidates": relic["result"]["daowen_choices"],
             "daowen_choice": daowen_choice, "daowen_result": daowen,
             "resonance_result": resonance, "region_result": region_result,
-            "growth_actions": growth_actions}
+            "growth_actions": growth_actions, "spell_capabilities": spell_capabilities}
 
 
 def _next_player_step(engine: GameEngine, world: WorldState) -> tuple[int, int] | None:
