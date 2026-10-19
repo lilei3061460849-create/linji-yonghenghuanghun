@@ -68,6 +68,9 @@ def fight(engine, encounter_id, timeline, replays):
             resolved = call(engine, "resolve_attack", {"token": prepared["token"], "hits": hits})
             timeline.append({"type": "player_attack", "battle": engine.state.current_battle,
                              "round": engine.state.current_round, "result": resolved})
+            if engine.state.pending_redemption:
+                redemption = call(engine, "resolve_redemption", {"option": "终结"})
+                timeline.append({"type": "redemption", "result": redemption})
         if not engine.state.player.is_alive or not any(e.is_alive and not e.is_departed
                                                        for e in engine.state.enemies):
             break
@@ -76,11 +79,17 @@ def fight(engine, encounter_id, timeline, replays):
             raise RuntimeError(f"monster phase failed: {monster_result}")
         timeline.append({"type": "monster_phase", "battle": engine.state.current_battle,
                          "round": engine.state.current_round, "result": monster_result})
+        if engine.state.pending_redemption:
+            redemption = call(engine, "resolve_redemption", {"option": "终结"})
+            timeline.append({"type": "redemption", "result": redemption})
         if not engine.state.player.is_alive or not any(e.is_alive and not e.is_departed
                                                        for e in engine.state.enemies):
             break
         call(engine, "round_end")
         call(engine, "round_start")
+    if engine.state.pending_redemption:
+        redemption = call(engine, "resolve_redemption", {"option": "终结"})
+        timeline.append({"type": "redemption", "result": redemption})
     replay = build_replay_payload(engine.state, battle_no=engine.state.current_battle)
     replay["world_encounter_id"] = encounter_id
     replay["outcome"] = ("player_dead" if not engine.state.player.is_alive else
