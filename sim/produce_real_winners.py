@@ -1,19 +1,10 @@
 #!/usr/bin/env python3
-"""从一阶真实对局逐个跑出「真实的一阶胜者」，供二阶（乱葬岗）测试使用。
+"""Legacy seven-battle combat-only sampler.
 
-背景（用户要求）：测试二阶不能用初始角色（60血/无法术/无朋友/无碎片），
-必须用「真实的一阶胜者」——实际赢下 7 场一阶战斗、被【最终的冠冕】完整封存、
-带着成长/道纹/法术/朋友/遗物/碎片进入二阶的角色。
-
-本脚本与 build_learner.play 的区别：
-1. 局外【学习】包含法术：先发制人（免费1种）→ 庇护/再生（免费道纹）→ 生生不息/后发制人
-2. 怪物阶段触发反应型法术（先发制人 before / 生生不息 after / 后发制人 before）
-3. 玩家回合：TacticalAI（满法输出+理智闪避+庇护保命），但保留少量法力给法术
-4. 通关后把封存快照单独保存到 data/real_winners/winner_XX.json
-
-用法：
-    python3 sim/produce_real_winners.py --count 10
-    python3 sim/produce_real_winners.py --max-games 200
+This is not the canonical real-winner source after the final-duel rule changed to
+last-two-survivors in the open world. Use sim/produce_open_world_winners.py for
+current winner evidence. This module remains the shared monster-phase driver and
+its old CLI requires an explicit --legacy-seven-battle-mode opt-in.
 """
 import argparse
 import hashlib
@@ -693,11 +684,16 @@ def winner_summary(path: str) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--count", type=int, default=3, help="需要的胜者数量")
+    ap.add_argument("--legacy-seven-battle-mode", action="store_true",
+                    help="显式运行旧七场战斗采样器；结果不能作为当前开放世界胜者证据")
+    ap.add_argument("--count", type=int, default=3, help="需要的旧式战斗胜者数量")
     ap.add_argument("--max-games", type=int, default=500, help="最多跑多少局")
     ap.add_argument("--no-spend", action="store_true",
-                    help="七场局外不花碎片提升战力（对照实验用；默认花满碎片）")
+                    help="旧式七场局外不花碎片提升战力（对照实验用）")
     args = ap.parse_args()
+    if not args.legacy_seven_battle_mode:
+        print("旧七场战斗采样器已停用。请使用 sim/produce_open_world_winners.py。")
+        raise SystemExit(2)
 
     os.makedirs(WINNER_DIR, exist_ok=True)
     outcome_counts: dict[str, int] = {}
