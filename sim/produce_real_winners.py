@@ -568,6 +568,30 @@ def play_first_tier(seed: int, region: str, sealed_path: str,
     return {"cleared": cleared, "won": True, "invalid": False}
 
 
+def extract_sealed_snapshot(seal_data: dict, tier: int) -> dict:
+    """Unwrap the engine's canonical per-tier seal queue and return this run's character snapshot.
+
+    The engine persists candidates as {candidates: {tier: [full_character_snapshot]}}.
+    That container is not itself a winner sample and must never be copied into winner_XX.json.
+    """
+    if isinstance(seal_data, dict) and isinstance(seal_data.get("player"), dict):
+        if "candidates" in seal_data:
+            raise ValueError("ambiguous seal data contains both player and candidates")
+        return seal_data
+    if not isinstance(seal_data, dict):
+        raise ValueError("sealed candidate file is not a JSON object")
+    queues = seal_data.get("candidates")
+    if not isinstance(queues, dict):
+        raise ValueError("sealed candidate file has no candidates queue")
+    queue = queues.get(str(tier), queues.get(tier))
+    if not isinstance(queue, list) or len(queue) != 1:
+        raise ValueError(f"expected exactly one newly sealed tier-{tier} candidate")
+    snapshot = queue[0]
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("player"), dict):
+        raise ValueError("sealed candidate queue does not contain a full character snapshot")
+    return snapshot
+
+
 def validate_winner_snapshot(snapshot: dict) -> None:
     """Reject legacy wrappers and snapshots without a verifiable seven-battle origin."""
     if not isinstance(snapshot, dict) or "candidates" in snapshot:
@@ -671,7 +695,10 @@ def main():
         if r.get("won") and os.path.exists(sealed_path):
             out = os.path.join(WINNER_DIR, f"winner_{next_index:02d}.json")
             with open(sealed_path, encoding="utf-8") as f:
-                snapshot = json.load(f)
+                seal_data = json.load(f)
+            from engine.gamedata import REGION_TIERS
+            tier = int(REGION_TIERS.get(region, 1))
+            snapshot = extract_sealed_snapshot(seal_data, tier)
             # 来源字段来自本次真实引擎运行；不允许旧包装结构被计入本批胜者。
             snapshot["origin"] = {
                 "region": region,
