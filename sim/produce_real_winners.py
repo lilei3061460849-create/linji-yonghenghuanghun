@@ -582,6 +582,11 @@ def validate_winner_snapshot(snapshot: dict) -> None:
         raise ValueError("winner snapshot has no recognized generator provenance")
     if origin.get("cleared") != 7:
         raise ValueError("winner snapshot did not clear all seven first-tier battles")
+    attrs = origin.get("initial_attributes")
+    if (not isinstance(attrs, dict)
+            or sum(int(value) for value in attrs.values()) != 25
+            or origin.get("initial_attribute_points") != 25):
+        raise ValueError("winner snapshot does not record a valid 25-point initial build")
     if not origin.get("sealed"):
         raise ValueError("winner snapshot was not sealed by the final-crown flow")
     if player.get("is_alive") is False:
