@@ -34,6 +34,8 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - name: Install dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+      - name: Remove stale replay outputs
+        run: rm -f data/open_world_replay/open_world_full_replay.json data/open_world_replay/open_world_full_replay.md
       - name: Run one deterministic open-world playthrough through existing combat
         run: python sim/run_open_world_replay.py
       - name: Upload complete world and combat replay
