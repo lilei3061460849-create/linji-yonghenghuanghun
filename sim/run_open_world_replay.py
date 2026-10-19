@@ -242,7 +242,7 @@ def _next_player_step(engine: GameEngine, world: WorldState) -> tuple[int, int] 
     return None
 
 
-def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
+def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
                     *, region: str = "罪孽都市", player_name: str = PLAYER_NAME,
                     include_winner_snapshot: bool = False,
                     blood_points: int = 9, speed_points: int = 8,
@@ -375,6 +375,24 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
                 and engine.state.player.is_alive):
             payload["winner_snapshot"] = engine._serialize_full_character()
         return payload
+
+
+def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
+                    *, region: str = "罪孽都市", player_name: str = PLAYER_NAME,
+                    include_winner_snapshot: bool = False,
+                    blood_points: int = 9, speed_points: int = 8,
+                    mana_points: int = 8) -> dict[str, Any]:
+    """Seed Python's global random choices per run and restore the caller's RNG state."""
+    previous_random_state = random.getstate()
+    random.seed(seed)
+    try:
+        return _run_playthrough_impl(
+            seed=seed, max_world_turns=max_world_turns, region=region,
+            player_name=player_name, include_winner_snapshot=include_winner_snapshot,
+            blood_points=blood_points, speed_points=speed_points, mana_points=mana_points,
+        )
+    finally:
+        random.setstate(previous_random_state)
 
 
 def _chronological_timeline(world_log: list[dict[str, Any]],
