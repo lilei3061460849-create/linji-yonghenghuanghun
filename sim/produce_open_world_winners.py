@@ -35,6 +35,10 @@ def validate_open_world_winner_snapshot(snapshot: dict[str, Any]) -> None:
         raise ValueError("winner sample is missing its top-level reincarnator")
     if player.get("is_alive") is not True:
         raise ValueError("winner sample does not contain a living winner")
+    if len(player.get("dao_wen") or {}) < 2:
+        raise ValueError("winner sample lacks learned DaoWen progression")
+    if len(player.get("spells") or []) < 1:
+        raise ValueError("winner sample lacks a learned spell")
     if not isinstance(origin.get("seed"), int) or not origin.get("region"):
         raise ValueError("winner sample is missing seed/region provenance")
     if origin.get("generator") != "sim/produce_open_world_winners.py":
@@ -172,8 +176,26 @@ def main() -> None:
                 "final_duel_won": True,
                 "winner_name": final.get("winner_name"),
                 "winner_runtime_id": final.get("winner_id"),
+                "growth_actions": (payload.get("driver_timeline") or [{}])[0].get("setup", {}).get("growth_actions", []),
+                "dao_wen_names": sorted((snapshot.get("player", {}).get("dao_wen") or {}).keys()),
+                "spell_names": list(snapshot.get("player", {}).get("spells") or []),
+                "friend_count": len(snapshot.get("friends") or []),
+                "employee_count": len(snapshot.get("employees") or []),
+                "relic_count": len(snapshot.get("relics") or []),
+                "shards_peak": snapshot.get("shards_peak", 0),
             }
-            validate_open_world_winner_snapshot(snapshot)
+            try:
+                validate_open_world_winner_snapshot(snapshot)
+            except ValueError as exc:
+                reason = f"winner snapshot rejected: {exc}"
+                failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
+                attempt["status"] = "winner_snapshot_rejected"
+                attempt["error"] = reason
+                attempts.append(attempt)
+                outcome_counts["winner_snapshot_rejected"] = outcome_counts.get("winner_snapshot_rejected", 0) + 1
+                print(f"#{games_played:>3} seed={seed} {region} 胜者快照未达数据契约：{reason}")
+                seed += 1
+                continue
             out = WINNER_DIR / f"winner_{next_index:02d}.json"
             out.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
             digest = hashlib.sha256(out.read_bytes()).hexdigest()
