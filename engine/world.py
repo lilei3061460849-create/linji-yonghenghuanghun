@@ -164,14 +164,27 @@ class WorldMap:
                 return location_id, location
         return None
 
-    def adjacent_vision(self, pos: Coord) -> list[Coord]:
-        """只看上下左右一格；斜角不算。相邻障碍本身可见，但不会透视其后方。"""
-        visible = []
-        for dx, dy in DIRECTIONS:
-            nxt = (pos[0] + dx, pos[1] + dy)
-            if self.in_bounds(nxt):
-                visible.append(nxt)
-        return visible
+    def adjacent_vision(self, pos: Coord, radius: int = 1) -> list[Coord]:
+        """按上下左右的曼哈顿距离计算视野；障碍本身可见，但会阻断其后的视线。"""
+        radius = max(1, int(radius))
+        visible: set[Coord] = set()
+        queue = deque([(pos, 0)])
+        visited = {pos}
+        while queue:
+            current, distance = queue.popleft()
+            if distance >= radius:
+                continue
+            # 墙体/建筑本身可以被看见，但不会继续向其背后扩散视野。
+            if distance > 0 and self.terrain_at(current) in self.opaque_terrain:
+                continue
+            for dx, dy in DIRECTIONS:
+                nxt = (current[0] + dx, current[1] + dy)
+                if not self.in_bounds(nxt) or nxt in visited:
+                    continue
+                visited.add(nxt)
+                visible.add(nxt)
+                queue.append((nxt, distance + 1))
+        return sorted(visible, key=lambda cell: (cell[1], cell[0]))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -206,6 +219,8 @@ class WorldActorState:
     # 造物行为模式：explore=自主探索，follow=跟随主人，guard=守卫指定格。
     behavior: str = "explore"
     owner_actor_id: str = ""
+    # 视野半径按上下左右的曼哈顿距离计；造物每次培养提高1。
+    vision_range: int = 1
     guard_position: Coord | None = None
     known_cells: set[str] = field(default_factory=set)
     visited_cells: set[str] = field(default_factory=set)
@@ -231,6 +246,7 @@ class WorldActorState:
         values["guard_position"] = tuple(guard_position) if guard_position is not None else None
         values.setdefault("behavior", "explore")
         values.setdefault("owner_actor_id", "")
+        values.setdefault("vision_range", 1)
         return cls(**values)
 
 
@@ -294,7 +310,7 @@ class WorldState:
 
     def visible_cells(self, actor_id: str) -> list[Coord]:
         actor = self._living_actor(actor_id)
-        cells = [actor.position] + self.map.adjacent_vision(actor.position)
+        cells = [actor.position] + self.map.adjacent_vision(actor.position, actor.vision_range)
         visible = set(cells)
         # 角色只能更新自己的情报；不共享其他角色的视野。
         actor.known_cells.update(self.map.key(p) for p in cells)
