@@ -342,7 +342,10 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
 
         world = WorldState.from_dict(engine.state.world_state)
         if world.final_duel_complete:
-            stop_reason = "final duel completed"
+            stop_reason = ("sole survivor victory"
+                           if any(event.get("type") == "sole_survivor_victory"
+                                  for event in world.event_log)
+                           else "final duel completed")
         elif not engine.state.player.is_alive:
             stop_reason = stop_reason or "player died"
         final = {
@@ -525,8 +528,9 @@ def validate_complete_playthrough(payload: dict[str, Any]) -> None:
     battles = payload.get("battles") or []
     if final.get("game_complete") is not True:
         raise RuntimeError(f"open-world run is incomplete: {final.get('stop_reason', 'unknown stop')}")
-    if final.get("stop_reason") != "final duel completed":
-        raise RuntimeError(f"unexpected terminal reason: {final.get('stop_reason')}")
+    terminal_reason = final.get("stop_reason")
+    if terminal_reason not in {"final duel completed", "sole survivor victory"}:
+        raise RuntimeError(f"unexpected terminal reason: {terminal_reason}")
     if int(population.get("monsters", 0)) < 1:
         raise RuntimeError("open-world run spawned no monsters")
     if int(population.get("other_reincarnators", 0)) < 2:
@@ -547,12 +551,16 @@ def validate_complete_playthrough(payload: dict[str, Any]) -> None:
             int(battle.get("event_count", 0)) for battle in battles):
         raise RuntimeError("combat event count does not match the exported battle replays")
     if int(battles[-1].get("round_count", 0)) < 1 or int(battles[-1].get("event_count", 0)) < 1:
-        raise RuntimeError("final duel has no actual combat rounds/events")
+        raise RuntimeError("last exported battle has no actual combat rounds/events")
     duel_entries = [entry for entry in payload.get("driver_timeline", [])
                     if entry.get("type") == "final_duel"]
-    if len(duel_entries) != 1 or duel_entries[0].get("result", {}).get("winner") not in {
-            "challenger", "defender"}:
-        raise RuntimeError("final duel did not produce exactly one recorded winner")
+    if terminal_reason == "final duel completed":
+        if len(duel_entries) != 1 or duel_entries[0].get("result", {}).get("winner") not in {
+                "challenger", "defender"}:
+            raise RuntimeError("final duel did not produce exactly one recorded winner")
+    elif not any(event.get("type") == "sole_survivor_victory"
+                 for event in payload.get("world_event_log", [])):
+        raise RuntimeError("sole-survivor terminal has no recorded victory event")
     if len(final.get("living_reincarnators_at_end", [])) != 1:
         raise RuntimeError("terminal world state does not contain exactly one living reincarnator")
 
