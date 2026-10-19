@@ -35,10 +35,11 @@ def validate_open_world_winner_snapshot(snapshot: dict[str, Any]) -> None:
         raise ValueError("winner sample is missing its top-level reincarnator")
     if player.get("is_alive") is not True:
         raise ValueError("winner sample does not contain a living winner")
-    if len(player.get("dao_wen") or {}) < 2:
+    dao_wen_names = set((player.get("dao_wen") or {}).keys())
+    if len(dao_wen_names) < 2:
         raise ValueError("winner sample lacks learned DaoWen progression")
-    if len(player.get("spells") or []) < 1:
-        raise ValueError("winner sample lacks a learned spell")
+    if not dao_wen_names.intersection({"杀伐", "再生", "庇护"}):
+        raise ValueError("winner sample has no DaoWen-backed predefined spell capability")
     if not isinstance(origin.get("seed"), int) or not origin.get("region"):
         raise ValueError("winner sample is missing seed/region provenance")
     if origin.get("generator") != "sim/produce_open_world_winners.py":
@@ -181,7 +182,8 @@ def main() -> None:
                 "winner_runtime_id": final.get("winner_id"),
                 "growth_actions": (payload.get("driver_timeline") or [{}])[0].get("setup", {}).get("growth_actions", []),
                 "dao_wen_names": sorted((snapshot.get("player", {}).get("dao_wen") or {}).keys()),
-                "spell_names": list(snapshot.get("player", {}).get("spells") or []),
+                "available_predefined_spells": (payload.get("driver_timeline") or [{}])[0].get("setup", {}).get("spell_capabilities", []),
+                "custom_spells": list(snapshot.get("player", {}).get("spells") or []),
                 "friend_count": len(snapshot.get("friends") or []),
                 "employee_count": len(snapshot.get("employees") or []),
                 "relic_count": len(snapshot.get("relics") or []),
