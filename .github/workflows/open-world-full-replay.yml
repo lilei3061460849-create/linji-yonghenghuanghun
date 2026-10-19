@@ -1,0 +1,41 @@
+name: Open-world full playthrough replay
+
+on:
+  pull_request:
+    paths:
+      - "sim/run_open_world_replay.py"
+      - ".github/workflows/open-world-full-replay.yml"
+      - "engine/**"
+      - "sim/produce_real_winners.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+      - name: Run one deterministic open-world playthrough through existing combat
+        run: python sim/run_open_world_replay.py
+      - name: Upload complete world and combat replay
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-world-full-replay-seed-20261019
+          path: |
+            artifacts/open_world_replay/open_world_full_replay.json
+            artifacts/open_world_replay/open_world_full_replay.md
+          if-no-files-found: warn
+          retention-days: 30
