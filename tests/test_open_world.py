@@ -2059,7 +2059,7 @@ from sim.run_open_world_replay import SEED, run_playthrough
 
 
 def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
-    replay = run_playthrough(SEED)
+    replay = run_playthrough(SEED, include_winner_snapshot=True)
     final = replay["final_state"]
 
     assert final["game_complete"] is True
@@ -2068,6 +2068,11 @@ def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
     assert final["winner_name"] == final["player"]["name"]
     assert final["player"]["alive"] is True
     assert final["world_turn"] > 0
+    winner_snapshot = replay["winner_snapshot"]
+    assert winner_snapshot["player"]["name"] == final["winner_name"]
+    assert winner_snapshot["player"]["entity_type"] == "轮回者"
+    assert winner_snapshot["player"]["is_alive"] is True
+    assert "candidates" not in winner_snapshot
 
     # The run must use the ordinary tier-1 population and a rules-valid setup,
     # not a handful of hand-placed enemies or an over-budget test character.
