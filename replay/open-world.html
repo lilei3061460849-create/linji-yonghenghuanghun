@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>开放世界单局回放</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0e13;--panel:#151b24;--panel2:#1d2632;--line:#2d3948;--text:#edf3fa;--muted:#9baabd;--blue:#82b4ff;--gold:#f3ca73;--green:#7dd8a3;--red:#ff8585}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -10%,#1b2b40 0,transparent 55%),var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1160px;margin:auto;padding:24px 16px 60px;display:grid;gap:16px}header,.panel{border:1px solid var(--line);border-radius:16px;background:#111720eF;box-shadow:0 8px 30px #0003;padding:18px}
+h1{font-size:clamp(25px,5vw,38px);letter-spacing:.02em;margin:0}h2{font-size:17px;margin:0 0 12px}.sub,.muted{color:var(--muted)}.sub{margin:5px 0 0}.topline{display:flex;justify-content:space-between;gap:16px;align-items:start;flex-wrap:wrap}.actions{display:flex;gap:8px;flex-wrap:wrap}a.button,button,input{font:inherit}a.button,button{color:var(--text);text-decoration:none;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 13px;cursor:pointer}a.button:hover,button:hover{border-color:var(--blue);color:#fff}.status{margin-top:14px;font-size:13px;color:var(--muted)}
+.banner{display:flex;align-items:center;gap:12px;background:linear-gradient(100deg,#163523,#17221e);border:1px solid #326344;border-radius:13px;padding:14px 16px;margin-top:16px}.trophy{font-size:26px}.winner{font-weight:750;font-size:18px}.win-sub{font-size:13px;color:#b7d7c2}
+.stats{display:grid;grid-template-columns:repeat(5,minmax(110px,1fr));gap:9px;margin-top:14px}.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px}.stat b{display:block;font-size:21px}.stat span{font-size:12px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.65fr);gap:16px}.map{overflow:auto;background:#080b10;border:1px solid var(--line);border-radius:12px;padding:14px}.map pre{font:clamp(8px,1.3vw,13px)/1.15 ui-monospace,SFMono-Regular,Consolas,monospace;color:#c3cedb;margin:0;white-space:pre;width:max-content;min-width:100%}.map-caption{font-size:12px;color:var(--muted);margin-top:9px}.loc-list{display:grid;gap:6px;max-height:410px;overflow:auto}.loc{border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:9px 10px;font-size:13px}.badge{font-size:11px;padding:2px 7px;border-radius:20px;background:#27364a;color:#c4dcff;margin-left:5px}.inactive{background:#352b20;color:#e6c993}
+.battles{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:9px}.battle{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;cursor:pointer}.battle:hover,.battle.selected{border-color:var(--gold);background:#211e18}.battle strong{display:block;margin-bottom:5px}.battle small{color:var(--muted)}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.toolbar input{flex:1;min-width:180px;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px}.toolbar button.active{border-color:var(--blue);color:var(--blue)}.count{margin-left:auto;color:var(--muted);font-size:12px}.timeline{display:grid;gap:7px;max-height:720px;overflow:auto;padding-right:3px}.event{display:grid;grid-template-columns:64px 1fr;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:10px}.turn{font-size:11px;color:var(--gold);font-variant-numeric:tabular-nums}.event h3{font-size:13px;margin:0 0 4px;font-weight:650}.event p{font-size:12px;color:var(--muted);margin:0;overflow-wrap:anywhere}.source{font-size:10px;text-transform:uppercase;color:var(--blue);letter-spacing:.08em}.event details{grid-column:2;margin-top:5px}.event summary{font-size:11px;color:var(--muted);cursor:pointer}.event pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:350px;overflow:auto;background:#090c11;border-radius:8px;padding:10px;font:11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;color:#c7d1df}.empty{color:var(--muted);padding:22px;text-align:center}.foot{font-size:12px;color:var(--muted)}
+@media(max-width:760px){main{padding:12px 10px 40px}.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}.stat:last-child{grid-column:span 2}.event{grid-template-columns:52px 1fr;gap:7px}.event details{grid-column:2}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="topline">
+    <div><h1>开放世界 · 单局回放</h1><p class="sub" id="subtitle">正在读取固定种子对局……</p></div>
+    <div class="actions"><a class="button" href="../data/open_world_replay/open_world_full_replay.json" download>下载完整 JSON</a><a class="button" href="index.html">返回战斗回放</a></div>
+  </div>
+  <div class="banner"><span class="trophy">✦</span><div><div class="winner" id="winner">载入中</div><div class="win-sub" id="result-note">世界事实与战斗事件来自实际引擎结算</div></div></div>
+  <div class="stats" id="stats"></div>
+  <div class="status" id="status">本地页面通过相对路径加载回放数据。</div>
+</header>
+<section class="grid">
+  <article class="panel"><h2>最终地图</h2><div class="map"><pre id="map">载入地图……</pre></div><div class="map-caption">P=玩家；R=其他轮回者；M=怪物；$=中立单位；#=墙；:=废墟。最终胜者已离开地图。</div></article>
+  <article class="panel"><h2>生成地点 <span class="muted" id="location-count"></span></h2><div class="loc-list" id="locations"></div></article>
+</section>
+<section class="panel"><h2>战斗目录</h2><div class="battles" id="battles"></div><p class="foot">点击某场战斗可筛选对应的引擎战斗事件；再点一次清除筛选。</p></section>
+<section class="panel">
+  <div class="topline" style="align-items:center;margin-bottom:12px"><div><h2 style="margin:0">完整时间线</h2><div class="muted" style="font-size:12px">世界事实、行动和实际战斗事件按世界回合排序。展开单条可查看原始 JSON。</div></div><span class="count" id="visible-count"></span></div>
+  <div class="toolbar"><input id="search" type="search" placeholder="搜索角色、事件类型、地点或内容"><button data-filter="all" class="active">全部</button><button data-filter="world">世界事实</button><button data-filter="combat">战斗事件</button><button data-filter="actions">行动</button></div>
+  <div class="timeline" id="timeline"></div>
+</section>
+<p class="foot">回放种子 <span id="seed"></span> · 世界回合与战斗回合分别计数。事实记录未由叙事补造。</p>
+</main>
+<script>
+(() => {
+  const DATA_URL = "../data/open_world_replay/open_world_full_replay.json";
+  const $ = id => document.getElementById(id);
+  let replay = null, filter = "all", battleFilter = null;
+  const safe = value => value == null ? "" : String(value);
+  const fmt = value => new Intl.NumberFormat("zh-CN").format(Number(value || 0));
+  function summary(item) {
+    if (item.source === "world_fact") {
+      const d = item.details || {};
+      const name = d.name || d.location_name || d.target_name || d.winner_name || "";
+      const dest = d.destination ? ` → ${d.destination.join(",")}` : "";
+      const pos = d.position ? ` @${d.position.join(",")}` : "";
+      const target = d.target_actor_id ? ` → ${d.target_actor_id}` : "";
+      return [name, dest, pos, target, d.reason].filter(Boolean).join("");
+    }
+    if (item.source === "combat_event") {
+      const e = item.event || {}, names = [e.actor_name, e.target_name].filter(Boolean).join(" → ");
+      const d = e.data || {};
+      const detail = d.actual_damage != null ? `伤害 ${d.actual_damage}` : d.actual_life_loss != null ? `生命损失 ${d.actual_life_loss}` : "";
+      return [names, detail].filter(Boolean).join(" · ");
+    }
+    const a = item.action || {}, result = a.result || {};
+    if (item.action_type === "world_move") return `移动到 ${((a.destination)||[]).join(",")} · ${a.target || ""}`;
+    if (item.action_type === "battle_start") return `遭遇 ${a.encounter_id || ""}${a.final_duel ? " · 最终死斗" : ""}`;
+    if (item.action_type === "final_duel") return `胜者：${result.winner || "未决"} · ${result.reason || ""}`;
+    if (item.action_type === "battle_end") return result?.result?.winner ? `胜者：${result.result.winner}` : "战斗结算";
+    if (item.action_type === "map_event_resolution") return `${a.event || "地图事件"} · ${result.success ? "已结算" : "结算失败"}`;
+    if (item.action_type === "world_initialized") return `地图 ${result?.result?.width || "?"}×${result?.result?.height || "?"}`;
+    return a.event || a.policy || a.outcome || "";
+  }
+  function label(item) {
+    if (item.source === "world_fact") return item.event_type || "世界事实";
+    if (item.source === "combat_event") return item.event?.event_type || "战斗事件";
+    return item.action_type || "行动";
+  }
+  function visibleItems() {
+    const q = $("search").value.trim().toLocaleLowerCase();
+    return (replay?.timeline || []).filter(item => {
+      if (filter === "world" && item.source !== "world_fact") return false;
+      if (filter === "combat" && item.source !== "combat_event") return false;
+      if (filter === "actions" && item.source !== "world_action") return false;
+      if (battleFilter != null && !(item.source === "combat_event" && item.battle_no === battleFilter)) return false;
+      const haystack = `${label(item)} ${summary(item)} ${JSON.stringify(item)}`.toLocaleLowerCase();
+      return !q || haystack.includes(q);
+    });
+  }
+  function renderTimeline() {
+    const root = $("timeline"), items = visibleItems(); root.replaceChildren();
+    $("visible-count").textContent = `${fmt(items.length)} / ${fmt(replay.timeline.length)} 项` + (battleFilter == null ? "" : ` · 第 ${battleFilter} 场`);
+    if (!items.length) { root.innerHTML = '<div class="empty">没有匹配的事件</div>'; return; }
+    const frag = document.createDocumentFragment();
+    for (const item of items) {
+      const row = document.createElement("article"); row.className = "event";
+      const turn = document.createElement("div"); turn.className = "turn";
+      turn.textContent = `世界回合 ${item.world_turn}` + (item.source === "combat_event" ? `\n战斗回合 ${item.battle_round}` : "");
+      const content = document.createElement("div");
+      const src = document.createElement("div"); src.className = "source"; src.textContent = item.source.replaceAll("_", " ");
+      const h = document.createElement("h3"); h.textContent = label(item);
+      const p = document.createElement("p"); p.textContent = summary(item) || "—";
+      content.append(src,h,p);
+      const details = document.createElement("details");
+      const summaryNode = document.createElement("summary"); summaryNode.textContent = "查看原始记录";
+      const pre = document.createElement("pre"); pre.textContent = JSON.stringify(item, null, 2);
+      details.append(summaryNode,pre); row.append(turn,content,details); frag.append(row);
+    }
+    root.append(frag);
+  }
+  function render() {
+    const f = replay.final_state, cfg = replay.run_config;
+    $("subtitle").textContent = `${cfg.region} · ${cfg.map_size[0]}×${cfg.map_size[1]} · 固定种子 ${replay.seed}`;
+    $("winner").textContent = `最终胜者：${f.winner_name || "未决"}`;
+    $("result-note").textContent = `${f.stop_reason} · 玩家 ${f.player.alive ? "存活" : "命零"} · ${f.player.hp}/${f.player.blood_limit} HP`;
+    const values = [[f.world_turn,"世界回合"],[f.battle_count,"战斗场数"],[f.combat_event_count,"战斗事件"],[replay.world_event_log.length,"世界事实"],[replay.timeline.length,"时间线项"]];
+    $("stats").innerHTML = values.map(([n,t]) => `<div class="stat"><b>${fmt(n)}</b><span>${t}</span></div>`).join("");
+    $("map").textContent = replay.map.final_ascii;
+    $("seed").textContent = replay.seed;
+    const locations = replay.map.locations || [];
+    $("location-count").textContent = `(${locations.length})`;
+    $("locations").innerHTML = locations.length ? "" : '<div class="empty">没有地点记录</div>';
+    for (const loc of locations) {
+      const el = document.createElement("div"); el.className = "loc";
+      const title = document.createElement("strong"); title.textContent = safe(loc.name || loc.location_id);
+      const badge = document.createElement("span"); badge.className = "badge" + (loc.active === false ? " inactive" : ""); badge.textContent = loc.active === false ? "已失效" : "有效";
+      const info = document.createElement("div"); info.className = "muted";
+      info.textContent = `${safe(loc.kind)} · (${loc.x}, ${loc.y})${loc.amount != null ? ` · ${safe(loc.amount)} 碎片` : ""}`;
+      el.append(title,badge,info); $("locations").append(el);
+    }
+    $("battles").replaceChildren();
+    for (const b of replay.battles) {
+      const card = document.createElement("button"); card.className = "battle";
+      const title = document.createElement("strong");
+      title.textContent = `第 ${b.battle_no} 场 · ${b.outcome === "player_won" ? "玩家胜" : b.outcome === "opponent_won" ? "对手胜" : safe(b.outcome)}`;
+      const meta = document.createElement("small"); meta.textContent = `${b.round_count} 个战斗回合 · ${b.event_count} 条引擎事件`;
+      const participants = document.createElement("div"); participants.className = "muted"; participants.style.cssText = "margin-top:5px;font-size:12px";
+      participants.textContent = (b.participants||[]).map(p=>safe(p.name)).join(" vs ");
+      card.append(title,meta,participants);
+      card.addEventListener("click",()=>{battleFilter = battleFilter === b.battle_no ? null : b.battle_no;document.querySelectorAll(".battle").forEach(x=>x.classList.remove("selected"));if(battleFilter!=null)card.classList.add("selected");renderTimeline();document.querySelector("#timeline").scrollIntoView({behavior:"smooth",block:"start"});});
+      $("battles").append(card);
+    }
+    renderTimeline();
+    $("status").textContent = `已载入 ${fmt(replay.timeline.length)} 项统一时间线 · ${fmt(replay.world_event_log.length)} 条世界事实 · ${fmt(f.combat_event_count)} 条战斗事件`;
+  }
+  document.querySelectorAll("[data-filter]").forEach(button => button.addEventListener("click",()=>{filter=button.dataset.filter;document.querySelectorAll("[data-filter]").forEach(b=>b.classList.toggle("active",b===button));renderTimeline();}));
+  $("search").addEventListener("input",renderTimeline);
+  fetch(DATA_URL,{cache:"no-store"}).then(response=>{if(!response.ok)throw new Error(`HTTP ${response.status}`);return response.json();}).then(data=>{replay=data;render();}).catch(error=>{$("status").textContent=`回放数据载入失败：${error.message}。请从仓库根目录启动本地 HTTP 服务。`;$("timeline").innerHTML='<div class="empty">无法加载 JSON 回放</div>';});
+})();
+</script>
+</body>
+</html>
