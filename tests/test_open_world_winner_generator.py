@@ -6,7 +6,8 @@ from sim.produce_open_world_winners import validate_open_world_winner_snapshot
 
 def _valid_snapshot():
     return {
-        "player": {"name": "轮回者0001", "entity_type": "轮回者", "is_alive": True},
+        "player": {"name": "轮回者0001", "entity_type": "轮回者", "is_alive": True,
+                   "dao_wen": {"庇护": 0, "再生": 0}, "spells": ["生生不息"]},
         "friends": [],
         "employees": [],
         "relics": [],
@@ -78,7 +79,8 @@ def test_generator_writes_snapshot_paired_replay_and_hash_report(tmp_path, monke
             {"type": "final_duel", "final_duel": True},
         ],
         "winner_snapshot": {
-            "player": {"name": "测试轮回者", "entity_type": "轮回者", "is_alive": True},
+            "player": {"name": "测试轮回者", "entity_type": "轮回者", "is_alive": True,
+                       "dao_wen": {"庇护": 0, "再生": 0}, "spells": ["生生不息"]},
             "friends": [], "employees": [], "relics": [],
         },
     }
