@@ -10,6 +10,7 @@ from engine.models import Entity
 from engine.world import WorldState
 from engine.replay import build_replay_payload
 from sim.produce_real_winners import _resolve_monster_turn_with_spells
+from sim.build_learner import _resolve_pending_event
 
 SEED = 20261019
 MAX_WORLD_TURNS = 120
@@ -128,6 +129,16 @@ def main():
         stop = "all map enemies defeated"
         while e.state.player.is_alive:
             world = WorldState.from_dict(e.state.world_state)
+            if e.event_pool.current is not None:
+                event_result = _resolve_pending_event(e)
+                timeline.append({"type": "map_event_resolution", "event": e.event_pool.current,
+                                 "result": event_result})
+                if not event_result.get("success"):
+                    raise RuntimeError(f"existing event resolution failed: {event_result}")
+                if event_result.get("player_dead"):
+                    stop = "player died during map event"
+                    break
+                continue
             if world.clock.turn >= MAX_WORLD_TURNS:
                 stop = f"world-turn limit {MAX_WORLD_TURNS}"
                 break
