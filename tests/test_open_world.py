@@ -2129,7 +2129,7 @@ def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
         "winner_departed": True,
     }]
 
-    repeated = run_playthrough(SEED, blood_points=10, speed_points=8, mana_points=7)
+    repeated = run_playthrough(SEED, blood_points=11, speed_points=6, mana_points=8)
     assert repeated["final_state"]["world_turn"] == final["world_turn"]
     assert repeated["final_state"]["player"]["hp"] == final["player"]["hp"]
     assert repeated["final_state"]["winner_name"] == final["winner_name"]
