@@ -372,7 +372,7 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
             "battles": replays,
         }
         if (include_winner_snapshot and world.final_duel_complete
-                and final.get("winner_name") == engine.state.player.name
+                and final.get("winner_id") == engine.state.player.runtime_id
                 and engine.state.player.is_alive):
             payload["winner_snapshot"] = engine._serialize_full_character()
         return payload
