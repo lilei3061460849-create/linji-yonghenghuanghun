@@ -1695,6 +1695,7 @@ class GameEngine:
         # 若地图威胁在最终会合启动前清空了其他轮回者，唯一存活者直接获胜；
         # 不得因“必须恰好两人”而把世界卡在没有可达目标的状态。
         if (not world.final_duel_search and not world.final_duel_started
+                and world.clock.turn > 0
                 and player is not None and player.is_alive and not living_rivals):
             world.final_duel_complete = True
             world.final_duel_winner = player.runtime_id
