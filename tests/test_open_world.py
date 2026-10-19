@@ -1161,6 +1161,49 @@ def test_final_duel_search_starts_when_only_two_reincarnators_remain_even_if_mon
     assert world.final_duel_started is False
 
 
+def test_only_surviving_reincarnator_wins_without_a_fake_final_duel(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "solo-survivor.db"),
+                        save_dir=str(tmp_path), rng_seed=104, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    dead_rival = Entity("R", "轮回者", blood_limit=30, current_hp=0)
+    engine.state.player = player
+    engine.state.enemies = [dead_rival]
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(player.runtime_id, "P", "player", 1, 1,
+                                    faction="player", mode="manual"))
+    world.add_actor(WorldActorState(dead_rival.runtime_id, "R", "enemy", 5, 5,
+                                    faction="enemy", mode="autonomous", alive=False))
+
+    result = engine._refresh_world_final_duel(world)
+
+    assert result["complete"] is True
+    assert result["sole_survivor"] is True
+    assert world.final_duel_started is False
+    assert world.final_duel_winner == player.runtime_id
+    assert any(event["type"] == "sole_survivor_victory" for event in world.event_log)
+
+
+def test_replay_validator_accepts_a_recorded_solo_survivor_terminal():
+    from sim.run_open_world_replay import validate_complete_playthrough
+
+    payload = {
+        "initial_population": {"monsters": 2, "other_reincarnators": 2, "special_locations": 1},
+        "final_state": {
+            "game_complete": True, "stop_reason": "sole survivor victory",
+            "winner_id": "player", "battle_count": 1, "combat_event_count": 2,
+            "living_reincarnators_at_end": [{"name": "玩家", "actor_id": "player"}],
+        },
+        "battles": [{"round_count": 1, "event_count": 2}],
+        "driver_timeline": [{"type": "battle_start", "final_duel": False}],
+        "world_event_log": [{"type": "sole_survivor_victory", "actor_id": "player"}],
+    }
+
+    validate_complete_playthrough(payload)
+
+
 def test_final_survivors_converge_to_a_marked_final_encounter():
     world = WorldState(clock=WorldClock(), map=_open_map(),
                        final_duel_search=True,
