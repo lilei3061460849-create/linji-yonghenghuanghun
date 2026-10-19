@@ -38,8 +38,16 @@ def validate_open_world_winner_snapshot(snapshot: dict[str, Any]) -> None:
     dao_wen_names = set((player.get("dao_wen") or {}).keys())
     if len(dao_wen_names) < 2:
         raise ValueError("winner sample lacks learned DaoWen progression")
-    if not dao_wen_names.intersection({"杀伐", "再生", "庇护"}):
-        raise ValueError("winner sample has no DaoWen-backed predefined spell capability")
+    available_spells = set(origin.get("available_predefined_spells") or [])
+    expected_spells = {
+        spell_name for spell_name, required in (
+            ("先发制人", "杀伐"),
+            ("生生不息", "再生"),
+            ("后发制人", "庇护"),
+        ) if required in dao_wen_names
+    }
+    if not available_spells or not available_spells.intersection(expected_spells):
+        raise ValueError("winner sample has no recorded DaoWen-backed predefined spell capability")
     if not isinstance(origin.get("seed"), int) or not origin.get("region"):
         raise ValueError("winner sample is missing seed/region provenance")
     if origin.get("generator") != "sim/produce_open_world_winners.py":
