@@ -1192,7 +1192,7 @@ def test_only_surviving_reincarnator_wins_without_a_fake_final_duel(tmp_path):
     dead_rival = Entity("R", "轮回者", blood_limit=30, current_hp=0)
     engine.state.player = player
     engine.state.enemies = [dead_rival]
-    world = WorldState(clock=WorldClock(), map=_open_map())
+    world = WorldState(clock=WorldClock(), map=_open_map(width=21, height=21))
     world.clock.turn = 1
     world.add_actor(WorldActorState(player.runtime_id, "P", "player", 1, 1,
                                     faction="player", mode="manual"))
