@@ -619,7 +619,7 @@ class GameEngine:
         if self.state.current_region == "乱葬岗":
             return [{"id": "造生", "params_schema": {
                 "name": "首次造生时可选；造物名字，须与场上其他角色不同"},
-                "note": "首次造生消耗10碎片并创造一个固定专属道纹、初始偏爱的造物；后续每次消耗25碎片，提升血限、法限、速限各1点及视野范围1格"}]
+                "note": "首次造生消耗10碎片并创造一个固定专属道纹、初始偏爱的造物；后续每次消耗25碎片，血限+6、法限+1、速限+1，视野范围+1格"}]
         return []
 
     def _get_battle_start_actions(self) -> dict:
@@ -4260,8 +4260,8 @@ class GameEngine:
             if self.state.shards < cost:
                 return {"success": False, "error": f"培养造物需要{cost}碎片"}
             # 造生强化的是这只造物本身，而不是不断叠加偏爱让不同造物趋同。
-            existing.blood_limit += 1
-            existing.current_hp = min(existing.blood_limit, existing.current_hp + 1)
+            existing.blood_limit += 6
+            existing.current_hp = min(existing.blood_limit, existing.current_hp + 6)
             existing.mana_limit += 1
             existing.current_mana = min(existing.mana_limit, existing.current_mana + 1)
             existing.speed_limit += 1
@@ -4275,7 +4275,7 @@ class GameEngine:
             actor_data["vision_range"] = vision_range
             return {"success": True, "action": "造生·培养造物",
                     "result": {"created_being": existing.name,
-                               "growth": {"blood_limit": 1, "mana_limit": 1,
+                               "growth": {"blood_limit": 6, "mana_limit": 1,
                                           "speed_limit": 1, "vision_range": 1},
                                "vision_range": vision_range,
                                "preferences": list(existing.preferences),
