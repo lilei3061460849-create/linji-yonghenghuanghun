@@ -22,7 +22,10 @@ from engine.replay import build_replay_payload
 from engine.world import WorldState
 from sim.build_learner import _resolve_pending_event
 from sim.duel_pvp import run_duel_pvp
-from sim.produce_real_winners import _resolve_monster_turn_with_spells
+from sim.produce_real_winners import (
+    _has_remaining_enemies,
+    _resolve_monster_turn_with_spells,
+)
 
 SEED = 1
 MAX_WORLD_TURNS = 120  # Safety ceiling only; hitting it is an incomplete run, never a win.
@@ -97,12 +100,14 @@ def fight(engine: GameEngine, encounter_id: str, timeline: list[dict[str, Any]],
         return outcome
 
     call(engine, "round_start")
+    if engine.state.pending_redemption:
+        redemption = call(engine, "resolve_redemption", {"option": "终结"})
+        timeline.append({"type": "redemption", "result": redemption})
     guard = 0
-    while (engine.state.player.is_alive
-           and any(enemy.is_alive and not enemy.is_departed for enemy in engine.state.enemies)):
+    while engine.state.player.is_alive and _has_remaining_enemies(engine):
         guard += 1
-        if guard > 30:
-            raise RuntimeError("combat exceeded 30 rounds")
+        if guard > 40:
+            raise RuntimeError("combat exceeded 40 rounds or queued reinforcements did not settle")
         while (engine.state.player.is_alive
                and engine.state.player.actions_used_this_round
                    < engine._action_budget_of(engine.state.player)
@@ -128,8 +133,7 @@ def fight(engine: GameEngine, encounter_id: str, timeline: list[dict[str, Any]],
             if engine.state.pending_redemption:
                 redemption = call(engine, "resolve_redemption", {"option": "终结"})
                 timeline.append({"type": "redemption", "result": redemption})
-        if not engine.state.player.is_alive or not any(
-                enemy.is_alive and not enemy.is_departed for enemy in engine.state.enemies):
+        if not engine.state.player.is_alive or not _has_remaining_enemies(engine):
             break
         monster_result = _resolve_monster_turn_with_spells(engine)
         if not monster_result.get("success"):
@@ -139,18 +143,22 @@ def fight(engine: GameEngine, encounter_id: str, timeline: list[dict[str, Any]],
         if engine.state.pending_redemption:
             redemption = call(engine, "resolve_redemption", {"option": "终结"})
             timeline.append({"type": "redemption", "result": redemption})
-        if not engine.state.player.is_alive or not any(
-                enemy.is_alive and not enemy.is_departed for enemy in engine.state.enemies):
+        if not engine.state.player.is_alive or not _has_remaining_enemies(engine):
             break
         call(engine, "round_end")
+        if engine.state.pending_redemption:
+            redemption = call(engine, "resolve_redemption", {"option": "终结"})
+            timeline.append({"type": "redemption", "result": redemption})
         call(engine, "round_start")
+        if engine.state.pending_redemption:
+            redemption = call(engine, "resolve_redemption", {"option": "终结"})
+            timeline.append({"type": "redemption", "result": redemption})
     if engine.state.pending_redemption:
         redemption = call(engine, "resolve_redemption", {"option": "终结"})
         timeline.append({"type": "redemption", "result": redemption})
 
     outcome = ("player_dead" if not engine.state.player.is_alive else
-               "player_won" if not any(enemy.is_alive and not enemy.is_departed
-                                       for enemy in engine.state.enemies) else "stopped")
+               "player_won" if not _has_remaining_enemies(engine) else "stopped")
     replays.append(_save_battle_replay(engine, encounter_id, outcome))
     timeline.append({"type": "battle_snapshot", "world_turn": world.clock.turn,
                      "battle": engine.state.current_battle, "outcome": outcome,
