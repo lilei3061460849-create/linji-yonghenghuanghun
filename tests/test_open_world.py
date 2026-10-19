@@ -2079,6 +2079,8 @@ def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
     assert setup["attributes"]["total"] == 25
 
     assert final["battle_count"] == len(replay["battles"]) >= 1
+    assert any(entry.get("type") == "battle_start" and not entry.get("final_duel", False)
+               for entry in replay["driver_timeline"]), "the map run must include a normal encounter"
     assert final["combat_event_count"] == sum(
         battle["event_count"] for battle in replay["battles"])
     final_battle = replay["battles"][-1]
