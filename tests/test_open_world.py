@@ -2204,6 +2204,20 @@ def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
         for battle in replay["battles"]]
 
 
+def test_replay_waits_for_rivals_when_no_hostile_is_reachable():
+    from sim.run_open_world_replay import run_playthrough, validate_complete_playthrough
+
+    replay = run_playthrough(
+        seed=12, region="龙心谷", player_name="测试轮回者",
+        blood_points=11, speed_points=6, mana_points=8,
+    )
+
+    assert replay["final_state"]["stop_reason"] in {
+        "final duel completed", "sole survivor victory",
+    }
+    validate_complete_playthrough(replay)
+
+
 def test_final_duel_loss_still_settles_world_before_death_legacy_interrupt():
     replay = run_playthrough(SEED, blood_points=13, speed_points=6, mana_points=6)
     final = replay["final_state"]
