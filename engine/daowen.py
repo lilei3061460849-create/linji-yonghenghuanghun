@@ -204,7 +204,7 @@ class DaoWenEngine:
     
     @staticmethod
     def calculate_shufu(x: int, target: Entity = None) -> dict:
-        """束缚X：支付：冷却2X。使[目标]无法行动，持续X"""
+        """束缚X：支付：冷却2X。使[目标]只能施法（瞬发或自定义法术），其余主动行动不可用，持续X。"""
         target_name = target.name if target is not None else "未选定目标"
         return {
             "dao_wen": "束缚",
@@ -212,8 +212,9 @@ class DaoWenEngine:
             "cost_type": CostType.COOLDOWN.value,
             "cost": 2 * x,
             "duration": x,
-            "effect": "无法行动",
-            "summary": f"冷却{2*x}场，使{target_name}无法行动，持续{x}回合"
+            "effect": "只能施法（瞬发或自定义法术），其余主动行动不可用",
+            "summary": (f"冷却{2 * x}场，使{target_name}只能施法（瞬发或自定义法术），"
+                        f"其余主动行动不可用，持续{x}回合")
         }
     
     @staticmethod

@@ -407,7 +407,33 @@ class GameEngine:
         elif phase == "battle_start":
             return self._get_battle_start_actions()
         elif phase == "in_combat":
-            return self._get_combat_actions()
+            available = self._get_combat_actions()
+            player = self.state.player
+            if player and player.has_status("束缚"):
+                subphase = self.state.combat_subphase
+                allowed_by_subphase = {
+                    CombatSubphase.PLAYER_ACTIONS.value: {
+                        "cast", "define_spell", "prepare_monster_phase"},
+                    CombatSubphase.AWAIT_ROUND_START.value: {"round_start"},
+                }
+                allowed = allowed_by_subphase.get(subphase)
+                if allowed is not None:
+                    available["actions"] = [
+                        action for action in available.get("actions", [])
+                        if action.get("action_type") in allowed
+                        and (action.get("action_type") not in {"cast", "define_spell"}
+                             or action.get("available", True))
+                    ]
+                    available["binding_restriction"] = (
+                        "【束缚】持续期间仅能施放瞬发法术cast(flow=...)，"
+                        "或定义/施展自定义法术define_spell/cast(kind=spell)；"
+                        "prepare_monster_phase/round_start只用于推进战斗流程。"
+                        "回合外防御反应与自动触发不受影响。"
+                    )
+                    existing_note = available.get("note", "")
+                    available["note"] = "；".join(
+                        part for part in (existing_note, available["binding_restriction"]) if part)
+            return available
         elif phase == "battle_end":
             return self._get_battle_end_actions()
         elif phase == "dead_duel":
@@ -990,6 +1016,63 @@ class GameEngine:
         "command_ally", "resolve_ally_phases",
     }
 
+    # 需要执行【束缚】行动分类的主动入口。回合推进、怪物阶段提交、强制选择和战终结算
+    # 不在此列；这些是流程/反应，不是目标主动使用的行动。
+    _BOUND_RESTRICTED_ACTIONS = {
+        "declare_parry", "use_daowen", "use_resonance", "consume_item",
+        "cast", "focus", "rest", "prepare_attack", "resolve_attack",
+        "declare_wish", "declare_escape", "deploy_employee",
+        "define_spell", "undefine_spell", "lianxin_in_battle",
+        "declare_evolution", "activate_duel_relic", "use_black_card",
+        "use_crime_vault", "fire_godfather_revolver", "select_shared_dragon_heart",
+        "declare_fuyuebei_toll", "activate_dragon_body", "devour_monster",
+        "declare_tail_sacrifice", "use_dragon_wings", "use_blood_wings",
+        "enslave_as_chizu", "blood_feast", "use_truth_eye",
+        "command_ally", "resolve_ally_phases",
+        "pay_for_dragon_nature", "unlock_dragon_trait",
+    }
+
+    def _bound_action_actor(self, action_type: str, params: dict) -> Optional[Entity]:
+        """定位一次主动行动的执行者；两阶段攻击从pending快照读取攻击者。"""
+        refs = self.combat._combat_entity_refs()
+        actor_ref = params.get("actor_ref")
+        if action_type == "resolve_attack":
+            pending = self.state.pending_attack or {}
+            actor_ref = (pending.get("options") or {}).get("actor_ref", actor_ref)
+        if actor_ref:
+            return refs.get(actor_ref)
+        if action_type == "use_daowen" and params.get("actor"):
+            matches = [entity for entity in refs.values()
+                       if entity.name == params.get("actor")]
+            if len(matches) == 1:
+                return matches[0]
+        return self.state.player
+
+    @staticmethod
+    def _is_allowed_bound_spell_action(action_type: str, params: dict) -> bool:
+        """束缚允许施放瞬发法术，或定义/施展自定义法术；不允许直接发动道纹。"""
+        if action_type == "define_spell":
+            return True
+        if action_type != "cast":
+            return False
+        if "flow" in params or "huangfu_spell" in params:
+            return params.get("kind") in (None, "flow", "instant")
+        return params.get("kind") == "spell"
+
+    def _is_bound_ally_spell_command(self, ally: Entity, params: dict) -> bool:
+        """束缚的友方仅可被命令施放已由【黄符】授予的瞬发法术。"""
+        instruction = params.get("instruction", "")
+        if not isinstance(instruction, str):
+            return False
+        for verb in self._ALLY_DAOWEN_VERBS:
+            if instruction.startswith(verb):
+                rest = instruction[len(verb):].strip()
+                spell_name = rest.split()[0] if rest else ""
+                return (bool(spell_name)
+                        and any(spell.name == spell_name for spell in ally.spells)
+                        and (ally.runtime_id, spell_name) in self.state.huangfu_grants())
+        return False
+
     def _restore_state_in_place(self, snapshot: GameState) -> None:
         """事务失败时原位恢复，既回滚数值，也保持调用方已持有的实体引用有效。
 
@@ -1161,7 +1244,7 @@ class GameEngine:
                 "use_black_card", "use_crime_vault", "fire_godfather_revolver",
                 "select_shared_dragon_heart", "declare_fuyuebei_toll", "activate_dragon_body",
                 "devour_monster", "declare_tail_sacrifice", "use_dragon_wings",
-                "use_blood_wings", "enslave_as_chizu", "blood_feast",
+                "use_blood_wings", "enslave_as_chizu", "blood_feast", "use_truth_eye",
                 # 轮回者指挥与友方自主行动都属于己方行动阶段，不能在怪物阶段插队。
                 "command_ally", "resolve_ally_phases",
             }
@@ -1179,6 +1262,23 @@ class GameEngine:
             if required and subphase != required:
                 return {"success": False,
                         "error": f"【{action_type}】要求战斗子阶段{required}，当前为{subphase}"}
+
+            if action_type in self._BOUND_RESTRICTED_ACTIONS:
+                actor = self._bound_action_actor(action_type, params)
+                if (actor is not None and actor.has_status("束缚")
+                        and not self._is_allowed_bound_spell_action(action_type, params)):
+                    return {"success": False,
+                            "error": (f"{actor.name}受【束缚】影响，持续期间只能进行法术行动"
+                                      "（cast(flow=...)或define_spell/cast(kind=spell)），"
+                                      "其他主动行动不可用")}
+
+            if action_type == "command_ally":
+                ally = self.combat._combat_entity_refs().get(params.get("ally_ref", ""))
+                if (ally is not None and ally.has_status("束缚")
+                        and not self._is_bound_ally_spell_command(ally, params)):
+                    return {"success": False,
+                            "error": (f"{ally.name}受【束缚】影响，只能施放【黄符】授予的瞬发法术；"
+                                      "不能执行其他命令行动")}
         return None
 
     def execute_action(self, action_type: str, params: dict = None) -> dict:
@@ -3900,7 +4000,8 @@ class GameEngine:
             return {"success": False, "error": built["error"]}
         # 先扣出手再写入：出手预算不足时不产生任何效果，也不白造出法术。
         spell_tier = max(1, len(set(built["spell"].required_daowen)))
-        budget_error = self._consume_actions_or_error(player, spell_tier)
+        budget_error = self._consume_actions_or_error(
+            player, spell_tier, action_type="define_spell")
         if budget_error:
             return budget_error
         player.spells.append(built["spell"])
@@ -4464,8 +4565,9 @@ class GameEngine:
         if entity.entity_type == "怪物" and not self.state.in_final_duel:
             return None
         if not self.combat.can_act(entity):
-            return {"success": False,
-                    "error": f"{entity.name}无法出手（束缚）"}
+            error = (f"{entity.name}受【束缚】影响，只能进行法术行动"
+                     if entity.has_status("束缚") else f"{entity.name}当前无法出手")
+            return {"success": False, "error": error}
         breath = self.combat.apply_opposing_longxi(entity)
         if breath and not entity.is_alive:
             return {"success": False, "error": f"{entity.name}被龙息命零",
@@ -4479,14 +4581,17 @@ class GameEngine:
         return None
 
     def _consume_actions_or_error(self, entity: "Entity", count: int,
-                                    action_label: str | None = None) -> Optional[dict]:
+                                    action_label: str | None = None,
+                                    *, action_type: str | None = None) -> Optional[dict]:
         """原子消耗多次出手；X阶法术/逃跑必须一次付清X次出手机会。"""
         if not isinstance(count, int) or isinstance(count, bool) or count < 1:
             return {"success": False, "error": "出手消耗必须是正整数"}
         if entity.entity_type == "怪物" and not self.state.in_final_duel:
             return None
-        if not self.combat.can_act(entity):
-            return {"success": False, "error": f"{entity.name}无法出手（束缚）"}
+        if not self.combat.can_act(entity, action_type=action_type):
+            error = (f"{entity.name}受【束缚】影响，只能进行法术行动"
+                     if entity.has_status("束缚") else f"{entity.name}当前无法出手")
+            return {"success": False, "error": error}
         budget = self._action_budget_of(entity)
         remaining = budget - entity.actions_used_this_round
         if remaining < count:
@@ -4513,6 +4618,23 @@ class GameEngine:
                     "error": f"死斗须严格交替出手：当前轮到{self.state.duel_turn}，{actor.name}({actor_side})不能行动"}
         return None
 
+    def _has_spell_action_option(self, entity: "Entity") -> bool:
+        """死斗行动余量判断：束缚者须有可用于瞬发或自定义施法的道纹/黄符法术。"""
+        if any(instance.can_use() for instance in entity.dao_wen.values()):
+            return True
+        grants = self.state.huangfu_grants()
+        return any(
+            (entity.runtime_id, spell.name) in grants
+            for spell in entity.spells
+        )
+
+    def _entity_can_take_active_action(self, entity: "Entity") -> bool:
+        if self.combat.can_act(entity):
+            return True
+        return (entity.has_status("束缚")
+                and self.combat.can_act(entity, action_type="cast")
+                and self._has_spell_action_option(entity))
+
     def _duel_side_can_act(self, side: str) -> bool:
         """该侧是否还有未用完的出手预算（存活且未撤退；get_all_* 已排除死者/撤退者）。
 
@@ -4522,14 +4644,14 @@ class GameEngine:
         if side == "player_side":
             entities = self.state.get_all_player_side()
             return any(e.actions_used_this_round < self.combat.single_round_action_count(e)
-                       and self.combat.can_act(e) for e in entities)
+                       and self._entity_can_take_active_action(e) for e in entities)
         # 守擂侧：怪物按正文口径「每回合 1 次攻击 + 1 种道纹」计出手预算
         # （single_round_action_count），与 _consume_action_or_error 同一口径——
         # 此前这里写成"存活未撤退即有余手"，与实际结算门禁不一致：怪物既被
         # 0 预算卡死无法出手，本函数又坚称它还有余手，回合因此永远结束不了。
         # 对手轮回者/盟友按各自出手预算判断（耗尽则连动）。
         return any(
-            e.is_alive and not e.has_retreated and self.combat.can_act(e)
+            e.is_alive and not e.has_retreated and self._entity_can_take_active_action(e)
             and e.actions_used_this_round < self.combat.single_round_action_count(e)
             for e in self.state.get_all_enemy_side())
 
@@ -5261,8 +5383,8 @@ class GameEngine:
         duel_err = self._check_duel_turn_or_error(actor)
         if duel_err:
             return duel_err
-        if not self.combat.can_act(actor):
-            return {"success": False, "error": f"{actor.name}当前无法行动"}
+        if not self.combat.can_act(actor, action_type="cast"):
+            return {"success": False, "error": f"{actor.name}当前无法施法"}
         target_ref = params.get("target_ref")
         cast_target = None
         if target_ref is not None:
@@ -5319,7 +5441,8 @@ class GameEngine:
                     actor.dao_wen.pop(daowen, None)
                 return {"success": False,
                         "error": f"【黄符】施法实际需要{effective_huangfu_mana}点法力，{actor.name}当前{actor.current_mana}"}
-        budget_err = self._consume_actions_or_error(actor, spell_tier)
+        budget_err = self._consume_actions_or_error(
+            actor, spell_tier, action_type="cast")
         if budget_err:
             for daowen in huangfu_temp_granted:
                 actor.dao_wen.pop(daowen, None)

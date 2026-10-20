@@ -97,7 +97,7 @@ def test_eternal_preference_makes_new_dao_wen_duration_permanent(tmp_path):
     caster.preferences = ["永恒的偏爱"]
     caster.dao_wen["束缚"] = DaoWenInstance(DaoWen(
         name="束缚", formula="束缚X", cost_type="冷却",
-        cost_formula="2X", effect_formula="使目标无法行动，持续X"))
+        cost_formula="2X", effect_formula="只能施法（瞬发或自定义法术），其余主动行动不可用，持续X"))
     engine.state.player = caster
     engine.state.enemies = [target]
 
@@ -126,7 +126,7 @@ def test_time_preference_converts_dao_wen_cooldown_to_rounds(tmp_path):
     caster.preferences = ["时间的偏爱"]
     instance = DaoWenInstance(DaoWen(
         name="束缚", formula="束缚X", cost_type="冷却",
-        cost_formula="2X", effect_formula="使目标无法行动，持续X"))
+        cost_formula="2X", effect_formula="只能施法（瞬发或自定义法术），其余主动行动不可用，持续X"))
     caster.dao_wen["束缚"] = instance
     engine.state.player = caster
     engine.state.enemies = [target]

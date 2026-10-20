@@ -48,7 +48,7 @@ class MonsterLifeMixin:
         if hp_ratio <= 0.3:
             difficulty_signals.append("生命低于30%")
         
-        # 2. 被束缚/无法行动
+        # 2. 被束缚/主动行动受限（仍可施放允许的法术）
         if monster.has_status("束缚"):
             difficulty_signals.append("被控制")
         

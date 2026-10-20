@@ -1581,17 +1581,17 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                             "note": "轮回者获得消耗品【自由结晶】(1/1)"})
         return effects
 
-    def can_act(self, entity: Entity) -> bool:
-        """是否可出手（束缚下不可；被【封印】暂离者不在场上，同样不可出手）。
+    def can_act(self, entity: Entity, action_type: str | None = None) -> bool:
+        """判断实体能否执行指定主动行动。
 
-        2026-10-08 用户令：封印可作用于任意目标含自己。这里是"能否出手"的唯一
-        事实源，加上暂离判断后，玩家/朋友/员工/怪物被封印期间一律不能行动，
-        不必在每个行动入口各写一份。
+        【束缚】期间仅放行法术行动（瞬发施法或自定义法术定义）；不传行动类型时按
+        普通行动判断，仍返回不可行动。被【封印】暂离者不在场上，任何行动都不可用。
+        反应选择与自动触发不通过此主动行动门禁。
         """
         return (entity.is_alive
                 and not self.state.is_sealed_away(entity)
-
-                and not entity.has_status("束缚"))
+                and (not entity.has_status("束缚")
+                     or action_type in {"cast", "define_spell"}))
 
     def is_targetable(self, attacker: Entity, target: Entity) -> bool:
         """目标是否可被选中：非飞行者无法选中飞行目标。"""
