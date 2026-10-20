@@ -31,12 +31,8 @@ class MonsterPhaseMixin:
 
     def reset_monster_activation(self):
         """战始重置怪物激活状态与战斗遗物状态"""
-        # 招架姿态与承露盏记账都是**每场**口径，战始一并归零，
-        # 避免上一场的姿态/余数漏到新战斗（换场时不经 [回始]）。
+        # 承露盏记账按**每场**口径归零（换场时不经 [回始]）。
         for e in self.state.get_all_player_side() + self.state.get_all_enemy_side():
-            e.parrying_this_round = False
-            e.parry_uses_remaining_this_round = 0
-            e.parry_locked_this_round = False
             e.hp_lost_this_battle = 0
             e.chenglu_paid = 0
         self._monster_activated = {}

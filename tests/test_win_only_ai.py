@@ -110,7 +110,6 @@ class _VetoProbe(WinOnlyAI):
         player = type("P", (), {
             "mutation_count": mutation, "name": "探针", "is_alive": True,
             "current_mana": 0, "current_hp": 1, "shield": 0,
-            "parry_locked_this_round": False, "parrying_this_round": False,
         })()
         state = type("S", (), {"player": player, "enemies": []})()
         self.engine = type("E", (), {"state": state, "execute_action": staticmethod(

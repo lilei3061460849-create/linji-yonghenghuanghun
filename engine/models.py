@@ -328,12 +328,9 @@ class Entity:
     # ---- 蓄锐：消耗1出手换取下回合+1出手 ----
     # 用 Entity.field 方式声明：
     _xurui_pending: int = field(default=0)
-    # 新规则：本回合你受到的攻击伤害 - 你10%当前生命（向下取整，最低0）；
-    # 每回合可使用次数 = 你当前生命（每次受击消耗1次，用完后本回合后续攻击不再减伤）。
-    # 不再有"上回合招架过→本回合禁用"的锁定。
-    parrying_this_round: bool = False   # 本回合是否已声明招架姿态
-    parry_uses_remaining_this_round: int = 0  # 本回合剩余可招架次数（声明时设为 current_hp）
-    # 旧 parry_locked_this_round 字段 2026-09-28 废弃，保留以兼容旧存档反序列化（不再读取/写入）。
+    # 旧版回合姿态式招架的存档兼容字段；现行逐击招架使用攻击提交参数，这些字段不参与规则结算。
+    parrying_this_round: bool = False
+    parry_uses_remaining_this_round: int = 0
     parry_locked_this_round: bool = False
     # ---- 承露盏（遗物）：每累计失去10生命获得1法力，每场战斗累计 ----
     hp_lost_this_battle: int = 0   # 本场累计失去的生命（战始归零）

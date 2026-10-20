@@ -77,8 +77,8 @@ CASES = [
     ("use_daowen", {"daowen_name": "不存在"}),
     ("round_end", {}),
     ("prepare_attack", {}),
-    # 2026-10-08 结构审查补充：这三条路径与 use_daowen 走的是不同的内部实现
-    # （招架姿态 / 残韵转换 / 瞬发法术执行器），预演必须同样与正式执行同源。
+    # 结构审查补充：这三条路径与 use_daowen 走不同内部实现
+    # （旧招架动作的兼容拒绝 / 残韵转换 / 瞬发法术执行器），预演须与正式执行同源。
     ("declare_parry", {}),
     ("use_resonance", {"source_daowen": "再生", "resonance_type": "反转"}),
     ("cast", {"flow": "发动杀伐X于目标", "steps": [{"x": 1}], "target_ref": "enemy:0"}),

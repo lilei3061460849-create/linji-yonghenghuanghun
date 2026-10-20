@@ -319,13 +319,7 @@ class WinOnlyAI(TacticalAI):
     # ---------- 选择：提案裁剪 + ±1 裁决 ----------
 
     def _dynamic_action(self):
-        # WinOnlyAI 自己覆写了 TacticalAI 的候选入口；若这里只复制道纹/普攻/残韵，
-        # 就会把基类已经实现的【招架】静默漏掉。招架不占出手，且必须进入整局
-        # 推演，否则高压局永远只会在“继续输出”和“发动道纹”之间选。
         candidates = []
-        parry = self._parry_candidate()
-        if parry is not None:
-            candidates.append(parry)
         candidates.extend(self._daowen_candidates())
         basic_candidates = self._basic_attack_candidates()
         candidates.extend(basic_candidates)
@@ -358,24 +352,19 @@ class WinOnlyAI(TacticalAI):
             res = pv.get("result") or {}
             if not res.get("success"):
                 continue
-            if cand.get("action") == "declare_parry":
-                # 招架是姿态，通用 diff 不会表达每击减伤；沿用 TacticalAI
-                # 的威胁评分，再交给 WinOnlyAI 的整局推演做最终胜负裁决。
-                s = self._score_parry_candidate(cand)
-            else:
-                diff = pv.get("diff", {})
-                s = self._score_candidate(diff, cand["label"],
-                                          cand.get("kind"), cand.get("target"))
-                if cand.get("kind") in ("attack", "damage"):
-                    # 不能把“敌人暂离/封印”产生的 hp_after=0 当成伤害。
-                    # 只有真实 damage_applied 且 actual_damage>0 才算完成首次接触。
-                    actual_damage = any(
-                        ev.get("type") == "damage_applied"
-                        and (ev.get("data") or {}).get("actual_damage", 0) > 0
-                        for ev in ((diff or {}).get("events", []) or []))
-                    if actual_damage:
-                        immediate_damage_available = True
-                        immediate_damage_candidates.add(id(cand))
+            diff = pv.get("diff", {})
+            s = self._score_candidate(diff, cand["label"],
+                                      cand.get("kind"), cand.get("target"))
+            if cand.get("kind") in ("attack", "damage"):
+                # 不能把“敌人暂离/封印”产生的 hp_after=0 当成伤害。
+                # 只有真实 damage_applied 且 actual_damage>0 才算完成首次接触。
+                actual_damage = any(
+                    ev.get("type") == "damage_applied"
+                    and (ev.get("data") or {}).get("actual_damage", 0) > 0
+                    for ev in ((diff or {}).get("events", []) or []))
+                if actual_damage:
+                    immediate_damage_available = True
+                    immediate_damage_candidates.add(id(cand))
             if s is None:
                 continue
             # 崩解线否决（训练 2026-09-10 六审）：异变 ≥ 50 即血 0 自爆

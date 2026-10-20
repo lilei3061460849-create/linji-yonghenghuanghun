@@ -106,7 +106,7 @@ engine/
 
 伤害数值链字段不可互换：
 
-- `original_damage`：CombatEngine 入口收到的原始伤害；`incoming_damage`：倍率/招架等上游调整后、格挡前数值；
+- `original_damage`：CombatEngine 入口收到的原始伤害；`incoming_damage`：倍率等上游修正后、格挡前数值；
 - `current_damage`：格挡后进入规则阶段的当前值。每条规则读取前序规则刚写回的值，不重读快照；中间值变成0仍继续遍历；
 - `post_rule_damage`：规则链结束、失血倍率应用前的数值；`damage_after_life_loss_multiplier`：应用【第一杯】等倍率后的待扣数值；
 - `shield_absorbed`：格挡吸收量；`actual_life_loss`：受击前后生命值差。`damage_after_life_loss_multiplier` 保留倍率后、最终封顶前的待扣数值；`actual_damage` 表示最终待扣数值，过量伤害时仍可能大于实际 HP 下降量。

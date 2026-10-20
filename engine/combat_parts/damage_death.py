@@ -465,17 +465,8 @@ class DamageDeathMixin:
                 reason="negative_damage_after_multiplier_adjust",
                 original_damage=original_damage,
             )
-        # 招架属于受击姿态资源，仍在格挡之前卸力；道纹持续状态则在格挡
-        # 之后一起进入同一 X 排序窗口（由 take_damage 的 status_adjuster 调用）。
-        amount = validate_damage_amount(
-            self._apply_parry_reduction(target, amount, damage_type),
-            "CombatEngine._apply_parry_reduction.result")
-        if amount < 0:
-            return self._damage_noop_result(
-                target, amount, damage_type, damage_ctx, legacy_ctx,
-                reason="negative_damage_after_parry",
-                original_damage=original_damage,
-            )
+        # 攻击招架只在 resolve_attack 的逐击攻击路径中结算；此通用伤害入口不处理招架。
+        # 道纹持续状态则在格挡之后进入同一 X 排序窗口。
         # 癫狂之脑（通用遗物池，2026-10-03 新增）：你受到的**攻击伤害**翻倍。
         # 只翻攻击行动造成的伤害（subtype=attack；含被万钧印改道的自攻）；
         # 道纹/代价/直接失血不受影响。倍率发生在格挡/护盾之前，故本次伤害的

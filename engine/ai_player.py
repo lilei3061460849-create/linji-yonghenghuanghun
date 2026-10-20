@@ -210,8 +210,8 @@ SYSTEM_PROMPT = """你是第四宇宙游戏的AI玩家。你的任务是根据�
 - define_spell：统一自定义施法；法术大全条目用 spell_name，完全自定义法术用 spell；定义后立即生效
 - define_spell：战斗中自创触发型法术（params: spell{name, required_daowen, trigger_condition, effect_flow, lifecycle}）
 - cast：施法（带flow时=瞬发法术；params: flow, target_ref, steps[{x, target_ref?, dodge, trigger_spell_choices}], max_iterations?）
-- prepare_attack / resolve_attack：两阶段攻击（先prepare拿一次性token，再逐击显式提交闪避、血影与反应法术）
-- declare_parry（招架）、declare_evolution（怪物进化·发动原初X）
+- prepare_attack / resolve_attack：两阶段攻击（先prepare拿一次性token，再逐击显式提交闪避、招架、血影与反应法术）
+- declare_evolution（怪物进化·发动原初X）
 - focus：聚能，1次出手→恢复50%已损法力（向上取整）
 - rest：蓄锐，1次出手→下[回始]获得【蓄锐·增】（出手+1，持续1回合）
 - prepare_monster_phase / resolve_monster_phase：怪物阶段两阶段接口（为每个actors条目提交完整选择）
