@@ -1189,7 +1189,7 @@ def test_only_surviving_reincarnator_wins_without_a_fake_final_duel(tmp_path):
     engine = GameEngine(db_path=str(tmp_path / "solo-survivor.db"),
                         save_dir=str(tmp_path), rng_seed=104, autosave=False)
     player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
-    dead_rival = Entity("R", "轮回者", blood_limit=30, current_hp=0)
+    dead_rival = Entity("R", "轮回者", blood_limit=30, current_hp=0, is_alive=False)
     engine.state.player = player
     engine.state.enemies = [dead_rival]
     world = WorldState(clock=WorldClock(), map=_open_map(width=21, height=21))

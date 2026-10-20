@@ -177,14 +177,15 @@ def test_debt_zero_cost_learn_and_repair_allowed(tmp_path):
     assert ok2["success"], ok2
 
 
-def test_choose_sha_qi_gate_matches_charge_10(tmp_path):
-    """附煞·发现选择：门禁与收费统一10（旧门禁50会误拒持10~49碎片的玩家）。"""
-    e = _debt_engine(tmp_path, debt=30)   # 持30：旧门禁50必误拒，新门禁10应放行
-    e.state.pending_sha_qi_choices = ["冥煞"]
+def test_removed_sha_qi_choice_cannot_spend_shards(tmp_path):
+    """旧 choose_sha_qi 端点已删除，不能再绕过新流程扣碎片。"""
+    e = _debt_engine(tmp_path, debt=30)
+    e.state.pending_sha_qi_choices = ["冥煞"]  # 仅为旧存档兼容字段，不再授权该行动
     held = next(iter(e.state.player.dao_wen))
-    ok = e.execute_action("choose_sha_qi", {"sha_qi": "冥煞", "daowen_name": held})
-    assert ok["success"], ok
-    assert e.state.shards == 20, f"应实扣10，实际剩 {e.state.shards}"
+    before = e.state.shards
+    result = e.execute_action("choose_sha_qi", {"sha_qi": "冥煞", "daowen_name": held})
+    assert result["success"] is False
+    assert e.state.shards == before, "已删除的旧端点不得扣碎片"
 
 
 def test_event_option_zero_cost_not_blocked_by_debt(tmp_path):
