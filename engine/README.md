@@ -216,8 +216,10 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `setup_choose_initial_daowen` | 从发现候选中显式选择1种作为初始道纹 |
 | `resolve_redemption` | 救赎触发后选择接纳为待命员工（自定义员工名）或无视 |
 | `setup_choose_resonance` | 选择初始残韵 |
-| `setup_choose_region` | 选择副本 |
-| `pre_battle_action` | 局外行动 |
+| `setup_choose_region` | 选择副本；完成后默认下一步为 `world_initialize` |
+| `world_initialize` | 默认副本入口：按当前副本区域初始化 21×21 开放地图 |
+| `world_move` / `world_wait` / `world_interact` | 开放地图移动、等待与交互；地图遭遇使用带 `world_encounter_id` 的 `battle_start` |
+| `pre_battle_action` | 局外行动；旧线性模式仅在用户明确要求时使用 |
 | `use_daowen` | 发动道纹（可选actor：留空=玩家自身法力制发动；指定[朋友]/[员工]名=听从指令发动，免法力只消耗出手，且必须指定非自身目标） |
 | `define_spell` | 统一自定义施法：用 `spell_name` 定义法术大全条目，或用 `spell` 定义新法术；所有法术类型均由此入口表达（1出手） |
 | `cast` | 施法。`kind=daowen`（默认）=发动单个道纹；`kind=spell`=统一自定义施法；带 `flow` = **瞬发法术**：一次出手依次发动多种道纹（只扣1出手，每步都是一次发动道纹，逐步按真实法力结算，中断保留已结算步骤、出手不退，不写入角色法术列表）。见 法术索引.md §5.4 |

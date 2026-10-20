@@ -565,7 +565,9 @@ class GameEngine:
                                     "（实际结算发生在战始遗物与法力重置之后，届时可能因法力变化而改变可承担的X）",
                     "candidates": global_spells_start,
                 }
-            actions.append({"action_type": "battle_start", "params_schema": battle_start_schema})
+            actions.append({"action_type": "battle_start", "params_schema": battle_start_schema,
+                            "note": "旧线性副本入口；默认应先执行列表首项world_initialize，"
+                                    "仅在用户明确要求线性流程时使用"})
         if self.state.endless_mode:
             # 无尽模式「无法探索」：不出现在可用行动里，
             # 保证 get_available_actions 的输出仍可原样执行（开发规则 13）。
@@ -576,9 +578,10 @@ class GameEngine:
             actions = [action for action in actions
                        if action.get("params_schema", {}).get("sub_action") not in {"探索", "附煞"}]
         if not getattr(self.state, "world_state", {}):
-            actions.append({"action_type": "world_initialize",
-                            "params_schema": {"width": "integer (default 21)", "height": "integer (default 21)"},
-                            "note": "初始化开放世界地图；地图种子由引擎骰子产生并记录"})
+            actions.insert(0, {"action_type": "world_initialize",
+                               "params_schema": {"width": "integer (default 21)", "height": "integer (default 21)"},
+                               "note": "默认副本入口：初始化开放世界地图（21×21）；地图种子由引擎骰子产生并记录。"
+                                       "只有用户明确要求旧线性流程时才跳过此项，继续旧线性局外行动并在精力耗尽后使用battle_start。"})
         else:
             actions.extend([
                 {"action_type": "world_status", "params_schema": {}},

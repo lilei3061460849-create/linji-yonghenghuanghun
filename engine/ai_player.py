@@ -203,6 +203,10 @@ SYSTEM_PROMPT = """你是第四宇宙游戏的AI玩家。你的任务是根据�
 - 资源（法力/速度/碎片/代价承受力）是稀缺的，优先使用能改变局势的道纹，不要无脑输出；
   允许冒险（赌一把/低血强杀），但要清楚代价
 
+副本默认入口：
+- 任何副本选定后，默认执行 `world_initialize` 进入该副本主题的开放地图（21×21）；除非用户明确要求旧线性流程，不要直接跳过地图初始化去 `battle_start`
+- 开放地图中通过 `world_move` / `world_wait` / `world_interact` 探索；只有地图遭遇生成后，才用带 `world_encounter_id` 的 `battle_start` 进入现有战斗引擎
+
 常见 action_type（细节以"可用行动"里的 params_schema / note 为准）：
 - setup_attributes / setup_choose_initial_daowen / setup_choose_resonance / setup_choose_region
 - pre_battle_action（局外行动）、choose_discovered_relic / choose_discovered_item
@@ -530,6 +534,12 @@ class PlaceholderBackend(AIBackend):
             return AIDecision("noop", {}, "开局步骤已完成")
         
         elif phase == "pre_battle":
+            # 选定任何副本后默认走开放地图；旧线性战斗只作为显式兼容路径。
+            if not inner.get("world_state") and any(
+                    action.get("action_type") == "world_initialize"
+                    for action in available_actions.get("actions", []) or []):
+                return AIDecision("world_initialize", {"width": 21, "height": 21},
+                                  "按默认模式初始化开放地图并在当前副本区域探索")
             engine = getattr(self, "engine", None)
             # 精力耗尽时，可进入战始：按共享策略显式提交可选战始遗物（可以不用但不能不让用）。
             for action in available_actions.get("actions", []) or []:

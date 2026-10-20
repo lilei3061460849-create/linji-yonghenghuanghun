@@ -129,8 +129,10 @@ def handle_setup_choose_region(engine: Any, params: Dict[str, Any]) -> Dict[str,
                    "unlocked_tier": int(engine.state.unlocked_tier),
                    "endless_mode": bool(engine.state.endless_mode),
                    "endless_cycle": int(engine.state.endless_cycle)},
-        "next_actions": ["pre_battle_action"],
-        "note": "副本已选择；开局配置完成（遗物与初始道纹均已在此前发现），进入局外行动。" + endless_note,
+        "next_actions": ["world_initialize"],
+        "note": "副本已选择；开局配置完成（遗物与初始道纹均已在此前发现）。"
+                "默认从开放地图进入本副本，下一步先执行world_initialize；"
+                "仅在用户明确选择旧线性模式时，才继续旧线性局外行动并在精力耗尽后使用battle_start。" + endless_note,
     }
 
 
