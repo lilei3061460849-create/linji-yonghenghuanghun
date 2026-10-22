@@ -214,12 +214,12 @@ def case_huoxueyi(tmp: Path) -> dict:
 def case_zengsheng(tmp: Path) -> dict:
     e = _sandbox(tmp, ["增生药剂"])
     p = e.state.player
-    e._grant_named_daowen(p, "血债")
+    e._grant_named_daowen(p, "连击")
     p.current_hp = 100
     hp_before = p.current_hp
-    e.combat.apply_daowen_effect("血债", DaoWenEngine.resolve("血债", 3), p, p)
+    e.combat.apply_daowen_effect("连击", DaoWenEngine.resolve("连击", 3), p, p)
     out = {
-        "case": "增生药剂：玩家对自己造成伤害（血债3打自己）",
+        "case": "增生药剂：玩家对自己造成伤害（连击3打自己）",
         "hp_before": hp_before, "hp_after": p.current_hp,
         "self_damage": 3, "relic_heal_expected": 30,
         "heal_records": [ev.get("subtype") for ev in getattr(p, "_hp_loss_events", [])],
@@ -227,9 +227,9 @@ def case_zengsheng(tmp: Path) -> dict:
     # 对照组：无遗物
     e2 = _sandbox(tmp, [])
     p2 = e2.state.player
-    e2._grant_named_daowen(p2, "血债")
+    e2._grant_named_daowen(p2, "连击")
     p2.current_hp = 100
-    e2.combat.apply_daowen_effect("血债", DaoWenEngine.resolve("血债", 3), p2, p2)
+    e2.combat.apply_daowen_effect("连击", DaoWenEngine.resolve("连击", 3), p2, p2)
     out["hp_after_without_relic"] = p2.current_hp
     out["delta_with_relic"] = p.current_hp - hp_before
     out["delta_without_relic"] = p2.current_hp - 100

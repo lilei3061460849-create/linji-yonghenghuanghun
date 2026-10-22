@@ -7,7 +7,7 @@
 本测试锁定修复后的契约：
   1. 非攻击失血（道纹伤害、流血代价、直接 _raw_hp_loss）都会触发生生不息。
   2. 普通攻击路径由 resolve_attack 的显式反应窗口结算，不重复经 hook 双发。
-  3. 法力不足（再生类消耗法力）时不触发、且不崩溃；血债类（流血代价、非法力）
+  3. 法力不足（再生类消耗法力）时不触发、且不崩溃；连击类（流血代价、非法力）
      即使 0 法力也照常触发。
 """
 from __future__ import annotations
@@ -66,7 +66,7 @@ def test_after_life_lost_fires_on_bleed_cost():
     """流血代价降低生命 → 生生不息触发。"""
     _, combat, player, _ = _combat_with_reactions(player_mana=20)
     combat.pay_numeric_cost(player, "流血", 5, cost_context={
-        "timing": "player_action", "source": "血债", "source_type": "daowen",
+        "timing": "player_action", "source": "连击", "source_type": "daowen",
         "actor": player, "target": player, "mechanic": "cost", "subtype": "bleed",
         "amount": 5, "tags": {"active_payment"},
     })
@@ -112,7 +112,7 @@ def test_after_life_lost_insufficient_mana_does_not_fire_or_crash():
 
 
 def test_after_life_lost_blood_debt_fires_at_zero_mana():
-    """血债（流血代价，不消耗法力）反应即使 0 法力也触发。"""
+    """连击（流血代价，不消耗法力）反应即使 0 法力也触发。"""
     state = GameState(phase="in_combat", combat_subphase="player_actions")
     player = Entity("青梧", "轮回者", blood_limit=100, current_hp=100,
                     mana_limit=20, current_mana=0)
@@ -120,15 +120,15 @@ def test_after_life_lost_blood_debt_fires_at_zero_mana():
     state.player = player
     state.enemies = [enemy]
     state.current_round = 1
-    player.dao_wen["血债"] = DaoWenInstance(
-        DaoWen(name="血债", formula="", cost_type="流血", cost_formula="X", effect_formula=""),
+    player.dao_wen["连击"] = DaoWenInstance(
+        DaoWen(name="连击", formula="", cost_type="流血", cost_formula="X", effect_formula=""),
         x_value=0)
     player.spells.append(Spell(
-        name="不死不休", required_daowen=["血债"],
-        trigger_condition="失去生命后", effect_flow="失去生命后→发动血债 X"))
+        name="不死不休", required_daowen=["连击"],
+        trigger_condition="失去生命后", effect_flow="失去生命后→发动连击 X"))
     combat = CombatEngine(state, DiceEngine())
 
-    # 敌方道纹造伤（0 法力、明确失血来源），不死不休的血债步无需法力即可反击。
+    # 敌方道纹造伤（0 法力、明确失血来源），不死不休的连击步无需法力即可反击。
     combat._apply_hostile_damage(player, 6, source=enemy, ctx={
         "timing": "monster_action", "source": "杀伐", "source_type": "daowen",
         "actor": enemy, "target": player, "mechanic": "damage", "subtype": "daowen",
@@ -136,12 +136,12 @@ def test_after_life_lost_blood_debt_fires_at_zero_mana():
     })
     events = getattr(player, "_hp_loss_events", []) or []
     fired = any(
-        lg.get("spell") == "不死不休" and lg.get("daowen") == "血债"
+        lg.get("spell") == "不死不休" and lg.get("daowen") == "连击"
         for e in events for lg in (e.get("reaction_logs") or []))
-    assert fired, "0 法力时血债类‘失去生命后’反应应照常触发（血债=流血代价，不耗法力）"
-    # 血债 X=1：玩家自流 1 血并对敌方造成 1 伤；敌方仍存活。
+    assert fired, "0 法力时连击类‘失去生命后’反应应照常触发（连击=流血代价，不耗法力）"
+    # 连击 X=1：玩家自流 1 血并对敌方造成 1 伤；敌方仍存活。
     assert enemy.current_hp == 100 - 1
-    assert player.current_hp == 100 - 6 - 1  # 6伤 + 血债自流1
+    assert player.current_hp == 100 - 6 - 1  # 6伤 + 连击自流1
 
 
 def test_after_life_lost_fires_on_blood_limit_pressure():
@@ -165,8 +165,8 @@ def test_after_life_lost_fires_on_blood_limit_pressure():
         trigger_condition="失去生命后", effect_flow="失去生命后→发动再生 X"))
     combat = CombatEngine(state, DiceEngine())
 
-    combat._apply_blood_limit_change(player, -6, "血债", "debuff", ctx={
-        "timing": "player_action", "source": "血债", "source_type": "daowen",
+    combat._apply_blood_limit_change(player, -6, "连击", "debuff", ctx={
+        "timing": "player_action", "source": "连击", "source_type": "daowen",
         "actor": enemy, "target": player, "mechanic": "blood_limit",
         "subtype": "pressure", "amount": 6, "tags": {"daowen", "blood_limit_loss"},
     })

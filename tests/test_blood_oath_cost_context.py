@@ -74,7 +74,7 @@ def test_player_action_bleed_context_triggers_blood_oath():
 
     detail = combat.pay_numeric_cost(
         player, "流血", 5,
-        cost_context={"timing": "player_action", "source": "血债", "source_type": "daowen", "tags": {"active_payment"}},
+        cost_context={"timing": "player_action", "source": "连击", "source_type": "daowen", "tags": {"active_payment"}},
     )
 
     assert detail["owner"]["detail"]["blood_oath"] == {"type": "shield", "amount": 5}

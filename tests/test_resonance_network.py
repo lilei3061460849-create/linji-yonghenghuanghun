@@ -97,7 +97,7 @@ def test_single_fourteen_node_core_loop():
     edges = R.CLOSED_LOOPS["杀伐闭环"]
     assert len(edges) == 11
     assert sorted(source for source, _, _ in edges) == sorted(target for _, _, target in edges)
-    assert R.find_transformation("血债", "转换") == "波及"
+    assert R.find_transformation("连击", "转换") == "波及"
     assert R.find_transformation("波及", "反转") == "增殖"
     assert R.find_transformation("封印", "反转") == "杀伐"
     for removed in ("冲击", "慈悲", "切割", "缓慢"):

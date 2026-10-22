@@ -64,13 +64,13 @@ def _start_with_enemy(engine, enemy):
 
 def test_blood_oath_ring_grants_shield_on_first_bleed_cost():
     """血誓戒正常路径：本回合首次流血代价，获得等量格挡"""
-    engine = _new_engine("oath_shield", daowen="血债")
+    engine = _new_engine("oath_shield", daowen="连击")
     engine.state.relics.append(Relic(name="血誓戒", effect=""))
-    _give_daowen(engine.state.player, "血债", cost_type="流血")
+    _give_daowen(engine.state.player, "连击", cost_type="流血")
     _start_with_enemy(engine, Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100))
 
     hp_before = engine.state.player.current_hp
-    r = engine.execute_action("use_daowen", {"daowen_name": "血债", "x": 5, "target": "靶怪"})
+    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 5, "target": "靶怪"})
     assert r["success"] is True
     assert engine.state.player.shield == 5
     assert engine.state.player.current_hp == hp_before - 5
@@ -78,13 +78,13 @@ def test_blood_oath_ring_grants_shield_on_first_bleed_cost():
 
 def test_blood_oath_ring_grants_life_instead_when_low_hp():
     """血誓戒正常路径：支付后生命≤30%时，改为获得等量生命而不是格挡"""
-    engine = _new_engine("oath_life", daowen="血债")
+    engine = _new_engine("oath_life", daowen="连击")
     engine.state.relics.append(Relic(name="血誓戒", effect=""))
-    _give_daowen(engine.state.player, "血债", cost_type="流血")
+    _give_daowen(engine.state.player, "连击", cost_type="流血")
     engine.state.player.current_hp = 20  # blood_limit=60, 支付后20-15=5 <= 30%*60=18
     _start_with_enemy(engine, Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100))
 
-    r = engine.execute_action("use_daowen", {"daowen_name": "血债", "x": 15, "target": "靶怪"})
+    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 15, "target": "靶怪"})
     assert r["success"] is True
     assert engine.state.player.shield == 0, "低血量时不应给格挡"
     assert engine.state.player.current_hp == 5 + 15, "应改为获得等量生命(15)"
@@ -92,14 +92,14 @@ def test_blood_oath_ring_grants_life_instead_when_low_hp():
 
 def test_blood_oath_ring_only_once_per_round():
     """血誓戒正常路径：每回合只在首次流血代价时触发，第二次不再触发"""
-    engine = _new_engine("oath_once", daowen="血债")
+    engine = _new_engine("oath_once", daowen="连击")
     engine.state.relics.append(Relic(name="血誓戒", effect=""))
-    _give_daowen(engine.state.player, "血债", cost_type="流血")
+    _give_daowen(engine.state.player, "连击", cost_type="流血")
     _start_with_enemy(engine, Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100))
 
-    engine.execute_action("use_daowen", {"daowen_name": "血债", "x": 3, "target": "靶怪"})
+    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target": "靶怪"})
     shield_after_first = engine.state.player.shield
-    engine.execute_action("use_daowen", {"daowen_name": "血债", "x": 4, "target": "靶怪"})
+    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 4, "target": "靶怪"})
     assert engine.state.player.shield == shield_after_first, "同一回合第二次流血代价不应再给格挡"
 
 
@@ -126,8 +126,8 @@ def test_tonghunbi_grants_caster_real_daowen_from_second_target():
         "second_target_ref": "enemy:0", "second_source_daowen": "固执",
     })
     assert r["success"] is True
-    assert "血债" in engine.state.player.dao_wen, "施法者应永久获得固执反转后的血债"
-    assert "固执" not in enemy.dao_wen and "血债" in enemy.dao_wen
+    assert "连击" in engine.state.player.dao_wen, "施法者应永久获得固执反转后的连击"
+    assert "固执" not in enemy.dao_wen and "连击" in enemy.dao_wen
 
 
 def test_first_cup_doubles_heal_and_no_longer_blocks_cancer():
@@ -280,7 +280,7 @@ def test_tonghunbi_rejected_when_second_target_lacks_daowen():
     })
     assert r["success"] is True  # 主残韵仍然成功，只是second分支未生效
     assert "未生效" in r["second_target_log"]
-    assert "血债" not in engine.state.player.dao_wen
+    assert "连击" not in engine.state.player.dao_wen
 
 
 if __name__ == "__main__":

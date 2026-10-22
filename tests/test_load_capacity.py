@@ -34,7 +34,7 @@ def _fill_to(player, n):
     """把玩家道纹补到 n 种（多的删掉、少的用杀伐闭环里的通用道纹补上）。"""
     for name in list(player.dao_wen)[n:]:
         player.dao_wen.pop(name, None)
-    for name in ("杀伐", "再生", "庇护", "束缚", "血债"):
+    for name in ("杀伐", "再生", "庇护", "束缚", "连击"):
         if len(player.dao_wen) >= n:
             break
         if name not in player.dao_wen:

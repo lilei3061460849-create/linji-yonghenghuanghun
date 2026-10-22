@@ -178,7 +178,7 @@ def run_inter_dungeon_playthrough():
                     e1.execute_action("use_resonance", {
                         "source_daowen": "清算", "resonance_type": "转换", "target_ref": f"enemy:{idx}"
                     })
-                if "固执" in m.dao_wen and "血债" not in p1.dao_wen and e1.state.resonance.get("反转", 0) > 0:
+                if "固执" in m.dao_wen and "连击" not in p1.dao_wen and e1.state.resonance.get("反转", 0) > 0:
                     e1.execute_action("use_resonance", {
                         "source_daowen": "固执", "resonance_type": "反转", "target_ref": f"enemy:{idx}"
                     })
@@ -201,8 +201,8 @@ def run_inter_dungeon_playthrough():
                 if "点金" in p1.dao_wen and not p1.has_status("点金") and p1.current_mana >= 6:
                     e1.execute_action("use_daowen", {"daowen_name": "点金", "x": 2, "target": p1.name})
                     continue
-                if target.has_status("固执") and "血债" in p1.dao_wen and p1.current_hp > 15:
-                    e1.execute_action("use_daowen", {"daowen_name": "血债", "x": 3, "target_ref": f"enemy:{t_idx}"})
+                if target.has_status("固执") and "连击" in p1.dao_wen and p1.current_hp > 15:
+                    e1.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target_ref": f"enemy:{t_idx}"})
                 elif p1.current_mana > 0 and "杀伐" in p1.dao_wen:
                     rem = max(1, p1.action_count - p1.actions_used_this_round)
                     spend = max(1, p1.current_mana // rem)

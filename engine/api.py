@@ -750,6 +750,8 @@ class GameEngine:
                     "blood_shadow": "目标持有血影时必填布尔值",
                     "spell_choices": "若触发法术，按法术选项完整提交",
                     **({"zaisheng_cost": ["法力", "攻击力"]} if name == "再生" else {}),
+                    **({"lianji_cost": ["流血", "法力", "衰老", "枯竭", "碎片", "假碎片"]}
+                       if name == "连击" else {}),
                     "cost_share_target_ref": (
                         [{"ref": ref, "name": entity.name}
                          for ref, entity in self.combat.blood_pact_targets().items()]
@@ -5000,6 +5002,9 @@ class GameEngine:
             # 2026-10-14：【透支】多代价通道（缺省流血；resolve 按签名分发，其余道纹无感）。
             if name == "透支":
                 resolve_kw["cost_channel"] = params.get("touzhi_cost", "流血")
+            # 2026-10-22：【连击】多支付通道（缺省流血；与透支同一接线口径）。
+            if name == "连击":
+                resolve_kw["cost_channel"] = params.get("lianji_cost", "流血")
             if name == "再生":
                 resolve_kw["cost_channel"] = params.get("zaisheng_cost", "法力")
             calc = DaoWenEngine.resolve(name, x, **resolve_kw)
@@ -7543,7 +7548,9 @@ class GameEngine:
                    shards_peak=d.get("shards_peak", max(0, int(d.get("shards", 0)))),
                    is_debt_bound=d.get("is_debt_bound", False))
         e.mutation_count = d.get("mutation_count", 0)   # ④修复：旧档无此键回退0
+        from .daowen import normalize_daowen_name as _norm_dw
         for name, x in d.get("dao_wen", {}).items():
+            name = _norm_dw(name)  # 旧封存【血债】读入即映射【连击】
             cooldowns = d.get("daowen_cooldowns", {}).get(name, {})
             e.dao_wen[name] = DaoWenInstance(
                 DaoWen(name=name, formula="", cost_type="消耗", cost_formula="X", effect_formula=""),
@@ -7554,7 +7561,7 @@ class GameEngine:
         # 新格式优先使用显式 daowen_order，避免状态名与来源道纹名不同时猜测。
         daowen_order_by_name = {name: index for index, name in enumerate(e.dao_wen)}
         for sp in d.get("spells", []):
-            e.spells.append(Spell(name=sp["name"], required_daowen=sp["required_daowen"],
+            e.spells.append(Spell(name=sp["name"], required_daowen=[_norm_dw(n) for n in sp["required_daowen"]],
                                    trigger_condition=sp["trigger_condition"], effect_flow=sp["effect_flow"],
                                    rank=sp.get("rank", 1),
                                    custom_conditions=sp.get("custom_conditions", []),
@@ -8058,6 +8065,39 @@ class GameEngine:
             migrated = True
         if hasattr(self.state, "truth_eye_cooldown"):
             self.state.truth_eye_cooldown = 0
+        return migrated
+
+    def _migrate_legacy_xuezhai_names(self) -> bool:
+        """旧档【血债】→【连击】（2026-10-22 用户令：改名只发生在读入边界）。
+
+        遍历状态内全部实体的道纹表：键序不变地改键、实例定义名同步归一。
+        引擎注册表不收旧名，迁移完成后旧名提交照常报未知道纹。
+        """
+        from .daowen import normalize_daowen_name
+        state = self.state
+        entities: list = []
+        if state.player is not None:
+            entities.append(state.player)
+        for coll in (state.friends, state.employees, state.temp_friends, state.enemies):
+            entities.extend(coll or [])
+        migrated = False
+        seen: set = set()
+        for entity in entities:
+            if id(entity) in seen:
+                continue
+            seen.add(id(entity))
+            dao_wen = getattr(entity, "dao_wen", None)
+            if not dao_wen or "血债" not in dao_wen:
+                continue
+            rebuilt = {}
+            for key, inst in dao_wen.items():
+                new_key = normalize_daowen_name(key)
+                if getattr(inst, "dao_wen", None) is not None:
+                    inst.dao_wen.name = new_key
+                rebuilt[new_key] = inst
+            dao_wen.clear()
+            dao_wen.update(rebuilt)
+            migrated = True
         return migrated
 
     def _action_choose_first_embrace(self, params: dict) -> dict:
@@ -9176,6 +9216,7 @@ class GameEngine:
                     # 能从来源角色的同名道纹确认位置时优先用来源；否则兼容退回状态持有者。
                     status.daowen_order = source_order.get(status.name, owner_order.get(status.name))
         self._migrate_legacy_truth_eye()
+        self._migrate_legacy_xuezhai_names()
 
     def save_game(self, slot: str = "auto") -> dict:
         """保存可完整往返的版本化快照；只允许load_game读取本引擎生成的本地文件。"""

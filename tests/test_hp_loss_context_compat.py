@@ -25,7 +25,7 @@ def test_hp_loss_event_recorded_for_damage_and_cost_without_double_counting():
     _, combat, player, enemy = _combat_with_player("皮衣")
 
     combat.pay_numeric_cost(player, "流血", 5, cost_context={
-        "timing": "player_action", "source": "血债", "source_type": "daowen",
+        "timing": "player_action", "source": "连击", "source_type": "daowen",
         "actor": player, "target": player, "mechanic": "cost", "subtype": "bleed",
         "amount": 5, "tags": {"active_payment"},
     })

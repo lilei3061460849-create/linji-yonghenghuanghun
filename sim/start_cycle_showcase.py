@@ -5,7 +5,7 @@
 CombatEngine 里逐时点触发。每一步都用引擎真实返回（spell_logs / reaction_logs /
 _hp_loss_events）佐证触发，而非手写台词：
   ① 敌方【非普攻道纹伤害】→ 失去生命后（自动反应）
-  ② 持有者自付【流血】代价      → 失去生命后（自动反应，血债类不耗法力）
+  ② 持有者自付【流血】代价      → 失去生命后（自动反应，连击类不耗法力）
   ③ 敌方【普攻】命中            → resolve_attack 反应窗口（受到伤害前 / 失去生命前 /
                                      受到伤害后 / 失去生命后）
   ④ 持有者【闪避】成功          → 「闪避时」（EXTRA_TRIGGERS 开放时点）
@@ -26,7 +26,7 @@ from engine.models import DaoWen, DaoWenInstance, Spell
 from tests.setup_support import finish_initial_daowen
 from sim.optional_actions import start_battle, start_round
 
-REACTION_DAOWEN = ("杀伐", "庇护", "再生", "血债", "坠落")
+REACTION_DAOWEN = ("杀伐", "庇护", "再生", "连击", "坠落")
 # (name, required_daowen, 触发时点, 效果流, 是否内置)
 REACTION_SPELLS: list[tuple[str, list[str], str, str, bool]] = [
     ("先发制人", ["杀伐"], "受到伤害前", "发动杀伐 X于攻击者", True),
@@ -36,9 +36,9 @@ REACTION_SPELLS: list[tuple[str, list[str], str, str, bool]] = [
     ("生生不息", ["再生"], "失去生命后", "发动再生 X于自身", True),
     ("以牙还牙", ["再生", "杀伐"], "失去生命后", "发动杀伐 X于攻击者", True),
     ("借力打力", ["庇护", "杀伐"], "受到伤害前", "发动庇护 X于自身", True),
-    ("不死不休", ["血债"], "失去生命后", "发动血债 X于攻击者", True),
-    ("千刀万剐", ["再生", "血债"], "失去生命后", "发动再生 X于自身", True),
-    ("咎由自取", ["坠落", "杀伐", "血债"], "目标发动道纹前", "发动杀伐 X于攻击者", False),
+    ("不死不休", ["连击"], "失去生命后", "发动连击 X于攻击者", True),
+    ("千刀万剐", ["再生", "连击"], "失去生命后", "发动再生 X于自身", True),
+    ("咎由自取", ["坠落", "杀伐", "连击"], "目标发动道纹前", "发动杀伐 X于攻击者", False),
 ]
 
 
@@ -130,16 +130,16 @@ def main() -> None:
                 "amount": amount, "tags": {st, "showcase"}}
 
     # ① 非攻击道纹伤害 → 失去生命后（自动反应）
-    _hdr("① 敌方【道纹·血债X=10】命中持有者（非普攻伤害 → 自动反应）")
+    _hdr("① 敌方【道纹·连击X=10】命中持有者（非普攻伤害 → 自动反应）")
     _set_spells(p, ["生生不息"])
     p.current_mana = 30
     before = p.current_hp
-    detail = combat._apply_hostile_damage(p, 10, source=enemy, ctx=dctx(enemy, "血债", "daowen", "damage", "daowen", 10))
+    detail = combat._apply_hostile_damage(p, 10, source=enemy, ctx=dctx(enemy, "连击", "daowen", "damage", "daowen", 10))
     print(f"    扣血 {detail.get('actual_damage')}（{before}→{p.current_hp}）→ 失去生命后触发：")
     _dump(detail.get("reaction_logs"))
     _dump(_ev_logs(p))
 
-    _hdr("①b 敌方【道纹】命中 → 失去生命后（血债类不耗法力，0法力也触发）")
+    _hdr("①b 敌方【道纹】命中 → 失去生命后（连击类不耗法力，0法力也触发）")
     _set_spells(p, ["不死不休"])
     p.current_mana = 0
     before = p.current_hp = 100
@@ -149,10 +149,10 @@ def main() -> None:
     print(f"    敌被反击：{enemy.current_hp}（原 {enemy.blood_limit}）")
 
     # ② 自付流血代价 → 失去生命后
-    _hdr("② 持有者自付【流血X=5】代价（血债类）")
+    _hdr("② 持有者自付【流血X=5】代价（连击类）")
     _set_spells(p, ["不死不休"])
     before = p.current_hp
-    combat.pay_numeric_cost(p, "流血", 5, cost_context=dctx(p, "血债", "daowen", "cost", "bleed", 5))
+    combat.pay_numeric_cost(p, "流血", 5, cost_context=dctx(p, "连击", "daowen", "cost", "bleed", 5))
     print(f"    扣血 {before - p.current_hp}（{before}→{p.current_hp}）→ 触发：")
     _dump(_ev_logs(p))
 

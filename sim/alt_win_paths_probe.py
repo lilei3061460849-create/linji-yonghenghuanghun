@@ -37,7 +37,7 @@ def _setup(seed: int, region: str, learn: list[str]):
                 next((n for n in rc if n != "无所求"), rc[0]))
     e.execute_action("choose_discovered_relic", {"relic_name": pick})
     dc = list(e.state.pending_initial_daowen_choices)
-    dp = next((n for n in ("庇护", "再生", "杀伐", "血债") if n in dc), dc[0])
+    dp = next((n for n in ("庇护", "再生", "杀伐", "连击") if n in dc), dc[0])
     e.execute_action("setup_choose_initial_daowen", {"daowen_name": dp})
     e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
     e.execute_action("setup_choose_region", {"region": region})

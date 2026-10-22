@@ -129,7 +129,7 @@ def _trigger_spells(option, player_mana):
             submitted = []
             if player_mana >= 1:
                 use = True
-                # 自由控X：攻击步骤尽量大X（杀伐/血债等），自保步骤留1
+                # 自由控X：攻击步骤尽量大X（杀伐/连击等），自保步骤留1
                 remaining = player_mana
                 for st in steps:
                     is_self = st.get("target_ref") == "player:0"

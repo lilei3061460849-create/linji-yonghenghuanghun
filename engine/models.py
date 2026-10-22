@@ -31,7 +31,15 @@ class DaoWen:
     is_monster_original: bool = False  # 是否原始怪物道纹
     is_monster_transform: bool = False  # 是否怪物转化道纹
     tags: list[str] = field(default_factory=list)
-    
+
+    def __post_init__(self):
+        # 道纹改名只许在读入边界生效（2026-10-22：【血债】→【连击】，
+        # 别名表单一出处 engine/daowen.py LEGACY_DAOWEN_ALIASES）：
+        # 任何构造路径（旧面板/旧封存/旧档）拿到的定义名都归一为现名，
+        # 引擎注册表与发动提交仍不收旧名。
+        if self.name == "血债":
+            self.name = "连击"
+
     def to_dict(self) -> dict:
         return {
             "name": self.name,

@@ -108,7 +108,7 @@ class WinOnlyAI(TacticalAI):
 
     # 闭环节点里的输出牌（按 engine/daowen.py 公式归读；爬梯不许把最后一张
     # 输出牌改没——先有锤子，才谈得上 透支喂锤/封印清场）。
-    DAMAGE_NODES = {"杀伐", "血债", "波及", "贯穿"}
+    DAMAGE_NODES = {"杀伐", "连击", "波及", "贯穿"}
     GOALS = ("透支", "封印")   # 透支=衰老换4X法力（破法力预算）；封印=异变换移怪（无视血墙）
 
     @staticmethod

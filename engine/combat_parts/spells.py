@@ -58,9 +58,9 @@ class SpellReactionMixin:
         "生生不息": {"trigger": ActionPhase.AFTER_LIFE_LOST.value, "steps": [("再生", "self")]},
         "以牙还牙": {"trigger": ActionPhase.AFTER_LIFE_LOST.value, "steps": [("再生", "self"), ("杀伐", "attacker")]},
         "借力打力": {"trigger": ActionPhase.BEFORE_DAMAGE_TAKEN.value, "steps": [("庇护", "self"), ("杀伐", "attacker")]},
-        "不死不休": {"trigger": ActionPhase.AFTER_LIFE_LOST.value, "steps": [("血债", "attacker")], "loop": True},
-        "千刀万剐": {"trigger": ActionPhase.AFTER_LIFE_LOST.value, "steps": [("再生", "self"), ("血债", "attacker")], "loop": True},
-        "咎由自取": {"trigger": "目标发动道纹前", "steps": [("杀伐", "target"), ("血债", "target")]},
+        "不死不休": {"trigger": ActionPhase.AFTER_LIFE_LOST.value, "steps": [("连击", "attacker")], "loop": True},
+        "千刀万剐": {"trigger": ActionPhase.AFTER_LIFE_LOST.value, "steps": [("再生", "self"), ("连击", "attacker")], "loop": True},
+        "咎由自取": {"trigger": "目标发动道纹前", "steps": [("杀伐", "target"), ("连击", "target")]},
         "镇魔印": {"trigger": TriggerTiming.SELF_TURN_END.value,
                    "steps": [("封印", "any")],
                    "effect_flow": "自身回合结束后→发动封印X于任意目标",
@@ -89,9 +89,9 @@ class SpellReactionMixin:
         "生生不息": ["再生"],
         "以牙还牙": ["杀伐", "再生"],
         "借力打力": ["杀伐", "庇护"],
-        "不死不休": ["血债"],
-        "千刀万剐": ["血债", "再生"],
-        "咎由自取": ["杀伐", "血债"],
+        "不死不休": ["连击"],
+        "千刀万剐": ["连击", "再生"],
+        "咎由自取": ["杀伐", "连击"],
         "镇魔印": ["封印"],
         "血炼周天": ["再生", "透支"],
         "徒劳无功": ["再生", "透支", "弱化"],
@@ -628,6 +628,28 @@ class SpellReactionMixin:
             else:
                 return (f"碎片不足：消灾X需{fake_need}假碎片或{real_need}碎片"
                         f"（局外×{mult}），当前假{have_fake}/真{have_real}")
+        if name == "连击":
+            # 2026-10-22：碎片/假碎片是两个独立通道，只扣各自池子，
+            # 不走 lose_shards 的「假碎片优先」合并失去（双价在 calc 里分开声明）。
+            real_need = int(calc.get("cost_real_shards", 0) or 0)
+            fake_need = int(calc.get("cost_fake_shards", 0) or 0)
+            if real_need > 0:
+                have_real = self.state.shards if actor is self.state.player else actor.shards
+                if have_real < real_need:
+                    return f"碎片不足：连击碎片通道需{real_need}碎片，当前{have_real}"
+                if actor is self.state.player:
+                    self.state.shards -= real_need
+                else:
+                    actor.shards -= real_need
+            if fake_need > 0:
+                have_fake = (self.state.fake_shards if actor is self.state.player
+                             else getattr(actor, "fake_shards", 0))
+                if have_fake < fake_need:
+                    return f"假碎片不足：连击假碎片通道需{fake_need}假碎片，当前{have_fake}"
+                if actor is self.state.player:
+                    self.state.fake_shards -= fake_need
+                else:
+                    actor.fake_shards -= fake_need
         return None
 
     def pay_daowen_mana(self, caster: Entity, calc: dict, target: Entity) -> tuple[int, Optional[str]]:
@@ -788,7 +810,7 @@ class SpellReactionMixin:
                 reason=InterruptReason.DAOWEN_UNUSABLE,
                 detail=f"道纹{daowen}不可用（未持有/封印/冷却/唯一已用）")
 
-        # --- 跳过谓词（如血债需要前序伤害） ---
+        # --- 跳过谓词（如连击需要前序伤害） ---
         if skip_predicate is not None:
             skip_reason = skip_predicate(daowen, target, entry_dict, step)
             if skip_reason:
@@ -1044,17 +1066,17 @@ class SpellReactionMixin:
                                       refs: dict[str, Entity]) -> list[dict]:
         """「目标发动道纹前」反应法术结算。
 
-        流程特例（血债需要前序伤害）以 skip_predicate 表达，保持与旧实现逐字一致。
-        2026-10-03：【坠落】道纹删除，【咎由自取】的坠落步骤一并移除（现为杀伐+血债）。
+        流程特例（连击需要前序伤害）以 skip_predicate 表达，保持与旧实现逐字一致。
+        2026-10-03：【坠落】道纹删除，【咎由自取】的坠落步骤一并移除（现为杀伐+连击）。
         """
         logs = []
         previous_damage = {"value": 0}
 
         def _daowen_skip(daowen, target, entry_dict, step):
-            # 2026-10-02 注：以下判定沿用了旧实现的字面行为（有前序伤害时跳过血债），
+            # 2026-10-02 注：以下判定沿用了旧实现的字面行为（有前序伤害时跳过连击），
             # 与其 detail 文案相反，属未经裁定的历史行为，见 报告.md「刻意未改动」。
-            if daowen == "血债" and previous_damage["value"] > 0:
-                return "血债需要前序伤害"
+            if daowen == "连击" and previous_damage["value"] > 0:
+                return "连击需要前序伤害"
             return None
 
         def _on_step(result):

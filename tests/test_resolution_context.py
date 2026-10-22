@@ -302,7 +302,7 @@ def test_context_does_not_change_battle_outcome(tmp_path):
         lab = {"db_path": str(tmp_path / f"{tag}.db"),
                "sealed_path": str(tmp_path / f"{tag}_seal.json"),
                "death_book_path": str(tmp_path / f"{tag}_book.md")}
-        results.append(bl.play("坠落", ["杀伐", "血债", "再生", "庇护", "透支"],
+        results.append(bl.play("坠落", ["杀伐", "连击", "再生", "庇护", "透支"],
                                "罪孽都市", seed=3, rng=random.Random(3),
                                lab_paths=lab))
     assert results[0] == results[1], "trace 打开改变了战斗结果"

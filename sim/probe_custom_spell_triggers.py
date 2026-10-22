@@ -170,11 +170,11 @@ def probe_after_life_lost():
 def probe_target_before_daowen():
     """目标发动道纹前：第2回合怪物真正发动道纹时，玩家的反应法术能否触发。"""
     e = _fresh_engine("target_before_daowen", region="扭曲都市")
-    for n in ("坠落", "杀伐", "血债"):
+    for n in ("坠落", "杀伐", "连击"):
         _give_daowen(e.state.player, n)
-    definition = {"name": "自创咎由自取", "required_daowen": ["坠落", "杀伐", "血债"],
+    definition = {"name": "自创咎由自取", "required_daowen": ["坠落", "杀伐", "连击"],
                   "trigger_condition": "目标发动道纹前",
-                  "effect_flow": "发动坠落X于目标→发动杀伐X于目标→发动血债X于目标"}
+                  "effect_flow": "发动坠落X于目标→发动杀伐X于目标→发动连击X于目标"}
     learned = _learn(e, definition)
     wired = learned["result"].get("wired")
     e.state.energy = 0

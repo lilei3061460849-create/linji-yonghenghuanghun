@@ -134,11 +134,11 @@ def test_event_and_daowen_costs_use_blood_pact_bus(tmp_path):
 
     target = Entity("敌人", "怪物", blood_limit=100, current_hp=100)
     state.enemies.append(target)
-    calc = DaoWenEngine.resolve("血债", 5, target=target)
+    calc = DaoWenEngine.resolve("连击", 5, target=target)
     combat.apply_daowen_effect(
-        "血债", calc, player, target,
+        "连击", calc, player, target,
         cost_share_target_ref="friend:0")
-    # 血债再流5平分 → 2/3（余数随机）；两次合计 = 15+5 = 20，双方各承担9~11。
+    # 连击再流5平分 → 2/3（余数随机）；两次合计 = 15+5 = 20，双方各承担9~11。
     losses = sorted([100 - player.current_hp, 80 - ally.current_hp])
     assert sum(losses) == 20
     assert losses[0] in (9, 10) and losses[1] in (10, 11)

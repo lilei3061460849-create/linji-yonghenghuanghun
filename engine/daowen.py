@@ -30,6 +30,16 @@ def is_reserved_slot(name) -> bool:
         isinstance(name, str) and name.startswith("？？〔") and name.endswith("〕"))
 
 
+# 道纹改名别名（旧档/旧面板读入时映射；引擎注册表只收新名，旧名提交照常报未知道纹）。
+# 2026-10-22 用户令：【血债】改名【连击】并扩为多支付道纹，旧名只许在读入边界被映射。
+LEGACY_DAOWEN_ALIASES = {"血债": "连击"}
+
+
+def normalize_daowen_name(name):
+    """旧道纹名 → 现名；非旧名原样返回。只用于读入/授予边界，不用于发动提交。"""
+    return LEGACY_DAOWEN_ALIASES.get(name, name)
+
+
 def display_resonance_node(name):
     """内部每个遗物化节点独立编号，玩家/索引统一显示为「？？」。"""
     return RELICIZED_SLOT if isinstance(name, str) and name.startswith("？？〔") else name
@@ -150,22 +160,63 @@ class DaoWenEngine:
             "summary": definition.summary(x),
         }
 
+    # 连击六通道每击价格（2026-10-22 用户令：与【透支】同类多代价道纹）：
+    # 流血1（旧【血债】原价，向后兼容缺省通道）／法力1／衰老每5击1点[血限]／
+    # 枯竭每5击1点[法限]／碎片1／假碎片10。
+    # 汇率锚：【透支】1法力=流血4/衰老2/枯竭1、【消灾】1单位=5碎片/50假碎片、
+    # 【假钞】1法力=10假碎片；上限类是永久代价，用户令折算后更划算，
+    # 故衰老/枯竭按每5击1点上限计价（同样击数付出更少）。
+    # 各通道只是演出不同（血针/激光/蚀针/枯针/金针/虚针），效果完全相同：
+    # 选择[目标]X次、每次1点伤害，不带任何通道专属机制。
+    LIANJI_CHANNELS = ("流血", "法力", "衰老", "枯竭", "碎片", "假碎片")
+    LIANJI_FORMS = {"流血": "血针", "法力": "激光", "衰老": "蚀针",
+                    "枯竭": "枯针", "碎片": "金针", "假碎片": "虚针"}
+
     @staticmethod
-    def calculate_xuezhai(x: int, target: Entity = None) -> dict:
-        """血债X：支付：流血X。选择[目标] X 次，每次对其造成 1 点伤害"""
+    def calculate_lianji(x: int, target: Entity = None, cost_channel: str = "流血") -> dict:
+        """连击X（2026-10-22 由【血债】改名）：支付六选一（见 LIANJI_CHANNELS 价格表）。
+
+        选择[目标] X 次，每次对其造成 1 点伤害。支付途径只改倍率与演出，
+        效果恒同；cost_channel 缺省流血（怪物/旧调用/预设法术不传参即原行为），
+        碎片与假碎片是两个独立通道，只扣各自池子（不走「假碎片优先」的合并失去）。
+        """
         target_name = target.name if target is not None else "未选定目标"
-        cost_hp = x
         hits = x
         damage_per_hit = 1
+        form = DaoWenEngine.LIANJI_FORMS.get(cost_channel)
+        if cost_channel == "流血":
+            extra = {"cost_type": CostType.BLEED.value, "cost_hp": x}
+            price = f"流血{x}"
+        elif cost_channel == "法力":
+            extra = {"cost_type": CostType.MANA.value, "cost": x}
+            price = f"法力{x}"
+        elif cost_channel == "衰老":
+            amount = (x + 4) // 5
+            extra = {"cost_type": CostType.AGING.value, "cost_blood_limit": amount}
+            price = f"衰老{amount}"
+        elif cost_channel == "枯竭":
+            amount = (x + 4) // 5
+            extra = {"cost_type": CostType.EXHAUST.value, "cost_mana_limit": amount}
+            price = f"枯竭{amount}"
+        elif cost_channel == "碎片":
+            extra = {"cost_type": "碎片", "cost_real_shards": x}
+            price = f"碎片{x}"
+        elif cost_channel == "假碎片":
+            extra = {"cost_type": "碎片", "cost_fake_shards": 10 * x}
+            price = f"假碎片{10 * x}"
+        else:
+            raise ValueError(
+                f"连击cost_channel非法：{cost_channel!r}，可选流血/法力/衰老/枯竭/碎片/假碎片")
         return {
-            "dao_wen": "血债",
+            "dao_wen": "连击",
             "x": x,
-            "cost_type": CostType.BLEED.value,
-            "cost_hp": cost_hp,
+            **extra,
+            "cost_channel": cost_channel,
+            "form": form,
             "hits": hits,
             "damage_per_hit": damage_per_hit,
             "total_damage": hits * damage_per_hit,
-            "summary": f"流血{x}，选择{target_name} {hits}次，每次造成{damage_per_hit}点伤害"
+            "summary": f"{price}，以{form}选择{target_name} {hits}次，每次造成{damage_per_hit}点伤害"
         }
     
     @staticmethod
@@ -799,7 +850,7 @@ class DaoWenEngine:
             "再生": cls.calculate_zaisheng,
             "庇护": cls.calculate_bihu,
             "固执": cls.calculate_guzhi,
-            "血债": cls.calculate_xuezhai,
+            "连击": cls.calculate_lianji,
             "波及": cls.calculate_boba,
             "增殖": cls.calculate_zengzhi,
             "束缚": cls.calculate_shufu,
@@ -944,8 +995,8 @@ class ResonanceEngine:
             ("杀伐", "反转", "再生"),
             ("再生", "曲解", "庇护"),
             ("庇护", "曲解", "固执"),
-            ("固执", "反转", "血债"),
-            ("血债", "转换", "波及"),
+            ("固执", "反转", "连击"),
+            ("连击", "转换", "波及"),
             # 删除慈悲/切割/缓慢后直连（2026-08-21）：
             # 波及→(反转)增殖：扩散伤害与成长的极性对冲；贯穿→(曲解)束缚：概念腐化。
             ("波及", "反转", "增殖"),

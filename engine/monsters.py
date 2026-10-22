@@ -263,7 +263,9 @@ def make_monster_entity(monster_def: dict):
     m.current_speed = _speed_limit
     m.current_mana = _mana_limit
     # 遗物【痛苦的偏爱】由 Entity.__post_init__ 统一授予，此处不再重复挂载。
+    from .daowen import normalize_daowen_name
     for dw_name, x in monster_def["dao_wen"].items():
+        dw_name = normalize_daowen_name(dw_name)  # 旧面板【血债】读入即映射【连击】
         # x 为 None → 面板未写死 X，标记 x_free 由发动方自选（2026-09-16 用户令）；
         # x 为整数 → 旧面板的固定 X，原样保留。
         m.dao_wen[dw_name] = DaoWenInstance(

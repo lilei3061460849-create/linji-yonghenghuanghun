@@ -176,17 +176,17 @@ def lab_blood_pact_qiankewanua():
     f = _friend(e, hp=80)
     m = _monster(e, hp=200, atk=1, ap=5)
     e.state.relics.append(Relic("血契", ""))
-    for n in ("再生", "血债"):
+    for n in ("再生", "连击"):
         _give_dw(p, n)
-    p.spells.append(Spell("千刀万剐", ["血债", "再生"], "失去生命后", "发动再生X→发动血债X"))
+    p.spells.append(Spell("千刀万剐", ["连击", "再生"], "失去生命后", "发动再生X→发动连击X"))
     p.current_hp = 40
     p.current_mana = 12
     f.current_hp = 80
     hp_p0, hp_f0, mana0, heal0 = p.current_hp, f.current_hp, p.current_mana, p.total_healed
     # 法术反应入口当前不把 steps 里的 cost_share_target_ref 传给 pay_numeric_cost。
-    # 对照：直接 use_daowen 血债并显式分担。
+    # 对照：直接 use_daowen 连击并显式分担。
     share = e.execute_action("use_daowen", {
-        "daowen_name": "血债", "x": 2, "target_ref": "enemy:0",
+        "daowen_name": "连击", "x": 2, "target_ref": "enemy:0",
         "cost_share_target_ref": "friend:0",
     })
     shared_ok = bool((share.get("execution") or {}).get("effects"))

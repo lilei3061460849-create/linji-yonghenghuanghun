@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-DEFAULT_DAOWEN = ("庇护", "再生", "冲击", "杀伐", "血债")
+DEFAULT_DAOWEN = ("庇护", "再生", "冲击", "杀伐", "连击")
 
 
 def build_battle_engine(tmp_path, name: str = "a", seed: int = 4,

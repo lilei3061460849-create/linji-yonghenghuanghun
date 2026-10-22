@@ -127,7 +127,7 @@ class CombatWatchdog:
             if m.has_status("固执"):
                 val = m.get_status_value("固执")
                 findings.append(f"敌方【{m.name}】处于【固执{val}】状态（单次失去生命上限为1），常规大额伤害被完全锁死。")
-                recommendations.append(f"对策方案：使用【残韵·反转】将【固执】逆转为【血债】，或使用【血债X】打出X次独立1点伤害绕过上限！")
+                recommendations.append(f"对策方案：使用【残韵·反转】将【固执】逆转为【连击】，或使用【连击X】打出X次独立1点伤害绕过上限！")
 
             # 2. 飞行判定（2026-10-03：【坠落】道纹删除，击落手段移除）
             if m.has_status("飞行") or m.is_flying:

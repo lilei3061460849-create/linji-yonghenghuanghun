@@ -7,11 +7,11 @@
 本文件的结构：
 
 * `PIECES`：A/B/C/D… 与实际道纹的固定映射（A=杀伐 伤害，B=再生 治疗，C=庇护 护盾，
-  D=血债 失去生命，E=分裂，F=坠落）；
+  D=连击 失去生命，E=分裂，F=坠落）；
 * `assert_battle_invariants()`：把上面那串「不许」写成一处可复用的断言；
 * 组合矩阵：两两、三连、四连（顺序按字母，X=1，给足资源保证效果真的落地）；
 * 语义组合：伤害+治疗 / 伤害+护盾 / 死亡+复活 / 死亡+分裂 / 失去生命+再生 /
-  失去生命+血债 / 血债+再生 / 进化+触发 / 分裂+触发 / 多个触发连续；
+  失去生命+连击 / 连击+再生 / 进化+触发 / 分裂+触发 / 多个触发连续；
 * 预演组合：整段组合预演一遍，再正式执行，与对照组逐字段比对。
 
 注意：本文件是**测试**，不含任何规则改动；为了让组合真的发生，harness 会给足
@@ -42,7 +42,7 @@ PIECES = {
     "A": "杀伐",   # 伤害
     "B": "再生",   # 治疗
     "C": "庇护",   # 护盾
-    "D": "血债",   # 失去生命
+    "D": "连击",   # 失去生命
     "E": "分裂",   # 分裂
     "F": "坠落",   # 压制飞行（打断类效果）
 }
@@ -256,17 +256,17 @@ def test_death_plus_split_keeps_clones_legal(tmp_path):
 
 
 def test_life_loss_plus_regen_and_blood_debt(tmp_path):
-    """失去生命+再生、失去生命+血债、血债+再生：三条都以「失去生命」为起点。"""
+    """失去生命+再生、失去生命+连击、连击+再生：三条都以「失去生命」为起点。"""
     engine = build_battle_engine(tmp_path, name="combo_life")
     player = engine.state.player
-    _grant(engine, "血债", "再生")
+    _grant(engine, "连击", "再生")
     _refill(engine)
     engine.combat.round_start({})
     _refill(engine)
 
     hp = player.current_hp
-    assert _cast(engine, "D").get("success") is True      # 血债：失去生命
-    assert player.current_hp < hp, "血债没有失去生命"
+    assert _cast(engine, "D").get("success") is True      # 连击：失去生命
+    assert player.current_hp < hp, "连击没有失去生命"
     assert_battle_invariants(engine, context="失去生命")
 
     _cast(engine, "B")                                     # 再生
@@ -277,7 +277,7 @@ def test_life_loss_plus_regen_and_blood_debt(tmp_path):
     hp2 = player.current_hp
     _cast(engine, "D")                                     # 再次失去生命
     _cast(engine, "B")                                     # 再接再生
-    assert_battle_invariants(engine, context="血债+再生")
+    assert_battle_invariants(engine, context="连击+再生")
 
 
 def test_evolution_plus_trigger(tmp_path):

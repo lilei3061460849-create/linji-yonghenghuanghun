@@ -231,7 +231,7 @@ def play_and_record(region: str, seed: int, battles: int = 7):
 
         # 只学通用道纹与怪物转化道纹：副本专属道纹须先经残韵从本副本怪物身上
         # 转化获得，不能在局外直接学习（门禁见 api._pre_battle_xuexi）。
-        todo = ["庇护", "再生", "波及", "血债", "束缚"]
+        todo = ["庇护", "再生", "波及", "连击", "束缚"]
 
         for battle_no in range(1, battles + 1):
             prep = []

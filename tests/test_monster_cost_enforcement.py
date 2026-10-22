@@ -5,7 +5,7 @@
 非【消耗】，不走法力制），发动时必须照常支付对应代价：
 - 发动【冷却X】道纹（如固执/束缚/全速/畸变/飞行）后立即进入冷却，同场内禁止复读；
   怪物使用冷却代价类的道纹 X 值只能≤1（2026-10-05 用户令，面板更大也按X=1结算）；
-- 发动【流血X】（如血债/慈悲）扣除自身生命，生命不足无法发动；
+- 发动【流血X】（如连击/慈悲）扣除自身生命，生命不足无法发动；
 - 发动【衰老X】扣除血限，发动【疲惫X】扣除速度，发动【异变5X】累加异变。
 """
 import pytest
@@ -93,7 +93,7 @@ def test_monster_cooldown_daowen_sets_cooldown_and_cannot_repeat(tmp_path):
 
 
 def test_monster_bleed_cost_daowen_deducts_monster_hp(tmp_path):
-    """正常路径：怪物发动血债必须扣除自身生命（支付流血代价）。"""
+    """正常路径：怪物发动连击必须扣除自身生命（支付流血代价）。"""
     e = _setup_engine(tmp_path)
     while e.state.energy > 0:
         e.execute_action("pre_battle_action", {
@@ -120,9 +120,9 @@ def test_monster_bleed_cost_daowen_deducts_monster_hp(tmp_path):
     })
     e.execute_action("round_end", {})
 
-    # 第2回合：怪物获得血债后发动（删除白板后，持有即可发动）
-    m.dao_wen["血债"] = DaoWenInstance(
-        DaoWen(name="血债", formula="", cost_type="流血", cost_formula="X", effect_formula=""),
+    # 第2回合：怪物获得连击后发动（删除白板后，持有即可发动）
+    m.dao_wen["连击"] = DaoWenInstance(
+        DaoWen(name="连击", formula="", cost_type="流血", cost_formula="X", effect_formula=""),
         x_value=5
     )
     e.execute_action("round_start", {"relic_choices": {}})
@@ -131,19 +131,19 @@ def test_monster_bleed_cost_daowen_deducts_monster_hp(tmp_path):
 
     pmp2 = e.execute_action("prepare_monster_phase", {})
     actor2 = pmp2["result"]["actors"][0]
-    assert "血债" in [opt["name"] for opt in actor2["daowen_options"]]
+    assert "连击" in [opt["name"] for opt in actor2["daowen_options"]]
 
     e.execute_action("resolve_monster_phase", {
         "token": pmp2["result"]["token"],
         "choices": [{
             "actor_ref": actor2["actor_ref"],
-            "daowen": {"name": "血债", "target_ref": "player:0", "dodge": False, "blood_shadow": False},
+            "daowen": {"name": "连击", "target_ref": "player:0", "dodge": False, "blood_shadow": False},
             "attack_actions": [{"hits": [{"target_ref": "player:0", "dodge": False, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}}] * actor2["base_hits_per_attack"]}] * actor2["base_attack_actions"]
         }]
     })
 
-    # 验证：怪物生命真实扣除了血债5的代价
-    assert m.current_hp == hp_after_player_hit - 5, f"怪物发动血债5应扣5生命，实扣{hp_after_player_hit - m.current_hp}"
+    # 验证：怪物生命真实扣除了连击5的代价
+    assert m.current_hp == hp_after_player_hit - 5, f"怪物发动连击5应扣5生命，实扣{hp_after_player_hit - m.current_hp}"
 
 
 def test_monster_cannot_cast_when_hp_insufficient_for_cost(tmp_path):
@@ -156,8 +156,8 @@ def test_monster_cannot_cast_when_hp_insufficient_for_cost(tmp_path):
     started = begin_battle(e)
     assert started["success"], started
     m = Entity("靶怪", "怪物", blood_limit=80, current_hp=10, attack_count=1, attack_power=1)
-    m.dao_wen["血债"] = DaoWenInstance(
-        DaoWen(name="血债", formula="", cost_type="流血", cost_formula="X", effect_formula=""),
+    m.dao_wen["连击"] = DaoWenInstance(
+        DaoWen(name="连击", formula="", cost_type="流血", cost_formula="X", effect_formula=""),
         x_value=50
     )
     e.state.enemies[:] = [m]
@@ -171,7 +171,7 @@ def test_monster_cannot_cast_when_hp_insufficient_for_cost(tmp_path):
         "token": pmp["result"]["token"],
         "choices": [{
             "actor_ref": actor["actor_ref"],
-            "daowen": {"name": "血债", "target_ref": "player:0", "dodge": False, "blood_shadow": False},
+            "daowen": {"name": "连击", "target_ref": "player:0", "dodge": False, "blood_shadow": False},
             "attack_actions": [{"hits": [{"target_ref": "player:0", "dodge": False, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}}] * actor["base_hits_per_attack"]}] * actor["base_attack_actions"]
         }]
     })

@@ -96,7 +96,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         # （下面的 self.resolution 创建之后，`_effect_chain_depth` 只是它的视图）。
         # AFTER_LIFE_LOST(失去生命后) 反应法术在“非攻击失血”路径的自动触发状态：
         #   _resolving_life_lost_reactions > 0 表示正在结算某次反应法术——反应
-        #     自身引发的失血不得再次触发反应（否则以牙还牙/血债会互相连锁死循环）。
+        #     自身引发的失血不得再次触发反应（否则以牙还牙/连击会互相连锁死循环）。
         #   _attack_after_window_target 是当前攻击中、其失血由 resolve_attack 的
         #     反应窗口结算的目标；该目标失血不再重复走 hook（避免与窗口双发）。
         self._resolving_life_lost_reactions = 0
