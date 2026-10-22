@@ -436,6 +436,7 @@ def _resolve_monster_turn(engine):
             choices.append({"actor_ref": actor["actor_ref"], "daowen": dao,
                             "attack_actions": attacks})
 
+        choices.sort(key=lambda choice: 0 if "dodge_targets" in (choice.get("daowen") or {}) else 1)
         result = engine.execute_action("resolve_monster_phase", {
             "token": prepared["result"]["token"], "choices": choices,
         })

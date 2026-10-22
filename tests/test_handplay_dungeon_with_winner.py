@@ -3,12 +3,107 @@ from types import SimpleNamespace
 
 import pytest
 
+from engine.ai_player import PlaceholderBackend
+from engine.api import GameEngine
+from engine.models import DaoWen, DaoWenInstance, Entity
+from sim import handplay_dungeon_with_winner as handplay
 from sim.handplay_dungeon_with_winner import (
     _choose_rest_plan,
     _prepare_before_battle,
+    _resolve_monster_turn_hand,
     manual_player_turn,
     play_dungeon,
 )
+
+
+def _wave_phase_engine(tmp_path):
+    engine = GameEngine(
+        db_path=str(tmp_path / "wave-handplay.db"),
+        save_dir=str(tmp_path / "saves"),
+        sealed_candidate_path=str(tmp_path / "sealed.json"),
+        death_book_path=str(tmp_path / "death.md"),
+        rng_seed=7,
+    )
+    player = Entity("测试轮回者", "轮回者", blood_limit=10, current_hp=10,
+                    mana_limit=10, current_mana=10, speed_limit=0, current_speed=0)
+    killer = Entity("先手杀手", "怪物", blood_limit=100, current_hp=100,
+                    attack_count=1, attack_power=50)
+    wave_monster = Entity("血僵", "怪物", blood_limit=100, current_hp=100,
+                          attack_count=1, attack_power=10)
+    wave_monster.dao_wen["波及"] = DaoWenInstance(
+        DaoWen(name="波及", formula="", cost_type="消耗",
+               cost_formula="X", effect_formula=""),
+        x_value=2,
+    )
+    engine.state.player = player
+    engine.state.friends = []
+    engine.state.employees = []
+    engine.state.enemies = [killer, wave_monster]
+    engine.state.phase = "in_combat"
+    engine.state.combat_subphase = "player_actions"
+    engine.state.pending_monster_phase = {}
+    engine.state.current_round = 2
+    return engine
+
+
+def test_handplay_resolves_wave_before_an_earlier_actor_can_kill_its_targets(
+        tmp_path, monkeypatch):
+    engine = _wave_phase_engine(tmp_path)
+    monkeypatch.setattr(handplay, "choose_dodge", lambda *args, **kwargs: False)
+
+    result = _resolve_monster_turn_hand(engine, [])
+
+    assert result["success"], result
+    assert result["result"]["player_dead"] is True  # 合法战败，不应变成阶段提交错误
+    details = result["result"]["details"]
+    wave = next(entry for entry in details if entry.get("daowen_activated") == "波及")
+    assert wave["execution"]["wave_marked"] == ["测试轮回者", "先手杀手"]
+    assert details.index(wave) < next(
+        i for i, entry in enumerate(details)
+        if entry.get("attacker") == "先手杀手" and entry.get("target_died"))
+
+
+def test_placeholder_ai_orders_wave_before_target_killing_actor(tmp_path):
+    engine = _wave_phase_engine(tmp_path)
+    prepared = engine.execute_action("prepare_monster_phase", {})
+    assert prepared["success"], prepared
+
+    decision = PlaceholderBackend().decide(
+        {"state": engine.state.to_dict()},
+        {"action_type": "resolve_monster_phase", **prepared["result"]},
+    )
+    choices = decision.params["choices"]
+    assert [choice["actor_ref"] for choice in choices] == ["enemy:1", "enemy:0"]
+    assert len(choices[0]["daowen"]["dodge_targets"]) == 2
+    result = engine.execute_action(decision.action_type, decision.params)
+    assert result["success"], result
+    assert result["result"]["player_dead"] is True
+
+
+def test_handplay_fallback_resubmits_wave_dodge_targets(tmp_path, monkeypatch):
+    engine = _wave_phase_engine(tmp_path)
+    monkeypatch.setattr(handplay, "choose_dodge", lambda *args, **kwargs: False)
+    original_execute = engine.execute_action
+    resolve_submissions = []
+
+    def reject_first_resolve(action, params):
+        if action == "resolve_monster_phase":
+            resolve_submissions.append(params)
+            if len(resolve_submissions) == 1:
+                return {"success": False, "error": "deliberate first-submit rejection"}
+        return original_execute(action, params)
+
+    monkeypatch.setattr(engine, "execute_action", reject_first_resolve)
+    log = []
+    result = _resolve_monster_turn_hand(engine, log)
+
+    assert result["success"], result
+    assert len(resolve_submissions) == 2
+    retry_choices = resolve_submissions[1]["choices"]
+    assert retry_choices[0]["actor_ref"] == "enemy:1"  # 波及在先手行动，避免快照目标先死亡
+    wave_dao = retry_choices[0]["daowen"]
+    assert len(wave_dao["dodge_targets"]) == 2
+    assert "首提被拒" in log[0]
 
 
 def test_rest_plan_matches_current_blood_limit_percentages_and_budget():

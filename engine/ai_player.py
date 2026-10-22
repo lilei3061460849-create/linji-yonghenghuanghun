@@ -218,7 +218,7 @@ SYSTEM_PROMPT = """你是第四宇宙游戏的AI玩家。你的任务是根据�
 - declare_evolution（怪物进化·发动原初X）
 - focus：聚能，1次出手→恢复50%已损法力（向上取整）
 - rest：蓄锐，1次出手→下[回始]获得【蓄锐·增】（出手+1，持续1回合）
-- prepare_monster_phase / resolve_monster_phase：怪物阶段两阶段接口（为每个actors条目提交完整选择）
+- prepare_monster_phase / resolve_monster_phase：怪物阶段两阶段接口（为每个actors条目提交完整选择）。同一resolve里的choices按数组顺序结算；若选择包含波及dodge_targets，必须把该actor排在可能杀死这些目标的actor之前（prepare快照内的波及目标在阶段执行中可能先阵亡）
 - battle_start / round_start / round_end / battle_end：阶段推进；存在候选时必须显式提交
   relic_choices / spell_choices，不能省略（无候选时不用传）
 - 其余动作（use_resonance / consume_item / command_ally / resolve_ally_phases / deploy_employee /
@@ -619,6 +619,8 @@ class PlaceholderBackend(AIBackend):
                                    for _ in range(action_count)]
                     choices.append({"actor_ref": actor["actor_ref"], "daowen": dao,
                                     "attack_actions": attacks})
+                # 波及的dodge_targets冻结在prepare快照；先结算这些标记，避免前序攻击杀死目标。
+                choices.sort(key=lambda choice: 0 if "dodge_targets" in (choice.get("daowen") or {}) else 1)
                 return AIDecision("resolve_monster_phase",
                                   {"token": available_actions["token"], "choices": choices},
                                   "提交完整怪物阶段选择")

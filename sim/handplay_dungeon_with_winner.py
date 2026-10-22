@@ -24,7 +24,8 @@ from tests.setup_support import finish_initial_daowen
 
 from engine.api import GameEngine
 from engine.ai_tactics import choose_dodge, choose_attack_target
-from sim.monster_targets import pick_monster_daowen_target  # noqa: E402
+from sim.monster_targets import (pick_monster_daowen_target,
+                                 pick_wave_dodge_targets)  # noqa: E402
 from sim.build_learner import _decline_spells, round_start_relic_choices
 from sim.produce_real_winners import build_spell_choices
 from sim.produce_open_world_winners import validate_open_world_winner_snapshot
@@ -163,6 +164,32 @@ def _pick_monster_daowen(engine, actor):
     return pick_monster_daowen_option(cands, player_low=player_low,
                                       monster_low=monster_low)
 
+
+def _monster_daowen_submission(e, actor, option):
+    """Build one complete monster-daowen submission for both primary and retry paths."""
+    dao = {
+        "name": option["name"], "dodge": False, "blood_shadow": False,
+        "trigger_spell_choices": {
+            holder: {spell["spell_name"]: {"use": False} for spell in spells}
+            for holder, spells in option.get("trigger_spell_options", {}).items()
+        },
+    }
+    if option["requires_target"]:
+        dao["target_ref"] = pick_monster_daowen_target(e, actor["actor_ref"], option)
+    if option.get("dodge_submission") == "per_target":
+        dao["dodge_targets"] = pick_wave_dodge_targets(option)
+    return dao
+
+
+def _wave_first(choices):
+    """Stable-sort wave users before other monsters: phase actions execute in input order.
+
+    A preceding monster can kill a target already frozen in a later wave's prepare
+    snapshot. Resolve those per-target choices while their selected targets are alive.
+    """
+    choices.sort(key=lambda choice: 0 if "dodge_targets" in (choice.get("daowen") or {}) else 1)
+    return choices
+
 def manual_player_turn(e, log):
     """满法输出+理智闪避+庇护保命（玩家回合）。返回出手列表。"""
     p = e.state.player
@@ -235,15 +262,7 @@ def _resolve_monster_turn_hand(e, log):
         if actor["daowen_options"]:
             option = _pick_monster_daowen(e, actor)
             if option is not None:
-                dao = {"name": option["name"], "dodge": False, "blood_shadow": False,
-                       "trigger_spell_choices": {holder: {sp["spell_name"]: {"use": False}
-                                                          for sp in spells}
-                                                 for holder, spells in option.get("trigger_spell_options", {}).items()}}
-                if option["requires_target"]:
-                    dao["target_ref"] = pick_monster_daowen_target(e, actor["actor_ref"], option)
-                if option["dodge_submission"] == "per_target":
-                    from sim.monster_targets import pick_wave_dodge_targets
-                    dao["dodge_targets"] = pick_wave_dodge_targets(option)
+                dao = _monster_daowen_submission(e, actor, option)
                 if option["resolves_as"] == "变形":
                     enemy_index = int(actor["actor_ref"].split(":", 1)[1])
                     hit_count = e.state.enemies[enemy_index].attack_power
@@ -277,9 +296,11 @@ def _resolve_monster_turn_hand(e, log):
         choices.append({"actor_ref": actor["actor_ref"], "daowen": dao,
                         "attack_actions": attacks})
     result = e.execute_action("resolve_monster_phase", {
-        "token": prepared["result"]["token"], "choices": choices})
+        "token": prepared["result"]["token"], "choices": _wave_first(choices)})
     if not result.get("success"):
-        # 兜底：拒绝全部法术
+        primary_error = result.get("error", "未知怪物阶段错误")
+        log.append(f"  怪物阶段首提被拒（状态已回滚）：{primary_error}")
+        # 兜底：拒绝全部法术，但仍完整提交道纹契约（含波及的dodge_targets）。
         fallback = []
         for actor in prepared["result"]["actors"]:
             dao = None
@@ -287,12 +308,7 @@ def _resolve_monster_turn_hand(e, log):
             if actor["daowen_options"]:
                 option = _pick_monster_daowen(e, actor)
                 if option is not None:
-                    dao = {"name": option["name"], "dodge": False, "blood_shadow": False,
-                           "trigger_spell_choices": {holder: {sp["spell_name"]: {"use": False}
-                                                              for sp in spells}
-                                                     for holder, spells in option.get("trigger_spell_options", {}).items()}}
-                    if option["requires_target"]:
-                        dao["target_ref"] = pick_monster_daowen_target(e, actor["actor_ref"], option)
+                    dao = _monster_daowen_submission(e, actor, option)
                     if option["resolves_as"] == "变形":
                         enemy_index = int(actor["actor_ref"].split(":", 1)[1])
                         hit_count_fb = e.state.enemies[enemy_index].attack_power
@@ -306,9 +322,14 @@ def _resolve_monster_turn_hand(e, log):
             fallback.append({"actor_ref": actor["actor_ref"], "daowen": dao,
                              "attack_actions": attacks})
         result = e.execute_action("resolve_monster_phase", {
-            "token": prepared["result"]["token"], "choices": fallback})
+            "token": prepared["result"]["token"], "choices": _wave_first(fallback)})
         if result.get("success"):
-            log.append("  （法术提交被拒，已退化为纯物理格挡）")
+            log.append("  （首提被拒，已按同一token拒绝反应法术后重交成功）")
+        else:
+            result["primary_error"] = primary_error
+            result["error"] = (f"首提失败：{primary_error}；拒绝法术后的回退也失败："
+                               f"{result.get('error', '未知怪物阶段错误')}")
+            log.append(f"  怪物阶段回退仍被拒：{result.get('error')}")
     # 记录法术触发
     for hit in (result.get("result", {}).get("details") or []):
         for lg in (hit.get("spell_logs") or []):
