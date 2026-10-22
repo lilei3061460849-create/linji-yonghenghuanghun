@@ -29,7 +29,7 @@
 | # | 角色 | 原始文件 | SHA-256 |
 | --- | --- | --- | --- |
 | 1 | 世界观与角色档案（故事正典） | [故事文档.md](故事文档.md) | `cb5d0137ffad6314d8324c219d01ee565abd3bf2089ab4fe5099337dbdf26d7f` |
-| 2 | AI 角色扮演约束（节选：职责、性格、扮演要求） | [AI_EXPERIENCE.md](AI_EXPERIENCE.md) | `c02a61e63f418cb937fdbd4be5706a2607046e97a09a6eeaddc9e1da18a7ffb9` |
+| 2 | AI 角色扮演约束（节选：职责、性格、扮演要求） | [AI_EXPERIENCE.md](AI_EXPERIENCE.md) | `60dde9c1a7f87e9b47710a924be648f50372d6b295cd9786347740d80c70a95b` |
 | 3 | 机制速查·道纹 | [全道纹索引.md](全道纹索引.md) | `79a8a515431330bde6c37ffd2c254d77c7829d27376056ac2864bf1c0481a4ab` |
 | 4 | 机制速查·物品 | [物品索引.md](物品索引.md) | `efbd9af8d8050939fd368287b2140453bc791f4fe5a878095a73565799044f51` |
 | 5 | 机制速查·法术 | [法术索引.md](法术索引.md) | `6d9c96d373a922015d911cc544863b525e4e7a9d1e9b94e38561cb650bc01c91` |
@@ -119,7 +119,7 @@
 ### 来源 2：AI 角色扮演约束（节选：职责、性格、扮演要求）
 
 - 路径：`AI_EXPERIENCE.md`
-- SHA-256：`c02a61e63f418cb937fdbd4be5706a2607046e97a09a6eeaddc9e1da18a7ffb9`
+- SHA-256：`60dde9c1a7f87e9b47710a924be648f50372d6b295cd9786347740d80c70a95b`
 
 ```markdown
 ### 职责划分
