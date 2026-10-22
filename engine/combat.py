@@ -30,44 +30,6 @@ from .models import MONSTER_MANA_RELIC
 MEDIOCRITY_ROUNDS = Entity.MEDIOCRITY_ROUNDS
 
 
-# ---------------------------------------------------------------------------
-# 【招架】规则的单一真源（2026-10-08 结构审查）
-#
-# 规则正文：本轮你受到的攻击伤害 - 你 10% 当前生命（向下取整，最低 0）；
-# 每回合可使用次数 = 你声明招架时的当前生命，每次受击消耗 1 次。
-#
-# 这条规则此前在三处各写一遍：
-#   1. 真实结算 —— 本文件 CombatEngine._apply_parry_reduction；
-#   2. AI 候选生成 —— engine/ai_tactics.py::_parry_candidate；
-#   3. 声明回执文案 —— engine/api.py::_action_declare_parry。
-# 其中 AI 那份多一个 max(1, …) 下界，与结算口径（max(0, …)）**不是同一条公式**，
-# 只因「当前生命 < 10 不生成候选」的早退才没暴露分叉。
-# 三处一律改为调用下面两个函数：改规则只改这里一处，AI 与回执不会再各自漂移。
-# 数值语义与既有行为逐字节一致（未改任何规则数值）。
-# ---------------------------------------------------------------------------
-
-def parry_reduction_for(current_hp: Any) -> int:
-    """招架的单击减免 = floor(当前生命 × 10%)，最低 0。
-
-    取**受击结算那一刻**的生命，不是声明时的快照——本轮掉的每一点血都会
-    同步削弱招架，这是这张牌的设计张力。
-    """
-    try:
-        hp = int(current_hp)
-    except (TypeError, ValueError):
-        return 0
-    return max(0, hp // 10)
-
-
-def parry_uses_for(current_hp: Any) -> int:
-    """招架的每回合可用次数 = 声明招架时的当前生命（每次受击消耗 1 次）。"""
-    try:
-        hp = int(current_hp)
-    except (TypeError, ValueError):
-        return 1
-    return max(1, hp)
-
-
 # 实现分片：方法体在 engine/combat_parts/*.py，本文件保留门面与核心结算
 # （__init__ / 伤害与数值管线 / resolve_attack / 回合管理 / 员工背叛与死之传承 /
 #  遗物结算 / 凡庸与目标合法性）。拆分不改变行为与对外契约：CombatEngine 仍是
@@ -134,7 +96,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         # （下面的 self.resolution 创建之后，`_effect_chain_depth` 只是它的视图）。
         # AFTER_LIFE_LOST(失去生命后) 反应法术在“非攻击失血”路径的自动触发状态：
         #   _resolving_life_lost_reactions > 0 表示正在结算某次反应法术——反应
-        #     自身引发的失血不得再次触发反应（否则以牙还牙/血债会互相连锁死循环）。
+        #     自身引发的失血不得再次触发反应（否则以牙还牙/连击会互相连锁死循环）。
         #   _attack_after_window_target 是当前攻击中、其失血由 resolve_attack 的
         #     反应窗口结算的目标；该目标失血不再重复走 hook（避免与窗口双发）。
         self._resolving_life_lost_reactions = 0
@@ -318,12 +280,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     def _incoming_adjust(self, target: Entity, amount: int, damage_type: str = "普通") -> int:
         if amount <= 0 or damage_type == "代价" or target is None:
             return amount
-        amount = self.hook_manager.apply_incoming_adjust(target, amount, damage_type, None, self.state)
-        return self._apply_parry_reduction(target, amount, damage_type)
-
-    def _apply_parry_reduction(self, target: Entity, amount: int, damage_type: str) -> int:
-        """旧回合姿态已废弃；逐击招架由 resolve_attack 的 parry 参数结算。"""
-        return amount
+        return self.hook_manager.apply_incoming_adjust(
+            target, amount, damage_type, None, self.state)
 
     def _record_speed_change_event(
         self, entity: Entity, amount: int,
@@ -382,12 +340,11 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         「苍白之花 → 回锋刀」战始联动时曾把它一并删掉，导致活血衣/增生药剂等
         全部走这条判定的遗物同时失效（628 个测试炸），故恢复。
         删联动要删的是**调用点**，不是这个共享判定本身。
+
+        判定口径与 `GameState._relic_active` 完全一致（含 2026-10-22 启用
+        归类：enabled=False 的遗物不生效），故直接委托状态层，不在此复制。
         """
-        if entity is None or not self.state.side_has(entity, name):
-            return False
-        if entity is self.state.player:
-            return self.state.sealed_relics.get(name, 0) <= 0
-        return True
+        return self.state._relic_active(entity, name)
 
     def _any_active_relic(self, name: str) -> bool:
         """查询场上是否存在未封印的该遗物持有者，用于“任意角色/所有角色”的全场效果。"""
@@ -505,11 +462,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         return extra
 
     def _huifeng_active(self, entity: Entity) -> bool:
-        if entity is None or not self.state.side_has(entity, "回锋刀"):
-            return False
-        if entity is self.state.player:
-            return self.state.sealed_relics.get("回锋刀", 0) <= 0
-        return True
+        return self._relic_active(entity, "回锋刀")
 
     def _huifeng_ref_from_choice(self, decision: Any) -> str:
         if not isinstance(decision, dict):
@@ -630,9 +583,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """守夜灯：每次[回始]获得等同于[法限]50%的法力。"""
         if entity is None or not entity.is_alive or entity.entity_type != "轮回者":
             return 0
-        if not self.state.side_has(entity, "守夜灯"):
-            return 0
-        if entity is self.state.player and self.state.sealed_relics.get("守夜灯", 0) > 0:
+        if not self._relic_active(entity, "守夜灯"):
             return 0
         return math.ceil(entity.mana_limit * 0.5)
 
@@ -1049,7 +1000,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 e._kuixi_pending_mana = 0
             # 2026-10-13：谁持有谁获得法限等量法力与异变；这不是代价，不走代价结算。
             # 兼容实体遗物、轮回者本局遗物及死斗对手遗物，并尊重玩家的遗物封印。
-            owns_relic = (any(r.name == MONSTER_MANA_RELIC for r in e.relics)
+            owns_relic = (any(r.name == MONSTER_MANA_RELIC and getattr(r, "enabled", True) for r in e.relics)
                           or self._relic_active(e, MONSTER_MANA_RELIC))
             relic_unsealed = (e is not player
                               or self.state.sealed_relics.get(MONSTER_MANA_RELIC, 0) <= 0)
@@ -1074,8 +1025,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                            f"异变+{amount}（累计{mutation['mutation_total']}层）",
                 })
             apply_verb(self, "reset_fields", {"target": e, "fields": {
-                "hp_lost_this_round": 0, "parrying_this_round": False,
-                "parry_uses_remaining_this_round": 0, "parry_locked_this_round": False,
+                "hp_lost_this_round": 0,
                 "_hp_loss_events": [], "_speed_change_events": [], "_blood_limit_events": [],
                 "actions_used_this_round": 0, "blood_oath_used_this_round": False,
                 "mana_inflicted_this_round": 0, "damage_dealt_this_round": 0}})
@@ -1373,7 +1323,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """校验所有可选[战始]遗物参数；缺项不得由计算层猜测或代选。"""
         if not isinstance(choices, dict):
             raise ValueError("relic_choices必须是对象")
-        active = {r.name for r in self.state.relics if self.state.sealed_relics.get(r.name, 0) <= 0}
+        active = {r.name for r in self.state.relics if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0}
         player = self.state.player
         # 2026-10-13 用户令：【三相残韵盘】遗物删除，原战始显式决策分支一并移除。
         # 2026-10-11 用户令：【苍白之花】改为纯被动（物品索引.md:110「你的当前法力可以
@@ -1415,7 +1365,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     def validate_round_start_relic_choices(self, choices: dict) -> None:
         if not isinstance(choices, dict):
             raise ValueError("relic_choices必须是对象")
-        active = {r.name for r in self.state.relics if self.state.sealed_relics.get(r.name, 0) <= 0}
+        active = {r.name for r in self.state.relics if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0}
         player = self.state.player
         damage = 3 * max(0, player.speed_limit - player.current_speed) if player else 0
         if "回锋刀" in active and damage > 0:
@@ -1449,7 +1399,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         if not player:
             return logs
         # 抵扣X（F2）：被封印的遗物在封印期间不触发任何效果
-        relics = {r.name for r in self.state.relics if self.state.sealed_relics.get(r.name, 0) <= 0}
+        relics = {r.name for r in self.state.relics if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0}
 
         if trigger == "round_start":
             choices = ctx.get("relic_choices", {})
@@ -1581,17 +1531,17 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                             "note": "轮回者获得消耗品【自由结晶】(1/1)"})
         return effects
 
-    def can_act(self, entity: Entity) -> bool:
-        """是否可出手（束缚下不可；被【封印】暂离者不在场上，同样不可出手）。
+    def can_act(self, entity: Entity, action_type: str | None = None) -> bool:
+        """判断实体能否执行指定主动行动。
 
-        2026-10-08 用户令：封印可作用于任意目标含自己。这里是"能否出手"的唯一
-        事实源，加上暂离判断后，玩家/朋友/员工/怪物被封印期间一律不能行动，
-        不必在每个行动入口各写一份。
+        【束缚】期间仅放行法术行动（瞬发施法或自定义法术定义）；不传行动类型时按
+        普通行动判断，仍返回不可行动。被【封印】暂离者不在场上，任何行动都不可用。
+        反应选择与自动触发不通过此主动行动门禁。
         """
         return (entity.is_alive
                 and not self.state.is_sealed_away(entity)
-
-                and not entity.has_status("束缚"))
+                and (not entity.has_status("束缚")
+                     or action_type in {"cast", "define_spell"}))
 
     def is_targetable(self, attacker: Entity, target: Entity) -> bool:
         """目标是否可被选中：非飞行者无法选中飞行目标。"""

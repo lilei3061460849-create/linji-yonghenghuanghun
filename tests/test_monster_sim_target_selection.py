@@ -142,6 +142,6 @@ def test_classification_sets_cover_all_dungeon_daowens():
                 "勒索",
                 "寄生", "蒙蔽", "愤怒", "全速", "无力",
                 "洞察", "急速", "加速", "自食", "招魂",
-                "缄默", "瓦解", "分裂", "贯穿", "固执", "血债"}
+                "缄默", "瓦解", "分裂", "贯穿", "固执", "连击"}
     missing = critical - MONSTER_SELF_DAOWEN - MONSTER_HOSTILE_DAOWEN
     assert not missing, f"以下需目标道纹未分类：{sorted(missing)}"

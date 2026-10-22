@@ -105,7 +105,7 @@ def test_before_life_lost_fires_on_bleed_cost():
     _, combat, player, enemy = _state()
     _add_spell(player, "再生", "失去生命前", "发动再生 X于自身")
     detail = combat.pay_numeric_cost(player, "流血", 5, cost_context={
-        "timing": "player_action", "source": "血债", "source_type": "daowen",
+        "timing": "player_action", "source": "连击", "source_type": "daowen",
         "actor": player, "target": player, "mechanic": "cost", "subtype": "bleed",
         "amount": 5, "tags": {"active_payment"},
     })

@@ -222,7 +222,7 @@ def run_one_seed(seed):
     STATS["normal_losses"] += len([b for b in rt.battle_log
                                    if b["outcome"] == "defeat"])
     # 从 rt.issues 收集正常战败以外的 rt 级报告
-    dmg_daowen = {"杀伐", "血债", "波及", "贯穿", "衰败", "弱化", "狂暴"}
+    dmg_daowen = {"杀伐", "连击", "波及", "贯穿", "衰败", "弱化", "狂暴"}
     has_dmg = bool(dmg_daowen & set((eng.state.player.dao_wen if eng.state.player else {})))
     for i in rt.issues:
         if "合理战败" in i["msg"] or "monster killed" in i["msg"]:

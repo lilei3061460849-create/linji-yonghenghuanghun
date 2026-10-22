@@ -1,108 +1,41 @@
-"""显式 legacy 覆盖：实验规则 AI（TacticalAI / WinOnlyAI）的陈旧候选排序断言。
-
-2026-10-02 架构收口（"正式 LLM 决策与 TacticalAI 完全解耦"）时对全仓剩余的
-3 条失败测试做了定性：
-
-  * tests/test_ai_tactics.py::test_ai_can_declare_parry_under_lethal_threat
-  * tests/test_win_only_ai.py::test_win_only_includes_parry_in_real_candidate_path
-  * tests/test_ai_basic_attack_candidate.py::test_at_one_by_one_daowen_still_wins
-
-结论：**它们只锁实验规则 AI 的候选排序/偏好，与正式 LLM 决策路径无关**，
-且断言口径在两次规则/机制改动后已失效——
-
-  1. 2026-09-10「攻次/攻力改制」：普攻伤害 = 攻击次数×攻击力，攻力=当前法力。
-     旧断言里"杀伐X=7 得 17.92 分"的前提（X=7 可负担）在 1×1 面板下不成立。
-  2. 2026-09-28「招架重写」：减免 = floor(10%当前生命)/每击、次数=当前生命。
-     10 生命面对 12 伤害时招架只能减 1 点、救不了命，
-     ``_parry_candidate()`` 会**故意拒绝**这种无收益招架（threat-reduction > hp）。
-
-按用户令「不得为保住陈旧测试改战斗语义」，这 3 条原断言以 xfail（strict=True）
-留档：规则 AI 排序再次漂移时仍可被看见，但不会把实验工具的偏好伪装成生产契约。
-下方同时断言**当前真实生效**的契约（这些必须通过），避免本文件只是一座墓园：
-
-  * 引擎层：招架动作出现在运行时 available_actions 里，减免=floor(10%当前生命)，
-    2026-10-11：「回合姿态式招架」整条口径已废（declare_parry / 10%当前生命减免 /
-    可挡次数=当前生命 / parrying_this_round 门禁），本文件原有 3 条契约测试随之删除；
-    现行招架是 resolve_attack 的逐击参数，守护在 tests/test_blade_combat_rework.py。
-  * 规则 AI 层：招架候选在"能救命"的局面下仍会被生成；
-    WinOnlyAI 的候选构建入口没有漏掉基类招架候选；
-    ``remaining_actions()`` 读 action_count 而不是写死 2。
-"""
-from __future__ import annotations
-
-import inspect
-
+"""当前实验规则 AI 契约与旧招架动作的兼容拒绝。"""
 import pytest
 
 from tests.test_ai_tactics import _engine
 
 
-def _lethal_engine(tmp_path, hp=10, attack_power=12):
+def test_legacy_declare_parry_action_is_not_offered_or_executable(tmp_path):
+    """旧的回合姿态入口不再出现；误提交时由引擎明确拒绝。"""
     e = _engine(tmp_path, learn=())
-    e.state.player.dao_wen.clear()
-    e.state.resonance.clear()
-    e.state.player.current_hp = hp
-    e.state.enemies[0].attack_count = 1
-    e.state.enemies[0].attack_power = attack_power
-    return e
+    offered = {action.get("action_type")
+               for action in e.get_available_actions().get("actions", [])}
+    assert "declare_parry" not in offered
 
-
-# ---------------------------------------------------------------------------
-# 一、留档的陈旧断言（xfail：记录实验规则 AI 排序的历史口径）
-# ---------------------------------------------------------------------------
-
-@pytest.mark.xfail(strict=True, reason="2026-09-28 招架改为 10%当前生命后，"
-                                        "10 生命面 12 伤害时招架救不了命，规则 AI 不再优先它")
-def test_legacy_rule_ai_prefers_parry_under_lethal_threat(tmp_path):
-    from engine.ai_tactics import TacticalAI
-
-    e = _lethal_engine(tmp_path)
-    result = TacticalAI(e).take_action()
-    assert result is not None and result.get("success"), result
-    assert result.get("action") == "贾凡招架"
-
-
-@pytest.mark.xfail(strict=True, reason="同上：WinOnlyAI 继承同一套招架候选过滤")
-def test_legacy_win_only_keeps_parry_in_real_candidate_path(tmp_path):
-    from sim.win_only_ai import WinOnlyAI
-
-    e = _lethal_engine(tmp_path)
-    result = WinOnlyAI(e).take_action()
-    assert result is not None and result.get("success"), result
-    assert result.get("action") == "贾凡招架"
+    result = e.execute_action("declare_parry", {})
+    assert not result["success"]
+    assert "resolve_attack" in result["error"]
 
 
 @pytest.mark.xfail(strict=True, reason="2026-09-10 攻次/攻力改制后，1×1 面板下"
                                         "普攻（免费1伤）与杀伐（1法力1伤）的真实取舍已改变")
 def test_legacy_one_by_one_daowen_outscores_basic_attack(tmp_path):
+    """与招架无关的历史实验 AI 排序断言，继续作为 strict xfail 留档。"""
     from engine.ai_tactics import TacticalAI
 
     e = _engine(tmp_path, learn=("杀伐",))
-    p = e.state.player
-    p.current_speed, p.current_mana = 1, 1
+    player = e.state.player
+    player.current_speed, player.current_mana = 1, 1
     ai = TacticalAI(e, verbose=True)
     ai.take_turn()
     decisions = [line for line in ai.log if "实时决策" in line]
     assert decisions and all("普攻" not in line for line in decisions), decisions
 
 
-# ---------------------------------------------------------------------------
-# 二、当前生效的契约（必须通过）
-# ---------------------------------------------------------------------------
-
-def test_win_only_candidate_builder_keeps_base_parry_candidate():
-    """WinOnlyAI 覆写候选入口时不得漏掉基类招架候选（源码级结构检查）。"""
-    from sim.win_only_ai import WinOnlyAI
-
-    src = inspect.getsource(WinOnlyAI._dynamic_action)
-    assert "_parry_candidate()" in src
-
-
 def test_rule_ai_budget_reads_action_count_not_hardcoded_two(tmp_path):
-    """实验规则 AI 的出手预算读 action_count（可被 蓄锐·增/疯狂/无力 修正）。"""
+    """实验规则 AI 的出手预算读 action_count（可被 蓄锐·增/疯狂/无力修正）。"""
     from engine.ai_tactics import TacticalAI
 
-    e = _lethal_engine(tmp_path)
+    e = _engine(tmp_path, learn=())
     stub = type("_Stub", (), {"action_count": 5, "actions_used_this_round": 1,
                               "current_mana": 0})()
     ai = TacticalAI(e, actor=stub)

@@ -1,7 +1,7 @@
 """
 多世代真实手操推演与死斗胜者经验沉淀系统：
-- 第1世代：龙心谷「贾希希」（加害+裂变+血债），通关7场封存为初代冠冕胜者。
-- 第2世代：龙心谷「苏星河」（加害+裂变+血债+高法限），通关7场后在第8场击败贾希希，成为二代冠冕胜者。
+- 第1世代：龙心谷「贾希希」（加害+裂变+连击），通关7场封存为初代冠冕胜者。
+- 第2世代：龙心谷「苏星河」（加害+裂变+连击+高法限），通关7场后在第8场击败贾希希，成为二代冠冕胜者。
 - 第3世代：龙心谷「林渊」（吸取前两代经验：激进修行法限至50+、精准闪避狂暴逆鳞连击、加害裂变极致穿透），通关7场后在第8场巅峰死斗决战二代胜者苏星河，登顶并生成最新权威《报告.md》。
 """
 import json
@@ -105,7 +105,7 @@ def run_three_generations():
     db_file = tempfile.mktemp(suffix=".db")
 
     print("================================================================")
-    print("【第1世代轮回】龙心谷：贾希希（初代：加害+裂变+血债流探索）")
+    print("【第1世代轮回】龙心谷：贾希希（初代：加害+裂变+连击流探索）")
     print("================================================================")
     e1 = GameEngine(db_path=db_file, rng_seed=42, sealed_candidate_path=sealed_file)
     e1.execute_action("setup_attributes", {
@@ -142,8 +142,8 @@ def run_three_generations():
                 e1.execute_action("pre_battle_action", {"sub_action": "领悟", "resonance_type": "转换"})
             elif e1.state.resonance.get("反转", 0) < 2:
                 e1.execute_action("pre_battle_action", {"sub_action": "领悟", "resonance_type": "反转"})
-            elif "加害" in p1.dao_wen and "裂变" in p1.dao_wen and "血债" not in p1.dao_wen and e1.state.shards >= 10:
-                e1.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "血债"})
+            elif "加害" in p1.dao_wen and "裂变" in p1.dao_wen and "连击" not in p1.dao_wen and e1.state.shards >= 10:
+                e1.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "连击"})
             else:
                 tier, cost, pts = best_cultivate_tier(e1.state.shards)
                 spd_pts = 1 if (p1.speed_limit < 12 and pts >= 2) else 0
@@ -172,7 +172,7 @@ def run_three_generations():
                     e1.execute_action("use_resonance", {
                         "source_daowen": "伤痕", "resonance_type": "转换", "target_ref": f"enemy:{idx}"
                     })
-                if "固执" in m.dao_wen and "血债" not in p1.dao_wen and e1.state.resonance.get("反转", 0) > 0:
+                if "固执" in m.dao_wen and "连击" not in p1.dao_wen and e1.state.resonance.get("反转", 0) > 0:
                     e1.execute_action("use_resonance", {
                         "source_daowen": "固执", "resonance_type": "反转", "target_ref": f"enemy:{idx}"
                     })
@@ -196,8 +196,8 @@ def run_three_generations():
                 if "裂变" in p1.dao_wen and not target.has_status("裂变") and p1.current_mana >= 6 and target.current_hp >= 40:
                     e1.execute_action("use_daowen", {"daowen_name": "裂变", "x": 2, "target_ref": f"enemy:{t_idx}"})
                     continue
-                if target.has_status("固执") and "血债" in p1.dao_wen and p1.current_hp > 15:
-                    e1.execute_action("use_daowen", {"daowen_name": "血债", "x": 3, "target_ref": f"enemy:{t_idx}"})
+                if target.has_status("固执") and "连击" in p1.dao_wen and p1.current_hp > 15:
+                    e1.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target_ref": f"enemy:{t_idx}"})
                 elif p1.current_mana > 0 and "杀伐" in p1.dao_wen:
                     rem = max(1, p1.action_count - p1.actions_used_this_round)
                     spend = max(1, p1.current_mana // rem)
@@ -252,8 +252,8 @@ def run_three_generations():
                 e2.execute_action("pre_battle_action", {"sub_action": "领悟", "resonance_type": "转换"})
             elif e2.state.resonance.get("反转", 0) < 2:
                 e2.execute_action("pre_battle_action", {"sub_action": "领悟", "resonance_type": "反转"})
-            elif "加害" in p2.dao_wen and "裂变" in p2.dao_wen and "血债" not in p2.dao_wen and e2.state.shards >= 10:
-                e2.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "血债"})
+            elif "加害" in p2.dao_wen and "裂变" in p2.dao_wen and "连击" not in p2.dao_wen and e2.state.shards >= 10:
+                e2.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "连击"})
             else:
                 tier, cost, pts = best_cultivate_tier(e2.state.shards)
                 spd_pts = 1 if (p2.speed_limit < 12 and pts >= 2) else 0
@@ -282,7 +282,7 @@ def run_three_generations():
                     e2.execute_action("use_resonance", {
                         "source_daowen": "伤痕", "resonance_type": "转换", "target_ref": f"enemy:{idx}"
                     })
-                if "固执" in m.dao_wen and "血债" not in p2.dao_wen and e2.state.resonance.get("反转", 0) > 0:
+                if "固执" in m.dao_wen and "连击" not in p2.dao_wen and e2.state.resonance.get("反转", 0) > 0:
                     e2.execute_action("use_resonance", {
                         "source_daowen": "固执", "resonance_type": "反转", "target_ref": f"enemy:{idx}"
                     })
@@ -306,8 +306,8 @@ def run_three_generations():
                 if "裂变" in p2.dao_wen and not target.has_status("裂变") and p2.current_mana >= 6 and target.current_hp >= 40:
                     e2.execute_action("use_daowen", {"daowen_name": "裂变", "x": 2, "target_ref": f"enemy:{t_idx}"})
                     continue
-                if target.has_status("固执") and "血债" in p2.dao_wen and p2.current_hp > 15:
-                    e2.execute_action("use_daowen", {"daowen_name": "血债", "x": 3, "target_ref": f"enemy:{t_idx}"})
+                if target.has_status("固执") and "连击" in p2.dao_wen and p2.current_hp > 15:
+                    e2.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target_ref": f"enemy:{t_idx}"})
                 elif p2.current_mana > 0 and "杀伐" in p2.dao_wen:
                     rem = max(1, p2.action_count - p2.actions_used_this_round)
                     spend = max(1, p2.current_mana // rem)
@@ -394,10 +394,10 @@ def run_three_generations():
                 r = e3.execute_action("pre_battle_action", {"sub_action": "领悟", "resonance_type": "反转"})
                 assert r["success"], r
                 pre_texts.append("领悟·残韵 → 获得【残韵·反转】")
-            elif "加害" in p3.dao_wen and "裂变" in p3.dao_wen and "血债" not in p3.dao_wen and e3.state.shards >= 10:
-                r = e3.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "血债"})
+            elif "加害" in p3.dao_wen and "裂变" in p3.dao_wen and "连击" not in p3.dao_wen and e3.state.shards >= 10:
+                r = e3.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "连击"})
                 assert r["success"], r
-                pre_texts.append("学习·道纹 → 习得【血债】（破除固执机制）")
+                pre_texts.append("学习·道纹 → 习得【连击】（破除固执机制）")
             else:
                 tier, cost, pts = best_cultivate_tier(e3.state.shards)
                 spd_pts = 1 if (p3.speed_limit < 12 and pts >= 2) else 0
@@ -464,12 +464,12 @@ def run_three_generations():
                     })
                     if r_res.get("success"):
                         b_lines.append(f"  [残韵插队] 林渊发动【残韵·转换】作用于{m.name}的【伤痕】→ 转化为专属道纹【加害】（林渊永久习得【加害】）")
-                if "固执" in m.dao_wen and "血债" not in p3.dao_wen and e3.state.resonance.get("反转", 0) > 0:
+                if "固执" in m.dao_wen and "连击" not in p3.dao_wen and e3.state.resonance.get("反转", 0) > 0:
                     r_res = e3.execute_action("use_resonance", {
                         "source_daowen": "固执", "resonance_type": "反转", "target_ref": f"enemy:{idx}"
                     })
                     if r_res.get("success"):
-                        b_lines.append(f"  [残韵插队] 林渊发动【残韵·反转】作用于{m.name}的【固执】→ 逆转为【血债】（林渊永久习得【血债】）")
+                        b_lines.append(f"  [残韵插队] 林渊发动【残韵·反转】作用于{m.name}的【固执】→ 逆转为【连击】（林渊永久习得【连击】）")
 
             act_idx = 1
             while p3.actions_used_this_round < p3.action_count and [m for m in e3.state.enemies if m.is_alive]:
@@ -496,9 +496,9 @@ def run_three_generations():
                         res = e3.execute_action("use_daowen", {
                             "daowen_name": "裂变", "x": 2, "target_ref": f"enemy:{t_idx}"
                         })
-                    elif target.has_status("固执") and "血债" in p3.dao_wen and p3.current_hp > 15:
+                    elif target.has_status("固执") and "连击" in p3.dao_wen and p3.current_hp > 15:
                         res = e3.execute_action("use_daowen", {
-                            "daowen_name": "血债", "x": 3, "target_ref": f"enemy:{t_idx}"
+                            "daowen_name": "连击", "x": 3, "target_ref": f"enemy:{t_idx}"
                         })
                     elif p3.current_mana > 0 and "杀伐" in p3.dao_wen:
                         rem = max(1, p3.action_count - p3.actions_used_this_round)
@@ -543,8 +543,8 @@ def run_three_generations():
         "[战始]（最终死斗）",
         f"出怪：【最终的冠冕】开启，二代封存候选胜者【苏星河】登场！",
         f"战斗背景：王座死斗之渊（冠冕之光笼罩的断罪深渊，胜者登王座，败者入传承）",
-        f"敌方面板：苏星河（{opp2.blood_limit}/{opp2.mana_limit}/{opp2.speed_limit}，出手{opp2.action_count}次）｜道纹：加害、裂变、血债、杀伐、庇护、再生",
-        f"我方面板：林渊（{p3.blood_limit}/{p3.mana_limit}/{p3.speed_limit}，出手{p3.action_count}次）｜道纹：加害、裂变、血债、杀伐、庇护、再生",
+        f"敌方面板：苏星河（{opp2.blood_limit}/{opp2.mana_limit}/{opp2.speed_limit}，出手{opp2.action_count}次）｜道纹：加害、裂变、连击、杀伐、庇护、再生",
+        f"我方面板：林渊（{p3.blood_limit}/{p3.mana_limit}/{p3.speed_limit}，出手{p3.action_count}次）｜道纹：加害、裂变、连击、杀伐、庇护、再生",
         "[战始]效果结算：",
         "  双方激活【最终死斗】法则：双方全额回复生命/法力/速度，逐出手交替推演，胜者登顶封存！",
         "",
@@ -652,7 +652,7 @@ def run_three_generations():
     d_lines.append("")
     d_lines.append("[战终]")
     d_lines.append(f"死斗结果：二代胜者苏星河[命零]，挑战者「林渊」斩获第3世代最终胜者！")
-    d_lines.append(f"封存交接：新胜者林渊（{p3.blood_limit}/{p3.mana_limit}/{p3.speed_limit}，道纹：加害/裂变/血债/杀伐/庇护/再生）完整封存至 data/sealed_candidate.json，登顶【最终的冠冕】！")
+    d_lines.append(f"封存交接：新胜者林渊（{p3.blood_limit}/{p3.mana_limit}/{p3.speed_limit}，道纹：加害/裂变/连击/杀伐/庇护/再生）完整封存至 data/sealed_candidate.json，登顶【最终的冠冕】！")
     d_lines.append("")
     battle_blocks.append("\n".join(d_lines))
 
@@ -665,7 +665,7 @@ def run_three_generations():
 >
 > 格式遵循 推演规范《六、战斗推演格式》与 AI 知识库七步原子时序切片管道：逐回合、逐次出手，禁止概括、跳过或合并结算。本局全程通过 GameEngine.execute_action 逐步手操点选，数值逐条取自引擎真实返回值（无推断、无口胡）。
 >
-> 来源：2026-08-17 第3世代真实手操实测。新轮回者林渊（42[血限]/20[法限]/8[速限]，开局遗物·无所求）进入龙心谷（一阶），在战内通过【残韵】实时窃取敌方专属道纹【裂变】、【加害】、【血债】，配合高额法限与多段穿透斩获前 7 场全胜，并在第 8 场最终死斗中正面击败二代封存胜者苏星河，登顶王座！
+> 来源：2026-08-17 第3世代真实手操实测。新轮回者林渊（42[血限]/20[法限]/8[速限]，开局遗物·无所求）进入龙心谷（一阶），在战内通过【残韵】实时窃取敌方专属道纹【裂变】、【加害】、【连击】，配合高额法限与多段穿透斩获前 7 场全胜，并在第 8 场最终死斗中正面击败二代封存胜者苏星河，登顶王座！
 >
 > 共8场。结果：8战8胜（含第8场最终死斗击败二代封存胜者苏星河），林渊登顶【最终的冠冕】完整封存！
 

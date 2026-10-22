@@ -51,7 +51,7 @@ def setup(seed,relic,region,rtype,combo):
     ch=e.execute_action('choose_discovered_relic',{'relic_name':relic})
     dc=list(e.state.pending_initial_daowen_choices)
     # choose defensive/damage starter; actual initial candidate from engine
-    pref=(['封印','庇护','再生','杀伐','血债'] if combo in ('hyper',) else ['庇护','再生','杀伐','血债'])
+    pref=(['封印','庇护','再生','杀伐','连击'] if combo in ('hyper',) else ['庇护','再生','杀伐','连击'])
     initial=next((x for x in pref if x in dc),dc[0])
     e.execute_action('setup_choose_initial_daowen',{'daowen_name':initial})
     e.execute_action('setup_choose_resonance',{'resonance_type':rtype})

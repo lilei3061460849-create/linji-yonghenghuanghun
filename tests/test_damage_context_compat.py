@@ -82,7 +82,7 @@ def test_brand_nail_damage_records_cost_parent_event():
     combat = CombatEngine(state, DiceEngine())
 
     payment = combat.pay_numeric_cost(player, "流血", 2, cost_context={
-        "timing": "player_action", "source": "血债", "source_type": "daowen",
+        "timing": "player_action", "source": "连击", "source_type": "daowen",
         "actor": player, "target": player, "mechanic": "cost", "subtype": "bleed",
         "amount": 2, "tags": {"active_payment"}, "event_id": "cost-1",
     })

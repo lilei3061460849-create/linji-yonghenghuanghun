@@ -246,10 +246,8 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
                 return "过路商人当前没有这件遗物；售出后不会自动补货"
             if price > engine.state.shards:
                 return f"你没有足够碎片购买该遗物：需要{price}，当前{engine.state.shards}"
-            cap = player.relic_capacity
-            owned = len({r.name for r in engine.state.relics})
-            if relic_name not in {r.name for r in engine.state.relics} and owned >= cap:
-                return f"遗物承载上限不足：当前{owned}/{cap}种"
+            # 2026-10-22 用户令：遗物持有不再受承载拦截，可照常买入；
+            # 生效数超承载时先不生效，[战始]用 active_relics 自定义启用。
         else:
             if not any(r.name == relic_name for r in engine.state.relics):
                 return "你当前没有这件可出售遗物"
@@ -381,6 +379,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             merchant.shards += price
             merchant.relics.remove(relic)
             engine.state.relics.append(relic)
+            engine.state.note_relic_gained(relic)
             applied.append(f"与过路商人成交：买入遗物{relic_name}，支付{price}碎片；商人余额{merchant.shards}，剩余{len(merchant.relics)}件遗物")
         else:
             relic = next(r for r in engine.state.relics if r.name == relic_name)
@@ -450,7 +449,9 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
                 name=name, effect=effect, current_uses=1, max_uses=1))
             applied.append(f"获得消耗品{name}")
         else:
-            engine.state.relics.append(Relic(name=name, effect=effect))
+            gained = Relic(name=name, effect=effect)
+            engine.state.relics.append(gained)
+            engine.state.note_relic_gained(gained)
             applied.append(f"获得遗物{name}")
 
     if event_name == "纸人冥婚":
@@ -900,6 +901,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             applied.append(f"{friend.name}获得事件遗物·{name}")
         else:
             engine.state.relics.append(relic)
+            engine.state.note_relic_gained(relic)
             applied.append(f"获得事件遗物·{name}")
     for name, (durability, effect) in EVENT_CONSUMABLES.items():
         if name in text:
@@ -914,6 +916,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         relic = next(r for r in engine.state.relics_pool if r.name == relic_name)
         engine.state.relics_pool.remove(relic)
         engine.state.relics.append(relic)
+        engine.state.note_relic_gained(relic)
         applied.append(f"获得遗物·{relic_name}")
     elif "随机" in text and "遗物" in text and not named_relics:
         discovery = engine._offer_relic_discovery(f"事件【{event_name}】")

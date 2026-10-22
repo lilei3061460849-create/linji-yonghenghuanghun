@@ -524,7 +524,7 @@ def _zyzq_choices(engine, foe):
 def test_each_instant_step_triggers_target_before_daowen_reactions():
     engine = _setup("p2_zyzq", mana=10)
     player, foe = engine.state.player, engine.state.enemies[0]
-    _give(foe, "坠落", "杀伐", "血债")
+    _give(foe, "坠落", "杀伐", "连击")
     foe.spells.append(engine.combat.spell_definition(foe, "咎由自取"))
     foe.mana_limit = foe.current_mana = 20
     hp0 = player.current_hp
@@ -548,7 +548,7 @@ def test_each_instant_step_triggers_target_before_daowen_reactions():
 def test_instant_caster_killed_by_reaction_is_normal_interrupt():
     engine = _setup("p2_zyzq_dead", mana=10)
     player, foe = engine.state.player, engine.state.enemies[0]
-    _give(foe, "坠落", "杀伐", "血债")
+    _give(foe, "坠落", "杀伐", "连击")
     foe.spells.append(engine.combat.spell_definition(foe, "咎由自取"))
     foe.mana_limit = foe.current_mana = 20
     choices = _zyzq_choices(engine, foe)
@@ -572,7 +572,7 @@ def test_instant_caster_killed_by_reaction_is_normal_interrupt():
 def test_instant_missing_trigger_choices_rejected_without_consuming_action():
     engine = _setup("p2_zyzq_missing")
     player, foe = engine.state.player, engine.state.enemies[0]
-    _give(foe, "坠落", "杀伐", "血债")
+    _give(foe, "坠落", "杀伐", "连击")
     foe.spells.append(engine.combat.spell_definition(foe, "咎由自取"))
     used0 = player.actions_used_this_round
     resp = _cast(engine, "发动杀伐X于目标", [{"x": 1, "dodge": False}], target=foe)

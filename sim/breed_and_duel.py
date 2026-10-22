@@ -165,12 +165,12 @@ def _make_breeder_act(e, log):
 
     PvP 关键约束：守擂常持【先发制人】（受到伤害前用杀伐反打），挑战者一上来就杀伐
     会被瞬间反杀（满血也扛不住）。所以这里先做**防御/长袖**动作（庇护加盾、封印/束缚/
-    减速削弱守擂），再输出；输出用代价型(血债，不耗法)或杀伐的 mana_budget 均摊，
+    减速削弱守擂），再输出；输出用代价型(连击，不耗法)或杀伐的 mana_budget 均摊，
     避免一发打光法力后整回合空转。None 才返回 False（让守擂接管）。"""
     p = e.state.player
     # 2026-10-11 用户令：【衰败】已删除，防守牌位改用仍存的【减速】
     defense = ["庇护", "再生", "封印", "束缚", "减速", "弱化", "蒙蔽", "僵化"]
-    attack_off = ["血债", "乱神", "杀伐"]
+    attack_off = ["连击", "乱神", "杀伐"]
     # 新回回合：先补一次防御
     state = {"last_round": -1, "buffed": False}
 
@@ -208,9 +208,9 @@ def _make_breeder_act(e, log):
         for name in attack_off:
             if name not in p.dao_wen:
                 continue
-            if p.current_mana < 1 and name not in ("血债", "乱神"):
+            if p.current_mana < 1 and name not in ("连击", "乱神"):
                 continue
-            if name in ("血债", "乱神"):
+            if name in ("连击", "乱神"):
                 x = 2
             else:
                 x = max(1, min(mana_budget, p.current_mana))

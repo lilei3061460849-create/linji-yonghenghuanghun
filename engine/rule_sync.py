@@ -1,8 +1,9 @@
 """规则自动同步系统。
 
 事实源分工：规则正文.md 提供通用规则正文，死者之书.md 提供法术与遗言格式，
-物品索引.md 提供物品，副本索引.md 与其链接文档提供副本内容；README.md 只作入口
-与 AI/维护速览，不参与规则抽取（2026-10-09 迁移）。
+物品索引.md 提供物品，副本索引.md 与其链接文档提供副本内容；结构化特殊事件事实源
+还定义了初拥之夜授予的专属道纹。README.md 只作入口与 AI/维护速览，不参与规则抽取
+（2026-10-09 迁移）。
 """
 from __future__ import annotations
 import os
@@ -423,6 +424,24 @@ class RuleSync:
                 result.append({**daowen, "dungeon": entry.name, "status": entry.status})
         return result
 
+    def extract_event_daowen(self, filepath: str = "data/rules/special_events.toml") -> list[dict]:
+        """提取结构化特殊事件中明示授予的初拥专属道纹。"""
+        import tomllib
+        full_path = Path(self.rules_dir) / filepath
+        if not full_path.exists():
+            return []
+        with full_path.open("rb") as source:
+            document = tomllib.load(source)
+        result = []
+        for event in document.get("event", []):
+            if event.get("id") != "chu_yong_zhi_ye":
+                continue
+            for line in event.get("rule_lines", []):
+                for name in re.findall(r"获得初拥专属道纹【([^】]+)】", line):
+                    result.append({"name": name, "event": event.get("name", "初拥之夜"),
+                                   "source": str(full_path)})
+        return result
+
     def extract_project_rules(self) -> dict:
         """按裁定后的多事实源分工提取当前项目规则。"""
         from .dungeons import load_dungeon_manifest
@@ -431,6 +450,7 @@ class RuleSync:
         return {
             "common_daowen": self.extract_daowen_from_file(COMMON_RULES_FILE),
             "dungeon_daowen": self.extract_dungeon_daowen(include_drafts=True),
+            "event_daowen": self.extract_event_daowen(),
             "spells": self.extract_spells_from_file(DEATH_BOOK_FILE),
             "items": self.extract_items_from_file(ITEM_INDEX_FILE),
             "dungeons": [
@@ -461,6 +481,8 @@ class RuleSync:
         """比较引擎与当前已实现正文中的通用及副本专属道纹。"""
         file_daowen = self.extract_daowen_from_file(COMMON_RULES_FILE)
         file_daowen += self.extract_dungeon_daowen(include_drafts=False)
+        # 初拥选项5中的专属道纹定义于结构化特殊事件事实源，而非通用/副本正文。
+        file_daowen += self.extract_event_daowen()
         file_names = {item["name"] for item in file_daowen}
         registered = set(DaoWenEngine.list_all())
         return {

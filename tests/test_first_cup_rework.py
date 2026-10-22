@@ -156,15 +156,15 @@ def test_first_cup_doubling_happens_after_shield():
 
 def test_first_cup_doubles_bleed_cost_life_loss():
     """数值型代价【流血X】：代价按 X 支付，失去的生命翻倍。"""
-    engine = _cup_engine("cost_ok", daowen="血债")
+    engine = _cup_engine("cost_ok", daowen="连击")
     player = engine.state.player
     player.current_mana = 50
     hp_before = player.current_hp
 
-    engine.execute_action("use_daowen", {"daowen_name": "血债", "x": 5, "target": "靶怪"})
+    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 5, "target": "靶怪"})
 
-    assert player.current_hp == hp_before - 10, "流血5 的代价应造成 10 点生命损失"
-    assert player._hp_loss_events[-1]["amount"] == 10
+    assert player.current_hp == hp_before - 50, "流血25（连击X=5）的代价应造成 50 点生命损失"
+    assert player._hp_loss_events[-1]["amount"] == 50
 
 
 def test_first_cup_doubles_raw_hp_loss():
@@ -317,11 +317,11 @@ def test_first_cup_doubling_visible_in_preview():
 
     def _preview(cup: bool, db_suffix: str):
         # 2026-10-03：原用例借【爆裂】反噬制造「自己失去的生命」，该道纹已删除；
-        # 改用【血债】：代价流血X（自己失去 X 点生命）+ 对目标造成 X 点伤害，
+        # 改用【连击】：代价流血X（自己失去 X 点生命）+ 对目标造成 X 点伤害，
         # 同一预演里同时可观察「打出的伤害」与「自己失去的生命」。
-        engine = _cup_engine(db_suffix, daowen="血债") if cup else _new_engine(db_suffix)
+        engine = _cup_engine(db_suffix, daowen="连击") if cup else _new_engine(db_suffix)
         if not cup:
-            _give_daowen(engine.state.player, "血债")
+            _give_daowen(engine.state.player, "连击")
             _start_with_enemy(engine, Entity(name="靶怪", entity_type="怪物",
                                              blood_limit=200, current_hp=200))
         monster = engine.state.enemies[0]
@@ -332,7 +332,7 @@ def test_first_cup_doubling_visible_in_preview():
         engine.state.shards = 0
         player_hp_before, monster_hp_before = player.current_hp, monster.current_hp
         preview = ActionPreview(engine).preview(
-            "use_daowen", {"daowen_name": "血债", "x": 3, "target": "靶怪"})
+            "use_daowen", {"daowen_name": "连击", "x": 3, "target": "靶怪"})
         diff = preview["diff"]
         assert preview["result"].get("error") is None
         # 预演零污染
@@ -345,5 +345,5 @@ def test_first_cup_doubling_visible_in_preview():
     cup_loss, cup_dealt = _preview(True, "pvw_cup")
 
     assert cup_dealt == plain_dealt, "打出去的伤害不变（翻的只是自己失去的生命）"
-    assert plain_loss == plain_dealt, "无遗物：流血代价 = 打出的伤害（血债X=3 → 各 3 点）"
+    assert plain_loss == plain_dealt, "无遗物：流血代价 = 打出的伤害（连击X=3 → 各 3 点）"
     assert cup_loss == plain_loss * 2, "持有【第一杯】：预演里的生命损失同样翻倍"

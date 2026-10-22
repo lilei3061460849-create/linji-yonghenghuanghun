@@ -149,7 +149,7 @@ class TriggerBus:
         listeners = self._listeners.get(event.event_type)
         if not listeners:
             return []   # 无订阅者：零开销快路径（保持在开帧之前）
-        # 触发也是结算的一部分：它可能产生新效果（失去生命→再生→血债→…），
+        # 触发也是结算的一部分：它可能产生新效果（失去生命→再生→连击→…），
         # 因此同样计入深度与预算，并可在 trace 里看到「谁订阅、谁生效」。
         with resolution_frame(combat, KIND_TRIGGER,
                                   getattr(event.event_type, "name", event.event_type)):

@@ -3,7 +3,7 @@
 需求里两条硬性约束在这里落地：
 
 * 不得一刀切禁止重复效果（`if effect in visited: return` 是禁止写法）——
-  失去生命→再生→血债→失去生命 是**合法**的，必须照常结算；
+  失去生命→再生→连击→失去生命 是**合法**的，必须照常结算；
 * 又必须能拦住 A→B→A→B… 与 A→B→C→A 这种无限套娃。
 本文件用「重复触发但不嵌套」vs「自触发导致嵌套」两种形态把这两条区分开：
 前者必须畅通，后者必须被保险丝截断，并且截断要**可诊断**（报错里带链）。
@@ -102,7 +102,7 @@ def test_legal_repeats_are_never_blocked_by_identity(tmp_path):
 
 
 def test_legal_chain_after_life_lost_may_repeat_the_same_effect(tmp_path):
-    """失去生命→再生→血债→失去生命 这种「回到同一状态」的链是合法的。
+    """失去生命→再生→连击→失去生命 这种「回到同一状态」的链是合法的。
 
     这里用一个显式推进的模型复现该形态：每次失去生命都触发 1 点回复，
     共 30 轮。判定它「合法」的依据不是效果名字，而是**每次都在消耗状态**
@@ -118,7 +118,7 @@ def test_legal_chain_after_life_lost_may_repeat_the_same_effect(tmp_path):
         combat.state.apply_heal(player, 1)
         return {"healed": 1}
 
-    with _TempMechanism(combat, "测试·血债再生回环", CombatEventType.DAMAGE_APPLIED, on_hp_lost):
+    with _TempMechanism(combat, "测试·连击再生回环", CombatEventType.DAMAGE_APPLIED, on_hp_lost):
         for _ in range(30):
             combat._apply_hostile_damage(player, 2, source=None)
 

@@ -173,9 +173,9 @@ def test_instant_step_opens_target_before_daowen_window():
     """主动施法的一步会开启敌方「目标发动道纹前」窗口（与 use_daowen 同口径）。"""
     state, combat, player, enemy = _state(mana=20)
     _give(player, "杀伐")
-    _give(enemy, "坠落", "杀伐", "血债")
+    _give(enemy, "坠落", "杀伐", "连击")
     enemy.mana_limit = enemy.current_mana = 20
-    enemy.spells.append(Spell(name="咎由自取", required_daowen=["坠落", "杀伐", "血债"],
+    enemy.spells.append(Spell(name="咎由自取", required_daowen=["坠落", "杀伐", "连击"],
                               trigger_condition="目标发动道纹前",
                               effect_flow="目标发动道纹前→发动坠落X于目标"))
     prepared = combat.prepare_daowen_trigger_spells(player)
@@ -199,9 +199,9 @@ def test_event_path_does_not_open_trigger_window():
     """事件型法术的步骤不开窗口：A→B 允许，B 不再为 A 开窗（防 A→B→A）。"""
     state, combat, player, enemy = _state(player_hp=60, mana=20)
     _give(player, "再生")
-    _give(enemy, "坠落", "杀伐", "血债")
+    _give(enemy, "坠落", "杀伐", "连击")
     enemy.mana_limit = enemy.current_mana = 20
-    enemy.spells.append(Spell(name="咎由自取", required_daowen=["坠落", "杀伐", "血债"],
+    enemy.spells.append(Spell(name="咎由自取", required_daowen=["坠落", "杀伐", "连击"],
                               trigger_condition="目标发动道纹前",
                               effect_flow="目标发动道纹前→发动坠落X于目标"))
     player.spells.append(Spell(name="自愈", required_daowen=["再生"],

@@ -1,0 +1,125 @@
+{
+  "player": {
+    "name": "林渊",
+    "entity_type": "轮回者",
+    "world_region": "龙心谷",
+    "world_x": 13,
+    "world_y": 13,
+    "is_neutral": false,
+    "preferences": [],
+    "blood_limit": 66,
+    "current_hp": 28,
+    "mana_limit": 4,
+    "current_mana": 4,
+    "speed_limit": 3,
+    "current_speed": 3,
+    "attack_count": 0,
+    "attack_power": 0,
+    "shield": 0,
+    "is_flying": false,
+    "is_alive": true,
+    "shards": 0,
+    "shards_peak": 33,
+    "is_debt_bound": false,
+    "mutation_count": 0,
+    "no_action_rounds": 0,
+    "no_damage_rounds": 0,
+    "lethal_counters": {
+      "迷失": [
+        0,
+        50
+      ],
+      "癌变": [
+        0,
+        132
+      ]
+    },
+    "lethal_progress": [
+      "迷失（0/50）",
+      "癌变（0/132）"
+    ],
+    "dao_wen": {
+      "血债": 0,
+      "庇护": 0
+    },
+    "daowen_cooldowns": {
+      "血债": {
+        "battles": 0,
+        "rounds": 0
+      },
+      "庇护": {
+        "battles": 0,
+        "rounds": 0
+      }
+    },
+    "spells": [],
+    "relics": [],
+    "status_effects": []
+  },
+  "friends": [],
+  "employees": [],
+  "relics": [
+    {
+      "name": "逆血龙鳞",
+      "effect": "本回合你每失去1点生命，造成的伤害+1",
+      "tags": []
+    }
+  ],
+  "resonance": {
+    "转换": 1
+  },
+  "shards": 33,
+  "shards_peak": 33,
+  "death_book_wisdom": [],
+  "death_book_legacies": [],
+  "attribute_points": 0,
+  "current_region": "龙心谷",
+  "artifacts_owned": [],
+  "first_embrace_traits": [],
+  "pending_first_embrace": false,
+  "chizu_names": [],
+  "dragon_nature": 0,
+  "dragon_traits": [],
+  "has_sacrifice_action": false,
+  "origin": {
+    "seed": 9,
+    "region": "龙心谷",
+    "rank": 3,
+    "generator": "sim/produce_open_world_winners.py",
+    "generator_version": 1,
+    "initial_attributes": {
+      "blood_points": 11,
+      "speed_points": 6,
+      "mana_points": 8
+    },
+    "initial_attribute_points": 25,
+    "world_turn": 24,
+    "battle_count": 3,
+    "ordinary_battle_count": 2,
+    "combat_event_count": 31,
+    "stop_reason": "final duel completed",
+    "final_duel_won": true,
+    "winner_name": "林渊",
+    "winner_runtime_id": "db6019d535a1436695204d3a934209b8",
+    "growth_actions": [
+      {
+        "kind": "daowen",
+        "name": "庇护",
+        "success": true,
+        "error": null
+      }
+    ],
+    "dao_wen_names": [
+      "庇护",
+      "血债"
+    ],
+    "available_predefined_spells": [
+      "后发制人"
+    ],
+    "custom_spells": [],
+    "friend_count": 0,
+    "employee_count": 0,
+    "relic_count": 1,
+    "shards_peak": 33
+  }
+}

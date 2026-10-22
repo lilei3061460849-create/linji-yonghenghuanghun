@@ -265,7 +265,7 @@ class DaowenEffectMixin:
                 result["effects"].append({"type": "damage", "target": target.name, **dmg})
                 if dmg.get("actual_damage", 0) > 0:
                     caster.damage_dealt_this_round += dmg["actual_damage"]
-        if name == "血债" or ("hits" in calc and calc.get("damage_per_hit") == 1 and "target_damage" not in calc):
+        if name == "连击" or ("hits" in calc and calc.get("damage_per_hit") == 1 and "target_damage" not in calc):
             hits = calc.get("hits", 1)
             if "hits" in wave_pieces:
                 # 波及：总命中次数平分，每个目标的份额每次1点伤害。

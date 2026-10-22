@@ -214,6 +214,7 @@ def _resolve_monster_turn_with_spells(engine):
             attacks.append({"hits": hits})
         choices.append({"actor_ref": actor["actor_ref"], "daowen": dao,
                         "attack_actions": attacks})
+    choices.sort(key=lambda choice: 0 if "dodge_targets" in (choice.get("daowen") or {}) else 1)
     result = engine.execute_action("resolve_monster_phase", {
         "token": prepared["result"]["token"], "choices": choices})
     if result.get("success"):
@@ -244,6 +245,7 @@ def _resolve_monster_turn_with_spells(engine):
             for _ in range(actor["base_attack_actions"])]
         fallback.append({"actor_ref": actor["actor_ref"], "daowen": dao,
                          "attack_actions": attacks})
+    fallback.sort(key=lambda choice: 0 if "dodge_targets" in (choice.get("daowen") or {}) else 1)
     return engine.execute_action("resolve_monster_phase", {
         "token": prepared["result"]["token"], "choices": fallback})
 

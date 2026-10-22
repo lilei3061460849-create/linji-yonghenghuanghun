@@ -57,7 +57,7 @@ PREVIEW_CASES = [
     ("use_daowen", {"daowen_name": "再生", "x": 1, "target": "贾凡"}),
     ("use_daowen", {"daowen_name": "冲击", "x": 1}),
     ("use_daowen", {"daowen_name": "杀伐", "x": 1}),
-    ("use_daowen", {"daowen_name": "血债", "x": 1}),
+    ("use_daowen", {"daowen_name": "连击", "x": 1}),
     ("use_daowen", {"daowen_name": "不存在"}),          # 未知道纹
     ("use_daowen", {"daowen_name": "庇护", "x": 9999}),  # 代价不足
     ("use_daowen", {"daowen_name": "杀伐", "x": 0}),     # X 非法
@@ -188,7 +188,7 @@ def test_repeated_previews_do_not_accumulate_state(engine):
 def test_random_preview_sequences_leave_no_trace(engine):
     """随机组合预演（含非法参数）——组合多了也不许留下痕迹。"""
     rng = random.Random(20260920)
-    names = ["庇护", "再生", "冲击", "杀伐", "血债", "不存在", "点金"]
+    names = ["庇护", "再生", "冲击", "杀伐", "连击", "不存在", "点金"]
     before = snapshot_runtime_state(engine)
     preview = ActionPreview(engine)
     for _ in range(60):

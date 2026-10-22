@@ -46,7 +46,7 @@ def _learn(e, name):
 def test_common_daowen_always_learnable():
     """正常路径：通用核心道纹不受副本门禁限制"""
     e = _engine("龙心谷")
-    for dw in ("庇护", "再生", "波及", "血债"):
+    for dw in ("庇护", "再生", "波及", "连击"):
         assert _learn(e, dw)["success"], f"通用道纹{dw}应可学习"
 
 

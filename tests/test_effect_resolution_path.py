@@ -1,6 +1,6 @@
 """效果结算入口的唯一性契约（Phase 4）。
 
-需求原话：「杀伐/再生/血债/庇护/死亡/复活/分裂/进化/三相 全部走同一条路径，
+需求原话：「杀伐/再生/连击/庇护/死亡/复活/分裂/进化/三相 全部走同一条路径，
 不得绕开结算入口做状态变更」。
 
 本文件把这个要求变成可执行的断言，而不是靠命名约定：
@@ -34,7 +34,7 @@ from tests.preview_support import (                                     # noqa: 
 NAMED_EFFECTS = {
     "杀伐": KIND_DAMAGE,
     "再生": KIND_HEAL,
-    "血债": KIND_COST,          # 血债以「失去生命」结算（代价/失血路径）
+    "连击": KIND_COST,          # 连击以「失去生命」结算（代价/失血路径）
     "庇护": KIND_EFFECT,        # 护盾来自道纹效果帧
     "死亡": KIND_DEATH,
     "分裂": KIND_SPLIT,
@@ -78,9 +78,9 @@ def _alive_enemy(engine):
 
 
 def _cast(engine, name, target=None, **params):
-    """发一次道纹；未指定目标时自动选第一个存活敌人（杀伐/血债需要目标）。"""
+    """发一次道纹；未指定目标时自动选第一个存活敌人（杀伐/连击需要目标）。"""
     if target is None:
-        target = _alive_enemy(engine) if name in ("杀伐", "血债", "坠落") else "贾凡"
+        target = _alive_enemy(engine) if name in ("杀伐", "连击", "坠落") else "贾凡"
     payload = {"daowen_name": name, "x": params.pop("x", 1), "target": target}
     payload.update(params)
     return engine.execute_action("use_daowen", payload)
@@ -111,7 +111,7 @@ def test_every_effect_entry_opens_a_frame_before_touching_state():
     assert "resolution_frame" in events.resolve_option_effect.__code__.co_names
 
 
-@pytest.mark.parametrize("effect", ["杀伐", "再生", "庇护", "血债"])
+@pytest.mark.parametrize("effect", ["杀伐", "再生", "庇护", "连击"])
 def test_named_daowen_effects_resolve_inside_a_frame(tmp_path, effect):
     engine = build_battle_engine(tmp_path, name=f"eff_{effect}")
     ctx = engine.combat.resolution

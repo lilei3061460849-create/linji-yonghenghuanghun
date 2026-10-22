@@ -115,6 +115,25 @@ def test_second_candidate_triggers_duel_with_correct_first_mover():
     _cleanup(path)
 
 
+def test_legacy_truth_eye_in_sealed_candidate_migrates_to_opponent_daowen():
+    """旧封存候选中的真理眼遗物应迁为擂主的真理道纹。"""
+    path = "data/test_duel_truth_eye_legacy.json"
+    _cleanup(path)
+    sealed = _new_candidate("truth_eye_legacy_sealed", path, name="旧擂主")
+    sealed.state.grant_relic("真理眼", "旧版真理眼效果", tag="血族")
+    _finish_battle_7(sealed)
+
+    challenger = _new_candidate("truth_eye_legacy_challenger", path, name="新挑战者")
+    result = _finish_battle_7(challenger)
+    assert result["result"]["final_crown"]["outcome"] == "duel_start"
+    opponent = next(entity for entity in challenger.state.enemies
+                    if entity.entity_type == "轮回者")
+    assert "真理" in opponent.dao_wen
+    assert all(relic.name != "真理眼" for relic in challenger.state.opponent_relics)
+    assert "真理" not in challenger.state.opponent_first_embrace_traits
+    _cleanup(path)
+
+
 def test_duel_includes_friends_and_employees_on_both_sides():
     """正常路径：死斗带队伍，双方的朋友/员工都应出现在各自阵营里"""
     path = "data/test_duel_teams.json"

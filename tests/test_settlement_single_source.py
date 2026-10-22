@@ -1,20 +1,19 @@
-"""战斗结算「单一真源」契约（2026-10-08 引擎底层结构审查配套）。
+"""战斗结算「单一真源」契约。
 
 目标：同一条规则不在 AI / 战斗执行 / 战报 / 预览 / 测试里各实现一遍。
 
-本文件锁死八条契约（对应用户点名的八项）：
-
- 1. 普通伤害（杀伐 → 生命变化）：返回里的数值 == 实体真实状态 == 战报渲染的数；
- 2. 多层触发：一次失血链上每层各结算一次，且各层记录之和能完整解释最终状态；
- 3. 闪避：整个攻击 / 道纹 / 法术解析失败（代价已付、效果不落地）；
- 4. 招架：用**结算当时**的生命算减伤，不是声明时的快照；
- 5. 格挡与招架完全区分（招架先卸力、格挡后吸收；代价两者都不吃）；
+ 1. 普通伤害（杀伐 → 生命变化）：返回数值 == 实体真实状态 == 战报渲染数；
+ 2. 多层触发：一次失血链上每层各结算一次，记录完整解释最终状态；
+ 3. 闪避：攻击 / 道纹 / 法术的整次判定失效，代价已付、效果不落地；
+ 4. 招架只在攻击的 resolve_attack 逐击结算；真刀免疫该击并返还速度，详见
+    tests/test_blade_combat_rework.py；通用伤害入口不再执行招架调整；
+ 5. 格挡与数值型代价分离，代价不进入格挡或攻击防御通道；
  6. 残韵：A 道纹 → 转换 → B 道纹，且同名只保留一份；
- 7. 自定义法术的一步与普通道纹同走核心规则（同 X 同数值）；
- 8. 结构护栏：招架公式与法力支付不得在多处各写一遍。
+ 7. 自定义法术的一步与普通道纹共用核心规则（同 X 同数值）；
+ 8. 结构护栏：法力支付与道纹效果入口不得在多处重复实现。
 
-预览 ↔ 正式执行的等价契约在 tests/test_action_preview_parity.py（既有文件，
-本次只往它的用例表补 cast / use_resonance / declare_parry / resolve_attack）。
+预览 ↔ 正式执行的等价契约在 tests/test_action_preview_parity.py；其中的
+`declare_parry` 样例只验证旧兼容入口会被一致拒绝。
 """
 from __future__ import annotations
 
@@ -73,7 +72,7 @@ def _give(ent: Entity, *names: str) -> None:
 
 def _arena(bl: int = 300, hp: int = 300, mana: int = 20, shield: int = 0,
            relics=()) -> tuple[GameState, CombatEngine, Entity, Entity]:
-    """不跑完整开局的最小战斗场，用于规则层断言（与 test_parry_and_chenglu 同款）。"""
+    """不跑完整开局的最小战斗场，用于规则层断言。"""
     state = GameState()
     state.rng_seed = 1
     dice = DiceEngine(seed=1)
@@ -90,7 +89,7 @@ def _arena(bl: int = 300, hp: int = 300, mana: int = 20, shield: int = 0,
 
 
 def _bleed_cost(combat: CombatEngine, ent: Entity, amount: int) -> None:
-    """付一笔【流血】代价（代价通道：不进招架、不进格挡）。"""
+    """付一笔【流血】数值代价（不进入攻击防御或格挡通道）。"""
     combat.pay_numeric_cost(ent, "流血", amount, cost_context={
         "timing": "player_action", "source": "透支", "source_type": "daowen",
         "actor": ent, "target": ent, "mechanic": "cost",
@@ -101,12 +100,7 @@ def _bleed_cost(combat: CombatEngine, ent: Entity, amount: int) -> None:
 # 1. 普通伤害：杀伐 → 生命变化
 # ===========================================================================
 
-# 2026-10-11 清理：本文件原有 6 条「回合姿态式招架」测试
-# （10% 当前生命减免 / 可挡次数=当前生命 / declare_parry 声明快照）。
-# 该口径已废：招架改为在 resolve_attack 的对应 hit 上逐击提交 parry=true，
-# 真刀免疫并返还 1 点速度、空刀不返还——守护在 tests/test_blade_combat_rework.py。
-# 与之配套的 engine/combat.py::parry_reduction_for / parry_uses_for 两个共享函数
-# 在全引擎已无任何调用点，同批删除（留着只会被误当作现行规则的真源）。
+# 逐击攻击招架由 tests/test_blade_combat_rework.py 锁定；本文件验证通用伤害路径。
 
 def test_plain_damage_numbers_match_the_state_and_the_report(tmp_path):
     """正常路径：杀伐X 打出的伤害，返回/实体/战报三处必须是同一组数。
@@ -325,15 +319,15 @@ def test_dodge_needs_speed(tmp_path):
 
 
 # ===========================================================================
-# 4. 招架：结算当时的生命
+# 4. 逐击攻击招架的专门覆盖见 tests/test_blade_combat_rework.py。
 # ===========================================================================
 
 # ===========================================================================
-# 5. 格挡 ≠ 招架
+# 5. 格挡 ≠ 攻击招架
 # ===========================================================================
 
-def test_shield_absorbs_alone_without_parry():
-    """对照：没声明招架时，格挡原样吸收，不受招架公式影响。"""
+def test_generic_damage_uses_shield_without_attack_parry():
+    """普通伤害走格挡通道；逐击攻击招架只在 resolve_attack 中处理。"""
     _, combat, player, enemy = _arena(bl=300, hp=300, shield=10)
     detail = combat._apply_hostile_damage(player, 50, source=enemy)
     assert detail["shield_absorbed"] == 10
@@ -341,18 +335,14 @@ def test_shield_absorbs_alone_without_parry():
     assert player.current_hp == 260
 
 
-def test_neither_parry_nor_shield_touches_a_cost():
-    """边界：【代价】既不吃招架减免，也不被格挡吸收——两条通道都要独立成立。"""
+def test_numeric_cost_bypasses_shield_and_attack_resolution():
+    """边界：【代价】经独立支付通道，不消耗格挡，也不走逐击攻击结算。"""
     _, combat, player, _ = _arena(bl=300, hp=300, shield=25)
-    player.parrying_this_round = True
-    player.parry_uses_remaining_this_round = 999
-    uses_before = player.parry_uses_remaining_this_round
 
     _bleed_cost(combat, player, 12)
 
-    assert player.current_hp == 288, "代价全额支付，不被招架减免"
+    assert player.current_hp == 288, "代价全额支付"
     assert player.shield == 25, "格挡不吸收代价"
-    assert player.parry_uses_remaining_this_round == uses_before, "代价不消耗招架次数"
 
 
 # ===========================================================================
@@ -484,7 +474,7 @@ def test_spell_step_and_plain_daowen_share_the_mana_payment_rule(tmp_path):
 
 
 # ===========================================================================
-# 8. 结构护栏：规则不得在多处各写一遍
+# 8. 结构护栏：法力支付与道纹入口不得重复实现
 # ===========================================================================
 
 def _read(rel_path: str) -> str:

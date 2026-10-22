@@ -25,6 +25,7 @@ from engine.gamedata import (  # noqa: E402
     REGION_TIERS,
     SHAFA_LOOP_DAOWEN,
     UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN,
+    FIRST_EMBRACE_DAOWEN,
 )
 from engine.dungeons import load_dungeon_documents  # noqa: E402
 
@@ -132,6 +133,8 @@ for n in MONSTER_TRANSFORM_DAOWEN:
 for region in REGION_EXCLUSIVE_DAOWEN:
     for n in region_daowen_order(region):
         CATEGORY[n] = region
+for n in FIRST_EMBRACE_DAOWEN:
+    CATEGORY[n] = "first_embrace"
 for n, region in UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.items():
     CATEGORY[n] = "unimpl"
 
@@ -148,6 +151,7 @@ NOTES = {
     # → 即时发动+代价【衰老】X×10Y → 2026-10-08 用户令改为代价【流血】X×10Y。
     "分裂": "即时发动（不绑【命零】）；代价【流血】X×10Y 付的是当前生命，付不起不能发动。复制体无【分裂】道纹、无[碎片]奖励。",
     "招魂": "唤回者为[临时朋友]，[战终]消失。",
+    "真理": "初拥之夜选项5授予的血族专属道纹，固定X=1；需指定目标与陈述，真伪由DM裁定，目标不能言明真理时无法开口。冷却2场战斗。",
     "原初": "怪物困境时发动【原初X】可临时借用一种自身未持有的原始怪物道纹（仅借用，不获得）。",
 }
 
@@ -173,7 +177,7 @@ A(f"本文件是**当前版本全部道纹（{len(DaoWenEngine._registry)}种）
 A(f"杀伐闭环（通用核心）{len(SHAFA_LOOP_DAOWEN)} ｜ 原始怪物道纹 {len(ORIGINAL_MONSTER_DAOWEN)} ｜ "
   f"怪物转化道纹 {len(MONSTER_TRANSFORM_DAOWEN)} ｜ 副本专属 "
   f"{'/'.join(str(len(region_daowen_order(r))) for r in ('扭曲都市', '罪孽都市', '龙心谷', '乱葬岗'))} ｜ "
-  f"未实现 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。")
+  f"初拥专属 {len(FIRST_EMBRACE_DAOWEN)} ｜ 未实现 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。")
 A("")
 A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余道纹取 `engine/daowen.py` `calculate_*` docstring。公式以实际引擎结算为准。")
 A("- **归属与残韵闭环**：`engine/gamedata.py` + `engine/daowen.py`（`CLOSED_LOOPS`）；与规则正文的闭环图一致。\n"
@@ -199,6 +203,7 @@ A(f"- [原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）](#原始怪物道�
 A(f"- [怪物转化道纹（{len(MONSTER_TRANSFORM_DAOWEN)}）](#怪物转化道纹{len(MONSTER_TRANSFORM_DAOWEN)})")
 for _r in ("扭曲都市", "罪孽都市", "龙心谷", "乱葬岗"):
     A(f"- [{_r}专属（{len(region_daowen_order(_r))}）](#{_r}专属{len(region_daowen_order(_r))})")
+A(f"- [初拥专属（{len(FIRST_EMBRACE_DAOWEN)}）](#初拥专属{len(FIRST_EMBRACE_DAOWEN)})")
 A("- [未实现（荒疫古城·1）](#未实现荒疫古城1)")
 A("- [道纹归属与学习规则](#道纹归属与学习规则)")
 A("")
@@ -213,13 +218,14 @@ A("| --- | --- | --- | --- | --- | --- |")
 CAT_LABEL = {
     "shaifa": "通用核心", "original": "原始", "transform": "转化",
     "扭曲都市": "扭曲专属", "罪孽都市": "罪孽专属", "龙心谷": "龙心专属",
-    "乱葬岗": "乱葬专属", "unimpl": "未实现",
+    "乱葬岗": "乱葬专属", "first_embrace": "初拥专属", "unimpl": "未实现",
 }
 for name in sorted(DaoWenEngine._registry, key=lambda n: (list(CATEGORY).index(n), n)):
     pass
 order = (list(SHAFA_LOOP_DAOWEN) + sorted(ORIGINAL_MONSTER_DAOWEN)
          + sorted(MONSTER_TRANSFORM_DAOWEN)
          + [n for r in ("扭曲都市", "罪孽都市", "龙心谷", "乱葬岗") for n in region_daowen_order(r)]
+         + sorted(FIRST_EMBRACE_DAOWEN)
          + list(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN))
 for name in order:
     out = "、".join(out_edges[name]) if out_edges[name] else "—"
@@ -290,6 +296,9 @@ for region in ("扭曲都市", "罪孽都市", "龙心谷", "乱葬岗"):
                         f"转化获得至少一种本副本道纹，此后才可学习本副本其它专属道纹；其它副本专属道纹不可学习。"],
             loop=f"{region}闭环", loop_title=region)
 
+section(f"初拥专属（{len(FIRST_EMBRACE_DAOWEN)}）", sorted(FIRST_EMBRACE_DAOWEN),
+        note_lines=["初拥之夜专属道纹：仅由对应初拥选项授予，不可通过局外学习、【典当】发现或残韵获得。"])
+
 section("未实现（荒疫古城·1）", list(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN),
         note_lines=["所属副本**未接入运行时**（规则草案，见 `副本/荒疫古城.md`）：计算已实现并注册，"
                     "但局外学习按专属道纹拒绝，不进入当前事件池/怪物池。荒疫古城草案闭环中还含"
@@ -303,9 +312,10 @@ A("1. **杀伐闭环（通用核心）**：开局发现初始道纹的来源；�
 A("2. **副本专属**：学习门槛=先经残韵从本副本怪物转化获得至少一种；其它副本专属不可学。")
 A("3. **怪物转化**：只能由自身已持有道纹经残韵变化获得（施法者同时获得）；原始⇄转化双向，反向可把转化道纹变回原始道纹。")
 A("4. **原始怪物**：不再是人类禁区——可经残韵（含转化道纹反向）永久获得，局外【学习】亦可习得；怪物发动按条目支付代价（全力／减速／疯狂异变5X、必中异变X，冷却类X≤1）；可经【原初X】临时借用。")
-A("5. **角色道纹唯一**：同名道纹不重复存在；通过残韵获得的道纹X按自由控X规则自定义。")
-A("6. **道纹只在战斗中发动**，唯一局外例外为【消灾】。")
-A("7. **自由控X**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】的X还受合法目标数封顶"
+A("5. **初拥专属**：【真理】仅由初拥之夜选项5授予，不可通过局外学习、【典当】发现或残韵获得。")
+A("6. **角色道纹唯一**：同名道纹不重复存在；通过残韵获得的道纹X按自由控X规则自定义。")
+A("7. **道纹只在战斗中发动**，唯一局外例外为【消灾】。")
+A("8. **自由控X**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】的X还受合法目标数封顶"
   "（目标不足面板X时按目标数自适应降X，X=1 合法——单目标全值；目标数为0时不可发动；"
   "玩家schema的X上限按目标数封顶）。")
 A("")

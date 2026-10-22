@@ -218,8 +218,8 @@ def test_death_attribution_marks_self_paid_cost():
 
     e = _E()
     assert death_attribution_note(e, "守擂主将") == "守擂主将阵亡"  # 无上下文
-    e._death_ctx = {"actor": "闻人", "source": "血债", "tags": ["active_payment"]}
-    assert "自付【血债】代价命零" in death_attribution_note(e, "守擂主将")
+    e._death_ctx = {"actor": "闻人", "source": "连击", "tags": ["active_payment"]}
+    assert "自付【连击】代价命零" in death_attribution_note(e, "守擂主将")
     assert "非对手击杀" in death_attribution_note(e, "守擂主将")
     e._death_ctx = {"actor": "司空", "source": "杀伐", "tags": ["daowen"]}
     assert death_attribution_note(e, "守擂主将") == "守擂主将阵亡"
@@ -229,24 +229,24 @@ def test_death_attribution_marks_self_paid_cost():
 
 
 def test_bleed_cost_death_is_tagged_self_inflicted():
-    """引擎侧：付【血债】流血代价致死时，死亡上下文的 actor 必须是死者本人。"""
+    """引擎侧：付【连击】流血代价致死时，死亡上下文的 actor 必须是死者本人。"""
     engine = _engine("bleed_death")
     p = engine.state.player
-    p.dao_wen["血债"] = DaoWenInstance(
-        DaoWen(name="血债", formula="血债X", cost_type="流血",
+    p.dao_wen["连击"] = DaoWenInstance(
+        DaoWen(name="连击", formula="连击X", cost_type="流血",
                cost_formula="X", effect_formula=""), x_value=0)
     engine.state.enemies.append(Entity(name="靶", entity_type="怪物",
                                        blood_limit=50, current_hp=50))
     engine.execute_action("round_start", {})
-    p.current_hp = 1                       # 只够付一次流血，付完即命零
+    p.current_hp = 5                       # 只够付一次流血（连击1流血价5），付完即命零
     r = engine.execute_action("use_daowen", {
-        "daowen_name": "血债", "x": 1, "target_ref": "enemy:0",
+        "daowen_name": "连击", "x": 1, "target_ref": "enemy:0",
         "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
     })
     assert r["success"] is True, r.get("error")
-    assert not p.is_alive, "1 血付流血 1 应命零"
+    assert not p.is_alive, "5 血付流血 5 应命零"
     ctx = getattr(p, "_death_ctx", None) or {}
-    assert ctx.get("source") == "血债", ctx
+    assert ctx.get("source") == "连击", ctx
     assert ctx.get("actor") in (None, "", p.name), f"自杀必须是自己动手: {ctx}"
     assert "active_payment" in (ctx.get("tags") or []), ctx
 

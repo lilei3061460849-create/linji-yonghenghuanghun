@@ -31,9 +31,9 @@ from engine.resolution import ResolutionContext                      # noqa: E40
 from sim.build_learner import play                                   # noqa: E402
 
 DAOWEN_SETS = [
-    ["杀伐", "血债", "再生", "庇护", "透支"],
+    ["杀伐", "连击", "再生", "庇护", "透支"],
     ["杀伐", "坠落", "再生", "分裂", "压制"],
-    ["血债", "再生", "庇护", "透支", "坠落"],
+    ["连击", "再生", "庇护", "透支", "坠落"],
 ]
 REGIONS = ["龙心谷", "坠落", "罪孽都市", "扭曲都市"]
 

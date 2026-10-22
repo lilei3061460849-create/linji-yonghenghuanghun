@@ -1,6 +1,6 @@
 """
 真实手操推演引擎与战报生成器：
-1. 贾希希（冠冕候选人1）：通过【残韵】战内窃取怪物专属道纹（活血、加害、裂变、逆鳞等），构建【加害+裂变+杀伐/血债】与【逆鳞+活血】专属Combo，通关7场并封存入库。
+1. 贾希希（冠冕候选人1）：通过【残韵】战内窃取怪物专属道纹（活血、加害、裂变、逆鳞等），构建【加害+裂变+杀伐/连击】与【逆鳞+活血】专属Combo，通关7场并封存入库。
 2. 林渊（挑战者2）：同样通过战内残韵窃取、专属道纹构建、法术反应联动通关7场，触发【最终的冠冕】死斗。
 3. 第8场死斗：双雄携带专属道纹（加害/裂变/逆鳞/龙鳞/杀伐/庇护/再生）与法术交替对决，精准闪避，生成完整合规的《报告.md》。
 """
@@ -143,8 +143,8 @@ def run_full_handplay_session(seed=42):
                 e1.execute_action("pre_battle_action", {"sub_action": "领悟", "resonance_type": "转换"})
             elif e1.state.resonance.get("反转", 0) < 2:
                 e1.execute_action("pre_battle_action", {"sub_action": "领悟", "resonance_type": "反转"})
-            elif "加害" in p1.dao_wen and "裂变" in p1.dao_wen and "血债" not in p1.dao_wen and e1.state.shards >= 10:
-                e1.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "血债"})
+            elif "加害" in p1.dao_wen and "裂变" in p1.dao_wen and "连击" not in p1.dao_wen and e1.state.shards >= 10:
+                e1.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "连击"})
             else:
                 tier, cost, pts = best_cultivate_tier(e1.state.shards)
                 spd_pts = 1 if (p1.speed_limit < 12 and pts >= 2) else 0
@@ -179,8 +179,8 @@ def run_full_handplay_session(seed=42):
                     e1.execute_action("use_resonance", {
                         "source_daowen": "伤痕", "resonance_type": "转换", "target_ref": f"enemy:{idx}"
                     })
-                # 4. 窃取固执 -> 血债
-                if "固执" in m.dao_wen and "血债" not in p1.dao_wen and e1.state.resonance.get("反转", 0) > 0:
+                # 4. 窃取固执 -> 连击
+                if "固执" in m.dao_wen and "连击" not in p1.dao_wen and e1.state.resonance.get("反转", 0) > 0:
                     e1.execute_action("use_resonance", {
                         "source_daowen": "固执", "resonance_type": "反转", "target_ref": f"enemy:{idx}"
                     })
@@ -214,9 +214,9 @@ def run_full_handplay_session(seed=42):
                     e1.execute_action("use_daowen", {"daowen_name": "裂变", "x": 2, "target_ref": f"enemy:{t_idx}"})
                     continue
 
-                # 专属Combo 3：血债破固执 / 杀伐收割
-                if target.has_status("固执") and "血债" in p1.dao_wen and p1.current_hp > 15:
-                    e1.execute_action("use_daowen", {"daowen_name": "血债", "x": 3, "target_ref": f"enemy:{t_idx}"})
+                # 专属Combo 3：连击破固执 / 杀伐收割
+                if target.has_status("固执") and "连击" in p1.dao_wen and p1.current_hp > 15:
+                    e1.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target_ref": f"enemy:{t_idx}"})
                 elif p1.current_mana > 0 and "杀伐" in p1.dao_wen:
                     rem = max(1, p1.action_count - p1.actions_used_this_round)
                     spend = max(1, p1.current_mana // rem)
@@ -298,10 +298,10 @@ def run_full_handplay_session(seed=42):
                 r = e.execute_action("pre_battle_action", {"sub_action": "领悟", "resonance_type": "反转"})
                 assert r["success"], r
                 pre_texts.append("领悟·残韵 → 获得【残韵·反转】")
-            elif "加害" in p.dao_wen and "裂变" in p.dao_wen and "血债" not in p.dao_wen and e.state.shards >= 10:
-                r = e.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "血债"})
+            elif "加害" in p.dao_wen and "裂变" in p.dao_wen and "连击" not in p.dao_wen and e.state.shards >= 10:
+                r = e.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "连击"})
                 assert r["success"], r
-                pre_texts.append("学习·道纹 → 习得【血债】（破除固执机制）")
+                pre_texts.append("学习·道纹 → 习得【连击】（破除固执机制）")
             else:
                 tier, cost, pts = best_cultivate_tier(e.state.shards)
                 spd_pts = 1 if (p.speed_limit < 12 and pts >= 2) else 0
@@ -385,13 +385,13 @@ def run_full_handplay_session(seed=42):
                     })
                     if res.get("success"):
                         b_lines.append(f"  [残韵插队] 林渊发动【残韵·转换】作用于{m.name}的【伤痕】→ 转化为【加害】（林渊永久习得专属道纹【加害】）")
-                # 窃取固执 -> 血债
-                if "固执" in m.dao_wen and "血债" not in p.dao_wen and e.state.resonance.get("反转", 0) > 0:
+                # 窃取固执 -> 连击
+                if "固执" in m.dao_wen and "连击" not in p.dao_wen and e.state.resonance.get("反转", 0) > 0:
                     res = e.execute_action("use_resonance", {
                         "source_daowen": "固执", "resonance_type": "反转", "target_ref": f"enemy:{idx}"
                     })
                     if res.get("success"):
-                        b_lines.append(f"  [残韵插队] 林渊发动【残韵·反转】作用于{m.name}的【固执】→ 逆转为【血债】（林渊永久习得【血债】）")
+                        b_lines.append(f"  [残韵插队] 林渊发动【残韵·反转】作用于{m.name}的【固执】→ 逆转为【连击】（林渊永久习得【连击】）")
 
             # ---------------------------------------------------------
             # 玩家行动阶段手操
@@ -440,11 +440,11 @@ def run_full_handplay_session(seed=42):
                     b_lines.append(f"  → 目标{target.name} 获得状态【裂变2】（受到伤害分2次结算，持续∞）")
                     continue
 
-                # 5. 专属Combo 3：血债穿透固执 / 满额杀伐
-                if target.has_status("固执") and "血债" in p.dao_wen and p.current_hp > 15:
-                    r = e.execute_action("use_daowen", {"daowen_name": "血债", "x": 3, "target_ref": f"enemy:{t_idx}"})
+                # 5. 专属Combo 3：连击穿透固执 / 满额杀伐
+                if target.has_status("固执") and "连击" in p.dao_wen and p.current_hp > 15:
+                    r = e.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target_ref": f"enemy:{t_idx}"})
                     assert r["success"], r
-                    b_lines.append(f"出手{action_idx}（林渊）：发动【血债X=3】→支付代价【流血3】（生命 {p.current_hp+3}→{p.current_hp}）")
+                    b_lines.append(f"出手{action_idx}（林渊）：发动【连击X=3】→支付代价【流血3】（生命 {p.current_hp+3}→{p.current_hp}）")
                     for h_i in range(3):
                         b_lines.append(f"  → 目标{target.name}·第{h_i+1}/3击：造成1点伤害（生命 {target.current_hp+3-h_i}→{target.current_hp+2-h_i}）")
                 elif p.current_mana > 0 and "杀伐" in p.dao_wen:
@@ -577,8 +577,8 @@ def run_full_handplay_session(seed=42):
     b8_lines.append("[战始]（第8场·最终的冠冕）")
     b8_lines.append("战斗类型：最终死斗（交替出手制）")
     b8_lines.append("对阵双方：挑战者「林渊」 VS 封存胜者「贾希希」")
-    b8_lines.append(f"敌方面板：贾希希（{p1.blood_limit}/{p1.mana_limit}/{p1.speed_limit}，出手{p1.action_count}次）｜道纹：加害、裂变、血债、杀伐、庇护、再生")
-    b8_lines.append(f"我方面板：林渊（{p.blood_limit}/{p.mana_limit}/{p.speed_limit}，出手{p.action_count}次）｜道纹：加害、裂变、血债、杀伐、庇护、再生")
+    b8_lines.append(f"敌方面板：贾希希（{p1.blood_limit}/{p1.mana_limit}/{p1.speed_limit}，出手{p1.action_count}次）｜道纹：加害、裂变、连击、杀伐、庇护、再生")
+    b8_lines.append(f"我方面板：林渊（{p.blood_limit}/{p.mana_limit}/{p.speed_limit}，出手{p.action_count}次）｜道纹：加害、裂变、连击、杀伐、庇护、再生")
     b8_lines.append("[战始]效果结算：")
     b8_lines.append("  无")
     b8_lines.append("")
@@ -682,7 +682,7 @@ def run_full_handplay_session(seed=42):
 >
 > 格式遵循 推演规范《六、战斗推演格式》与 AI 知识库七步原子时序切片管道：逐回合、逐次出手，禁止概括、跳过或合并结算。本局全程通过 GameEngine.execute_action 逐步手操点选，数值逐条取自引擎真实返回值（无推断、无口胡）。
 >
-> 来源：2026-08-17 真实一阶全流程手操实测。新轮回者林渊（42[血限]/20[法限]/8[速限]，开局遗物·无所求）进入龙心谷（一阶），在战内通过【残韵】实时窃取敌方专属道纹【裂变】、【加害】、【血债】，配合高额法限与多段穿透斩获前 7 场全胜，并在第 8 场最终死斗中正面击败封存胜者贾希希，登顶王座！
+> 来源：2026-08-17 真实一阶全流程手操实测。新轮回者林渊（42[血限]/20[法限]/8[速限]，开局遗物·无所求）进入龙心谷（一阶），在战内通过【残韵】实时窃取敌方专属道纹【裂变】、【加害】、【连击】，配合高额法限与多段穿透斩获前 7 场全胜，并在第 8 场最终死斗中正面击败封存胜者贾希希，登顶王座！
 >
 > 共8场。结果：8战8胜（含第8场最终死斗击败封存胜者贾希希），林渊登顶【最终的冠冕】完整封存！
 

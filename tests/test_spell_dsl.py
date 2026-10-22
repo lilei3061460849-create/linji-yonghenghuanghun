@@ -152,7 +152,7 @@ def test_condition_rejects_unclosed_parenthesis():
 # 三、效果流程：目标声明 / 条件分支 / 循环
 # ========================================================================
 
-KNOWN = {"杀伐", "再生", "透支", "庇护", "血债", "坠落"}
+KNOWN = {"杀伐", "再生", "透支", "庇护", "连击", "坠落"}
 
 
 def test_effect_flow_requires_explicit_target():
@@ -186,14 +186,14 @@ def test_effect_flow_rejects_unknown_target_word():
 
 def test_effect_flow_loop_marker():
     """循环标记产出 LoopStep：控制流归执行器，不再预展开。"""
-    steps, loop = parse_effect_flow("发动血债X于攻击者→循环直到法力耗尽", KNOWN)
+    steps, loop = parse_effect_flow("发动连击X于攻击者→循环直到法力耗尽", KNOWN)
     assert loop is True
-    assert steps == [LoopStep(body=(ActionStep("血债", "attacker"),), max_iterations=None)]
+    assert steps == [LoopStep(body=(ActionStep("连击", "attacker"),), max_iterations=None)]
 
-    steps2, loop2 = parse_effect_flow("发动再生X于自身→发动血债X于攻击者→循环", KNOWN)
+    steps2, loop2 = parse_effect_flow("发动再生X于自身→发动连击X于攻击者→循环", KNOWN)
     assert loop2 is True
     assert steps2 == [LoopStep(body=(ActionStep("再生", "self"),
-                                     ActionStep("血债", "attacker")), max_iterations=None)]
+                                     ActionStep("连击", "attacker")), max_iterations=None)]
 
 
 def test_effect_flow_fixed_count_loop():
@@ -207,16 +207,16 @@ def test_effect_flow_nested_conditional_branch():
     """条件分支可嵌套，且执行顺序按深度优先展开成决策槽位。"""
     steps, loop = parse_effect_flow(
         "若自身 生命 小于 50 则（若自身 法力 大于 2 则 发动杀伐X于攻击者 "
-        "否则 发动再生X于自身）否则 发动血债X于攻击者", KNOWN)
+        "否则 发动再生X于自身）否则 发动连击X于攻击者", KNOWN)
     branch = steps[0]
     assert isinstance(branch, IfStep)
     inner = branch.then_steps[0]
     assert isinstance(inner, IfStep)
     assert inner.then_steps == (ActionStep("杀伐", "attacker"),)
     assert inner.else_steps == (ActionStep("再生", "self"),)
-    assert branch.else_steps == (ActionStep("血债", "attacker"),)
+    assert branch.else_steps == (ActionStep("连击", "attacker"),)
     indices = [(i, s.daowen) for i, s in iter_action_steps(steps)]
-    assert indices == [(0, "杀伐"), (1, "再生"), (2, "血债")]
+    assert indices == [(0, "杀伐"), (1, "再生"), (2, "连击")]
     assert count_action_steps(steps) == 3
 
 

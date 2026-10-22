@@ -103,7 +103,7 @@ def battle_start_relic_choices(engine) -> dict:
     （2026-10-13 用户令：【三相残韵盘】遗物删除，决策分支一并移除。）
     """
     active = {r.name for r in engine.state.relics
-              if engine.state.sealed_relics.get(r.name, 0) <= 0}
+              if getattr(r, "enabled", True) and engine.state.sealed_relics.get(r.name, 0) <= 0}
     p = engine.state.player
     out: dict = {}
     if "猩红果实" in active and p is not None:
@@ -131,7 +131,7 @@ def round_start_relic_choices(engine) -> dict:
     """
     choices: dict = {}
     active = {r.name for r in engine.state.relics
-              if engine.state.sealed_relics.get(r.name, 0) <= 0}
+              if getattr(r, "enabled", True) and engine.state.sealed_relics.get(r.name, 0) <= 0}
     p = engine.state.player
     if "回锋刀" in active and p is not None and p.speed_limit > p.current_speed:
         alive = [i for i, enemy in enumerate(engine.state.enemies) if enemy.is_alive]

@@ -31,7 +31,15 @@ class DaoWen:
     is_monster_original: bool = False  # 是否原始怪物道纹
     is_monster_transform: bool = False  # 是否怪物转化道纹
     tags: list[str] = field(default_factory=list)
-    
+
+    def __post_init__(self):
+        # 道纹改名只许在读入边界生效（2026-10-22：【血债】→【连击】，
+        # 别名表单一出处 engine/daowen.py LEGACY_DAOWEN_ALIASES）：
+        # 任何构造路径（旧面板/旧封存/旧档）拿到的定义名都归一为现名，
+        # 引擎注册表与发动提交仍不收旧名。
+        if self.name == "血债":
+            self.name = "连击"
+
     def to_dict(self) -> dict:
         return {
             "name": self.name,
@@ -110,6 +118,10 @@ class Relic:
     name: str
     effect: str
     tags: list[str] = field(default_factory=list)
+    # 启用归类（2026-10-22 用户令）：持有不再受[血限]承载拦截，改为
+    # 「持有不限、生效数受承载约束」——enabled=False 的遗物仍持有，只是不生效。
+    # 这是既有遗物对象上的一个状态，不是新品类；旧档缺此键一律默认 True。
+    enabled: bool = True
 
     def __post_init__(self):
         # 实体、本局遗物与死斗对手的旧档都会重新构造 Relic，描述统一随规则升级。
@@ -117,7 +129,9 @@ class Relic:
             self.effect = MONSTER_MANA_RELIC_EFFECT
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "effect": self.effect, "tags": self.tags}
+        # getattr 防旧 pickle 存档：旧对象没有 enabled 字段，按默认启用读。
+        return {"name": self.name, "effect": self.effect, "tags": self.tags,
+                "enabled": getattr(self, "enabled", True)}
 
 
 # 每只怪物出厂自带的遗物：[回始]获得法限等量的法力和异变。
@@ -328,12 +342,9 @@ class Entity:
     # ---- 蓄锐：消耗1出手换取下回合+1出手 ----
     # 用 Entity.field 方式声明：
     _xurui_pending: int = field(default=0)
-    # 新规则：本回合你受到的攻击伤害 - 你10%当前生命（向下取整，最低0）；
-    # 每回合可使用次数 = 你当前生命（每次受击消耗1次，用完后本回合后续攻击不再减伤）。
-    # 不再有"上回合招架过→本回合禁用"的锁定。
-    parrying_this_round: bool = False   # 本回合是否已声明招架姿态
-    parry_uses_remaining_this_round: int = 0  # 本回合剩余可招架次数（声明时设为 current_hp）
-    # 旧 parry_locked_this_round 字段 2026-09-28 废弃，保留以兼容旧存档反序列化（不再读取/写入）。
+    # 旧版回合姿态式招架的存档兼容字段；现行逐击招架使用攻击提交参数，这些字段不参与规则结算。
+    parrying_this_round: bool = False
+    parry_uses_remaining_this_round: int = 0
     parry_locked_this_round: bool = False
     # ---- 承露盏（遗物）：每累计失去10生命获得1法力，每场战斗累计 ----
     hp_lost_this_battle: int = 0   # 本场累计失去的生命（战始归零）
@@ -980,6 +991,11 @@ class Entity:
             "hp_ratio": round(self.hp_ratio, 2),
             "ai_memory": self.ai_memory,
             "dao_wen": {k: v.dao_wen.name for k, v in self.dao_wen.items()},
+            "daowen_cooldowns": {
+                k: {"battles": int(getattr(v, "cooldown_remaining", 0)),
+                    "rounds": int(getattr(v, "cooldown_rounds_remaining", 0))}
+                for k, v in self.dao_wen.items()
+            },
             "spells": [s.name for s in self.spells],
             "relics": [r.to_dict() for r in self.relics],
             "status_effects": [
@@ -1275,10 +1291,10 @@ class GameState:
     pending_first_embrace: bool = False
     # 仅当初拥之夜是由死斗胜利(领取猩红尖牙)触发时为True：完成本次选择(非"封存血脉")后应紧接着完整封存
     seal_pending_after_embrace: bool = False
-    # 初拥之夜所得同样以【遗物】形式存放在 self.relics（tags含"血族"）；
-    # first_embrace_traits 是对 relics 的只读视图，见下方 property。
+    # 初拥之夜的血族遗物存放在 self.relics（tags含"血族"）；【真理】已迁为道纹。
+    # first_embrace_traits 只读列出仍属遗物的血族项目，见下方 property。
     chizu_names: list[str] = field(default_factory=list)
-    # 真理眼冷却：剩余需要经过的战斗场数(战终-1，0=可用)
+    # 旧 pickle 兼容字段；【真理】冷却现存于 DaoWenInstance.cooldown_remaining。
     truth_eye_cooldown: int = 0
 
     
@@ -1286,8 +1302,8 @@ class GameState:
     attribute_points: int = 0
     allocated_blood: int = 0     # 已分配血限（从属性点）
     
-    # ---- 遗物视图：血族/龙族项目一律以遗物形式存放，遗物是唯一事实源 ----
-    # 这样它们自动继承遗物的全部通用规则（可被销毁、交换、封印、计入"一件当前遗物"）。
+    # ---- 血族遗物视图：仍属遗物的血族项目由 relics 作为唯一事实源 ----
+    # 【真理】是例外，现存于 Entity.dao_wen；其余血族遗物继承销毁、交换、封印等通则。
 
     def _relic_names_by_tag(self, tag: str) -> list[str]:
         return [r.name for r in self.relics if tag in r.tags]
@@ -1299,7 +1315,7 @@ class GameState:
 
     @property
     def first_embrace_traits(self) -> list[str]:
-        """血族遗物名单（对 relics 的只读视图）。"""
+        """初拥授予且仍属遗物的血族项目名单（【真理】作为道纹不在此视图）。"""
         return self._relic_names_by_tag("血族")
 
     @property
@@ -1377,7 +1393,7 @@ class GameState:
             # 【忘忧香】：战斗被动。受到溢出回复时将其转化为等量格挡。
             # 这是遗物级被动：只要持有者（己方实体/轮回者阵营）持有忘忧香，溢出回复1:1转格挡。
             wangyou = next((r for r in self.relics if r.name == "忘忧香"), None)
-            if wangyou is not None:
+            if wangyou is not None and getattr(wangyou, "enabled", True):
                 entity.gain_shield(overheal)
                 detail["wangyouxiang_block"] = overheal
                 detail["wangyouxiang_ctx"] = make_context(
@@ -1494,7 +1510,7 @@ class GameState:
         「当前生命直接置0」的命零类效果（癌变/迷失·迷失/雕塑等）不带数值、
         也不翻倍——它们不是"失去生命"，是判定归零。
         """
-        return self.FIRST_CUP_MULTIPLIER if self.side_has(entity, self.FIRST_CUP) else 1
+        return self.FIRST_CUP_MULTIPLIER if self._relic_active(entity, self.FIRST_CUP) else 1
 
     def _relic_active(self, entity: Entity, name: str) -> bool:
         """遗物持有判定。
@@ -1502,12 +1518,98 @@ class GameState:
         - 归属查 `side_has`（玩家＝本局 relics；敌方轮回者＝opponent_relics）；
         - 玩家侧再查 sealed_relics：被【豪夺/封印】封住的遗物不生效（原口径）。
         新遗物（千荆甲等）的触发一律经本函数，避免各处各写一份持有判定。
+        - 启用归类（2026-10-22 用户令）：遗物对象 enabled=False 时不生效，
+          与封印并列为「持有但不生效」的第二种状态，不另设名单。
         """
         if entity is None or not self.side_has(entity, name):
+            return False
+        relic = self._relic_object(entity, name)
+        if relic is not None and not getattr(relic, "enabled", True):
             return False
         if entity is self.player:
             return self.sealed_relics.get(name, 0) <= 0
         return True
+
+    def _relic_object(self, entity: Entity, name: str) -> Optional[Relic]:
+        """按归属找到名为 name 的遗物对象（找不到返回 None，如法器名不在遗物列表）。"""
+        if entity is None:
+            return None
+        if entity is self.player:
+            pool = self.relics
+        elif entity.entity_type == "轮回者" and self.on_enemy_side(entity):
+            pool = self.opponent_relics
+        else:
+            pool = getattr(entity, "relics", ()) or ()
+        return next((r for r in pool if r.name == name), None)
+
+    def enabled_relic_names(self) -> set:
+        """本局玩家当前生效中的遗物种名集合。"""
+        return {r.name for r in self.relics if getattr(r, "enabled", True)}
+
+    def note_relic_gained(self, relic: Relic) -> None:
+        """新获得遗物时的启用归类：生效数未满承载则默认启用，满了则持有但不生效。
+
+        持有本身不再受承载拦截（2026-10-22 用户令）；玩家可在[战始]用
+        battle_start 的 active_relics 参数、或局外 set_active_relics 自定义启用。
+        """
+        player = self.player
+        if player is None:
+            relic.enabled = True
+            return
+        enabled_count = len({r.name for r in self.relics if getattr(r, "enabled", True) and r is not relic})
+        relic.enabled = enabled_count < player.relic_capacity
+
+    def set_active_relics(self, names) -> tuple:
+        """把本局遗物的启用集合设为 names（战始/局外自定义启用）。
+
+        返回 (True, None) 或 (False, 错误文案)。启用数不得超过当前
+        [血限]承载；未列名的已持有遗物一律置为停用（仍持有，不丢弃）。
+        """
+        player = self.player
+        if player is None:
+            return False, "没有玩家"
+        if (not isinstance(names, list)
+                or any(not isinstance(n, str) or not n for n in names)):
+            return False, "active_relics必须是遗物名字符串列表"
+        if len(set(names)) != len(names):
+            return False, "active_relics不得重复"
+        owned = {r.name for r in self.relics}
+        unknown = [n for n in names if n not in owned]
+        if unknown:
+            return False, f"未持有遗物：{'、'.join(unknown)}"
+        cap = player.relic_capacity
+        if len(names) > cap:
+            return False, (f"生效遗物超出承载：[血限]{player.blood_limit} 只允许{cap}件生效"
+                           f"（30[血限]=1件），提交了{len(names)}件")
+        wanted = set(names)
+        for relic in self.relics:
+            relic.enabled = relic.name in wanted
+        return True, None
+
+    def toggle_relic(self, name) -> tuple:
+        """切换单件遗物的启用/停用（2026-10-22 用户令）。
+
+        返回 (True, 现在是否启用) 或 (False, 错误文案)。停用永远允许；
+        启用时若生效数已满承载则拒绝（先停用一件，或改用 set_active_relics 整组改选）。
+        """
+        player = self.player
+        if player is None:
+            return False, "没有玩家"
+        if not isinstance(name, str) or not name:
+            return False, "relic_name必须是遗物名字符串"
+        relic = next((r for r in self.relics if r.name == name), None)
+        if relic is None:
+            return False, f"未持有遗物：{name}"
+        if getattr(relic, "enabled", True):
+            relic.enabled = False
+            return True, False
+        enabled_count = len({r.name for r in self.relics if getattr(r, "enabled", True)})
+        cap = player.relic_capacity
+        if enabled_count >= cap:
+            return False, (f"生效遗物已满承载：[血限]{player.blood_limit} 只允许{cap}件生效"
+                           f"（30[血限]=1件），先停用一件再启用【{name}】")
+        relic.enabled = True
+        return True, True
 
     def huangfu_grants(self) -> set:
         """【黄符】授予登记：{(ally_runtime_id, spell_name)}。
@@ -1534,7 +1636,7 @@ class GameState:
         """
         if entity is None or entity is not self.player:
             return False
-        return self.sealed_relics.get("猩红果实", 0) <= 0 and self.side_has(entity, "猩红果实")
+        return self._relic_active(entity, "猩红果实")
 
     def side_has(self, entity: Entity, name: str) -> bool:
         """该实体所属轮回者是否持有该终音/初拥/龙族项目。朋友/员工不继承。"""
@@ -1686,6 +1788,9 @@ class GameState:
         """授予一件遗物；tag 用于标记 血族/龙族 等来源。"""
         r = Relic(name=name, effect=effect, tags=[tag] if tag else [])
         self.relics.append(r)
+        # 注意：授予口不走 note_relic_gained 的自动停用——初拥/龙族等「选了即授予」
+        # 的项目旧口径本就绕过承载拦截，默认启用；启用归类的自动停用只管
+        # 发现/自选/交易/拾取这些「遇到遗物」的获得入口（各自调用 note_relic_gained）。
         return r
 
     def remove_relic(self, name: str) -> bool:

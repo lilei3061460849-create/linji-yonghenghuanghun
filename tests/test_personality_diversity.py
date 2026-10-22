@@ -33,8 +33,8 @@ def test_observer_records_risk_evidence_for_self_harm():
     e, ob = _observer_with_player()
     prev = {"hp": 50, "bl": 60, "shield": 0, "mana": 20, "enemy_hp": 100, "budget": 6}
     post = {"hp": 44, "bl": 60, "shield": 0, "mana": 19, "enemy_hp": 92}
-    ob.consume(prev, post, {"success": True, "action": "发动道纹【血债X=1】",
-                            "calculation": {"dao_wen": "血债", "x": 1}}, {}, 1, 0)
+    ob.consume(prev, post, {"success": True, "action": "发动道纹【连击X=1】",
+                            "calculation": {"dao_wen": "连击", "x": 1}}, {}, 1, 0)
     dims = [(x["dim"], x["dir"]) for x in ob.recorded]
     assert ("risk_preference", 1) in dims, f"自伤行为必须记为冒险证据: {dims}"
     traits = e.state.personality_traits[e.state.player.runtime_id]["traits"]
@@ -58,8 +58,8 @@ def test_observer_evidence_cap_per_battle():
     e, ob = _observer_with_player()
     prev = {"hp": 50, "bl": 60, "shield": 0, "mana": 20, "enemy_hp": 100, "budget": 6}
     post = {"hp": 44, "bl": 60, "shield": 0, "mana": 19, "enemy_hp": 92}
-    result = {"success": True, "action": "发动道纹【血债X=1】",
-              "calculation": {"dao_wen": "血债", "x": 1}}
+    result = {"success": True, "action": "发动道纹【连击X=1】",
+              "calculation": {"dao_wen": "连击", "x": 1}}
     for _ in range(6):
         ob.consume(dict(prev), dict(post), result, {}, 1, 0)
     entry = e.state.personality_traits[e.state.player.runtime_id]["traits"]["risk_preference"]

@@ -34,7 +34,7 @@ def _fill_to(player, n):
     """把玩家道纹补到 n 种（多的删掉、少的用杀伐闭环里的通用道纹补上）。"""
     for name in list(player.dao_wen)[n:]:
         player.dao_wen.pop(name, None)
-    for name in ("杀伐", "再生", "庇护", "束缚", "血债"):
+    for name in ("杀伐", "再生", "庇护", "束缚", "连击"):
         if len(player.dao_wen) >= n:
             break
         if name not in player.dao_wen:
@@ -116,42 +116,42 @@ def test_learn_daowen_over_capacity_is_rejected_without_spending():
 
 
 def test_choose_discovered_relic_over_capacity_is_rejected():
-    """边界：遗物满了再选发现遗物被拒，遗物池不被消耗。"""
+    """边界（2026-10-22 改版）：遗物持有不再被承载拒绝——超额选择成功，
+    新遗物持有但停用（生效数已满），待选列表正常清空。"""
     e = _engine()
     p = e.state.player
-    p.blood_limit = 30                      # 额度 1 种
+    p.blood_limit = 30                      # 生效额度 1 件
     e.state.relics = [Relic("守夜灯", "")]
     e._init_relic_pool()
-    pool_before = len(e.state.relics_pool)
     choice = next(r.name for r in e.state.relics_pool)
     e.state.pending_relic_choices = [choice]
     e.state.pending_relic_source = "测试"
 
     r = e.execute_action("choose_discovered_relic", {"relic_name": choice})
-    assert r["success"] is False, r
-    assert "承载" in r["error"], r["error"]
-    assert len(e.state.relics) == 1, "容量不足时不得写入遗物"
-    assert len(e.state.relics_pool) == pool_before, "容量不足时不得消耗遗物池"
-    assert e.state.pending_relic_choices == [choice], "被拒后该次发现仍应可重选"
+    assert r["success"] is True, r
+    assert r["result"]["enabled"] is False, "生效数已满，新遗物应先停用"
+    assert len(e.state.relics) == 2, "持有不限：新遗物应写入持有"
+    assert e.state.enabled_relic_names() == {"守夜灯"}, "只有原先那件在生效"
+    assert e.state.pending_relic_choices == [], "选择完成后待选列表应清空"
 
 
 def test_resonance_self_pick_over_capacity_is_rejected():
-    """边界：共鸣·自选同样被拦，且碎片/精力都不扣。"""
+    """边界（2026-10-22 改版）：共鸣·自选不再被承载拦——照常扣费拿取，
+    新遗物持有但停用（生效数已满）。函数名保留沿革，断言已按新规改写。"""
     e = _engine()
     p = e.state.player
-    p.blood_limit = 30                      # 额度 1 种
+    p.blood_limit = 30                      # 生效额度 1 件
     e.state.relics = [Relic("守夜灯", "")]
     e._init_relic_pool()
     e.state.shards = 100
-    energy_before = e.state.energy
     name = next(r.name for r in e.state.relics_pool)
 
     r = e.execute_action("pre_battle_action", {"sub_action": "共鸣", "tier": 2, "name": name})
-    assert r["success"] is False, r
-    assert "承载" in r["error"], r["error"]
-    assert e.state.shards == 100, "容量不足时不得扣碎片"
-    assert e.state.energy == energy_before, "容量不足时精力应退回（外层已扣、内层退回）"
-    assert len(e.state.relics) == 1, "容量不足时不得写入遗物"
+    assert r["success"] is True, r
+    assert r["result"]["enabled"] is False, "生效数已满，新遗物应先停用"
+    assert e.state.shards == 85, "自选照常支付15碎片"
+    assert len(e.state.relics) == 2, "持有不限：新遗物应写入持有"
+    assert e.state.enabled_relic_names() == {"守夜灯"}, "只有原先那件在生效"
 
 
 # ==================== 4. 残韵转化不受影响 ====================
@@ -214,11 +214,10 @@ def test_resonance_grant_beyond_capacity_is_refused():
 
 
 def test_setup_phase_is_exempt_from_the_relic_quota():
-    """裁定①（2026-10-12）：开局阶段豁免遗物额度，否则低血限开局会被卡住。
+    """裁定①沿革（2026-10-12 开局豁免 → 2026-10-22 持有不限）：低血限不再需要豁免。
 
-    实测流程（seed=7）：blood_points=3 → 血限18 → 额度0；`setup_choose_region`
-    会直接发下开局遗物（承露盏），随后 `choose_discovered_relic` 这条路在开局期间
-    必须放行；进入局外（phase=pre_battle）后豁免结束，再拿一件就被拒。
+    实测流程（seed=7）：blood_points=3 → 血限18 → 生效额度0；开局遗物照常发下，
+    进入局外后再拿一件也不被拒——只是额度0时没有任何遗物能生效（enabled 全 False）。
     """
     e = GameEngine(db_path=os.path.join(tempfile.mkdtemp(prefix="cap0"), "g.db"),
                    rng_seed=7, save_dir=tempfile.mkdtemp(prefix="cap0b"))
@@ -234,12 +233,13 @@ def test_setup_phase_is_exempt_from_the_relic_quota():
     assert len(e.state.relics) == 1, "开局遗物照常发下（豁免）"
     assert e.state.phase == "pre_battle"
 
-    # 豁免到开局为止：局外再拿一件就被拒
+    # 2026-10-22：局外再拿一件照常成功（持有不限），额度0 → 两件都不生效
     e._init_relic_pool()
     assert e.state.relics_pool, "遗物池应有候选，否则本断言无意义"
     nxt = e.state.relics_pool[0].name
     e.state.pending_relic_choices = [nxt]
     e.state.pending_relic_source = "测试"
     r2 = e.execute_action("choose_discovered_relic", {"relic_name": nxt})
-    assert r2["success"] is False and "承载" in r2["error"], r2
-    assert len(e.state.relics) == 1, "局外超额不得再拿"
+    assert r2["success"] is True, r2
+    assert len(e.state.relics) == 2, "持有不限：第二件应写入持有"
+    assert e.state.enabled_relic_names() == set(), "额度0时没有任何遗物能生效"

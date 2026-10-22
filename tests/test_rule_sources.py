@@ -17,6 +17,7 @@ def test_project_rules_are_extracted_from_their_authoritative_documents():
     """正常路径：法术、物品、副本和怪物分别来自裁定后的事实源。"""
     sync = _sync()
     facts = sync.extract_project_rules()
+    assert [entry["name"] for entry in facts["event_daowen"]] == ["真理"]
     # 2026-10-03：删除爆裂/坠落/滑翔/狂暴/兴奋/尸爆/活血后：
     # 通用道纹 38→34（删 7 条、正文补回 愤怒/无神/疯狂 定义），
     # 副本道纹 64→61（扭曲-1、龙心-1、乱葬-1）

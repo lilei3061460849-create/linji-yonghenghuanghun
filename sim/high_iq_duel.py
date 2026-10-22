@@ -4,8 +4,8 @@
   持有【守夜灯】、【逼债】、【点金】、【清算】、【杀伐】、【庇护】、【残韵·反转】。
   战术核心：经济剥削、逼债削减血限、点金夺取碎片、清算剥夺全部格挡、残韵插队反转敌方再生为杀伐！
 - 龙心谷挑战者「林渊」：
-  持有【无所求】、【加害】、【裂变】、【逆鳞】、【活血】、【血债】、【杀伐】、【庇护】、【残韵·曲解】。
-  战术核心：加害增伤+裂变拆分倍增、逆鳞积攒受击反噬、活血回合末自愈续航、血债多段穿透、残韵曲解篡改公式！
+  持有【无所求】、【加害】、【裂变】、【逆鳞】、【活血】、【连击】、【杀伐】、【庇护】、【残韵·曲解】。
+  战术核心：加害增伤+裂变拆分倍增、逆鳞积攒受击反噬、活血回合末自愈续航、连击多段穿透、残韵曲解篡改公式！
 - 双方在第8场展开真正的七步原子时序切片攻防博弈！
 """
 import json
@@ -151,8 +151,8 @@ def run_high_iq_duel_playthrough(seed=42):
                 e1.execute_action("pre_battle_action", {"sub_action": "领悟", "resonance_type": "转换"})
             elif e1.state.resonance.get("反转", 0) < 2:
                 e1.execute_action("pre_battle_action", {"sub_action": "领悟", "resonance_type": "反转"})
-            elif "加害" in p1.dao_wen and "裂变" in p1.dao_wen and "血债" not in p1.dao_wen and e1.state.shards >= 10:
-                e1.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "血债"})
+            elif "加害" in p1.dao_wen and "裂变" in p1.dao_wen and "连击" not in p1.dao_wen and e1.state.shards >= 10:
+                e1.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "连击"})
             else:
                 tier, cost, pts = best_cultivate_tier(e1.state.shards)
                 spd_pts = 1 if (p1.speed_limit < 12 and pts >= 2) else 0
@@ -181,7 +181,7 @@ def run_high_iq_duel_playthrough(seed=42):
                     e1.execute_action("use_resonance", {
                         "source_daowen": "伤痕", "resonance_type": "转换", "target_ref": f"enemy:{idx}"
                     })
-                if "固执" in m.dao_wen and "血债" not in p1.dao_wen and e1.state.resonance.get("反转", 0) > 0:
+                if "固执" in m.dao_wen and "连击" not in p1.dao_wen and e1.state.resonance.get("反转", 0) > 0:
                     e1.execute_action("use_resonance", {
                         "source_daowen": "固执", "resonance_type": "反转", "target_ref": f"enemy:{idx}"
                     })
@@ -204,8 +204,8 @@ def run_high_iq_duel_playthrough(seed=42):
                 if "裂变" in p1.dao_wen and not target.has_status("裂变") and p1.current_mana >= 6 and target.current_hp >= 40:
                     e1.execute_action("use_daowen", {"daowen_name": "裂变", "x": 2, "target_ref": f"enemy:{t_idx}"})
                     continue
-                if target.has_status("固执") and "血债" in p1.dao_wen and p1.current_hp > 15:
-                    e1.execute_action("use_daowen", {"daowen_name": "血债", "x": 3, "target_ref": f"enemy:{t_idx}"})
+                if target.has_status("固执") and "连击" in p1.dao_wen and p1.current_hp > 15:
+                    e1.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target_ref": f"enemy:{t_idx}"})
                 elif p1.current_mana > 0 and "杀伐" in p1.dao_wen:
                     rem = max(1, p1.action_count - p1.actions_used_this_round)
                     spend = max(1, p1.current_mana // rem)
@@ -284,10 +284,10 @@ def run_high_iq_duel_playthrough(seed=42):
                 r = e.execute_action("pre_battle_action", {"sub_action": "领悟", "resonance_type": "反转"})
                 assert r["success"], r
                 pre_texts.append("领悟·残韵 → 获得【残韵·反转】")
-            elif "加害" in p.dao_wen and "裂变" in p.dao_wen and "血债" not in p.dao_wen and e.state.shards >= 10:
-                r = e.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "血债"})
+            elif "加害" in p.dao_wen and "裂变" in p.dao_wen and "连击" not in p.dao_wen and e.state.shards >= 10:
+                r = e.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "连击"})
                 assert r["success"], r
-                pre_texts.append("学习·道纹 → 习得【血债】（破除固执机制）")
+                pre_texts.append("学习·道纹 → 习得【连击】（破除固执机制）")
             else:
                 tier, cost, pts = best_cultivate_tier(e.state.shards)
                 spd_pts = 1 if (p.speed_limit < 12 and pts >= 2) else 0
@@ -358,12 +358,12 @@ def run_high_iq_duel_playthrough(seed=42):
                     })
                     if r_res.get("success"):
                         b_lines.append(f"  [残韵插队] 林渊发动【残韵·转换】作用于{m.name}的【伤痕】→ 转化为专属道纹【加害】（林渊永久习得【加害】）")
-                if "固执" in m.dao_wen and "血债" not in p.dao_wen and e.state.resonance.get("反转", 0) > 0:
+                if "固执" in m.dao_wen and "连击" not in p.dao_wen and e.state.resonance.get("反转", 0) > 0:
                     r_res = e.execute_action("use_resonance", {
                         "source_daowen": "固执", "resonance_type": "反转", "target_ref": f"enemy:{idx}"
                     })
                     if r_res.get("success"):
-                        b_lines.append(f"  [残韵插队] 林渊发动【残韵·反转】作用于{m.name}的【固执】→ 逆转为【血债】（林渊永久习得【血债】）")
+                        b_lines.append(f"  [残韵插队] 林渊发动【残韵·反转】作用于{m.name}的【固执】→ 逆转为【连击】（林渊永久习得【连击】）")
 
             act_idx = 1
             while p.actions_used_this_round < p.action_count and [m for m in e.state.enemies if m.is_alive]:
@@ -389,9 +389,9 @@ def run_high_iq_duel_playthrough(seed=42):
                         res = e.execute_action("use_daowen", {
                             "daowen_name": "裂变", "x": 2, "target_ref": f"enemy:{t_idx}"
                         })
-                    elif target.has_status("固执") and "血债" in p.dao_wen and p.current_hp > 15:
+                    elif target.has_status("固执") and "连击" in p.dao_wen and p.current_hp > 15:
                         res = e.execute_action("use_daowen", {
-                            "daowen_name": "血债", "x": 3, "target_ref": f"enemy:{t_idx}"
+                            "daowen_name": "连击", "x": 3, "target_ref": f"enemy:{t_idx}"
                         })
                     elif p.current_mana > 0 and "杀伐" in p.dao_wen:
                         rem = max(1, p.action_count - p.actions_used_this_round)
@@ -438,8 +438,8 @@ def run_high_iq_duel_playthrough(seed=42):
         "[战始]（最终死斗）",
         f"出怪：【最终的冠冕】开启，封存胜者【贾希希】登场！",
         f"战斗背景：王座死斗之渊（龙心火山断罪深渊，胜者登王座，败者入传承）",
-        f"敌方面板：贾希希（{opp.blood_limit}/{opp.mana_limit}/{opp.speed_limit}，出手{opp.action_count}次）｜道纹：加害、裂变、血债、杀伐、庇护、再生｜残韵：反转",
-        f"我方面板：林渊（{p.blood_limit}/{p.mana_limit}/{p.speed_limit}，出手{p.action_count}次）｜道纹：加害、裂变、血债、杀伐、庇护、再生｜残韵：反转",
+        f"敌方面板：贾希希（{opp.blood_limit}/{opp.mana_limit}/{opp.speed_limit}，出手{opp.action_count}次）｜道纹：加害、裂变、连击、杀伐、庇护、再生｜残韵：反转",
+        f"我方面板：林渊（{p.blood_limit}/{p.mana_limit}/{p.speed_limit}，出手{p.action_count}次）｜道纹：加害、裂变、连击、杀伐、庇护、再生｜残韵：反转",
         "[战始]效果结算：",
         "  双方激活【最终死斗】法则：双方全额回复生命/法力/速度，逐出手交替推演，胜者登顶封存！",
         "",
@@ -523,7 +523,7 @@ def run_high_iq_duel_playthrough(seed=42):
     d_lines.append(f"　我方　林渊 生命42/42 法力0/54 速度11/12 持续[裂变2(持续∞)]")
     d_lines.append(f"　敌方　贾希希 生命38/42 法力0/50 速度7/8 持续[加害2(持续∞)]")
 
-    # 第2回合：残韵反制逆转、血债多段穿透与王座终结
+    # 第2回合：残韵反制逆转、连击多段穿透与王座终结
     d_lines.append("")
     d_lines.append("第2回合")
     d_lines.append("[回始]：")
@@ -553,11 +553,11 @@ def run_high_iq_duel_playthrough(seed=42):
     opp.current_mana -= 10
     opp.current_hp -= 20
 
-    # 出手3（林渊）：打出【血债4】多段穿透Combo！
+    # 出手3（林渊）：打出【连击4】多段穿透Combo！
     p.current_hp -= 4
     d_lines.append("出手3（林渊）：")
-    d_lines.append("  [动作声明] 发动【血债X=4】（支付代价【流血4】，生命 42→38）")
-    d_lines.append("  [数值落地] 血债分拆为 4 次独立的 1 点伤害判定，每段受【加害2】与【裂变2】增幅为 (1+2)=3 伤害，分2段结算：")
+    d_lines.append("  [动作声明] 发动【连击X=4】（支付代价【流血4】，生命 42→38）")
+    d_lines.append("  [数值落地] 连击分拆为 4 次独立的 1 点伤害判定，每段受【加害2】与【裂变2】增幅为 (1+2)=3 伤害，分2段结算：")
     for hit_i in range(1, 5):
         opp.current_hp = max(0, opp.current_hp - 3)
         d_lines.append(f"    ├ 第{hit_i}/4击：造成3点穿透伤害（贾希希生命 {opp.current_hp+3}→{opp.current_hp}）")
@@ -583,7 +583,7 @@ def run_high_iq_duel_playthrough(seed=42):
     d_lines.append("")
     d_lines.append("[战终]")
     d_lines.append("死斗结果：初代胜者贾希希[命零]，挑战者「林渊」以42点血限、残韵反转与加害裂变极致连招夺得最终胜利！")
-    d_lines.append("王座交接：林渊（42/54/12，道纹：加害/裂变/血债/杀伐/庇护/再生）完整封存至 data/sealed_candidate.json，登顶【最终的冠冕】！")
+    d_lines.append("王座交接：林渊（42/54/12，道纹：加害/裂变/连击/杀伐/庇护/再生）完整封存至 data/sealed_candidate.json，登顶【最终的冠冕】！")
     d_lines.append("")
     battle_blocks.append("\n".join(d_lines))
 
@@ -596,7 +596,7 @@ def run_high_iq_duel_playthrough(seed=42):
 >
 > 格式遵循 推演规范《六、战斗推演格式》与 AI 知识库七步原子时序切片管道：逐回合、逐次出手，禁止概括、跳过或合并结算。本局全程通过 GameEngine.execute_action 逐步手操点选，数值逐条取自引擎真实返回值（无推断、无口胡）。
 >
-> 来源：2026-08-17 真实一阶巅峰手操实测。新轮回者林渊（42[血限]/20[法限]/8[速限]，开局遗物·无所求）进入龙心谷（一阶），在战内通过【残韵】实时窃取敌方专属道纹【裂变】、【加害】、【血债】，配合高额法限与多段穿透斩获前 7 场全胜；在第 8 场最终死斗中正面迎战封存胜者贾希希，双方展开包含专属道纹增伤、残韵反转插队、多段血债穿透与精准控速闪避的高智商巅峰博弈，最终林渊力克强敌，登顶王座！
+> 来源：2026-08-17 真实一阶巅峰手操实测。新轮回者林渊（42[血限]/20[法限]/8[速限]，开局遗物·无所求）进入龙心谷（一阶），在战内通过【残韵】实时窃取敌方专属道纹【裂变】、【加害】、【连击】，配合高额法限与多段穿透斩获前 7 场全胜；在第 8 场最终死斗中正面迎战封存胜者贾希希，双方展开包含专属道纹增伤、残韵反转插队、多段连击穿透与精准控速闪避的高智商巅峰博弈，最终林渊力克强敌，登顶王座！
 >
 > 共8场。结果：8战8胜（含第8场最终死斗击败封存胜者贾希希），林渊登顶【最终的冠冕】完整封存！
 

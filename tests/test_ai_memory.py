@@ -76,10 +76,10 @@ def test_memory_is_seeded_but_bounded_and_not_engine_fact(tmp_path):
     before = {"hp": 20, "blood_limit": 20, "mana": 5, "mana_limit": 5,
               "speed": 4, "shield": 0, "enemy_hp": 30, "threat": 10}
     after = dict(before)
-    result = {"success": True, "action": "贾凡招架"}
+    result = {"success": True, "action": "resolve_attack"}
     for _ in range(MAX_EPISODES + 10):
         remember_action(first, before, after, result,
-                        {"action": "declare_parry", "label": "招架"})
+                        {"action": "resolve_attack", "label": "逐击招架"})
     assert len(first["episodes"]) == MAX_EPISODES
     assert before["hp"] == 20 and after["enemy_hp"] == 30
 

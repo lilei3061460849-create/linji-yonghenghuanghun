@@ -216,13 +216,13 @@ def test_r42_target_daowen_trigger_is_explicit(tmp_path):
     engine = _engine(tmp_path); player, opponent = _combat(engine)
     opponent.entity_type = "轮回者"; opponent.mana_limit = opponent.current_mana = 20
     player.dao_wen["杀伐"] = DaoWenInstance(DaoWen("杀伐", "", "消耗", "X", ""))
-    for name in ("必中", "杀伐", "血债"):   # 2026-10-03：【坠落】删除 → 改用【必中】
+    for name in ("必中", "杀伐", "连击"):   # 2026-10-03：【坠落】删除 → 改用【必中】
         opponent.dao_wen[name] = DaoWenInstance(DaoWen(name, "", "消耗", "X", ""))
-    opponent.spells = [Spell("咎由自取", ["杀伐", "血债"], "目标发动道纹前", "")]
+    opponent.spells = [Spell("咎由自取", ["杀伐", "连击"], "目标发动道纹前", "")]
     result = engine.execute_action("use_daowen", {
         "daowen_name": "杀伐", "x": 1, "target_ref": "enemy:0",
         "dodge": False, "blood_shadow": False,
-        # 2026-10-03：【坠落】删除后【咎由自取】只剩 杀伐→血债 两步
+        # 2026-10-03：【坠落】删除后【咎由自取】只剩 杀伐→连击 两步
         "trigger_spell_choices": {"enemy:0": {"咎由自取": {"use": True, "steps": [
             {"x": 1, "target_ref": "player:0", "dodge": False},
             {"x": 1, "target_ref": "player:0", "dodge": False},
@@ -288,7 +288,7 @@ def test_r43_all_implemented_event_options_have_a_runtime_route(tmp_path):
             engine = _engine(root, seed=event_index * 10 + option["id"])
             player = Entity("P", "轮回者", blood_limit=100, current_hp=100,
                             mana_limit=100, current_mana=100, speed_limit=100, current_speed=100)
-            for name in set(engine.SPELL_REGISTRY) | {"杀伐", "切割", "庇护", "再生", "血债"}:
+            for name in set(engine.SPELL_REGISTRY) | {"杀伐", "切割", "庇护", "再生", "连击"}:
                 player.dao_wen[name] = DaoWenInstance(DaoWen(name, "", "消耗", "X", ""))
             engine.state.player = player; engine.state.phase = "pre_battle"
             engine.state.current_region = event["region"] if event["region"] != "通用" else "罪孽都市"
@@ -454,9 +454,9 @@ def test_r46_normal_event_relic_battle_start_matrix(tmp_path):
     # DM裁定（2026-08-19）：100 −1(上一步的流血代价，同时触发了烙痕钉) +5(负岳索等量回复)，
     # 按[血限]封顶回 100（2026-10-14：猩红退场后起点从 90 回到 100）。
     assert friend.current_hp == 15 and player.current_hp == 100 and not friend.has_status("负岳索")
-    player.dao_wen["血债"] = DaoWenInstance(DaoWen("血债", "", "流血", "X", ""))
+    player.dao_wen["连击"] = DaoWenInstance(DaoWen("连击", "", "流血", "X", ""))
     blocked = engine.execute_action("use_daowen", {
-        "daowen_name": "血债", "x": 1, "target_ref": "enemy:0",
+        "daowen_name": "连击", "x": 1, "target_ref": "enemy:0",
         "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
     })
     assert not blocked["success"] and "缄默面具" in blocked["error"]

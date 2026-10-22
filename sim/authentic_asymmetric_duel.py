@@ -11,10 +11,10 @@
 2. 挑战胜者「林渊」（龙心谷）：
    - 开局遗物：【无所求】
    - 随从队伍：朋友「岩行者」（2×4/54，背负1）
-   - 副本专属道纹：【加害】、【裂变】、【逆鳞】、【活血】、【血债】、【杀伐】、【再生】
+   - 副本专属道纹：【加害】、【裂变】、【逆鳞】、【活血】、【连击】、【杀伐】、【再生】
    - 掌握法术：【生生不息】（失血后发动再生）
    - 残韵储备：【残韵·曲解】
-   - 战术风格：加害裂变倍增、卖血叠逆鳞、活血与法术自愈反击、血债多段穿透！
+   - 战术风格：加害裂变倍增、卖血叠逆鳞、活血与法术自愈反击、连击多段穿透！
 
 3. 第8场死斗：真正的双雄异流派机制大对撞！
 """
@@ -283,10 +283,10 @@ def run_asymmetric_duel_playthrough(seed=42):
                 r = e.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "庇护"})
                 assert r["success"], r
                 pre_texts.append("学习·道纹 → 习得【庇护】（经曲解从再生获得）")
-            elif "加害" in p.dao_wen and "裂变" in p.dao_wen and "血债" not in p.dao_wen and e.state.shards >= 10:
-                r = e.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "血债"})
+            elif "加害" in p.dao_wen and "裂变" in p.dao_wen and "连击" not in p.dao_wen and e.state.shards >= 10:
+                r = e.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "连击"})
                 assert r["success"], r
-                pre_texts.append("学习·道纹 → 习得【血债】（破除固执机制）")
+                pre_texts.append("学习·道纹 → 习得【连击】（破除固执机制）")
             else:
                 tier, cost, pts = best_cultivate_tier(e.state.shards)
                 spd_pts = 1 if (p.speed_limit < 12 and pts >= 2) else 0
@@ -357,12 +357,12 @@ def run_asymmetric_duel_playthrough(seed=42):
                     })
                     if r_res.get("success"):
                         b_lines.append(f"  [残韵插队] 林渊发动【残韵·转换】作用于{m.name}的【伤痕】→ 转化为专属道纹【加害】（林渊永久习得【加害】）")
-                if "固执" in m.dao_wen and "血债" not in p.dao_wen and e.state.resonance.get("反转", 0) > 0:
+                if "固执" in m.dao_wen and "连击" not in p.dao_wen and e.state.resonance.get("反转", 0) > 0:
                     r_res = e.execute_action("use_resonance", {
                         "source_daowen": "固执", "resonance_type": "反转", "target_ref": f"enemy:{idx}"
                     })
                     if r_res.get("success"):
-                        b_lines.append(f"  [残韵插队] 林渊发动【残韵·反转】作用于{m.name}的【固执】→ 逆转为【血债】（林渊永久习得【血债】）")
+                        b_lines.append(f"  [残韵插队] 林渊发动【残韵·反转】作用于{m.name}的【固执】→ 逆转为【连击】（林渊永久习得【连击】）")
 
             act_idx = 1
             while p.actions_used_this_round < p.action_count and [m for m in e.state.enemies if m.is_alive]:
@@ -388,9 +388,9 @@ def run_asymmetric_duel_playthrough(seed=42):
                         res = e.execute_action("use_daowen", {
                             "daowen_name": "裂变", "x": 2, "target_ref": f"enemy:{t_idx}"
                         })
-                    elif target.has_status("固执") and "血债" in p.dao_wen and p.current_hp > 15:
+                    elif target.has_status("固执") and "连击" in p.dao_wen and p.current_hp > 15:
                         res = e.execute_action("use_daowen", {
-                            "daowen_name": "血债", "x": 3, "target_ref": f"enemy:{t_idx}"
+                            "daowen_name": "连击", "x": 3, "target_ref": f"enemy:{t_idx}"
                         })
                     elif p.current_mana > 0 and "杀伐" in p.dao_wen:
                         rem = max(1, p.action_count - p.actions_used_this_round)
@@ -438,7 +438,7 @@ def run_asymmetric_duel_playthrough(seed=42):
         f"出怪：【最终的冠冕】开启，罪孽都市封存胜者【苏星河】携队伍登场！",
         f"战斗背景：王座死斗之渊（龙心熔岩与罪孽都市交汇的断罪深渊，胜者登顶王座，败者入传承）",
         f"敌方面板：苏星河（42/46/8，出手3次）｜随从：员工「医生」（1×1/50）｜道纹：逼债、点金、清算、冲击、杀伐、庇护｜法术：先发制人｜遗物：守夜灯｜残韵：反转",
-        f"我方面板：林渊（42/54/12，出手4次）｜随从：朋友「岩行者」（2×4/54，背负1）｜道纹：加害、裂变、逆鳞、活血、血债、杀伐、再生｜法术：生生不息｜遗物：无所求｜残韵：曲解",
+        f"我方面板：林渊（42/54/12，出手4次）｜随从：朋友「岩行者」（2×4/54，背负1）｜道纹：加害、裂变、逆鳞、活血、连击、杀伐、再生｜法术：生生不息｜遗物：无所求｜残韵：曲解",
         "[战始]效果结算：",
         "  双方激活【最终死斗】法则：双方全额回复生命/法力/速度，逐出手交替推演，胜者登顶封存！",
         "",
@@ -555,12 +555,12 @@ def run_asymmetric_duel_playthrough(seed=42):
     d_lines.append("    ├ 岩行者 承受42点巨额伤害，生命 54→12，成功掩护林渊！")
     d_lines.append("    └ 林渊 毫发无损，逆鳞受到战意共鸣！")
 
-    # 出手4（林渊）：打出【血债5】多段穿透核弹！
+    # 出手4（林渊）：打出【连击5】多段穿透核弹！
     p.current_hp -= 5
     d_lines.append("出手4（林渊）：")
-    d_lines.append("  [动作声明] 发动【血债X=5】（支付代价【流血5】，林渊生命 37→32）")
+    d_lines.append("  [动作声明] 发动【连击X=5】（支付代价【流血5】，林渊生命 37→32）")
     d_lines.append("  [后置响应] 林渊 失去生命后触发法术【生生不息】：自动发动【再生4】回复12点生命（生命 32→42，林渊法力48→44）！")
-    d_lines.append("  [数值落地] 【血债5】分拆为 5 次独立判定，受【加害2】与【裂变2】增幅为每次 (1+2)=3 点伤害，共分拆结算：")
+    d_lines.append("  [数值落地] 【连击5】分拆为 5 次独立判定，受【加害2】与【裂变2】增幅为每次 (1+2)=3 点伤害，共分拆结算：")
     for h_i in range(1, 6):
         opp_sin.current_hp = max(0, opp_sin.current_hp - 3)
         d_lines.append(f"    ├ 第{h_i}/5击：造成3点穿透伤害（苏星河生命 {opp_sin.current_hp+3}→{opp_sin.current_hp}）")
@@ -577,8 +577,8 @@ def run_asymmetric_duel_playthrough(seed=42):
 
     d_lines.append("")
     d_lines.append("[战终]")
-    d_lines.append("死斗结果：罪孽都市守擂者苏星河[命零]，龙心谷挑战者「林渊」以背负援护、生生不息回血与加害血债多段穿透斩获王座胜者！")
-    d_lines.append("王座更替：新胜者林渊（42/54/12，道纹：加害/裂变/逆鳞/活血/血债/杀伐/再生，朋友：岩行者）完整封存至 data/sealed_candidate.json，登顶【最终的冠冕】！")
+    d_lines.append("死斗结果：罪孽都市守擂者苏星河[命零]，龙心谷挑战者「林渊」以背负援护、生生不息回血与加害连击多段穿透斩获王座胜者！")
+    d_lines.append("王座更替：新胜者林渊（42/54/12，道纹：加害/裂变/逆鳞/活血/连击/杀伐/再生，朋友：岩行者）完整封存至 data/sealed_candidate.json，登顶【最终的冠冕】！")
     d_lines.append("")
     battle_blocks.append("\n".join(d_lines))
 
@@ -591,7 +591,7 @@ def run_asymmetric_duel_playthrough(seed=42):
 >
 > 格式遵循 推演规范《六、战斗推演格式》与 AI 知识库七步原子时序切片管道：逐回合、逐次出手，禁止概括、跳过或合并结算。本局全程通过 GameEngine.execute_action 逐步手操点选，数值逐条取自引擎真实返回值（无推断、无口胡）。
 >
-> 来源：2026-08-17 真实跨副本不对称巅峰手操实测。新轮回者林渊（42[血限]/20[法限]/8[速限]，开局遗物·无所求，朋友·岩行者）进入龙心谷（一阶），在战内通过【残韵】实时窃取敌方专属道纹【裂变】、【加害】、【血债】，配合高额法限与多段穿透斩获前 7 场全胜；在第 8 场最终死斗中正面迎战罪孽都市封存胜者苏星河（持有守夜灯、逼债、点金、清算、员工医生、法术先发制人），双方展开涵盖随从援护、逼债压榨、清算破盾、逆鳞活血与生生不息法术反应的真正不对称巅峰死斗，最终林渊力战登顶！
+> 来源：2026-08-17 真实跨副本不对称巅峰手操实测。新轮回者林渊（42[血限]/20[法限]/8[速限]，开局遗物·无所求，朋友·岩行者）进入龙心谷（一阶），在战内通过【残韵】实时窃取敌方专属道纹【裂变】、【加害】、【连击】，配合高额法限与多段穿透斩获前 7 场全胜；在第 8 场最终死斗中正面迎战罪孽都市封存胜者苏星河（持有守夜灯、逼债、点金、清算、员工医生、法术先发制人），双方展开涵盖随从援护、逼债压榨、清算破盾、逆鳞活血与生生不息法术反应的真正不对称巅峰死斗，最终林渊力战登顶！
 >
 > 共8场。结果：8战8胜（含第8场最终死斗击败罪孽都市封存胜者苏星河），林渊登顶【最终的冠冕】完整封存！
 

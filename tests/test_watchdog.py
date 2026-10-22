@@ -32,7 +32,7 @@ def test_combat_watchdog_detects_stagnant_loop_and_provides_diagnosis():
     assert res is not None
     assert res["interrupted"] is True
     assert "固执" in str(res["diagnosis"]["findings"])
-    assert "血债" in str(res["diagnosis"]["recommendations"])
+    assert "连击" in str(res["diagnosis"]["recommendations"])
 
 
 def test_run_failure_watchdog_triggers_after_max_failures():

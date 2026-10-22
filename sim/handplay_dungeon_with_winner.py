@@ -5,16 +5,17 @@
 不能用初始角色。本脚本：
 1. 加载 data/real_winners/winner_XX.json（真实一阶胜者快照）
 2. 以该快照的 player+friends+employees+遗物+碎片 作为起点进入乱葬岗
-3. 真手操：每回合显式决策（满法输出+理智闪避+庇护保命+反应法术），
+3. 真手操：每回合显式决策（有【杀伐】则优先使用，否则提交完整普攻；兼顾庇护与理智闪避），
    与 TacticalAI 无关，决策全部来自本脚本的显式 execute_action 调用
 4. 输出逐回合战报（数据全部取自引擎返回值）
 
 用法：
-    python3 sim/produce_real_winners.py --count 1
+    python3 sim/produce_open_world_winners.py --count 3 --max-games 50
     python3 sim/handplay_dungeon_with_winner.py --winner data/real_winners/winner_02.json --battles 1 --seed 7
 """
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -23,12 +24,116 @@ from tests.setup_support import finish_initial_daowen
 
 from engine.api import GameEngine
 from engine.ai_tactics import choose_dodge, choose_attack_target
-from sim.monster_targets import pick_monster_daowen_target  # noqa: E402
+from sim.monster_targets import (pick_monster_daowen_target,
+                                 pick_wave_dodge_targets)  # noqa: E402
 from sim.build_learner import _decline_spells, round_start_relic_choices
 from sim.produce_real_winners import build_spell_choices
+from sim.produce_open_world_winners import validate_open_world_winner_snapshot
+
+
+_REST_HEAL_PERCENT = {1: 20, 2: 40, 3: 60}
+_REST_SHARD_COST = {1: 0, 2: 10, 3: 25}
+
+
+def _choose_rest_plan(blood_limit: int, current_hp: int, shards: int) -> tuple[int, int]:
+    """Choose a valid rest tier and its exact contract allocation.
+
+    The API requires allocation of the tier's full heal amount even if the target
+    has less missing HP (actual healing is capped). Prefer the cheapest tier that
+    fills the gap; otherwise use the strongest affordable tier and repeat as needed.
+    """
+    missing_hp = blood_limit - current_hp
+    if missing_hp <= 0:
+        raise ValueError("rest is only applicable while HP is below the blood limit")
+
+    heal_by_tier = {
+        tier: math.ceil(blood_limit * percent / 100)
+        for tier, percent in _REST_HEAL_PERCENT.items()
+    }
+    affordable = [
+        tier for tier, cost in _REST_SHARD_COST.items()
+        if cost == 0 or shards >= cost
+    ]
+    covering = [tier for tier in affordable if heal_by_tier[tier] >= missing_hp]
+    if covering:
+        tier = min(covering, key=lambda candidate: (_REST_SHARD_COST[candidate], candidate))
+    else:
+        tier = max(affordable, key=lambda candidate: heal_by_tier[candidate])
+    return tier, heal_by_tier[tier]
+
+
+def _prepare_before_battle(e) -> None:
+    """Apply bounded pre-battle actions; reject failures instead of retrying forever."""
+    prep_action_limit = max(0, int(e.state.energy))
+    prep_action_count = 0
+    while e.state.energy > 0:
+        prep_action_count += 1
+        if prep_action_count > prep_action_limit:
+            raise RuntimeError("局外行动未消耗精力，已触发安全上限并停止，避免死循环")
+        p = e.state.player
+        if p and p.current_hp < p.blood_limit:
+            tier, heal_amount = _choose_rest_plan(
+                p.blood_limit, p.current_hp, e.state.shards)
+            hp_before = p.current_hp
+            energy_before = e.state.energy
+            r = e.execute_action("pre_battle_action", {
+                "sub_action": "休整", "tier": tier,
+                "heal_allocations": [{"target_ref": "player:0", "amount": heal_amount}]})
+            if not r.get("success"):
+                raise RuntimeError(f"局外休整{tier}档失败：{r.get('error')}")
+            if e.state.energy >= energy_before:
+                raise RuntimeError("局外休整成功但精力未减少，已停止避免死循环")
+            print(f"局外：休整{tier}档 分配{heal_amount}（实际恢复{p.current_hp - hp_before}）"
+                  f"→ {p.current_hp}/{p.blood_limit}")
+            continue
+        energy_before = e.state.energy
+        r = e.execute_action("pre_battle_action", {
+            "sub_action": "修行", "tier": 1})
+        if not r.get("success"):
+            raise RuntimeError(f"局外修行1档失败：{r.get('error')}")
+        if e.state.energy >= energy_before:
+            raise RuntimeError("局外修行成功但精力未减少，已停止避免死循环")
+        print("局外：修行1档 → 法限+2")
+
 
 # 玩家自己回合的手操策略（不用TacticalAI，用最简显式规则）
-# 满法输出：杀伐X尽量大；庇护保命：仅在受到致命威胁且盾不足时上盾
+# 若缺少输出道纹，仍须走两阶段普攻；绝不能把「没有杀伐」当作「跳过行动」。
+
+def _manual_basic_attack(e, log):
+    prepared = e.execute_action("prepare_attack", {"actor_ref": "player:0"})
+    if not prepared.get("success"):
+        log.append(f"  普攻准备失败：{prepared.get('error')}")
+        return prepared
+    attack = prepared["result"]
+    refs = e.combat._combat_entity_refs()
+    targets = [option for option in attack["target_options"]
+               if option["ref"] in refs and refs[option["ref"]].is_alive]
+    if not targets:
+        result = {"success": False, "error": "普攻没有合法目标"}
+        log.append(f"  普攻未执行：{result['error']}")
+        return result
+    target_option = min(targets, key=lambda option: refs[option["ref"]].current_hp)
+    target = refs[target_option["ref"]]
+    per_hit_damage = e.state.player.effective_attack_power()
+    hits = [{
+        "target_ref": target_option["ref"],
+        "damage": per_hit_damage,
+        "dodge": False,
+        "parry": False,
+        "blood_shadow": False,
+        "spell_choices": _decline_spells(target_option),
+    } for _ in range(attack["hit_count"])]
+    resolved = e.execute_action("resolve_attack", {
+        "token": attack["token"], "hits": hits,
+    })
+    if not resolved.get("success"):
+        log.append(f"  普攻结算失败：{resolved.get('error')}")
+        return resolved
+    damage = sum(hit.get("damage_dealt", 0)
+                 for hit in resolved.get("result", {}).get("hits", []))
+    log.append(f"  普攻{attack['hit_count']}击攻击{target.name} → {damage}伤")
+    return resolved
+
 
 def _pick_monster_daowen(engine, actor):
     """怪物按当前情形择优选道纹——委托 sim.monster_targets 统一入口（2026-08-22）。
@@ -59,6 +164,32 @@ def _pick_monster_daowen(engine, actor):
     return pick_monster_daowen_option(cands, player_low=player_low,
                                       monster_low=monster_low)
 
+
+def _monster_daowen_submission(e, actor, option):
+    """Build one complete monster-daowen submission for both primary and retry paths."""
+    dao = {
+        "name": option["name"], "dodge": False, "blood_shadow": False,
+        "trigger_spell_choices": {
+            holder: {spell["spell_name"]: {"use": False} for spell in spells}
+            for holder, spells in option.get("trigger_spell_options", {}).items()
+        },
+    }
+    if option["requires_target"]:
+        dao["target_ref"] = pick_monster_daowen_target(e, actor["actor_ref"], option)
+    if option.get("dodge_submission") == "per_target":
+        dao["dodge_targets"] = pick_wave_dodge_targets(option)
+    return dao
+
+
+def _wave_first(choices):
+    """Stable-sort wave users before other monsters: phase actions execute in input order.
+
+    A preceding monster can kill a target already frozen in a later wave's prepare
+    snapshot. Resolve those per-target choices while their selected targets are alive.
+    """
+    choices.sort(key=lambda choice: 0 if "dodge_targets" in (choice.get("daowen") or {}) else 1)
+    return choices
+
 def manual_player_turn(e, log):
     """满法输出+理智闪避+庇护保命（玩家回合）。返回出手列表。"""
     p = e.state.player
@@ -87,11 +218,15 @@ def manual_player_turn(e, log):
                 out.append(r)
                 shielded_this_round = True
                 continue
-        # 2) 输出：杀伐打血最少，尽量大X（满法输出）
+        # 2) 输出：优先用【杀伐】；新生成的真实胜者可能没有杀伐，则走正式两阶段普攻。
+        if "杀伐" not in p.dao_wen:
+            r = _manual_basic_attack(e, log)
+            if r.get("success"):
+                out.append(r)
+                continue
+            break
         target = min(enemies, key=lambda x: x.current_hp)
         x = max(1, p.current_mana - 2)  # 留2法力给反应法术
-        if x < 1:
-            break
         r = e.execute_action("use_daowen", {"daowen_name": "杀伐", "x": x,
                                             "target": target.name,
                                             "trigger_spell_choices": {}})
@@ -100,6 +235,12 @@ def manual_player_turn(e, log):
                       (r.get("execution", {}).get("effects") or []))
             log.append(f"  输出：杀伐X={x} 打{target.name} → {dmg}伤")
             out.append(r)
+            continue
+        # 失败的法术不得让角色空过本出手机会；改提交有效普攻并保留失败诊断。
+        log.append(f"  杀伐未能发动：{r.get('error')}；改用普攻")
+        fallback = _manual_basic_attack(e, log)
+        if fallback.get("success"):
+            out.append(fallback)
             continue
         break
     return out
@@ -121,15 +262,7 @@ def _resolve_monster_turn_hand(e, log):
         if actor["daowen_options"]:
             option = _pick_monster_daowen(e, actor)
             if option is not None:
-                dao = {"name": option["name"], "dodge": False, "blood_shadow": False,
-                       "trigger_spell_choices": {holder: {sp["spell_name"]: {"use": False}
-                                                          for sp in spells}
-                                                 for holder, spells in option.get("trigger_spell_options", {}).items()}}
-                if option["requires_target"]:
-                    dao["target_ref"] = pick_monster_daowen_target(e, actor["actor_ref"], option)
-                if option["dodge_submission"] == "per_target":
-                    from sim.monster_targets import pick_wave_dodge_targets
-                    dao["dodge_targets"] = pick_wave_dodge_targets(option)
+                dao = _monster_daowen_submission(e, actor, option)
                 if option["resolves_as"] == "变形":
                     enemy_index = int(actor["actor_ref"].split(":", 1)[1])
                     hit_count = e.state.enemies[enemy_index].attack_power
@@ -163,9 +296,11 @@ def _resolve_monster_turn_hand(e, log):
         choices.append({"actor_ref": actor["actor_ref"], "daowen": dao,
                         "attack_actions": attacks})
     result = e.execute_action("resolve_monster_phase", {
-        "token": prepared["result"]["token"], "choices": choices})
+        "token": prepared["result"]["token"], "choices": _wave_first(choices)})
     if not result.get("success"):
-        # 兜底：拒绝全部法术
+        primary_error = result.get("error", "未知怪物阶段错误")
+        log.append(f"  怪物阶段首提被拒（状态已回滚）：{primary_error}")
+        # 兜底：拒绝全部法术，但仍完整提交道纹契约（含波及的dodge_targets）。
         fallback = []
         for actor in prepared["result"]["actors"]:
             dao = None
@@ -173,12 +308,7 @@ def _resolve_monster_turn_hand(e, log):
             if actor["daowen_options"]:
                 option = _pick_monster_daowen(e, actor)
                 if option is not None:
-                    dao = {"name": option["name"], "dodge": False, "blood_shadow": False,
-                           "trigger_spell_choices": {holder: {sp["spell_name"]: {"use": False}
-                                                              for sp in spells}
-                                                     for holder, spells in option.get("trigger_spell_options", {}).items()}}
-                    if option["requires_target"]:
-                        dao["target_ref"] = pick_monster_daowen_target(e, actor["actor_ref"], option)
+                    dao = _monster_daowen_submission(e, actor, option)
                     if option["resolves_as"] == "变形":
                         enemy_index = int(actor["actor_ref"].split(":", 1)[1])
                         hit_count_fb = e.state.enemies[enemy_index].attack_power
@@ -192,9 +322,14 @@ def _resolve_monster_turn_hand(e, log):
             fallback.append({"actor_ref": actor["actor_ref"], "daowen": dao,
                              "attack_actions": attacks})
         result = e.execute_action("resolve_monster_phase", {
-            "token": prepared["result"]["token"], "choices": fallback})
+            "token": prepared["result"]["token"], "choices": _wave_first(fallback)})
         if result.get("success"):
-            log.append("  （法术提交被拒，已退化为纯物理格挡）")
+            log.append("  （首提被拒，已按同一token拒绝反应法术后重交成功）")
+        else:
+            result["primary_error"] = primary_error
+            result["error"] = (f"首提失败：{primary_error}；拒绝法术后的回退也失败："
+                               f"{result.get('error', '未知怪物阶段错误')}")
+            log.append(f"  怪物阶段回退仍被拒：{result.get('error')}")
     # 记录法术触发
     for hit in (result.get("result", {}).get("details") or []):
         for lg in (hit.get("spell_logs") or []):
@@ -227,6 +362,7 @@ def load_winner(e, snapshot):
 def play_dungeon(winner_path: str, battles: int, seed: int):
     with open(winner_path, encoding="utf-8") as f:
         snapshot = json.load(f)
+    validate_open_world_winner_snapshot(snapshot)
     p0 = snapshot["player"]
     print("═" * 66)
     print(f"真实一阶胜者进入乱葬岗：{p0['name']} "
@@ -253,27 +389,8 @@ def play_dungeon(winner_path: str, battles: int, seed: int):
         if not e.state.player or not e.state.player.is_alive:
             print(f"\n❌ 第{b}场：轮回者已阵亡，本次乱葬岗挑战结束")
             break
-        # 每场战斗前都做局外（休整回血 + 附煞），与真实游戏流程一致
-        fusha_done = False
-        while e.state.energy > 0:
-            p = e.state.player
-            if p and p.current_hp < p.blood_limit:
-                r = e.execute_action("pre_battle_action", {
-                    "sub_action": "休整", "tier": 3,
-                    "heal_allocations": [{"target_ref": "player:0", "amount": 48}]})
-                print(f"局外：休整3档 恢复{48} 血 → {p.current_hp}/{p.blood_limit}"
-                      if r.get("success") else f"局外：休整失败 {r.get('error')}")
-                continue
-            if not fusha_done and e.state.shards >= 25:
-                r = e.execute_action("pre_battle_action", {
-                    "sub_action": "附煞", "mode": "选择", "sha_qi": "冥煞", "daowen_name": "杀伐"})
-                if r.get("success"):
-                    print("局外：附煞·选择 冥煞 附于【杀伐】（伤害+100%）")
-                    fusha_done = True
-                    continue
-            e.execute_action("pre_battle_action", {
-                "sub_action": "修行", "tier": 1})
-            print("局外：修行1档 → 法限+2")
+        # 每场战斗前按现存行动休整/修行；已删除的【附煞】不再提交。
+        _prepare_before_battle(e)
         print(f"\n──── 第{b}场 · 战始 ────")
         from sim.optional_actions import start_battle
         bs, _art = start_battle(e)

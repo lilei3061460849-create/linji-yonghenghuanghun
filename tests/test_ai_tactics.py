@@ -65,8 +65,8 @@ def test_ai_shields_when_facing_lethal_damage(tmp_path):
     assert "庇护" in r.get("action", "") or "再生" in r.get("action", "")
 
 
-def test_ai_does_not_waste_parry_in_a_safe_window(tmp_path):
-    """边界：安全血线下仍应允许输出，不能因招架存在而每回合白占动作。"""
+def test_ai_does_not_offer_legacy_parry_action(tmp_path):
+    """招架是 resolve_attack 的逐击参数，不是独立战斗行动。"""
     e = _engine(tmp_path, learn=())
     e.state.player.dao_wen.clear()
     e.state.resonance.clear()

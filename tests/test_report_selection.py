@@ -1,8 +1,8 @@
 """
-pytest - 战报政策与批量选取脚本
+pytest - 批量选取脚本的独立输出路径与结算记录
 
-正式 `报告.md` 只保留最新一次轮回记录，由 GameEngine 手操写入。
-`sim/pick_best_report.py` 仍是平衡工具：通关、冠冕前血量、无效局标记。
+`sim/pick_best_report.py` 是旧规则下的批量平衡工具，默认只写入被忽略的
+`data/batch_report.md`，不依赖也不创建仓库根目录的 `报告.md`。
 
 覆盖：正常路径 / 边界条件 / 错误输入
 """
@@ -19,9 +19,6 @@ _s = importlib.util.spec_from_file_location(
     "pb", os.path.join(ROOT, "sim", "pick_best_report.py"))
 pb = importlib.util.module_from_spec(_s)
 _s.loader.exec_module(pb)
-
-REPORT = os.path.join(ROOT, "报告.md")
-
 
 # ---------- 正常路径 ----------
 
@@ -52,10 +49,11 @@ def test_died_runs_excluded():
         assert r["hp_before_crown"] is None
 
 
-def test_report_does_not_claim_batch_selection_result():
-    """边界：最新手操战报不得伪装成pick_best_report批量评选结果。"""
-    txt = open(REPORT, encoding="utf-8").read()
-    assert "入选依据：进入【最终的冠冕】前剩余生命" not in txt
+def test_batch_selection_defaults_to_ignored_output_not_root_report():
+    """边界：批量平衡工具默认写到 data/，不创建已取消的根目录报告.md。"""
+    parser = pb._build_arg_parser()
+    assert parser.get_default("out") == "data/batch_report.md"
+    assert os.path.join(ROOT, parser.get_default("out")) != os.path.join(ROOT, "报告.md")
 
 
 # ---------- 错误输入 ----------

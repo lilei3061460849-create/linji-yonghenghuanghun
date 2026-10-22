@@ -8,6 +8,9 @@
 用户裁定：「可以替换/放弃」。故这里固化两条脱困出口，缺一即红：
   1. `discard_discovered_relic`：放弃本次发现，清空待选列表，不取任何遗物；
   2. `choose_discovered_relic(replace=…)`：换掉一件已持有的，总种数不变故不受额度限制。
+
+2026-10-22 改版：遗物持有不再受承载拦截（启用归类），超额选择直接成功、
+新遗物先停用——死结从源头上不存在了；替换/放弃作为通用能力保留，本文件继续守护。
 """
 import os
 import sys
@@ -52,16 +55,19 @@ def _engine_at_capacity():
 # ---------- 正常路径 ----------
 
 def test_deadlock_is_real_without_an_escape():
-    """前置校验：不做任何处置时，这个现场确实推不动（否则本组测试没有意义）。"""
-    e, _, fresh = _engine_at_capacity()
+    """前置校验（2026-10-22 改版）：待选门禁仍在，但选择本身不再被承载拒绝——
+    超额拿到的遗物持有但停用，死结从源头上解开。"""
+    e, held, fresh = _engine_at_capacity()
 
     blocked = e.execute_action("battle_start", {})
     assert blocked["success"] is False
     assert "必须先从发现候选中选择1件遗物" in blocked["error"]
 
     pick = e.execute_action("choose_discovered_relic", {"relic_name": fresh[0]})
-    assert pick["success"] is False
-    assert "超出承载" in pick["error"], pick
+    assert pick["success"] is True, pick
+    assert pick["result"]["enabled"] is False, "生效数已满，新遗物应先停用"
+    assert {x.name for x in e.state.relics} == {held, fresh[0]}, "持有不限：两件都在"
+    assert e.state.enabled_relic_names() == {held}, "只有原先那件在生效"
 
 
 def test_discard_clears_pending_and_lets_the_game_proceed():

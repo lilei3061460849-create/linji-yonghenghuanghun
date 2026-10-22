@@ -229,12 +229,12 @@ def _pure_attack_round(e):
 def _fire_target_before_daowen_case(trigger_text):
     e = _fresh_engine("wired_daowen")
     p = e.state.player
-    for n in ("坠落", "杀伐", "血债"):
+    for n in ("坠落", "杀伐", "连击"):
         _give_daowen(p, n)
     spell_name = f"同义测试_{trigger_text}"
-    definition = {"name": spell_name, "required_daowen": ["坠落", "杀伐", "血债"],
+    definition = {"name": spell_name, "required_daowen": ["坠落", "杀伐", "连击"],
                   "trigger_condition": trigger_text,
-                  "effect_flow": "发动坠落X于目标→发动杀伐X于目标→发动血债X于目标"}
+                  "effect_flow": "发动坠落X于目标→发动杀伐X于目标→发动连击X于目标"}
     r2 = _learn(e, definition)
     if not r2["success"]:
         return False, None, f"学习被拒绝：{r2.get('error')}"
