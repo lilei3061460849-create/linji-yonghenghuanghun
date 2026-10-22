@@ -72,8 +72,8 @@ def test_blood_oath_ring_grants_shield_on_first_bleed_cost():
     hp_before = engine.state.player.current_hp
     r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 5, "target": "靶怪"})
     assert r["success"] is True
-    assert engine.state.player.shield == 5
-    assert engine.state.player.current_hp == hp_before - 5
+    assert engine.state.player.shield == 25
+    assert engine.state.player.current_hp == hp_before - 25
 
 
 def test_blood_oath_ring_grants_life_instead_when_low_hp():
@@ -84,7 +84,7 @@ def test_blood_oath_ring_grants_life_instead_when_low_hp():
     engine.state.player.current_hp = 20  # blood_limit=60, 支付后20-15=5 <= 30%*60=18
     _start_with_enemy(engine, Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100))
 
-    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 15, "target": "靶怪"})
+    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target": "靶怪"})  # 流血价5X=15
     assert r["success"] is True
     assert engine.state.player.shield == 0, "低血量时不应给格挡"
     assert engine.state.player.current_hp == 5 + 15, "应改为获得等量生命(15)"

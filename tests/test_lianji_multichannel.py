@@ -1,9 +1,9 @@
 """【连击】（2026-10-22 由【血债】改名）多支付通道测试。
 
-用户令口径：与【透支】同例的多代价道纹——支付六选一（流血/法力/衰老/
-枯竭/碎片/假碎片），各通道只是倍率与演出不同（血针/激光/蚀针/枯针/
-金针/虚针），效果完全相同：选择[目标]X次、每次1点伤害，不带任何
-通道专属机制。旧名【血债】仅在读入边界自动映射，引擎不接受旧名提交。
+用户令口径：与【透支】同例的多代价道纹——支付六选一（流血5X/法力5X/
+衰老X/枯竭X/碎片5X/假碎片50X，价格与效果全表同乘五），各通道只有
+倍率不同，效果完全相同：选择[目标]5X次、每次1点伤害，不带任何通道专属机制。
+旧名【血债】仅在读入边界自动映射，引擎不接受旧名提交。
 """
 import pytest
 
@@ -20,32 +20,32 @@ from tests.setup_support import begin_battle, finish_initial_daowen
 def test_lianji_default_channel_is_bleed_legacy_price():
     calc = DaoWenEngine.resolve("连击", 4)
     assert calc["cost_type"] == "流血"
-    assert calc["cost_hp"] == 4
-    assert calc["hits"] == 4 and calc["damage_per_hit"] == 1
-    assert calc["total_damage"] == 4
+    assert calc["cost_hp"] == 20
+    assert calc["hits"] == 20 and calc["damage_per_hit"] == 1
+    assert calc["total_damage"] == 20
 
 
 @pytest.mark.parametrize("channel,cost_key,amount,cost_type", [
-    ("流血", "cost_hp", 7, "流血"),
-    ("法力", "cost", 7, "消耗"),
-    ("衰老", "cost_blood_limit", 2, "衰老"),   # ⌈7/5⌉：上限类折算更划算
-    ("枯竭", "cost_mana_limit", 2, "枯竭"),
-    ("碎片", "cost_real_shards", 7, "碎片"),
-    ("假碎片", "cost_fake_shards", 70, "碎片"),
+    ("流血", "cost_hp", 35, "流血"),
+    ("法力", "cost", 35, "消耗"),
+    ("衰老", "cost_blood_limit", 7, "衰老"),
+    ("枯竭", "cost_mana_limit", 7, "枯竭"),
+    ("碎片", "cost_real_shards", 35, "碎片"),
+    ("假碎片", "cost_fake_shards", 350, "碎片"),
 ])
 def test_lianji_channels_same_effect_different_price(channel, cost_key, amount, cost_type):
     calc = DaoWenEngine.resolve("连击", 7, cost_channel=channel)
     assert calc[cost_key] == amount
     assert calc["cost_type"] == cost_type
-    # 效果恒同：与缺省流血通道逐字段一致（除代价与演出）
-    assert calc["hits"] == 7 and calc["damage_per_hit"] == 1
-    assert calc["total_damage"] == 7
-    assert calc["form"] == DaoWenEngine.LIANJI_FORMS[channel]
+    # 效果恒同：与缺省流血通道逐字段一致（除代价）
+    assert calc["hits"] == 35 and calc["damage_per_hit"] == 1
+    assert calc["total_damage"] == 35
 
 
-def test_lianji_limit_channel_rounds_up():
-    assert DaoWenEngine.resolve("连击", 5, cost_channel="衰老")["cost_blood_limit"] == 1
-    assert DaoWenEngine.resolve("连击", 6, cost_channel="枯竭")["cost_mana_limit"] == 2
+def test_lianji_limit_channels_priced_in_whole_x():
+    # 全乘五后上限类回到整数X计价，无⌈X/5⌉零头
+    assert DaoWenEngine.resolve("连击", 5, cost_channel="衰老")["cost_blood_limit"] == 5
+    assert DaoWenEngine.resolve("连击", 6, cost_channel="枯竭")["cost_mana_limit"] == 6
     assert DaoWenEngine.resolve("连击", 1, cost_channel="衰老")["cost_blood_limit"] == 1
 
 
@@ -127,40 +127,41 @@ def _cast(e, m, x, channel):
 def test_battle_mana_channel_laser(tmp_path):
     e, p, m = _setup_battle(tmp_path)
     mana0, hp0 = p.current_mana, p.current_hp
-    r = _cast(e, m, 3, "法力")
+    assert mana0 >= 5
+    r = _cast(e, m, 1, "法力")
     assert r["success"], r
-    assert p.current_mana == mana0 - 3       # 法力通道：扣法力
+    assert p.current_mana == mana0 - 5       # 法力通道：5/击扣法力
     assert p.current_hp == hp0               # 不流血
-    assert m.current_hp == 80 - 3            # 效果恒同：3击×1点
+    assert m.current_hp == 80 - 5            # 效果恒同：5击×1点
 
 
 def test_battle_real_shard_channel_only_touches_real(tmp_path):
     e, p, m = _setup_battle(tmp_path)
-    e.state.shards, e.state.fake_shards = 10, 40
+    e.state.shards, e.state.fake_shards = 20, 40
     r = _cast(e, m, 2, "碎片")
     assert r["success"], r
-    assert e.state.shards == 8
+    assert e.state.shards == 10              # 5/击
     assert e.state.fake_shards == 40         # 独立通道：不走假碎片优先
-    assert m.current_hp == 80 - 2
+    assert m.current_hp == 80 - 10           # X=2 → 10击
 
 
 def test_battle_fake_shard_channel_only_touches_fake(tmp_path):
     e, p, m = _setup_battle(tmp_path)
-    e.state.shards, e.state.fake_shards = 10, 40
+    e.state.shards, e.state.fake_shards = 10, 200
     r = _cast(e, m, 2, "假碎片")
     assert r["success"], r
-    assert e.state.fake_shards == 40 - 20    # 10/击
+    assert e.state.fake_shards == 200 - 100  # 50/击
     assert e.state.shards == 10
-    assert m.current_hp == 80 - 2
+    assert m.current_hp == 80 - 10           # X=2 → 10击
 
 
 def test_battle_shard_channel_insufficient_rejected_cleanly(tmp_path):
     e, p, m = _setup_battle(tmp_path)
-    e.state.shards, e.state.fake_shards = 1, 0
+    e.state.shards, e.state.fake_shards = 9, 0
     r = _cast(e, m, 2, "碎片")
     assert r["success"] is False
     assert "碎片不足" in r["error"]
-    assert e.state.shards == 1 and m.current_hp == 80  # 未扣未伤
+    assert e.state.shards == 9 and m.current_hp == 80  # 未扣未伤
 
 
 def test_battle_old_name_submission_rejected(tmp_path):

@@ -160,50 +160,44 @@ class DaoWenEngine:
             "summary": definition.summary(x),
         }
 
-    # 连击六通道每击价格（2026-10-22 用户令：与【透支】同类多代价道纹）：
-    # 流血1（旧【血债】原价，向后兼容缺省通道）／法力1／衰老每5击1点[血限]／
-    # 枯竭每5击1点[法限]／碎片1／假碎片10。
-    # 汇率锚：【透支】1法力=流血4/衰老2/枯竭1、【消灾】1单位=5碎片/50假碎片、
-    # 【假钞】1法力=10假碎片；上限类是永久代价，用户令折算后更划算，
-    # 故衰老/枯竭按每5击1点上限计价（同样击数付出更少）。
-    # 各通道只是演出不同（血针/激光/蚀针/枯针/金针/虚针），效果完全相同：
-    # 选择[目标]X次、每次1点伤害，不带任何通道专属机制。
+    # 连击六通道价格（2026-10-22 用户令：与【透支】同类多代价道纹，价格与效果全表同乘五）：
+    # 流血5X／法力5X／衰老X／枯竭X／碎片5X／假碎片50X；效果 选择[目标]5X次、每次1点伤害。
+    # 比率锚现有体系：【消灾】1单位=5碎片/50假碎片、【假钞】1法力=10假碎片、
+    # 【透支】上限类按整X计价；全乘五后衰老/枯竭回到整数X计价，不留⌈X/5⌉零头，
+    # 流血也回到旧【血债】「1点生命换1点伤害」的老比率（只是以5为一段）。
+    # 各通道效果完全相同，只有倍率不同，不带任何通道专属机制
+    # （演出差异不进引擎，用户 2026-10-22 令）。
     LIANJI_CHANNELS = ("流血", "法力", "衰老", "枯竭", "碎片", "假碎片")
-    LIANJI_FORMS = {"流血": "血针", "法力": "激光", "衰老": "蚀针",
-                    "枯竭": "枯针", "碎片": "金针", "假碎片": "虚针"}
 
     @staticmethod
     def calculate_lianji(x: int, target: Entity = None, cost_channel: str = "流血") -> dict:
         """连击X（2026-10-22 由【血债】改名）：支付六选一（见 LIANJI_CHANNELS 价格表）。
 
-        选择[目标] X 次，每次对其造成 1 点伤害。支付途径只改倍率与演出，
+        选择[目标] 5X 次，每次对其造成 1 点伤害。支付途径只改倍率，
         效果恒同；cost_channel 缺省流血（怪物/旧调用/预设法术不传参即原行为），
         碎片与假碎片是两个独立通道，只扣各自池子（不走「假碎片优先」的合并失去）。
         """
         target_name = target.name if target is not None else "未选定目标"
-        hits = x
+        hits = 5 * x
         damage_per_hit = 1
-        form = DaoWenEngine.LIANJI_FORMS.get(cost_channel)
         if cost_channel == "流血":
-            extra = {"cost_type": CostType.BLEED.value, "cost_hp": x}
-            price = f"流血{x}"
+            extra = {"cost_type": CostType.BLEED.value, "cost_hp": 5 * x}
+            price = f"流血{5 * x}"
         elif cost_channel == "法力":
-            extra = {"cost_type": CostType.MANA.value, "cost": x}
-            price = f"法力{x}"
+            extra = {"cost_type": CostType.MANA.value, "cost": 5 * x}
+            price = f"法力{5 * x}"
         elif cost_channel == "衰老":
-            amount = (x + 4) // 5
-            extra = {"cost_type": CostType.AGING.value, "cost_blood_limit": amount}
-            price = f"衰老{amount}"
+            extra = {"cost_type": CostType.AGING.value, "cost_blood_limit": x}
+            price = f"衰老{x}"
         elif cost_channel == "枯竭":
-            amount = (x + 4) // 5
-            extra = {"cost_type": CostType.EXHAUST.value, "cost_mana_limit": amount}
-            price = f"枯竭{amount}"
+            extra = {"cost_type": CostType.EXHAUST.value, "cost_mana_limit": x}
+            price = f"枯竭{x}"
         elif cost_channel == "碎片":
-            extra = {"cost_type": "碎片", "cost_real_shards": x}
-            price = f"碎片{x}"
+            extra = {"cost_type": "碎片", "cost_real_shards": 5 * x}
+            price = f"碎片{5 * x}"
         elif cost_channel == "假碎片":
-            extra = {"cost_type": "碎片", "cost_fake_shards": 10 * x}
-            price = f"假碎片{10 * x}"
+            extra = {"cost_type": "碎片", "cost_fake_shards": 50 * x}
+            price = f"假碎片{50 * x}"
         else:
             raise ValueError(
                 f"连击cost_channel非法：{cost_channel!r}，可选流血/法力/衰老/枯竭/碎片/假碎片")
@@ -212,11 +206,10 @@ class DaoWenEngine:
             "x": x,
             **extra,
             "cost_channel": cost_channel,
-            "form": form,
             "hits": hits,
             "damage_per_hit": damage_per_hit,
             "total_damage": hits * damage_per_hit,
-            "summary": f"{price}，以{form}选择{target_name} {hits}次，每次造成{damage_per_hit}点伤害"
+            "summary": f"{price}，选择{target_name} {hits}次，每次造成{damage_per_hit}点伤害"
         }
     
     @staticmethod

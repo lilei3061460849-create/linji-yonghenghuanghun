@@ -238,13 +238,13 @@ def test_bleed_cost_death_is_tagged_self_inflicted():
     engine.state.enemies.append(Entity(name="靶", entity_type="怪物",
                                        blood_limit=50, current_hp=50))
     engine.execute_action("round_start", {})
-    p.current_hp = 1                       # 只够付一次流血，付完即命零
+    p.current_hp = 5                       # 只够付一次流血（连击1流血价5），付完即命零
     r = engine.execute_action("use_daowen", {
         "daowen_name": "连击", "x": 1, "target_ref": "enemy:0",
         "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
     })
     assert r["success"] is True, r.get("error")
-    assert not p.is_alive, "1 血付流血 1 应命零"
+    assert not p.is_alive, "5 血付流血 5 应命零"
     ctx = getattr(p, "_death_ctx", None) or {}
     assert ctx.get("source") == "连击", ctx
     assert ctx.get("actor") in (None, "", p.name), f"自杀必须是自己动手: {ctx}"

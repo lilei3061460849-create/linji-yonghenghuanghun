@@ -138,10 +138,10 @@ def test_event_and_daowen_costs_use_blood_pact_bus(tmp_path):
     combat.apply_daowen_effect(
         "连击", calc, player, target,
         cost_share_target_ref="friend:0")
-    # 连击再流5平分 → 2/3（余数随机）；两次合计 = 15+5 = 20，双方各承担9~11。
+    # 连击5流血25平分 → 12/13（余数随机）；两次合计 = 15+25 = 40，双方各承担19~21。
     losses = sorted([100 - player.current_hp, 80 - ally.current_hp])
-    assert sum(losses) == 20
-    assert losses[0] in (9, 10) and losses[1] in (10, 11)
+    assert sum(losses) == 40
+    assert losses[0] in (19, 20) and losses[1] in (20, 21)
 
 
 def test_regeneration_is_four_x_and_old_contracts_are_removed():

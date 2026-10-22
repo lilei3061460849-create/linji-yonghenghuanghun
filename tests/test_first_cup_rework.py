@@ -163,8 +163,8 @@ def test_first_cup_doubles_bleed_cost_life_loss():
 
     engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 5, "target": "靶怪"})
 
-    assert player.current_hp == hp_before - 10, "流血5 的代价应造成 10 点生命损失"
-    assert player._hp_loss_events[-1]["amount"] == 10
+    assert player.current_hp == hp_before - 50, "流血25（连击X=5）的代价应造成 50 点生命损失"
+    assert player._hp_loss_events[-1]["amount"] == 50
 
 
 def test_first_cup_doubles_raw_hp_loss():
