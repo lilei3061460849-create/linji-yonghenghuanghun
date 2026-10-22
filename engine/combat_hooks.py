@@ -78,7 +78,8 @@ class BifenglingHook:
     priority = 50
 
     def on_dodge(self, entity: Any, state: Any) -> Dict[str, Any]:
-        if not entity or not hasattr(state, "side_has") or not state.side_has(entity, "避风铃"):
+        checker = getattr(state, "_relic_active", None) or getattr(state, "side_has", None)
+        if not entity or checker is None or not checker(entity, "避风铃"):
             return {}
         entity.shield += 3
         return {"shield_gained": 3, "total_shield": entity.shield}
@@ -97,7 +98,8 @@ class ShouyedengHook:
 
     def on_round_start(self, entity: Any, is_enemy_turn: bool, state: Any) -> Dict[str, Any]:
         # is_enemy_turn 保留在签名里只为兼容 hook 协议：授予已改为[回始]，与敌我回合无关。
-        if not entity or not hasattr(state, "side_has") or not state.side_has(entity, "守夜灯"):
+        checker = getattr(state, "_relic_active", None) or getattr(state, "side_has", None)
+        if not entity or checker is None or not checker(entity, "守夜灯"):
             return {}
         if getattr(entity, "_shouyedeng_granted", 0):
             return {}
@@ -174,7 +176,7 @@ class LethalMitigationHook:
                 }
 
         # 2. 断尾求生
-        if (getattr(target, "is_alive", False) and combat.state.side_has(target, "断尾求生")
+        if (getattr(target, "is_alive", False) and getattr(combat.state, "_relic_active", combat.state.side_has)(target, "断尾求生")
                 and combat.state.side_tail_declared(target)):
             remaining_after_shield = (amount if damage_type == "无视格挡"
                                       else max(0, amount - getattr(target, "shield", 0))) if amount > 0 else 0
@@ -352,7 +354,8 @@ class AfterDamageEffectsHook:
                 detail["fuyuesuo_heal"] = {"healer": healer.name, **healed}
 
         # 龙族血脉攻击怪物直接命零
-        if (attacker is not None and hasattr(combat.state, "side_has") and combat.state.side_has(attacker, "龙族血脉")
+        _bloodline_checker = getattr(combat.state, "_relic_active", None) or getattr(combat.state, "side_has", None)
+        if (attacker is not None and _bloodline_checker is not None and _bloodline_checker(attacker, "龙族血脉")
                 and getattr(target, "entity_type", "") == "怪物" and getattr(target, "is_alive", False)):
             target.current_hp = 0
             target.is_alive = False

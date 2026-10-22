@@ -340,12 +340,11 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         「苍白之花 → 回锋刀」战始联动时曾把它一并删掉，导致活血衣/增生药剂等
         全部走这条判定的遗物同时失效（628 个测试炸），故恢复。
         删联动要删的是**调用点**，不是这个共享判定本身。
+
+        判定口径与 `GameState._relic_active` 完全一致（含 2026-10-22 启用
+        归类：enabled=False 的遗物不生效），故直接委托状态层，不在此复制。
         """
-        if entity is None or not self.state.side_has(entity, name):
-            return False
-        if entity is self.state.player:
-            return self.state.sealed_relics.get(name, 0) <= 0
-        return True
+        return self.state._relic_active(entity, name)
 
     def _any_active_relic(self, name: str) -> bool:
         """查询场上是否存在未封印的该遗物持有者，用于“任意角色/所有角色”的全场效果。"""
@@ -463,11 +462,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         return extra
 
     def _huifeng_active(self, entity: Entity) -> bool:
-        if entity is None or not self.state.side_has(entity, "回锋刀"):
-            return False
-        if entity is self.state.player:
-            return self.state.sealed_relics.get("回锋刀", 0) <= 0
-        return True
+        return self._relic_active(entity, "回锋刀")
 
     def _huifeng_ref_from_choice(self, decision: Any) -> str:
         if not isinstance(decision, dict):
@@ -588,9 +583,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """守夜灯：每次[回始]获得等同于[法限]50%的法力。"""
         if entity is None or not entity.is_alive or entity.entity_type != "轮回者":
             return 0
-        if not self.state.side_has(entity, "守夜灯"):
-            return 0
-        if entity is self.state.player and self.state.sealed_relics.get("守夜灯", 0) > 0:
+        if not self._relic_active(entity, "守夜灯"):
             return 0
         return math.ceil(entity.mana_limit * 0.5)
 
@@ -1007,7 +1000,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 e._kuixi_pending_mana = 0
             # 2026-10-13：谁持有谁获得法限等量法力与异变；这不是代价，不走代价结算。
             # 兼容实体遗物、轮回者本局遗物及死斗对手遗物，并尊重玩家的遗物封印。
-            owns_relic = (any(r.name == MONSTER_MANA_RELIC for r in e.relics)
+            owns_relic = (any(r.name == MONSTER_MANA_RELIC and getattr(r, "enabled", True) for r in e.relics)
                           or self._relic_active(e, MONSTER_MANA_RELIC))
             relic_unsealed = (e is not player
                               or self.state.sealed_relics.get(MONSTER_MANA_RELIC, 0) <= 0)
@@ -1330,7 +1323,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """校验所有可选[战始]遗物参数；缺项不得由计算层猜测或代选。"""
         if not isinstance(choices, dict):
             raise ValueError("relic_choices必须是对象")
-        active = {r.name for r in self.state.relics if self.state.sealed_relics.get(r.name, 0) <= 0}
+        active = {r.name for r in self.state.relics if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0}
         player = self.state.player
         # 2026-10-13 用户令：【三相残韵盘】遗物删除，原战始显式决策分支一并移除。
         # 2026-10-11 用户令：【苍白之花】改为纯被动（物品索引.md:110「你的当前法力可以
@@ -1372,7 +1365,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     def validate_round_start_relic_choices(self, choices: dict) -> None:
         if not isinstance(choices, dict):
             raise ValueError("relic_choices必须是对象")
-        active = {r.name for r in self.state.relics if self.state.sealed_relics.get(r.name, 0) <= 0}
+        active = {r.name for r in self.state.relics if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0}
         player = self.state.player
         damage = 3 * max(0, player.speed_limit - player.current_speed) if player else 0
         if "回锋刀" in active and damage > 0:
@@ -1406,7 +1399,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         if not player:
             return logs
         # 抵扣X（F2）：被封印的遗物在封印期间不触发任何效果
-        relics = {r.name for r in self.state.relics if self.state.sealed_relics.get(r.name, 0) <= 0}
+        relics = {r.name for r in self.state.relics if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0}
 
         if trigger == "round_start":
             choices = ctx.get("relic_choices", {})

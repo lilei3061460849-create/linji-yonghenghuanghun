@@ -352,7 +352,7 @@ class GameEngine:
             }
         if self.event_pool.current is not None:
             event = self.event_pool.events[self.event_pool.current]
-            has_wusuoqiu = any(r.name == "无所求" for r in self.state.relics)
+            has_wusuoqiu = any(r.name == "无所求" and getattr(r, "enabled", True) for r in self.state.relics)
             actions = []
             for option in event["options"]:
                 schema: dict = {"event": self.event_pool.current, "option_id": option["id"]}
@@ -495,6 +495,15 @@ class GameEngine:
                 "name": "2档必填，当前遗物池名称"}},
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "探索", "tier": {1: "发现1个未遇事件", 2: "30碎片发现2个未遇事件"}}},
+            {"action_type": "set_active_relics", "params_schema": {
+                "relic_names": "生效遗物名列表（自定义启用）：持有不限，生效数≤[血限]承载（30[血限]=1件）；"
+                               "未列名遗物仍持有、只是不生效；也可改在 battle_start 时用 active_relics 提交"},
+             "note": (f"当前生效：{sorted(self.state.enabled_relic_names())}；"
+                      f"承载：{self.state.player.relic_capacity if self.state.player else 0}件"
+                      if self.state.player else "当前无玩家")},
+            {"action_type": "toggle_relic", "params_schema": {
+                "relic_name": "要切换启用/停用的单件遗物名：停用永远允许；启用时生效数已满承载则拒绝"},
+             "note": "与 set_active_relics 互补：本行动只翻一件的启用状态"},
         ]
         for region_action in self._get_region_actions():
             actions.append({
@@ -558,7 +567,9 @@ class GameEngine:
             actions.append({"action_type": "choose_first_embrace",
                             "params_schema": {"choice": "1..9"}})
         if self.state.energy <= 0:
-            battle_start_schema: dict[str, Any] = {"relic_choices": "逐件显式提交可选战始遗物"}
+            battle_start_schema: dict[str, Any] = {
+                "relic_choices": "逐件显式提交可选战始遗物",
+                "active_relics": "可选：本场生效的遗物名列表（自定义启用，≤[血限]承载）；不提交则沿用当前启用集合"}
             global_spells_start = self.combat.prepare_global_trigger_spells(TriggerTiming.BATTLE_START.value)
             if global_spells_start:
                 battle_start_schema["spell_choices"] = {
@@ -985,7 +996,7 @@ class GameEngine:
     def _get_battle_end_actions(self) -> dict:
         round_end_schema = {}
         player = self.state.player
-        if (player and self.state.side_has(player, "血族血脉")
+        if (player and self.state._relic_active(player, "血族血脉")
                 and self.combat._has_active_blood_pact(player)
                 and player.damage_dealt_this_round <= 0):
             round_end_schema["blood_lineage_cost_share_target_ref"] = [
@@ -1219,7 +1230,7 @@ class GameEngine:
         if action_type.startswith("world_") and phase != "pre_battle":
             return {"success": False,
                     "error": "当前开放世界行动尚处于第一阶段，只能在局外阶段调用；战斗/世界统一主循环尚未接通"}
-        if action_type in ("pre_battle_action", "resolve_event", "upgrade_doctor") and phase != "pre_battle":
+        if action_type in ("pre_battle_action", "resolve_event", "upgrade_doctor", "set_active_relics", "toggle_relic") and phase != "pre_battle":
             return {"success": False, "error": "局外行动/事件只能在局外阶段执行"}
         if action_type == "battle_start" and phase != "pre_battle":
             return {"success": False, "error": "只有局外阶段可以进入战始"}
@@ -1675,6 +1686,10 @@ class GameEngine:
             return self._action_resolve_monster_phase(params)
         elif action_type == "monster_phase":
             return self._action_monster_phase(params)
+        elif action_type == "set_active_relics":
+            return self._action_set_active_relics(params)
+        elif action_type == "toggle_relic":
+            return self._action_toggle_relic(params)
         elif action_type == "choose_discovered_relic":
             return self._action_choose_discovered_relic(params)
         elif action_type == "discard_discovered_relic":
@@ -2054,10 +2069,14 @@ class GameEngine:
                 owned_names = {relic.name for relic in inventory}
                 relic_name = location.get("relic_name", location.get("name", ""))
                 capacity = getattr(entity, "relic_capacity", 10**9)
-                if relic_name not in owned_names and len(owned_names) < capacity:
+                # 2026-10-22：玩家遗物持有不限（生效数才受承载），照常拾取；
+                # 非玩家单位维持原容量口径。
+                if relic_name not in owned_names and (is_player or len(owned_names) < capacity):
                     relic = Relic(name=relic_name, effect=location.get("relic_effect", ""),
                                   tags=list(location.get("relic_tags") or []))
                     inventory.append(relic)
+                    if is_player:
+                        self.state.note_relic_gained(relic)
                     location["active"] = False
                     location["collected"] = True
                     location["collected_by"] = actor.actor_id
@@ -2624,11 +2643,13 @@ class GameEngine:
                             capacity = (actor_entity.relic_capacity if is_player
                                         else getattr(actor_entity, "relic_capacity", 10**9))
                             owned_names = {relic.name for relic in owned_relics}
-                            if location.get("relic_name") not in owned_names and len(owned_names) < capacity:
+                            if location.get("relic_name") not in owned_names and (is_player or len(owned_names) < capacity):
                                 relic = Relic(name=location["relic_name"],
                                               effect=location.get("relic_effect", ""),
                                               tags=list(location.get("relic_tags") or []))
                                 owned_relics.append(relic)
+                                if is_player:
+                                    self.state.note_relic_gained(relic)
                                 location["active"] = False
                                 location["collected"] = True
                                 location["collected_by"] = actor_id
@@ -2885,10 +2906,7 @@ class GameEngine:
                     return {"success": False, "error": f"你没有遗物【{give_relic}】"}
                 if request_relic and target_relic is None:
                     return {"success": False, "error": f"对方没有遗物【{request_relic}】"}
-                player_relic_count = len({r.name for r in self.state.relics})
                 target_relic_count = len({r.name for r in target_entity.relics})
-                if request_relic and not give_relic and player_relic_count >= self.state.player.relic_capacity:
-                    return {"success": False, "error": "你的遗物承载已满，无法接收对方遗物"}
                 if give_relic and not request_relic and target_relic_count >= target_entity.relic_capacity:
                     return {"success": False, "error": "对方遗物承载已满，无法接收你的遗物"}
                 # 默认议价基准：一件遗物按10碎片估值。目标只接受自己收到的价值不低于付出的报价。
@@ -2921,6 +2939,7 @@ class GameEngine:
                 if target_relic is not None:
                     target_entity.relics.remove(target_relic)
                     self.state.relics.append(target_relic)
+                    self.state.note_relic_gained(target_relic)
                 world.record("trade_offer_accepted", target_id, proposer_actor_id=player_id,
                              offer_shards=offer_shards, request_shards=request_shards,
                              give_relic=give_relic, request_relic=request_relic)
@@ -3799,6 +3818,40 @@ class GameEngine:
                 "result": {"discarded_choices": choices, "source": source,
                            "note": "本次发现不取任何遗物，待选列表已清空"}}
 
+    def _action_set_active_relics(self, params: dict) -> dict:
+        """自定义启用遗物（2026-10-22 用户令）：持有不限，生效数受[血限]承载。
+
+        局外整理用；战斗中不开放——生效集合在[战始]锁定，也可在
+        battle_start 时以 active_relics 参数一次提交。
+        """
+        names = params.get("relic_names", params.get("active_relics"))
+        ok, error = self.state.set_active_relics(names)
+        if not ok:
+            return {"success": False, "error": error}
+        player = self.state.player
+        return {"success": True, "action": "自定义启用遗物",
+                "result": {"enabled": sorted(self.state.enabled_relic_names()),
+                           "disabled": sorted({r.name for r in self.state.relics}
+                                              - self.state.enabled_relic_names()),
+                           "capacity": player.relic_capacity if player else 0,
+                           "blood_limit": player.blood_limit if player else 0}}
+
+    def _action_toggle_relic(self, params: dict) -> dict:
+        """切换单件遗物启用/停用（2026-10-22 用户令）。
+
+        局外行动；与 set_active_relics（整组改选）互补：本行动只翻一件。
+        停用永远允许；启用时生效数已满承载则拒绝。
+        """
+        name = params.get("relic_name", params.get("name"))
+        ok, result = self.state.toggle_relic(name)
+        if not ok:
+            return {"success": False, "error": result}
+        player = self.state.player
+        return {"success": True, "action": "切换遗物启用",
+                "result": {"relic": name, "enabled": result,
+                           "enabled_relics": sorted(self.state.enabled_relic_names()),
+                           "capacity": player.relic_capacity if player else 0}}
+
     def _action_choose_discovered_relic(self, params: dict) -> dict:
         choice = params.get("relic_name", "")
         choices = self.state.pending_relic_choices
@@ -3809,11 +3862,11 @@ class GameEngine:
         relic = next((r for r in self.state.relics_pool if r.name == choice), None)
         if relic is None:
             return {"success": False, "error": f"遗物池中不存在【{choice}】"}
-        # 2026-10-12 用户令：30X[血限] = 允许拥有 X 种道纹和 X 种遗物。
-        # 裁定①：**开局阶段豁免**——开局流程强制「必须先从发现候选中选择1件遗物」，
-        # 低血限（血限18→额度0）会被这条卡死、连 setup_choose_region 都走不到。
-        # 裁定③（2026-10-12）：额度已满时仍可「替换」——带 replace 参数指定要换掉的
-        # 一件已持有遗物，先移除再放入，总种数不变，因此不受额度限制。
+        # 2026-10-12 用户令：30X[血限] = 允许拥有 X 种道纹和 X 种遗物；
+        # 2026-10-22 用户令改版：遗物**持有**不再受承载拦截，改为「持有不限、
+        # 生效数受承载约束」的启用归类——超出生效数的遗物仍可拿，只是先不生效，
+        # [战始]用 active_relics 自定义启用。原「替换」参数保留（换掉一件已持有
+        # 遗物再放入），原开局豁免与满额拒绝随之废止。
         player = self.state.player
         replace_name = (params.get("replace") or "").strip()
         replaced = None
@@ -3823,26 +3876,18 @@ class GameEngine:
                 return {"success": False,
                         "error": f"未持有【{replace_name}】，无法用它替换",
                         "owned": sorted({r.name for r in self.state.relics})}
-        elif player is not None and self.state.phase != "setup":
-            cap = player.relic_capacity
-            owned = len({r.name for r in self.state.relics})
-            if owned >= cap:
-                return {"success": False,
-                        "error": (f"遗物种类超出承载：[血限]{player.blood_limit} 只允许{cap}种"
-                                  f"（30[血限]=1种），已持有{owned}种。"
-                                  f"可带 replace 参数换掉一件，或放弃本次发现"),
-                        "owned": sorted({r.name for r in self.state.relics})}
         if replaced is not None:
             self.state.relics.remove(replaced)
         self.state.relics_pool.remove(relic)
         self.state.relics.append(relic)
+        self.state.note_relic_gained(relic)
         source = self.state.pending_relic_source
         self.state.pending_relic_choices = []
         self.state.pending_relic_source = ""
         result: dict = {
             "success": True,
             "action": "选择发现遗物",
-            "result": {"relic": choice, "source": source,
+            "result": {"relic": choice, "source": source, "enabled": relic.enabled,
                        **({"replaced": replaced.name} if replaced is not None else {})},
         }
         # 开局流程：先发现遗物，再发现初始道纹。
@@ -4148,21 +4193,14 @@ class GameEngine:
             if self.state.shards < 15:
                 self.state.energy += 1
                 return {"success": False, "error": "碎片不足15"}
-            # 2026-10-12 用户令：30X[血限] = 允许拥有 X 种道纹和 X 种遗物。
-            player = self.state.player
-            if player is not None:
-                cap = player.relic_capacity
-                owned = len({r.name for r in self.state.relics})
-                if owned >= cap:
-                    self.state.energy += 1
-                    return {"success": False,
-                            "error": (f"遗物种类超出承载：[血限]{player.blood_limit} 只允许{cap}种"
-                                      f"（30[血限]=1种），已持有{owned}种")}
+            # 2026-10-22 用户令：遗物持有不再受承载拦截（生效数才受限），
+            # 自选照常扣费拿取，启用与否由 note_relic_gained 按当前生效数归类。
             self.state.shards -= 15
             self.state.energy -= 1
             relic = self.state.relics_pool.pop(idx)
             self.state.relics.append(relic)
-            return {"success": True, "action": "共鸣(自选)", "result": {"gained_relic": relic.name, "effect": relic.effect}}
+            self.state.note_relic_gained(relic)
+            return {"success": True, "action": "共鸣(自选)", "result": {"gained_relic": relic.name, "effect": relic.effect, "enabled": relic.enabled}}
         discovery = self._offer_relic_discovery("共鸣发现")
         if not discovery.get("success"):
             return discovery
@@ -4718,7 +4756,7 @@ class GameEngine:
                 return log, None
         if blood_shadow:
             if (target is None or not self._hostile_to(actor, target)
-                    or not self.state.side_has(target, "血影") or target.current_hp <= 10):
+                    or not self.state._relic_active(target, "血影") or target.current_hp <= 10):
                 raise ValueError("当前判定不能使用血影")
             self.combat.pay_numeric_cost(
                 target, "流血", 10,
@@ -4752,7 +4790,7 @@ class GameEngine:
                     (wave_marked if marked else wave_unmarked).append(ent.name)
                     continue
                 if entry["blood_shadow"]:
-                    if not self.state.side_has(ent, "血影") or ent.current_hp <= 10:
+                    if not self.state._relic_active(ent, "血影") or ent.current_hp <= 10:
                         raise ValueError(f"{ent.name}不能使用血影")
                     self.combat.pay_numeric_cost(
                         ent, "流血", 10,
@@ -5202,7 +5240,7 @@ class GameEngine:
         second = params.get("second_target_ref", "")
         second_source_daowen = params.get("second_source_daowen", "")
         second_log = None
-        if second and any(r.name == "同魂笔" for r in self.state.relics):
+        if second and any(r.name == "同魂笔" and getattr(r, "enabled", True) for r in self.state.relics):
             if not second_source_daowen:
                 second_log = "同魂笔：必须指定second_source_daowen(第二个目标身上要受影响的道纹)，未生效"
             else:
@@ -5279,7 +5317,7 @@ class GameEngine:
                     "instruction": "血限按1点一档不受此限；余点会留在池里，攒够2点再兑"}
         blood_gain = vals["blood_points"] * 6
         # 不朽之躯：[血限]无法增加，兑血限的点会白扔，直接拒绝而不是静默吞点。
-        if blood_gain and self.state.side_has(target_entity, "不朽之躯"):
+        if blood_gain and self.state._relic_active(target_entity, "不朽之躯"):
             return {"success": False,
                     "error": "【不朽之躯】使[血限]无法增加，不能把属性点兑成血限",
                     "instruction": "改兑 speed_points / mana_points"}
@@ -5619,14 +5657,14 @@ class GameEngine:
                 "ref": ref, "name": target.name,
                 "can_dodge": target.current_speed > 0,
                 "can_parry": target.current_speed > 0,
-                "can_blood_shadow": (self.state.side_has(target, "血影")
+                "can_blood_shadow": (self.state._relic_active(target, "血影")
                                      and (target.current_hp > 10 or bool(blood_pact_options))),
                 "blood_shadow_cost_share_target_options": blood_pact_options,
                 "spell_options": self.combat.prepare_spell_reactions(target, attacker),
                 "dodge_relic_target_options": [
                     {"ref": r, "name": e.name} for r, e in refs.items()
                     if self.state.on_player_side(e) != self.state.on_player_side(target) and e.is_alive
-                ] if self.state.side_has(target, "回锋刀") else [],
+                ] if self.state._relic_active(target, "回锋刀") else [],
             })
         options = {
             "actor_ref": actor_ref,
@@ -5687,7 +5725,7 @@ class GameEngine:
                 speed_spend[ref] = speed_spend.get(ref, 0) + 1
                 if speed_spend[ref] > target.current_speed:
                     return {"success": False, "error": f"{target.name}速度不足以完成全部闪避"}
-                if self.state.side_has(target, "回锋刀"):
+                if self.state._relic_active(target, "回锋刀"):
                     rr = hit.get("dodge_relic_target_ref")
                     allowed = {x["ref"] for x in legal[ref]["dodge_relic_target_options"]}
                     if rr not in allowed:
@@ -5804,7 +5842,7 @@ class GameEngine:
         if self.state.in_final_duel:
             return {"success": False, "error": "最终死斗无法逃跑"}
         if any(r.name == "不离" for r in self.state.relics
-               if self.state.sealed_relics.get(r.name, 0) <= 0):
+               if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0):
             return {"success": False, "error": "【不离】：无法逃跑、撤退，也无法被移出本场战斗"}
 
         budget_error = self._consume_actions_or_error(
@@ -6514,7 +6552,7 @@ class GameEngine:
         # 真拒绝必须在结算选项效果之前判定（旧版曾据此索取分配去向）。
         text = opt["text"]
         is_reject = self._is_reject_option_text(text)
-        has_wusuoqiu = any(r.name == "无所求" for r in self.state.relics)
+        has_wusuoqiu = any(r.name == "无所求" and getattr(r, "enabled", True) for r in self.state.relics)
         res = resolve_option_effect(opt["text"], self, event_name=name, params=params)
         if res.get("interrupt_required"):
             interrupt = Interrupt(
@@ -7178,6 +7216,12 @@ class GameEngine:
         from .monsters import (make_monster_entity, roll_spawn_plan,
                                scale_monster_def_for_endless, assign_monster_preferences)
         relic_choices = params.get("relic_choices", {})
+        # 自定义启用（2026-10-22 用户令）：[战始]可提交 active_relics 选定
+        # 本场生效的遗物（≤[血限]承载），必须在战始遗物结算之前先生效。
+        if params.get("active_relics") is not None:
+            ok, error = self.state.set_active_relics(params.get("active_relics"))
+            if not ok:
+                return {"success": False, "error": error}
         # 先完成全部静态校验，再抽怪；非法遗物参数不得消耗正式随机源。
         self.combat.validate_battle_start_relic_choices(relic_choices)
         world_encounter_id = params.get("world_encounter_id")
@@ -7527,7 +7571,8 @@ class GameEngine:
                 e.spells.append(migrated)
         for relic in d.get("relics", []):
             e.relics.append(Relic(name=relic["name"], effect=relic.get("effect", ""),
-                                  tags=list(relic.get("tags") or [])))
+                                  tags=list(relic.get("tags") or []),
+                                  enabled=bool(relic.get("enabled", True))))
         for st in d.get("status_effects", []):
             e.status_effects.append(StatusEffect(name=st["name"], value=st.get("value", 0),
                                                   remaining_rounds=st.get("remaining_rounds", -1),
@@ -7827,7 +7872,8 @@ class GameEngine:
         self.combat.reset_monster_activation()
         self.state.in_final_duel = True
         self.state.opponent_relics = [
-            Relic(name=r.get("name", ""), effect=r.get("effect", ""), tags=r.get("tags") or [])
+            Relic(name=r.get("name", ""), effect=r.get("effect", ""), tags=r.get("tags") or [],
+                  enabled=bool(r.get("enabled", True)))
             for r in (candidate_snapshot.get("relics") or [])
             if r.get("name")
         ]
@@ -8610,7 +8656,7 @@ class GameEngine:
             tgt = self.combat._combat_entity_refs().get(entry.get("target_ref", "")) if isinstance(entry, dict) else None
             if tgt is None or not tgt.is_alive:
                 continue
-            if self.state.side_has(tgt, "不朽之躯"):
+            if self.state._relic_active(tgt, "不朽之躯"):
                 zengzhi_settled.append({"target": tgt.name, "increase": 0, "blocked_by": "不朽之躯"})
                 continue
             amt = entry.get("amount", 0)
