@@ -1,9 +1,9 @@
 """
-pytest - 血族/龙族项目以【遗物】形式存在（裁定：不要额外的换皮类别）
+血族/龙族遗物视图与初拥专属道纹的分类边界。
 
-要点：relics 是唯一事实源。dragon_traits / first_embrace_traits 只是
-对 relics 的只读视图（按 tags 过滤），因此这些项目自动继承遗物通用规则：
-可被销毁、交换、封印，并计入"一件当前遗物"。
+龙族项目与除【真理】外的初拥项目以遗物形式存放；dragon_traits /
+first_embrace_traits 是对 relics 的只读视图（按 tags 过滤）。【真理】作为
+初拥专属道纹存入角色道纹表，不混入遗物视图。
 
 覆盖：正常路径 / 边界条件 / 错误输入
 """
@@ -44,12 +44,24 @@ def test_dragon_item_is_stored_as_relic(tmp_path):
 
 
 def test_blood_item_is_stored_as_relic(tmp_path):
-    """正常路径：初拥之夜所选项目必须真的出现在 relics 里"""
+    """正常路径：初拥遗物项目必须真的出现在 relics 里"""
     e = _engine(tmp_path)
     e.state.pending_first_embrace = True
     r = e.execute_action("choose_first_embrace", {"choice": 7})  # 血影
     assert r["success"], r.get("error")
     assert "血影" in [x.name for x in e.state.relics]
+
+
+def test_truth_is_stored_as_bloodline_daowen_not_relic(tmp_path):
+    """选项5只授予专属道纹【真理】，不增加血族遗物名单。"""
+    e = _engine(tmp_path)
+    e.state.pending_first_embrace = True
+    result = e.execute_action("choose_first_embrace", {"choice": 5})
+    assert result["success"], result.get("error")
+    assert "真理" in e.state.player.dao_wen
+    assert "真理" not in [relic.name for relic in e.state.relics]
+    assert "真理眼" not in [relic.name for relic in e.state.relics]
+    assert "真理" not in e.state.first_embrace_traits
 
 
 def test_views_reflect_relics(tmp_path):

@@ -38,7 +38,8 @@ from .rule_repository import RuleRepository
 from .dungeons import DEFAULT_INDEX
 from .gamedata import (REGION_EXCLUSIVE_DAOWEN, ORIGINAL_MONSTER_DAOWEN,
                        MONSTER_TRANSFORM_DAOWEN, SHAFA_LOOP_DAOWEN,
-                       UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN, learnability_error)
+                       UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN, FIRST_EMBRACE_DAOWEN,
+                       learnability_error)
 from .dm_rulings import DMRulingsDB, DMRuling, Interrupt
 from .death_book import DeathBookStore, draft_legacy, validate_legacy
 from .ai_memory import clear_memory, condense_to_legacy
@@ -719,11 +720,18 @@ class GameEngine:
                                 "reason": "冷却中或被封印"})
                 continue
             max_x = self._max_legal_daowen_x(player, name)
-            # 2026-10-09 用户令：波及 X≥2 下限 repealed，X 下限恒为 1（X_MIN 已拔除）。
-            min_x = 1
-            actions.append({
-                "action_type": "use_daowen", "available": max_x >= min_x,
-                "params_schema": {
+            # 【真理】固定X=1、只需目标与待裁定陈述；发动仍沿用初拥旧口径，
+            # 不消耗主动出手，也不经过普通数值道纹的闪避/法术反应流程。
+            if name == "真理":
+                params_schema = {
+                    "daowen_name": name,
+                    "target_ref": target_options,
+                    "statement": "string",
+                }
+            else:
+                # 2026-10-09 用户令：波及 X≥2 下限 repealed，X 下限恒为 1（X_MIN 已拔除）。
+                min_x = 1
+                params_schema = {
                     "daowen_name": name,
                     "x": {"type": "integer", "minimum": min_x, "maximum": max_x},
                     "target_ref": target_options,
@@ -736,7 +744,10 @@ class GameEngine:
                          for ref, entity in self.combat.blood_pact_targets().items()]
                         if self.combat._has_active_blood_pact(player) else []
                     ),
-                },
+                }
+            actions.append({
+                "action_type": "use_daowen", "available": max_x >= 1,
+                "params_schema": params_schema,
             })
         for actor_ref, actor in refs.items():
             if actor is player or not self.state.on_player_side(actor):
@@ -862,7 +873,6 @@ class GameEngine:
             "血族尖牙": ("enslave_as_chizu", {
                 "target_ref": target_options,
                 "cost_share_target_ref": blood_pact_cost_targets}),
-            "真理眼": ("use_truth_eye", {"target_ref": target_options, "statement": "string"}),
             "血食": ("blood_feast", {"target_ref": target_options}),
         }
         for trait in self.state.dragon_traits + self.state.first_embrace_traits:
@@ -915,7 +925,10 @@ class GameEngine:
         """按真实代价口径枚举当前可提交的最大X，不把当前法力直接冒充上限。
 
         y 为双参数道纹（如【分裂】X/Y）的第二参数，单参数道纹忽略。
+        【真理】效果不随X变化，行动schema固定为X=1。
         """
+        if name == "真理":
+            return 1
         upper = max(1, actor.current_mana, actor.current_hp, actor.blood_limit,
                     actor.current_speed, self.state.shards, self.state.fake_shards, 50)
         legal = 0
@@ -3671,7 +3684,7 @@ class GameEngine:
         2: ("不朽之躯", "当前[血限]减半；免疫衰老；[血限]无法增加"),
         3: ("鲜血之翼", "代价：流血5X，发动【飞行X】回合"),
         4: ("血族尖牙", "代价：衰老20，使生命低于自身的一个[目标]转化为听命于你的赤族（诅咒：[回终]赤族流血20）"),
-        5: ("真理眼", "代价：冷却2，使一个[目标]必须言明真理，否则无法开口"),
+        5: ("真理", "专属道纹：冷却2场；指定一个[目标]与陈述，要求其言明真理，否则无法开口；真伪由DM裁定"),
         6: ("寒冰法力", "对[目标]每累计施加10法力，使其本回合出手次数-1"),
         7: ("血影", "当自身被选为非必中判定的[目标]时，可流血10，取消本次判定"),
         8: ("血食", "可使一名听命于你的赤族[命零]，自身获得等同于该赤族当前生命的[回复]"),
@@ -3909,6 +3922,10 @@ class GameEngine:
         missing = [d for d in required if d not in actor.dao_wen]
         if missing:
             return {"error": f"自创法术缺少所需道纹：{'、'.join(missing)}（须自身已持有）"}
+        interrupt_only = sorted(set(required) & FIRST_EMBRACE_DAOWEN)
+        if interrupt_only:
+            return {"error": (f"道纹【{'、'.join(interrupt_only)}】必须独立发动并等待DM裁定，"
+                               "不可作为法术材料")}
         if (not isinstance(trigger, str) or not trigger.strip()
                 or not isinstance(flow, str) or not flow.strip()):
             return {"error": "自创法术需触发条件和效果流程"}
@@ -4871,6 +4888,10 @@ class GameEngine:
             }
 
         dw_instance = actor.dao_wen[name]
+
+        if name == "真理":
+            # 初拥能力迁成道纹身份，但其既有主动入口不消耗出手、不附加数值效果。
+            return self._action_use_truth_daowen(params, actor=actor, x=x)
 
         if not dw_instance.can_use():
             return {"success": False, "error": f"道纹{name}不可用（冷却/封印）"}
@@ -7814,6 +7835,24 @@ class GameEngine:
         # 旧快照可能只记下了 dragon_traits / first_embrace_traits 名字，遗物缺 tag
         dragon_names = list(candidate_snapshot.get("dragon_traits") or [])
         embrace_names = list(candidate_snapshot.get("first_embrace_traits") or [])
+        legacy_truth_eye = ("真理眼" in embrace_names
+                            or any(relic.name == "真理眼" for relic in self.state.opponent_relics))
+        if legacy_truth_eye:
+            # 旧封存候选把真理眼记在顶层血族遗物中；现迁至擂主的道纹槽。
+            if opponent_leader is not None:
+                try:
+                    legacy_cooldown = max(0, int(candidate_snapshot.get("truth_eye_cooldown", 0)))
+                except (TypeError, ValueError):
+                    legacy_cooldown = 0
+                truth_instance = opponent_leader.dao_wen.get("真理")
+                if truth_instance is None:
+                    opponent_leader.dao_wen["真理"] = self._new_truth_daowen_instance(legacy_cooldown)
+                else:
+                    truth_instance.cooldown_remaining = max(
+                        truth_instance.cooldown_remaining, legacy_cooldown)
+            self.state.opponent_relics = [
+                relic for relic in self.state.opponent_relics if relic.name != "真理眼"]
+            embrace_names = [name for name in embrace_names if name != "真理眼"]
         existing = {r.name for r in self.state.opponent_relics}
         for r in self.state.opponent_relics:
             if r.name in dragon_names and "龙族" not in r.tags:
@@ -7937,6 +7976,44 @@ class GameEngine:
         return {"success": True, "action": "领取终音法器",
                 "result": {"artifact": name, "effect": effect, "seal": seal}}
 
+    @staticmethod
+    def _new_truth_daowen_instance(cooldown_remaining: int = 0) -> DaoWenInstance:
+        """构造初拥专属道纹【真理】；X固定为1，冷却按完整战斗场数计。"""
+        return DaoWenInstance(
+            DaoWen(
+                name="真理", formula="固定X=1", cost_type="冷却",
+                cost_formula="2场战斗",
+                effect_formula="指定一个目标与陈述；要求其言明真理，否则无法开口；真伪由DM裁定",
+                tags=["初拥之夜", "血族专属"],
+            ),
+            x_value=1,
+            x_free=False,
+            cooldown_remaining=max(0, int(cooldown_remaining)),
+        )
+
+    def _migrate_legacy_truth_eye(self) -> bool:
+        """把旧档中的血族遗物【真理眼】及全局冷却迁成【真理】道纹实例。"""
+        player = self.state.player
+        if player is None:
+            return False
+        legacy_relics = [relic for relic in self.state.relics if relic.name == "真理眼"]
+        old_cooldown = max(0, int(getattr(self.state, "truth_eye_cooldown", 0)))
+        instance = player.dao_wen.get("真理")
+        migrated = False
+        if legacy_relics and instance is None:
+            instance = self._new_truth_daowen_instance(old_cooldown)
+            player.dao_wen["真理"] = instance
+            migrated = True
+        elif instance is not None and old_cooldown:
+            instance.cooldown_remaining = max(instance.cooldown_remaining, old_cooldown)
+            migrated = True
+        if legacy_relics:
+            self.state.relics = [relic for relic in self.state.relics if relic.name != "真理眼"]
+            migrated = True
+        if hasattr(self.state, "truth_eye_cooldown"):
+            self.state.truth_eye_cooldown = 0
+        return migrated
+
     def _action_choose_first_embrace(self, params: dict) -> dict:
         """
         初拥之夜：9选1。1~8每项限选1次(除9外)，选择后[回复]30%[血限]。
@@ -7948,16 +8025,26 @@ class GameEngine:
         if choice not in self.FIRST_EMBRACE_OPTIONS:
             return {"success": False, "error": "choice必须是1~9之间的整数"}
         name, effect = self.FIRST_EMBRACE_OPTIONS[choice]
-        if choice != 9 and name in self.state.first_embrace_traits:
-            return {"success": False, "error": f"{name}已经选过，1~8每项限选1次"}
-
         player = self.state.player
         if not player:
             return {"success": False, "error": "没有玩家"}
 
         if choice != 9:
-            # 以【遗物】形式授予：遗物是唯一事实源，自动继承遗物通用规则
-            self.state.grant_relic(name, effect, tag="血族")
+            already_chosen = name in self.state.first_embrace_traits
+            if name == "真理":
+                # 兼容迁移前仍以遗物保存的旧档，及任何已持有同名道纹的状态。
+                already_chosen = (already_chosen or "真理" in player.dao_wen
+                                  or any(relic.name == "真理眼" for relic in self.state.relics))
+            if already_chosen:
+                return {"success": False, "error": f"{name}已经选过，1~8每项限选1次"}
+
+        if choice != 9:
+            if name == "真理":
+                # 事件专属道纹由初拥直接授予；不进入普通学习/残韵流程。
+                player.dao_wen[name] = self._new_truth_daowen_instance()
+            else:
+                # 其余初拥项目仍以遗物形式存放，继承遗物通用规则。
+                self.state.grant_relic(name, effect, tag="血族")
             self.state.pending_first_embrace = False
             if name == "不朽之躯":
                 player.blood_limit = math.ceil(player.blood_limit / 2)
@@ -8026,29 +8113,51 @@ class GameEngine:
                 "result": {"cost": payment, "enslaved": target.name,
                            "chizu_names": list(self.state.chizu_names)}}
 
-    def _action_use_truth_eye(self, params: dict) -> dict:
-        """真理眼：代价冷却2(按战斗场数计)，使一个[目标]必须言明真理，否则无法开口；真伪由DM裁定"""
-        if "真理眼" not in self.state.first_embrace_traits:
-            return {"success": False, "error": "没有真理眼"}
-        if self.state.truth_eye_cooldown > 0:
-            return {"success": False, "error": f"真理眼冷却中，还需{self.state.truth_eye_cooldown}场战斗"}
+    def _action_use_truth_daowen(
+        self, params: dict, *, actor: Optional[Entity] = None, x: int = 1,
+    ) -> dict:
+        """真理：指定目标与陈述，要求目标言明真理，否则无法开口；由DM裁定真伪，冷却2场。"""
+        actor = actor or self.state.player
+        if actor is self.state.player:
+            self._migrate_legacy_truth_eye()
+        instance = actor.dao_wen.get("真理") if actor is not None else None
+        if instance is None:
+            return {"success": False, "error": "没有道纹【真理】"}
+        if not isinstance(x, int) or isinstance(x, bool) or x != 1:
+            return {"success": False, "error": "【真理】固定X=1"}
+        if instance.cooldown_remaining > 0:
+            return {"success": False,
+                    "error": f"真理冷却中，还需{instance.cooldown_remaining}场战斗"}
+        if not instance.can_use():
+            return {"success": False, "error": "道纹真理不可用（冷却/封印）"}
+        if (actor is not self.state.player
+                and not (self.state.in_final_duel and actor.entity_type == "轮回者"
+                         and actor in self.state.get_all_enemy_side())):
+            return {"success": False, "error": "只有持有初拥血脉的轮回者才能发动【真理】"}
+
         target = self.combat._combat_entity_refs().get(params.get("target_ref", ""))
         statement = params.get("statement", "")
         if target is None or not statement:
             return {"success": False, "error": "必须指定合法target_ref与statement"}
-        self.state.truth_eye_cooldown = 2
+
+        # 保持初拥旧行动口径：发动不消耗出手，不另加资源代价或普通道纹反应链。
+        instance.cooldown_remaining = 2
         interrupt = Interrupt(
             interrupt_type=InterruptType.CUSTOM,
-            context={"ability": "真理眼", "target": target.name, "statement": statement},
-            description=f"对{target.name}发动【真理眼】，要求其就以下内容言明真理，否则无法开口：\n{statement}\n"
+            context={"ability": "真理", "target": target.name, "statement": statement},
+            description=f"对{target.name}发动【真理】，要求其就以下内容言明真理，否则无法开口：\n{statement}\n"
                         f"请DM裁定对方的回应是否属实。",
             options=[{"id": "truth", "label": "属实", "description": "按DM裁定的真实内容生效"},
                      {"id": "silence", "label": "无法开口", "description": "对方拒绝或无法说出真话，只能沉默"}],
             state_snapshot=self.state.to_dict(),
         )
         self._pending_interrupts.append(interrupt)
-        return {"success": True, "action": "真理眼",
+        return {"success": True, "action": "真理",
                 "result": {"interrupt": interrupt.to_dict(), "cooldown_battles": 2}}
+
+    def _action_use_truth_eye(self, params: dict) -> dict:
+        """旧 action 名称兼容入口；新界面只暴露 use_daowen(daowen_name=真理)。"""
+        return self._action_use_truth_daowen(params)
 
     def _action_blood_feast(self, params: dict) -> dict:
         """血食：可使一名听命于你的赤族[命零]，自身获得等同于该赤族当前生命的[回复]"""
@@ -8576,9 +8685,8 @@ class GameEngine:
                 self.state.player.current_hp = min(self.state.player.current_hp, self.state.player.blood_limit)
             self._artifact_base_blood_limit = 0
 
-        # 真理眼冷却：每场[战终]-1
-        if self.state.truth_eye_cooldown > 0:
-            self.state.truth_eye_cooldown -= 1
+        # 初拥【真理】已采用 DaoWenInstance.cooldown_remaining，随下方通用道纹冷却递减；
+        # truth_eye_cooldown 仅作为旧 pickle 迁移字段，不再参与新存档结算。
 
         # 道纹【冷却X】：规则正文「[战终]后已完成战斗场数+1，达到Y时才能再次使用」。
         # 对所有持有道纹的角色统一递减，归零即恢复可用。
@@ -9021,6 +9129,7 @@ class GameEngine:
                     source_order = order_by_entity.get(id(source_entity), {}) if source_entity else {}
                     # 能从来源角色的同名道纹确认位置时优先用来源；否则兼容退回状态持有者。
                     status.daowen_order = source_order.get(status.name, owner_order.get(status.name))
+        self._migrate_legacy_truth_eye()
 
     def save_game(self, slot: str = "auto") -> dict:
         """保存可完整往返的版本化快照；只允许load_game读取本引擎生成的本地文件。"""

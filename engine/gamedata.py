@@ -47,6 +47,9 @@ UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN = {
     "净化": "荒疫古城",
 }
 
+# 初拥之夜选项5授予的血族专属道纹；不进入局外学习或残韵获取池。
+FIRST_EMBRACE_DAOWEN = frozenset({"真理"})
+
 
 def learnability_error(name, *, owned, region, known) -> str | None:
     """局外【学习】口径的单名校验（2026-10-13 从 api._pre_battle_xuexi 原样抽出）。
@@ -58,6 +61,8 @@ def learnability_error(name, *, owned, region, known) -> str | None:
         return f"未知道纹: {name}"
     if name in owned:
         return f"已经掌握道纹: {name}"
+    if name in FIRST_EMBRACE_DAOWEN:
+        return f"【{name}】是初拥之夜专属道纹，只能通过初拥之夜获得"
     owner = next((r for r, pool in REGION_EXCLUSIVE_DAOWEN.items() if name in pool), None)
     if owner is not None:
         if owner != region:

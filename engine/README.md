@@ -220,7 +220,7 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `world_initialize` | 默认副本入口：按当前副本区域初始化 21×21 开放地图 |
 | `world_move` / `world_wait` / `world_interact` | 开放地图移动、等待与交互；地图遭遇使用带 `world_encounter_id` 的 `battle_start` |
 | `pre_battle_action` | 局外行动；旧线性模式仅在用户明确要求时使用 |
-| `use_daowen` | 发动道纹（可选actor：留空=玩家自身法力制发动；指定[朋友]/[员工]名=听从指令发动，免法力只消耗出手，且必须指定非自身目标） |
+| `use_daowen` | 发动道纹（可指定[朋友]/[员工]的actor_ref听从指令，由其自身支付法力并消耗出手；初拥专属【真理】需提交target_ref与statement，冷却2场且不消耗出手） |
 | `define_spell` | 统一自定义施法：用 `spell_name` 定义法术大全条目，或用 `spell` 定义新法术；所有法术类型均由此入口表达（1出手） |
 | `cast` | 施法。`kind=daowen`（默认）=发动单个道纹；`kind=spell`=统一自定义施法；带 `flow` = **瞬发法术**：一次出手依次发动多种道纹（只扣1出手，每步都是一次发动道纹，逐步按真实法力结算，中断保留已结算步骤、出手不退，不写入角色法术列表）。见 法术索引.md §5.4 |
 | `use_resonance` | 使用残韵 |
@@ -250,7 +250,6 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `use_dragon_wings` | 烬翼：花3X龙性获得飞行X |
 | `use_blood_wings` | 初拥之夜·鲜血之翼：流血5X获得飞行X |
 | `enslave_as_chizu` | 初拥之夜·血族尖牙：衰老20，将生命低于自身的目标转化为赤族 |
-| `use_truth_eye` | 初拥之夜·真理眼：抛Interrupt交DM裁定，冷却2场 |
 | `blood_feast` | 初拥之夜·血食：命零一名赤族，回复等量生命 |
 | `choose_diandang_daowen` | 领取【典当】发现：从当前组3选1里选1种获得，不消耗出手 |
 | `prepare_attack` / `resolve_attack` | 两阶段攻击：逐击绑定目标、闪避、血影和法术反应 |

@@ -37,6 +37,7 @@ from typing import Optional, Any
 
 from ..models import Entity, Spell, DaoWenInstance
 from ..daowen import DaoWenEngine
+from ..gamedata import FIRST_EMBRACE_DAOWEN
 from ..enums import ActionPhase, TriggerTiming, CostType
 from ..effect_context import EffectContext, make_context, normalize_context
 from ..spell_dsl import (
@@ -1271,6 +1272,10 @@ class SpellReactionMixin:
         except SpellDslError as exc:
             raise ValueError(f"瞬发法术句式错误：{exc}") from exc
         program = list(parsed.steps)
+        interrupt_only = sorted(collect_step_daowen(program) & FIRST_EMBRACE_DAOWEN)
+        if interrupt_only:
+            raise ValueError(
+                f"道纹【{'、'.join(interrupt_only)}】必须独立发动并等待DM裁定，不能嵌入瞬发法术")
         slot_count = count_action_steps(program)
         if slot_count == 0:
             raise ValueError("瞬发法术没有任何可执行的步骤")

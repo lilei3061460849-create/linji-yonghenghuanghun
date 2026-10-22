@@ -776,6 +776,17 @@ class DaoWenEngine:
             "summary": f"支付：{3 * x}法力，唤回1具已灭怪物作为临时朋友（生命{20*x}）"
         }
 
+    @staticmethod
+    def calculate_zhenli(x: int, target: Entity = None) -> dict:
+        """真理X（固定X=1）：支付：冷却2场。对[目标]要求其就所述陈述言明真理，否则无法开口；真伪由DM裁定。"""
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "真理", "x": x,
+            "cost_type": CostType.COOLDOWN.value, "cost": 2,
+            "truth_required": True,
+            "summary": f"冷却2场，对{target_name}要求其就所述陈述言明真理，否则无法开口；真伪由DM裁定",
+        }
+
     # ========== 统一调度入口 ==========
     
     _registry: dict = {}  # 运行时注册
@@ -832,6 +843,8 @@ class DaoWenEngine:
             "瓦解": cls.calculate_wajie,
             "勾魂": cls.calculate_gouhun,
             "招魂": cls.calculate_zhaohun,
+            # 初拥之夜专属道纹；只允许事件授予，不进入常规学习/残韵池。
+            "真理": cls.calculate_zhenli,
         }
     
     @staticmethod

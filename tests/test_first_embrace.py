@@ -3,7 +3,7 @@ pytest 风格测试 - 里程碑：初拥之夜（9选1特殊事件）
 
 原文（FIRST_EMBRACE_OPTIONS，见 engine/api.py）：
 由终音法器"猩红尖牙"强制触发，也可能在其他场景下被再次触发（封存血脉保留触发权）。
-1~8每项限选1次，选择后立即回复30%当前[血限]；9号"封存血脉"不消耗触发权、可重复触发。
+1~8每项限选1次，选择后立即回复30%当前[血限]；选项5【真理】为专属道纹，其余项目为遗物；9号"封存血脉"不消耗触发权、可重复触发。
 
 覆盖范围：choose_first_embrace 的门槛校验 + 9个选项各自的具体机制效果。
 运行方式：
@@ -20,6 +20,8 @@ import pytest
 
 from tests.attack_support import resolve_attack as resolve_player_attack
 from engine.api import GameEngine
+from engine.daowen import DaoWenEngine
+from engine.gamedata import learnability_error, learnable_daowen_pool
 from engine.models import Entity, DaoWen, DaoWenInstance, Relic
 
 
@@ -86,6 +88,33 @@ def test_choice_out_of_range_rejected():
     assert engine.execute_action("choose_first_embrace", {"choice": 10})["success"] is False
 
 
+def test_truth_is_not_available_through_regular_learning_or_discovery():
+    """真理是初拥专属道纹，不进入局外学习或典当发现候选池。"""
+    DaoWenEngine.register_all()
+    known = DaoWenEngine.list_all()
+    error = learnability_error("真理", owned=set(), region="龙心谷", known=known)
+    assert error and "初拥之夜专属" in error
+    assert "真理" not in learnable_daowen_pool(owned=set(), region="龙心谷", known=known)
+
+
+def test_truth_cannot_be_embedded_as_a_spell_step():
+    """DM中断型真理必须独立发动，避免普通法术数值流程吞掉其裁定效果。"""
+    engine = _new_engine(dbsuffix="truth_spell")
+    _grant(engine, 5)
+    player = engine.state.player
+    spell = engine._build_custom_spell(player, {
+        "name": "强制真理", "required_daowen": ["真理"],
+        "trigger_condition": "受到伤害前", "effect_flow": "发动真理X于攻击者",
+    })
+    assert "error" in spell and "必须独立发动" in spell["error"]
+
+    enemy = _start_battle_with_enemy(engine)
+    with pytest.raises(ValueError, match="必须独立发动"):
+        engine.combat.build_instant_execution(
+            player, "发动真理X于目标", enemy, [{"x": 1}],
+            engine.combat._combat_entity_refs())
+
+
 def test_cannot_reselect_same_trait_1_to_8():
     """错误输入：1~8号每项限选1次，重复选择被拒绝；9号不受此限制"""
     engine = _new_engine(dbsuffix="gate3")
@@ -94,6 +123,12 @@ def test_cannot_reselect_same_trait_1_to_8():
     r_dup = _grant(engine, 1)
     assert r_dup["success"] is False
     assert "已经选过" in r_dup["error"]
+
+    r5 = _grant(engine, 5)
+    assert r5["success"] is True
+    r5_dup = _grant(engine, 5)
+    assert r5_dup["success"] is False
+    assert "已经选过" in r5_dup["error"]
 
     r9a = _grant(engine, 9)
     assert r9a["success"] is True
@@ -303,44 +338,123 @@ def test_chizu_curse_bleeds_20_each_round_end():
 
 
 # ========================================================================
-# 5. 真理眼
+# 5. 真理
 # ========================================================================
 
-def test_option5_truth_eye_raises_interrupt_and_sets_cooldown():
-    """正常路径：真理眼是中断类能力，需要DM裁定，不由代码自动判定结果"""
-    engine = _new_engine(dbsuffix="eye")
-    _grant(engine, 5)
+def test_option5_truth_is_a_daowen_and_raises_dm_interrupt_without_spending_action():
+    """正常路径：选项5授予专属道纹；效果仍交DM裁定且不消耗出手。"""
+    engine = _new_engine(dbsuffix="truth")
+    player = engine.state.player
+    result = _grant(engine, 5)
+    assert result["success"] is True
+    assert result["result"]["trait"] == "真理"
+    assert "真理" in player.dao_wen
+    assert "真理" not in [relic.name for relic in engine.state.relics]
+    assert "真理眼" not in [relic.name for relic in engine.state.relics]
+    assert "真理" not in engine.state.first_embrace_traits
+
     enemy = _start_battle_with_enemy(engine)
-    r = engine.execute_action("use_truth_eye", {"target_ref": "enemy:0", "statement": "你藏着钥匙"})
+    available = engine.get_available_actions()["actions"]
+    truth_action = next(action for action in available
+                        if action.get("action_type") == "use_daowen"
+                        and action.get("params_schema", {}).get("daowen_name") == "真理")
+    assert "target_ref" in truth_action["params_schema"]
+    assert "statement" in truth_action["params_schema"]
+    assert "x" not in truth_action["params_schema"]
+    assert not any(action.get("action_type") == "use_truth_eye" for action in available)
+
+    actions_before = player.actions_used_this_round
+    hp_before, mana_before = player.current_hp, player.current_mana
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "真理", "target_ref": "enemy:0", "statement": "你藏着钥匙"})
     assert r["success"] is True
-    assert "interrupt" in r["result"]
-    assert engine.state.truth_eye_cooldown == 2
+    assert r["action"] == "真理"
+    assert r["result"]["interrupt"]["context"]["ability"] == "真理"
+    assert "请DM裁定对方的回应是否属实" in r["result"]["interrupt"]["description"]
+    assert player.dao_wen["真理"].cooldown_remaining == 2
+    assert player.actions_used_this_round == actions_before
+    assert (player.current_hp, player.current_mana) == (hp_before, mana_before)
     assert len(engine._pending_interrupts) == 1
+
+
+def test_legacy_truth_eye_action_alias_routes_to_the_new_daowen():
+    """兼容旧客户端的 use_truth_eye action 名称，但统一按新道纹结算。"""
+    engine = _new_engine(dbsuffix="truth_alias")
+    _grant(engine, 5)
+    _start_battle_with_enemy(engine)
+    result = engine.execute_action("use_truth_eye", {
+        "target_ref": "enemy:0", "statement": "旧客户端兼容"})
+    assert result["success"] is True
+    assert result["action"] == "真理"
+    assert result["result"]["interrupt"]["context"]["ability"] == "真理"
+    assert engine.state.player.dao_wen["真理"].cooldown_remaining == 2
 
 
 def test_option5_cooldown_blocks_reuse_and_decrements_per_battle_end():
     """边界：冷却期内再次发动应拒绝；冷却随每次[战终]递减，归零后可再次使用"""
-    engine = _new_engine(dbsuffix="eye_cd")
+    engine = _new_engine(dbsuffix="truth_cd")
     _grant(engine, 5)
     _start_battle_with_enemy(engine)
-    engine.execute_action("use_truth_eye", {"target_ref": "enemy:0", "statement": "第一次"})
+    engine.execute_action("use_daowen", {
+        "daowen_name": "真理", "target_ref": "enemy:0", "statement": "第一次"})
     engine.submit_ruling(interrupt_type="自定义", ruling_text="属实")
 
-    r_again = engine.execute_action("use_truth_eye", {"target_ref": "enemy:0", "statement": "立刻再来"})
+    r_again = engine.execute_action("use_daowen", {
+        "daowen_name": "真理", "target_ref": "enemy:0", "statement": "立刻再来"})
     assert r_again["success"] is False, "冷却期内应拒绝"
 
     engine.state.enemies.clear()
     engine.execute_action("battle_end", {})
-    assert engine.state.truth_eye_cooldown == 1
+    assert engine.state.player.dao_wen["真理"].cooldown_remaining == 1
     engine.state.phase = "in_combat"  # 构造下一场已结束的合法战终状态
     engine.execute_action("battle_end", {})
-    assert engine.state.truth_eye_cooldown == 0
+    assert engine.state.player.dao_wen["真理"].cooldown_remaining == 0
 
     engine.state.phase = "in_combat"
     engine.state.enemies.clear()
     engine.state.enemies.append(Entity(name="怪物乙", entity_type="怪物", blood_limit=10, current_hp=10))
-    r_ok = engine.execute_action("use_truth_eye", {"target_ref": "enemy:0", "statement": "冷却结束"})
+    r_ok = engine.execute_action("use_daowen", {
+        "daowen_name": "真理", "target_ref": "enemy:0", "statement": "冷却结束"})
     assert r_ok["success"] is True
+
+
+def test_truth_cooldown_round_trips_through_game_save(tmp_path):
+    """存档往返后，真理的战斗场数冷却保存在专属道纹实例上。"""
+    engine = _new_engine(dbsuffix="truth_save")
+    engine.save_dir = str(tmp_path)
+    _grant(engine, 5)
+    _start_battle_with_enemy(engine)
+    used = engine.execute_action("use_daowen", {
+        "daowen_name": "真理", "target_ref": "enemy:0", "statement": "存档冷却"})
+    assert used["success"] is True
+    assert engine.state.player.to_dict()["daowen_cooldowns"]["真理"]["battles"] == 2
+    assert engine.save_game("truth")["success"] is True
+
+    restored = GameEngine(db_path=str(tmp_path / "restored.db"), save_dir=str(tmp_path),
+                          rng_seed=1, sealed_candidate_path=str(tmp_path / "sealed.json"))
+    loaded = restored.load_game("truth")
+    assert loaded["success"] is True
+    assert restored.state.player.dao_wen["真理"].cooldown_remaining == 2
+    assert len(restored._pending_interrupts) == 1
+
+
+def test_legacy_truth_eye_save_migrates_relic_and_cooldown(tmp_path):
+    """旧存档里的真理眼遗物与全局冷却迁为真理道纹实例。"""
+    engine = _new_engine(dbsuffix="truth_legacy")
+    engine.save_dir = str(tmp_path)
+    engine.state.grant_relic("真理眼", "旧版效果", tag="血族")
+    engine.state.truth_eye_cooldown = 1
+    assert engine.save_game("legacy_truth")["success"] is True
+
+    restored = GameEngine(db_path=str(tmp_path / "legacy_restored.db"), save_dir=str(tmp_path),
+                          rng_seed=1, sealed_candidate_path=str(tmp_path / "sealed_legacy.json"))
+    loaded = restored.load_game("legacy_truth")
+    assert loaded["success"] is True
+    assert "真理" in restored.state.player.dao_wen
+    assert restored.state.player.dao_wen["真理"].cooldown_remaining == 1
+    assert all(relic.name != "真理眼" for relic in restored.state.relics)
+    assert restored.state.truth_eye_cooldown == 0
+    assert "真理" not in restored.state.first_embrace_traits
 
 
 # ========================================================================

@@ -977,6 +977,11 @@ class Entity:
             "hp_ratio": round(self.hp_ratio, 2),
             "ai_memory": self.ai_memory,
             "dao_wen": {k: v.dao_wen.name for k, v in self.dao_wen.items()},
+            "daowen_cooldowns": {
+                k: {"battles": int(getattr(v, "cooldown_remaining", 0)),
+                    "rounds": int(getattr(v, "cooldown_rounds_remaining", 0))}
+                for k, v in self.dao_wen.items()
+            },
             "spells": [s.name for s in self.spells],
             "relics": [r.to_dict() for r in self.relics],
             "status_effects": [
@@ -1272,10 +1277,10 @@ class GameState:
     pending_first_embrace: bool = False
     # 仅当初拥之夜是由死斗胜利(领取猩红尖牙)触发时为True：完成本次选择(非"封存血脉")后应紧接着完整封存
     seal_pending_after_embrace: bool = False
-    # 初拥之夜所得同样以【遗物】形式存放在 self.relics（tags含"血族"）；
-    # first_embrace_traits 是对 relics 的只读视图，见下方 property。
+    # 初拥之夜的血族遗物存放在 self.relics（tags含"血族"）；【真理】已迁为道纹。
+    # first_embrace_traits 只读列出仍属遗物的血族项目，见下方 property。
     chizu_names: list[str] = field(default_factory=list)
-    # 真理眼冷却：剩余需要经过的战斗场数(战终-1，0=可用)
+    # 旧 pickle 兼容字段；【真理】冷却现存于 DaoWenInstance.cooldown_remaining。
     truth_eye_cooldown: int = 0
 
     
@@ -1283,8 +1288,8 @@ class GameState:
     attribute_points: int = 0
     allocated_blood: int = 0     # 已分配血限（从属性点）
     
-    # ---- 遗物视图：血族/龙族项目一律以遗物形式存放，遗物是唯一事实源 ----
-    # 这样它们自动继承遗物的全部通用规则（可被销毁、交换、封印、计入"一件当前遗物"）。
+    # ---- 血族遗物视图：仍属遗物的血族项目由 relics 作为唯一事实源 ----
+    # 【真理】是例外，现存于 Entity.dao_wen；其余血族遗物继承销毁、交换、封印等通则。
 
     def _relic_names_by_tag(self, tag: str) -> list[str]:
         return [r.name for r in self.relics if tag in r.tags]
@@ -1296,7 +1301,7 @@ class GameState:
 
     @property
     def first_embrace_traits(self) -> list[str]:
-        """血族遗物名单（对 relics 的只读视图）。"""
+        """初拥授予且仍属遗物的血族项目名单（【真理】作为道纹不在此视图）。"""
         return self._relic_names_by_tag("血族")
 
     @property
