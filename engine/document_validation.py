@@ -61,6 +61,22 @@ STALE_KNOWLEDGE_HEADING = re.compile(
     re.MULTILINE,
 )
 
+# 资源设计标准（2026-10-23 用户裁定）：四类资源的资格与结构，缺一条即视为规则丢失。
+RESOURCE_DESIGN_HEADING = "【二、资源设计标准】"
+RESOURCE_DESIGN_MARKERS = (
+    "现有任何资源都无法实现的效果，才有资格新增资源",
+    "消耗品不受此限制",
+    "名称仅二字",
+    "局外发动须",
+    "X 只能提升效果强度或持续时间",
+    "无 X 变量",
+    "必有触发时机及对应效果",
+    "不受限其他资源规则",
+    "主动与被动均可生效",
+    "不消耗出手",
+    "当场设计",
+)
+
 
 def github_anchor(heading: str) -> str:
     """生成项目当前标题所需的 GitHub 风格锚点。"""
@@ -153,6 +169,18 @@ def validate_ai_knowledge_base(path: str | Path) -> dict:
     stale_headings = STALE_KNOWLEDGE_HEADING.findall(text)
     if stale_headings:
         errors.append("知识库仍含过期/已解决流水账标题：" + "；".join(stale_headings))
+
+    design = re.search(
+        rf"^{re.escape(RESOURCE_DESIGN_HEADING)}\s*$\n(?P<body>.*?)(?=^【|^##\s|\Z)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    if design is None:
+        errors.append(f"缺少「{RESOURCE_DESIGN_HEADING}」资源设计标准章节")
+    else:
+        for marker in RESOURCE_DESIGN_MARKERS:
+            if marker not in design.group("body"):
+                errors.append(f"资源设计标准缺少关键要求：{marker}")
 
     if errors:
         raise ValueError("AI知识库校验失败：\n" + "\n".join(errors))

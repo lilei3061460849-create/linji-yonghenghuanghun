@@ -91,6 +91,12 @@ TWISTED_TOOL_LIBRARY = {
 FREE_CRYSTAL_COST_POOL = ("流血", "衰老", "枯竭", "萎缩", "疲惫", "失忆", "异变", "冷却")
 FREE_CRYSTAL_COST_AMOUNT = 10
 
+# 局外可发动的道纹白名单（2026-10-23 用户裁定：默认局内，局外须明示）。
+# 「明示」＝该道纹条文自己写明可局外发动；没写的一律只能在战斗中发动。
+# 目前唯一明示项是【消灾】（条文：局外发动消耗×2）。
+# 新增一项必须先改条文，再改这里；tests/test_resource_design_standard.py 钉死本集合。
+OUT_OF_COMBAT_DAOWEN = frozenset({"消灾"})
+
 
 class GameEngine:
     """
@@ -1218,7 +1224,7 @@ class GameEngine:
             self.state.combat_subphase = CombatSubphase.PLAYER_ACTIONS.value
 
     def _phase_error(self, action_type: str, params: dict) -> Optional[dict]:
-        """执行入口的阶段门禁；【消灾】是唯一允许在局外发动的道纹。"""
+        """执行入口的阶段门禁；道纹默认局内发动，局外只放行条文明确许可项。"""
         phase = self.state.phase
         if self.state.pending_daowen_choices and action_type != "choose_hired_daowen":
             return {"success": False,
@@ -1240,10 +1246,13 @@ class GameEngine:
             return {"success": False, "error": f"尚有{self.state.energy}点精力，耗尽后才能进入战斗"}
         if action_type == "use_daowen":
             name = params.get("daowen_name", "")
-            if phase == "pre_battle" and name == "消灾":
+            # 默认局内；局外须条文明示（白名单见模块顶部 OUT_OF_COMBAT_DAOWEN）。
+            if phase == "pre_battle" and name in OUT_OF_COMBAT_DAOWEN:
                 return None
             if phase != "in_combat":
-                return {"success": False, "error": "道纹只能在战斗中发动；局外唯一例外是【消灾】"}
+                allowed = "、".join(f"【{n}】" for n in sorted(OUT_OF_COMBAT_DAOWEN))
+                return {"success": False,
+                        "error": f"道纹默认仅在战斗中发动；局外发动须条文明示（当前明示：{allowed}）"}
         if action_type == "restart_battle" and phase != "in_combat":
             return {"success": False, "error": "只有进行中的战斗可以重来"}
         if action_type in self._COMBAT_ONLY_ACTIONS and phase != "in_combat":

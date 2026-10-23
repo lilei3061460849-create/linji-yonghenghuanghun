@@ -94,7 +94,8 @@ def test_use_daowen_out_of_combat_only_xiaozai_pays_double_no_action():
     r = engine.execute_action("use_daowen", {"daowen_name": "假钞", "x": 1,
                                              "dodge": False, "blood_shadow": False,
                                              "trigger_spell_choices": {}})
-    assert not r["success"] and "只能在战斗中发动" in r["error"]
+    # 2026-10-23 用户裁定：默认局内，局外须条文明示；错误文案随之改为「明示」口径。
+    assert not r["success"] and "局外发动须条文明示" in r["error"]
     r = engine.execute_action("use_daowen", {"daowen_name": "消灾", "x": 1,
                                              "dodge": False, "blood_shadow": False,
                                              "trigger_spell_choices": {}})
