@@ -360,7 +360,7 @@ def test_ember_wing_active_use_grants_flight():
     engine.execute_action("battle_start", {})
     engine.execute_action("round_start", {})
     player = engine.state.player
-    r = engine.execute_action("consume_item", {"name": "烬翼"})
+    r = engine.execute_action("consume_item", {"name": "烬翼", "mode": "fly"})
     assert r["success"], r
     assert player.get_status_value("飞行") == 1
     assert r["result"]["uses_remaining"] == 4

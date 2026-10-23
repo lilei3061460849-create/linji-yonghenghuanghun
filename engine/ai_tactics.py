@@ -1467,7 +1467,11 @@ class TacticalAI:
         for item in list(self.engine.state.consumables):
             if getattr(item, "current_uses", 0) <= 0:
                 continue
-            pv = self.previewer.preview("consume_item", {"name": item.name})
+            params = {"name": item.name}
+            # 翼类消耗品必须带 mode（2026-10-23）；实验 AI 只取最保守的「飞行」。
+            if getattr(item, "kind", "") == "wing":
+                params["mode"] = "fly"
+            pv = self.previewer.preview("consume_item", params)
             if not pv.get("result") or not pv["result"].get("success"):
                 continue
             risk_level, reasons = ActionPreview.risk_classify(pv.get("diff", {}), p)
@@ -1477,7 +1481,7 @@ class TacticalAI:
                 if self.verbose:
                     self.log.append(f"[安全过滤] 拒绝 消耗品{item.name}: {risk_level} {' '.join(reasons)}")
                 continue
-            r = self.engine.execute_action("consume_item", {"name": item.name})
+            r = self.engine.execute_action("consume_item", params)
             if r.get("success"):
                 self.used[f"消耗品·{item.name}"] = self.used.get(f"消耗品·{item.name}", 0) + 1
                 return r

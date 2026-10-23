@@ -1989,3 +1989,18 @@ class GameState:
     def battle_over(self) -> bool:
         """战斗胜负已定（胜或负任一成立）。"""
         return self.battle_lost() or self.battle_won()
+
+    # ==================== 特殊事件抑制（烬翼·熄事，2026-10-23） ====================
+    SPECIAL_EVENT_SUPPRESSION_STATUS = "熄事"
+
+    def suppresses_special_events(self, entity) -> bool:
+        """该角色本回合是否免疫特殊事件的**触发**结算。
+
+        【烬翼】「熄事」模式：状态 remaining_rounds=1，回终自然到期。
+        覆盖会落到该角色身上的触发：致死类（凡庸／癌变／迷失）与永久离场类
+        （雕塑／还债）。只拦"触发"，不拦玩家主动选择的行动（例如主动逃跑），
+        也不拦别人身上触发的事件。
+        """
+        if entity is None:
+            return False
+        return bool(entity.has_status(self.SPECIAL_EVENT_SUPPRESSION_STATUS))

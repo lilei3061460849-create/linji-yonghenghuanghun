@@ -263,7 +263,7 @@ def test_wing_consumable_active_use_grants_flight():
     engine.execute_action("battle_start", {})
     engine.execute_action("round_start", {})
     player = engine.state.player
-    r = engine.execute_action("consume_item", {"name": "血翼"})
+    r = engine.execute_action("consume_item", {"name": "血翼", "mode": "fly"})
     assert r["success"], r
     assert player.get_status_value("飞行") == 1
     assert r["result"]["uses_remaining"] == 2
@@ -277,7 +277,7 @@ def test_wing_consumable_boundary_depleted_is_unusable_but_not_destroyed():
     engine.state.consumables.append(wing)
     engine.execute_action("battle_start", {})
     engine.execute_action("round_start", {})
-    r = engine.execute_action("consume_item", {"name": "血翼"})
+    r = engine.execute_action("consume_item", {"name": "血翼", "mode": "fly"})
     assert r["success"] is False
     assert any(c.name == "血翼" and c.is_depleted for c in engine.state.consumables)
 

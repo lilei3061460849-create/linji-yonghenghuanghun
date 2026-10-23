@@ -302,6 +302,10 @@ class CostPaymentMixin:
         """
         if not entity.can_trigger_mutation_lost():
             return {"lost": False, "entity": entity.name, "note": "怪物不会触发【迷失】"}
+        # 【烬翼·熄事】：本回合不触发特殊事件（异变层数保留，只是不结算迷失）。
+        if self.state.suppresses_special_events(entity):
+            return {"lost": False, "entity": entity.name, "suppressed": True,
+                    "note": f"{entity.name}受到【熄事】保护，本次不触发【迷失】"}
         allies = self._living_allies_of(entity)
         if not allies:
             # 无队友：命零。subtype 仍记为 "collapse" 以兼容死者之书既有死因分类

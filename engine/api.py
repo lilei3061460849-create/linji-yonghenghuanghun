@@ -33,7 +33,9 @@ from .spell_dsl import parse_spell_definition, SpellDslError
 from .combat_events import register_combat_event_observer
 from .consumables import (
     ZIYU_TRIGGER_BATTLE_END, apply_zi_yu_trigger, note_action_targets,
-    WING_BLOOD, WING_EMBER, make_wing_item)
+    WING_BLOOD, WING_EMBER, WING_MODE_FLEE, WING_MODE_FLY, WING_MODE_LIFESTEAL,
+    WING_MODE_SUPPRESS, WING_MODES, WING_STATUS_LIFESTEAL, WING_STATUS_SUPPRESS,
+    make_wing_item)
 from .events import EventPool
 from .rule_repository import RuleRepository
 from .dungeons import DEFAULT_INDEX
@@ -857,9 +859,14 @@ class GameEngine:
             }})
         for item in self.state.consumables:
             if not item.is_depleted:
-                actions.append({"action_type": "consume_item", "params_schema": {
-                    "name": item.name, "target_ref": target_options,
-                }, "uses_remaining": item.current_uses})
+                schema: dict[str, Any] = {"name": item.name, "target_ref": target_options}
+                entry: dict[str, Any] = {"action_type": "consume_item",
+                                         "params_schema": schema,
+                                         "uses_remaining": item.current_uses}
+                if item.name in WING_MODES:
+                    schema["mode"] = dict(WING_MODES[item.name])
+                    entry["note"] = "翼类消耗品：每次使用选一个 mode，耗 1 点耐久"
+                actions.append(entry)
         plight_options = self.combat.get_plight_evolution_options()
         actions.append({"action_type": "declare_evolution", "available": bool(plight_options),
                         "params_schema": {"monster": "string", "daowen": "string", "x": "integer"},
@@ -5867,30 +5874,20 @@ class GameEngine:
 
     ESCAPE_ACTION_COST = 5
 
-    def _action_declare_escape(self, params: dict) -> dict:
-        """逃跑（2026-10-13 改制）：轮回者行动，一次付清5次出手，
-        以当前状态强制脱离本场战斗，不再走DM追击裁定。
-
-        前置：非最终死斗；未持有生效中的【不离】（无法逃跑/撤退/被移出）；
-        本轮剩余出手≥5（原子消费，不足则一次不扣）。
-        脱战清理口径沿用原【买路财】撤退：敌方清空、临时朋友解散、员工撤部署、
-        朋友/员工撤退标记重置、精力回满、阶段回 pre_battle；不产生击杀碎片奖励。
-        """
-        escaper = self.state.player
-        if not escaper:
-            return {"success": False, "error": "没有玩家"}
+    def _escape_blocked_reason(self) -> str:
+        """逃跑前置校验：最终死斗与【不离】不可逃。返回错误文案，空串表示可逃。"""
         if self.state.in_final_duel:
-            return {"success": False, "error": "最终死斗无法逃跑"}
+            return "最终死斗无法逃跑"
         if any(r.name == "不离" for r in self.state.relics
                if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0):
-            return {"success": False, "error": "【不离】：无法逃跑、撤退，也无法被移出本场战斗"}
+            return "【不离】：无法逃跑、撤退，也无法被移出本场战斗"
+        return ""
 
-        budget_error = self._consume_actions_or_error(
-            escaper, self.ESCAPE_ACTION_COST, action_label="逃跑")
-        if budget_error:
-            return budget_error
+    def _force_disengage(self, *, reason: str) -> dict:
+        """强制脱战（清理口径 = 原买路财撤退，不改语义）。
 
-        # 强制脱战（清理口径 = 原买路财撤退，不改语义）
+        `declar_escape`（付 5 出手）与【血翼/烬翼·立刻逃跑】（付 1 耐久）共用。
+        """
         self.state.enemies.clear()
         self.state.temp_friends.clear()
         # 2026-10-14：逃跑不走战终结算，【增殖】战终待决随脱战作废（不得带入下场）。
@@ -5903,7 +5900,30 @@ class GameEngine:
             ally.has_retreated = False
         self.state.energy = self.state.energy_budget  # 无尽模式逐轮递减，见 GameState.energy_budget
         self.state.phase = "pre_battle"
+        return {"note": "本场战斗结束，未击败任何怪物，不产生击杀碎片奖励", "reason": reason}
 
+    def _action_declare_escape(self, params: dict) -> dict:
+        """逃跑（2026-10-13 改制）：轮回者行动，一次付清5次出手，
+        以当前状态强制脱离本场战斗，不再走DM追击裁定。
+
+        前置：非最终死斗；未持有生效中的【不离】（无法逃跑/撤退/被移出）；
+        本轮剩余出手≥5（原子消费，不足则一次不扣）。
+        脱战清理口径沿用原【买路财】撤退：敌方清空、临时朋友解散、员工撤部署、
+        朋友/员工撤退标记重置、精力回满、阶段回 pre_battle；不产生击杀碎片奖励。
+        """
+        escaper = self.state.player
+        if not escaper:
+            return {"success": False, "error": "没有玩家"}
+        blocked = self._escape_blocked_reason()
+        if blocked:
+            return {"success": False, "error": blocked}
+
+        budget_error = self._consume_actions_or_error(
+            escaper, self.ESCAPE_ACTION_COST, action_label="逃跑")
+        if budget_error:
+            return budget_error
+
+        self._force_disengage(reason="逃跑")
         return {
             "success": True, "action": "逃跑·强制脱战",
             "result": {"actions_paid": self.ESCAPE_ACTION_COST,
@@ -6027,19 +6047,44 @@ class GameEngine:
         if item.name in TWISTED_TOOL_LIBRARY:
             return self._consume_twisted_tool(item, params)
 
-        # 翼类消耗品（2026-10-23 用户令）：主动使用获得【飞行】1回合，耐久-1。
-        if item.kind == "wing" or item.name in {WING_BLOOD, WING_EMBER}:
+        # 翼类消耗品（2026-10-23 用户令）：每次使用选一个模式，耗 1 点耐久。
+        #   血翼：噬血（本回合你造成的伤害给予等量回复）／飞行1／立刻逃跑
+        #   烬翼：熄事（本回合不触发任何特殊事件）／飞行1／立刻逃跑
+        if item.kind == "wing" or item.name in WING_MODES:
             player = self.state.player
             if player is None or not player.is_alive:
                 return {"success": False, "error": "没有可行动的玩家"}
+            modes = WING_MODES.get(item.name, {})
+            mode = params.get("mode", "")
+            if mode not in modes:
+                return {"success": False,
+                        "error": (f"【{item.name}】需要mode参数，可选："
+                                  + "；".join(f"{k}={v}" for k, v in modes.items()))}
+            if mode == WING_MODE_FLEE:
+                blocked = self._escape_blocked_reason()
+                if blocked:
+                    return {"success": False, "error": blocked}
             remaining = item.use()
-            player.add_status(StatusEffect(name="飞行", value=1, remaining_rounds=1,
-                                           source=item.name))
+            result: dict[str, Any] = {"mode": mode, "effect": modes[mode],
+                                      "uses_remaining": remaining,
+                                      "max_uses": item.max_uses,
+                                      "is_depleted": item.is_depleted}
+            if mode == WING_MODE_FLY:
+                player.add_status(StatusEffect(name="飞行", value=1, remaining_rounds=1,
+                                               source=item.name))
+                result["flying_rounds"] = 1
+            elif mode == WING_MODE_LIFESTEAL:
+                player.add_status(StatusEffect(name=WING_STATUS_LIFESTEAL, value=1,
+                                               remaining_rounds=1, source=item.name))
+            elif mode == WING_MODE_SUPPRESS:
+                player.add_status(StatusEffect(name=WING_STATUS_SUPPRESS, value=1,
+                                               remaining_rounds=1, source=item.name))
+            elif mode == WING_MODE_FLEE:
+                result.update(self._force_disengage(reason=f"{item.name}·立刻逃跑"))
             return {
                 "success": True,
-                "action": f"使用消耗品【{item.name}】",
-                "result": {"flying_rounds": 1, "uses_remaining": remaining,
-                           "max_uses": item.max_uses, "is_depleted": item.is_depleted},
+                "action": f"使用消耗品【{item.name}】（{modes[mode]}）",
+                "result": result,
                 "state": self.combat._get_combat_state(),
             }
 

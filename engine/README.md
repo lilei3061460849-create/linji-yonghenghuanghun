@@ -248,6 +248,7 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `select_shared_dragon_heart` | 共心环(龙心谷终音)：选定本场共享的龙心类型 |
 | `declare_fuyuebei_toll` | 负岳碑(龙心谷终音)：预声明保护某[朋友]/[员工]下次撤退 |
 | `unlock_dragon_trait` | 真龙之心：代价累积满12点解锁1种龙族遗物(trait)；trait=烬翼 时改发消耗品【烬翼】5/5。震岳龙躯为常驻被动，无独立 action |
+| `consume_item` | 使用消耗品；翼类（血翼/烬翼）必须带 `mode`：血翼 `lifesteal`／`fly`／`flee`，烬翼 `suppress`／`fly`／`flee`，每次耗1点耐久 |
 | `devour_monster` | 吞骸龙胃：吞噬已命零的怪物，回复12+可选龙心+6耐久 |
 | `declare_tail_sacrifice` | 断尾求生：预声明命零时愿意移除的其他龙族遗物 |
 | `enslave_as_chizu` | 初拥之夜·血族尖牙：衰老20，将生命低于自身的目标转化为赤族 |

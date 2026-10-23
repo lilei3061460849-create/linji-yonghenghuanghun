@@ -1504,6 +1504,12 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """结算一名角色的凡庸。调用方必须已按非轮回者优先排好序。"""
         if not entity.is_alive:
             return []
+        # 【烬翼·熄事】：本回合不触发特殊事件（凡庸不结算，计数照常清零）。
+        if self.state.suppresses_special_events(entity):
+            entity.no_action_rounds = 0
+            entity.no_damage_rounds = 0
+            return [{"type": "mediocrity", "entity": entity.name, "suppressed": True,
+                     "note": f"{entity.name}受到【熄事】保护，本次不触发【凡庸】"}]
         self._hp_loss_recording += 1  # 凡庸直接命零=特殊死因，不触发「失去生命后」
         try:
             entity.current_hp = 0

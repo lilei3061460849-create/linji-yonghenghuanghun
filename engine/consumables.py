@@ -78,13 +78,37 @@ WING_EMBER = "烬翼"
 WING_ITEM_SPECS: dict[str, dict] = {
     WING_BLOOD: {
         "max_uses": 3,
-        "effect": "主动使用后获得【飞行】持续1回合；你每累计失去100%[血限]的生命，耐久+1",
+        "effect": ("主动使用（选一）：①本回合你造成的伤害给予你等量回复；②获得【飞行】1回合；"
+                   "③立刻逃跑。你每累计失去100%[血限]的生命，耐久+1"),
     },
     WING_EMBER: {
         "max_uses": 5,
-        "effect": "主动使用后获得【飞行】持续1回合；任意怪物［命零］时，耐久+1",
+        "effect": ("主动使用（选一）：①本回合你不会触发任何特殊事件（凡庸/雕塑/癌变/迷失/还债）；"
+                   "②获得【飞行】1回合；③立刻逃跑。任意怪物［命零］时，耐久+1"),
     },
 }
+
+# 每次使用选一个模式；模式名是引擎参数，括号内文本用于错误提示与文档。
+WING_MODE_FLY = "fly"
+WING_MODE_FLEE = "flee"
+WING_MODE_LIFESTEAL = "lifesteal"   # 血翼专属
+WING_MODE_SUPPRESS = "suppress"     # 烬翼专属
+WING_MODES: dict[str, dict[str, str]] = {
+    WING_BLOOD: {
+        WING_MODE_LIFESTEAL: "本回合你造成的伤害给予你等量回复",
+        WING_MODE_FLY: "获得【飞行】1回合",
+        WING_MODE_FLEE: "立刻逃跑",
+    },
+    WING_EMBER: {
+        WING_MODE_SUPPRESS: "本回合你不会触发任何特殊事件",
+        WING_MODE_FLY: "获得【飞行】1回合",
+        WING_MODE_FLEE: "立刻逃跑",
+    },
+}
+
+# 模式生效时给持有者的状态名（「本回合」= remaining_rounds=1，回终到期）。
+WING_STATUS_LIFESTEAL = "噬血"
+WING_STATUS_SUPPRESS = "熄事"
 
 
 def make_wing_item(name: str):
