@@ -36,7 +36,7 @@ def test_dragon_item_is_stored_as_relic(tmp_path):
     """正常路径：解锁龙族项目后，它必须真的出现在 relics 里"""
     e = _engine(tmp_path)
     e.state.artifacts_owned.append("真龙之心")
-    e.state.dragon_nature = 12
+    e.state.dragon_cost_points = 12
     r = e.execute_action("unlock_dragon_trait", {"trait": "龙息"})
     assert r["success"], r.get("error")
     names = [x.name for x in e.state.relics]
@@ -90,7 +90,7 @@ def test_tail_sacrifice_destroys_the_relic(tmp_path):
     """边界：断尾求生应销毁一件龙族遗物，relics 与视图同步减少"""
     e = _engine(tmp_path)
     e.state.artifacts_owned.append("真龙之心")
-    e.state.dragon_nature = 24
+    e.state.dragon_cost_points = 24
     e.execute_action("unlock_dragon_trait", {"trait": "断尾求生"})
     e.execute_action("unlock_dragon_trait", {"trait": "龙息"})
     assert set(e.state.dragon_traits) == {"断尾求生", "龙息"}
@@ -111,7 +111,7 @@ def test_no_duplicate_relic_grant(tmp_path):
     """错误输入：同一龙族遗物不可重复获得"""
     e = _engine(tmp_path)
     e.state.artifacts_owned.append("真龙之心")
-    e.state.dragon_nature = 24
+    e.state.dragon_cost_points = 24
     assert e.execute_action("unlock_dragon_trait", {"trait": "龙息"})["success"]
     r2 = e.execute_action("unlock_dragon_trait", {"trait": "龙息"})
     assert not r2["success"], "重复获得同一遗物必须被拒绝"
@@ -120,7 +120,7 @@ def test_no_duplicate_relic_grant(tmp_path):
 def test_unlock_requires_artifact(tmp_path):
     """错误输入：没有真龙之心时不得解锁龙族遗物"""
     e = _engine(tmp_path)
-    e.state.dragon_nature = 99
+    e.state.dragon_cost_points = 99
     r = e.execute_action("unlock_dragon_trait", {"trait": "龙息"})
     assert not r["success"]
 

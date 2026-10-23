@@ -27,7 +27,7 @@ from engine.models import Consumable, Relic
 from sim.optional_actions import (
     battle_start_relic_choices, round_start_relic_choices,
     try_select_shared_dragon_heart, try_use_black_card,
-    try_use_crime_vault, try_use_blood_wings,
+    try_use_crime_vault,
     try_fire_godfather_revolver, start_battle, start_round,
 )
 
@@ -130,38 +130,20 @@ def test_shared_dragon_heart_selects_type(engine):
     assert engine.state.shared_dragon_heart_type == "流血"
 
 
-def test_blood_wings_fly_when_threatened(engine):
-    """鲜血之翼：血厚且受致命威胁时发动飞行。"""
-    engine.state.grant_relic("鲜血之翼", "代价：流血5X，发动【飞行X】回合", tag="血族")
+def test_blood_wings_passive_flight_after_dodge(engine):
+    """鲜血之翼（2026-10-23 重做为被动）：成功闪避后自动飞行，不再有可选发动。"""
+    engine.state.grant_relic("鲜血之翼", "每次成功闪避后获得【飞行】1回合", tag="血族")
     p = engine.state.player
     p.current_hp = 60
     p.blood_limit = 60
     engine.state.energy = 0
     bs, _ = start_battle(engine)
     assert bs.get("success"), bs
-    rs, _ = start_round(engine)  # 进入 PLAYER_ACTIONS 子阶段
+    rs, _ = start_round(engine)
     assert rs.get("success"), rs
-    for m in engine.state.enemies:
-        m.attack_count = 4
-        m.attack_power = 8  # 威胁32 ≥ 40%×60
-    r = try_use_blood_wings(engine)
-    assert r and r.get("success"), r
-    assert r["result"]["flying_rounds"] >= 1
-
-
-def test_blood_wings_declined_without_threat(engine):
-    """鲜血之翼：威胁不足时显式不发动（可以不用但不能不让用）。"""
-    engine.state.grant_relic("鲜血之翼", "代价：流血5X，发动【飞行X】回合", tag="血族")
-    p = engine.state.player
-    p.current_hp = 60
-    p.blood_limit = 60
-    engine.state.energy = 0
-    bs, _ = start_battle(engine)
-    assert bs.get("success"), bs
-    for m in engine.state.enemies:
-        m.attack_count = 1
-        m.attack_power = 1  # 威胁小
-    assert try_use_blood_wings(engine) is None
+    extra = engine.combat._note_dodge(p)
+    assert extra.get("blood_wings_flight") == 1
+    assert p.get_status_value("飞行") == 1
 
 
 def test_start_battle_and_start_round_keep_working(engine):

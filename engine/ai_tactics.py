@@ -1486,9 +1486,9 @@ class TacticalAI:
     def try_artifact(self) -> Optional[dict]:
         """可选法器（不占出手）：由 engine/ai_rules.py 的策略驱动，引擎校验把关。"""
         from engine.ai_rules import (
-            try_fire_godfather_revolver, try_use_blood_wings,
+            try_fire_godfather_revolver,
         )
-        for fn in (try_fire_godfather_revolver, try_use_blood_wings):
+        for fn in (try_fire_godfather_revolver,):
             r = fn(self.engine)
             if r and r.get("success"):
                 self.used[f"法器·{r.get('action', '')}"] = self.used.get(

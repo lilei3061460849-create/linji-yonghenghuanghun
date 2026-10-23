@@ -4,9 +4,12 @@
 属性模型统一后法力=攻击力，[战始]一次性给 20X 法力等于同时白送攻击力，强度跳变；
 且法力每场都会回满，[战始]给蓝的边际价值很低。改为战终永久成长。
 
+2026-10-23 遗物彻底重做：取消 X，固定为每场[战终][法限]+2（不再读
+event_modifiers.silent_mask_x，残留字段不影响结果）。
+
 验证点：
-  - 经 BATTLE_END 相位触发，[法限]+X（X=event_modifiers.silent_mask_x）；
-  - X=0 不发放；封印（抵扣X）不触发；未持有不触发；
+  - 经 BATTLE_END 相位触发，固定[法限]+2；
+  - 不随旧 X 字段变化；封印不触发；未持有不触发；
   - 【禁代价】是 api.py 的静态校验规则，不在本机制范围；
   - 战始相位不再出现缄默面具（已移至战终）。
 """
@@ -48,16 +51,13 @@ def _arena(mana=0, mana_limit=50, relics=(), sealed=None, x=None):
 
 
 def _ref_silent_mask(combat, player):
-    """新规则的参考实现（仅测试对照用，非生产代码）：[战终][法限]+X。"""
+    """新规则的参考实现（仅测试对照用，非生产代码）：[战终]固定[法限]+2。"""
     state = combat.state
     relics = {r.name for r in state.relics if state.sealed_relics.get(r.name, 0) <= 0}
     if "缄默面具" in relics:
-        x = state.event_modifiers.get("silent_mask_x", 0)
-        if x <= 0:
-            return "缄默面具：+0法限"
-        player.mana_limit += x
+        player.mana_limit += 2
         combat.clamp_immortal_body(player)
-        return f"缄默面具：[法限]+{x}（现为{player.mana_limit}）"
+        return f"缄默面具：[法限]+2（现为{player.mana_limit}）"
     return None
 
 
@@ -95,22 +95,23 @@ def test_silent_mask_normal():
     assert player.mana_limit == 52
 
 
-def test_silent_mask_x_zero_no_gain():
-    """X=0：不发放法限，但仍产生日志（与旧块"照常执行"的语义保持一致）。"""
-    state, combat, player = _arena(mana=70, mana_limit=50,
-                                   relics=("缄默面具", "不朽之躯"), x=0)
-    results = combat._dispatch_phase(Phase.BATTLE_END, target=player)
-    assert results == ["缄默面具：+0法限"]
-    assert player.mana_limit == 50
-    assert player.current_mana == 50, "X=0 时仍执行钳制"
+def test_silent_mask_fixed_two_ignores_legacy_x_field():
+    """边界：X 已取消，残留的 silent_mask_x 字段（旧存档/旧事件）不得改变固定 +2。"""
+    for legacy in (0, 1, 5):
+        state, combat, player = _arena(mana=70, mana_limit=50,
+                                       relics=("缄默面具", "不朽之躯"), x=legacy)
+        results = combat._dispatch_phase(Phase.BATTLE_END, target=player)
+        assert results == ["缄默面具：[法限]+2（现为52）"], (legacy, results)
+        assert player.mana_limit == 52
+        assert player.current_mana == 52, "加成后仍执行钳制"
 
 
 def test_silent_mask_immortal_clamp_after_limit_gain():
     """法限提高后当前法力不得超过新上限（全局钳制规则）。"""
     state, combat, player = _arena(mana=45, mana_limit=50,
-                                   relics=("缄默面具", "不朽之躯"), x=1)
+                                   relics=("缄默面具", "不朽之躯"))
     combat._dispatch_phase(Phase.BATTLE_END, target=player)
-    assert player.mana_limit == 51
+    assert player.mana_limit == 52
     assert player.current_mana <= player.mana_limit
 
 
@@ -130,7 +131,7 @@ def test_silent_mask_sealed_no_entry():
 # ==================== 3. 顺序 / 只触发一次 ====================
 
 def test_silent_mask_at_battle_end_not_start():
-    """完整路径：战始只有帮派令；缄默面具改在战终结算[法限]+X。"""
+    """完整路径：战始只有帮派令；缄默面具改在战终结算固定[法限]+2。"""
     state, combat, player = _arena(mana_limit=50, relics=("缄默面具", "帮派令"), x=2)
     logs = combat.process_relics("battle_start", {"relic_choices": {}})
     assert logs == ["帮派令：获得洗劫3"], logs
@@ -152,31 +153,29 @@ def test_silent_mask_executes_exactly_once():
 # ==================== 4. 参考实现 sweep ====================
 
 def test_silent_mask_reference_sweep_zero_mismatch():
-    """参考实现 vs 新机制：持有×封印×X×不朽 全场景逐结果一致。"""
+    """参考实现 vs 新机制：持有×封印×不朽 全场景逐结果一致。"""
     mismatches = []
     total = 0
-    for held, sealed, x, immortal in itertools.product(
-            [False, True], [False, True], [0, 1, 2], [False, True]):
+    for held, sealed, immortal in itertools.product(
+            [False, True], [False, True], [False, True]):
         total += 1
         relics_a = ([r for r in (["缄默面具"] if held else [])
                      + (["不朽之躯"] if immortal else [])])
         state_a, combat_a, player_a = _arena(mana=40, mana_limit=50,
                                              relics=tuple(relics_a),
-                                             sealed={"缄默面具": 2} if sealed else None,
-                                             x=x)
+                                             sealed={"缄默面具": 2} if sealed else None)
         state_b, combat_b, player_b = _arena(mana=40, mana_limit=50,
                                              relics=tuple(relics_a),
-                                             sealed={"缄默面具": 2} if sealed else None,
-                                             x=x)
+                                             sealed={"缄默面具": 2} if sealed else None)
         old_result = _ref_silent_mask(combat_a, player_a)
         new_result = _run_new(combat_b, player_b)
         if old_result != new_result:
-            mismatches.append(("result", held, sealed, x, immortal, old_result, new_result))
+            mismatches.append(("result", held, sealed, immortal, old_result, new_result))
         if player_a.mana_limit != player_b.mana_limit:
-            mismatches.append(("mana_limit", held, sealed, x, immortal,
+            mismatches.append(("mana_limit", held, sealed, immortal,
                                player_a.mana_limit, player_b.mana_limit))
 
-    assert total == 2 * 2 * 3 * 2
+    assert total == 2 * 2 * 2
     assert not mismatches, f"{total} 组场景出现 {len(mismatches)} 组差异: {mismatches[:3]}"
 
 

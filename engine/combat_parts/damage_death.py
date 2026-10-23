@@ -475,6 +475,10 @@ class DamageDeathMixin:
                 and self._relic_active(target, "癫狂之脑")):
             amount = validate_damage_amount(
                 amount * 2, "CombatEngine.狂脑伤害倍率.result")
+        # 震岳龙躯（龙族遗物，2026-10-23 重做为常驻被动）：单次超出15点的伤害无效。
+        # 与【固执】的「每次失去生命≤1」不同层级：本条只封顶伤害数值，不碰失血倍率。
+        if self._relic_active(target, "震岳龙躯") and amount > 15:
+            amount = 15
 
         # 1. 伤害重定向 (背负；【嫁祸】2026-10-11 已删除)
         redirected_target = self.hook_manager.apply_redirection(target, damage_type, self.state)

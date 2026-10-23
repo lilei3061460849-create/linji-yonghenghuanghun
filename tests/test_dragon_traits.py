@@ -1,11 +1,12 @@
 """
-pytest 风格测试 - 里程碑：真龙之心（龙心谷终音法器，龙性资源 + 8种龙族遗物）
+pytest 风格测试 - 真龙之心（龙心谷终音法器，代价累积 + 8 种龙族遗物）
 
-原文：
-"每消耗12X龙性，获得X种不同龙族遗物（6X衰老=2X枯竭=X萎缩=12X龙性）"。
-8件龙族遗物：龙族血脉/龙威/龙族利爪/龙息/震岳龙躯/吞骸龙胃/断尾求生/烬翼。
+2026-10-23 用户令：废除「龙性」货币。玩家**实际支付**的数值型【代价】
+（流血/衰老/枯竭/萎缩/疲惫）自动记 1:1 入账，每满 12 点换 1 件龙族遗物。
+8 件龙族遗物：龙族血脉/龙威/龙族利爪/龙息/震岳龙躯/吞骸龙胃/断尾求生/烬翼，
+全部为被动、无 X、有触发时机（震岳龙躯与烬翼已由主动发动改为常驻被动）。
 
-覆盖范围：pay_for_dragon_nature/unlock_dragon_trait 的门槛与汇率校验 + 8件龙族遗物各自的机制效果。
+覆盖范围：unlock_dragon_trait 的门槛校验 + 8 件龙族遗物各自的被动效果。
 运行方式：
     python -m pytest tests/test_dragon_traits.py -v
 """
@@ -44,9 +45,9 @@ def _new_engine(region="龙心谷", name="老张", speed=8, mana=6, dbsuffix="a"
     return engine
 
 
-def _with_heart(engine, nature=100):
+def _with_heart(engine, points=100):
     engine.state.artifacts_owned.append("真龙之心")
-    engine.state.dragon_nature = nature
+    engine.state.dragon_cost_points = points
     return engine
 
 
@@ -55,64 +56,50 @@ def _resolve_full_attack(engine, attacker_name, target, n_hits=1):
 
 
 # ========================================================================
-# 龙性经济：pay_for_dragon_nature / unlock_dragon_trait
+# 代价累积：实际支付的数值型代价自动入账 / unlock_dragon_trait
 # ========================================================================
 
-def test_pay_for_dragon_nature_without_artifact_rejected():
-    """错误输入：没有真龙之心时无法换取龙性"""
-    engine = _new_engine(dbsuffix="gate1")
-    r = engine.execute_action("pay_for_dragon_nature", {"cost_type": "衰老", "x": 1})
-    assert r["success"] is False
-
-
-def test_pay_for_dragon_nature_exchange_rates():
-    """正常路径：6衰老=2枯竭=1萎缩=12龙性 的汇率关系（即1衰老=2龙性，1枯竭=6龙性，1萎缩=12龙性）"""
-    engine = _new_engine(dbsuffix="rate")
-    _with_heart(engine, nature=0)
+def test_actual_numeric_cost_accumulates_with_heart():
+    """正常路径：真正支付 1 点数值型代价 = 1 点代价累积，不需要任何兑换步骤。"""
+    from engine.models import Consumable
+    engine = _new_engine(dbsuffix="accrue")
     player = engine.state.player
-    bl_before, ml_before, sl_before = player.blood_limit, player.mana_limit, player.speed_limit
+    _with_heart(engine, points=0)
+    engine.execute_action("battle_start", {})
+    engine.execute_action("round_start", {})
 
-    r1 = engine.execute_action("pay_for_dragon_nature", {"cost_type": "衰老", "x": 6})
-    assert r1["result"]["dragon_nature_gained"] == 12
-    assert player.blood_limit == bl_before - 6
-
-    r2 = engine.execute_action("pay_for_dragon_nature", {"cost_type": "枯竭", "x": 2})
-    assert r2["result"]["dragon_nature_gained"] == 12
-    assert player.mana_limit == ml_before - 2
-
-    r3 = engine.execute_action("pay_for_dragon_nature", {"cost_type": "萎缩", "x": 1})
-    assert r3["result"]["dragon_nature_gained"] == 12
-    assert player.speed_limit == sl_before - 1
-
-    assert engine.state.dragon_nature == 36
+    engine.combat.pay_numeric_cost(player, "流血", 4)
+    assert engine.state.dragon_cost_points == 4
+    engine.combat.pay_numeric_cost(player, "衰老", 3)
+    assert engine.state.dragon_cost_points == 7
 
 
-def test_pay_for_dragon_nature_error_invalid_type_or_x():
-    """错误输入：非法cost_type或x<1"""
-    engine = _new_engine(dbsuffix="pay_err")
-    _with_heart(engine, nature=0)
-    assert engine.execute_action("pay_for_dragon_nature", {"cost_type": "未知", "x": 1})["success"] is False
-    assert engine.execute_action("pay_for_dragon_nature", {"cost_type": "衰老", "x": 0})["success"] is False
+def test_cost_accumulation_requires_holding_artifact():
+    """边界：没有真龙之心时，支付代价不产生任何累积。"""
+    engine = _new_engine(dbsuffix="accrue_off")
+    player = engine.state.player
+    engine.execute_action("battle_start", {})
+    engine.execute_action("round_start", {})
+    engine.combat.pay_numeric_cost(player, "流血", 5)
+    assert engine.state.dragon_cost_points == 0
 
 
-def test_unlock_dragon_trait_requires_12_nature_and_rejects_duplicates():
-    """边界+错误输入：解锁1种遗物消耗12龙性；龙性不足/未知遗物/重复解锁均应拒绝"""
+def test_unlock_dragon_trait_requires_12_points_and_rejects_duplicates():
+    """边界+错误输入：满12点消耗12点解锁；不足/未知/重复均应拒绝。"""
     engine = _new_engine(dbsuffix="unlock")
-    _with_heart(engine, nature=11)
+    _with_heart(engine, points=11)
     r_low = engine.execute_action("unlock_dragon_trait", {"trait": "龙威"})
     assert r_low["success"] is False
+    assert "代价累积不足" in r_low["error"]
 
-    engine.state.dragon_nature = 12
+    engine.state.dragon_cost_points = 12
     r_ok = engine.execute_action("unlock_dragon_trait", {"trait": "龙威"})
     assert r_ok["success"] is True
-    assert engine.state.dragon_nature == 0
+    assert engine.state.dragon_cost_points == 0
     assert "龙威" in engine.state.dragon_traits
 
-    r_dup = engine.execute_action("unlock_dragon_trait", {"trait": "龙威"})
-    assert r_dup["success"] is False
-
-    r_unknown = engine.execute_action("unlock_dragon_trait", {"trait": "不存在"})
-    assert r_unknown["success"] is False
+    assert engine.execute_action("unlock_dragon_trait", {"trait": "龙威"})["success"] is False
+    assert engine.execute_action("unlock_dragon_trait", {"trait": "不存在"})["success"] is False
 
 
 # ========================================================================
@@ -234,47 +221,42 @@ def test_dragon_breath_can_kill_monster_before_it_acts():
 # 5. 震岳龙躯
 # ========================================================================
 
-def test_dragon_body_caps_damage_at_15_and_ticks_down_each_round():
-    """正常路径：激活后自身受到超出15的伤害无效，持续X回合后失效"""
+def test_dragon_body_passively_caps_single_hit_at_15():
+    """正常路径（重做后）：持有震岳龙躯即常驻生效，单次超过15点的伤害只落15点。"""
     engine = _new_engine(dbsuffix="body")
     player = engine.state.player
     _with_heart(engine)
     engine.execute_action("unlock_dragon_trait", {"trait": "震岳龙躯"})
     engine.execute_action("battle_start", {})
     engine.execute_action("round_start", {})
-    r = engine.execute_action("activate_dragon_body", {"x": 2})
-    assert r["success"] is True
-    assert engine.state.dragon_body_shield_rounds == 2
 
     engine.state.enemies.clear()
-    heavy = Entity(name="重击怪", entity_type="怪物", blood_limit=50, current_hp=50, attack_power=999, attack_count=1)
+    heavy = Entity(name="重击怪", entity_type="怪物", blood_limit=50, current_hp=50,
+                   attack_power=999, attack_count=1)
     engine.state.enemies.append(heavy)
     hp_before = player.current_hp
     result = engine.combat.resolve_attack(heavy, player, is_must_hit=True)
     assert result["damage_dealt"] == 15
     assert player.current_hp == hp_before - 15
 
-    engine.state.combat_subphase = "await_round_end"
-    engine.execute_action("round_end", {})
-    assert engine.state.dragon_body_shield_rounds == 1
-    engine.execute_action("round_start", {})
-    engine.state.combat_subphase = "await_round_end"
-    engine.execute_action("round_end", {})
-    assert engine.state.dragon_body_shield_rounds == 0
 
-    engine.execute_action("round_start", {})
-    hp_before2 = player.current_hp
-    result2 = engine.combat.resolve_attack(heavy, player, is_must_hit=True)
-    assert result2["damage_dealt"] == 999, "护体失效后应恢复正常伤害"
-
-
-def test_dragon_body_activation_boundary_insufficient_nature():
-    """边界：龙性不足6X时无法激活"""
-    engine = _new_engine(dbsuffix="body_err")
-    _with_heart(engine, nature=5)
+def test_dragon_body_boundary_leaves_small_hits_untouched():
+    """边界：不超过15点的单次伤害原样落地，不会被抬到15。"""
+    engine = _new_engine(dbsuffix="body_small")
+    player = engine.state.player
+    _with_heart(engine)
     engine.execute_action("unlock_dragon_trait", {"trait": "震岳龙躯"})
-    r = engine.execute_action("activate_dragon_body", {"x": 1})
-    assert r["success"] is False
+    engine.execute_action("battle_start", {})
+    engine.execute_action("round_start", {})
+
+    engine.state.enemies.clear()
+    light = Entity(name="轻击怪", entity_type="怪物", blood_limit=50, current_hp=50,
+                   attack_power=7, attack_count=1)
+    engine.state.enemies.append(light)
+    hp_before = player.current_hp
+    result = engine.combat.resolve_attack(light, player, is_must_hit=True)
+    assert result["damage_dealt"] == 7
+    assert player.current_hp == hp_before - 7
 
 
 # ========================================================================
@@ -357,27 +339,30 @@ def test_tail_sacrifice_error_declare_self_or_unowned_trait():
 # 8. 烬翼
 # ========================================================================
 
-def test_dragon_wings_costs_dragon_nature_for_flight():
-    """正常路径：[回始]消耗3X点龙性，获得飞行X"""
+def test_ember_wing_grants_flight_at_round_start_when_wounded():
+    """正常路径（重做后）：回始时生命不高于[血限]一半，自动获得飞行1回合。"""
     engine = _new_engine(dbsuffix="wings")
     player = engine.state.player
-    _with_heart(engine, nature=30)
+    _with_heart(engine)
     engine.execute_action("unlock_dragon_trait", {"trait": "烬翼"})
-    engine.state.phase = "in_combat"
+    engine.execute_action("battle_start", {})
+    player.current_hp = max(1, player.blood_limit // 2)
     engine.state.combat_subphase = "await_round_start"
-    nature_before = engine.state.dragon_nature
-    r = engine.execute_action("use_dragon_wings", {"x": 3})
-    assert r["success"] is True
-    assert engine.state.dragon_nature == nature_before - 9
-    assert player.get_status_value("飞行") == 3
+    r = engine.execute_action("round_start", {})
+    assert r["success"], r
+    assert player.get_status_value("飞行") == 1
 
 
-def test_dragon_wings_boundary_insufficient_nature_rejected():
-    """边界：龙性不足3X时拒绝"""
-    engine = _new_engine(dbsuffix="wings_err")
-    _with_heart(engine, nature=2)
+def test_ember_wing_boundary_inactive_when_healthy():
+    """边界：生命高于一半时回始不触发（被动不主动发动）。"""
+    engine = _new_engine(dbsuffix="wings_ok")
+    player = engine.state.player
+    _with_heart(engine)
     engine.execute_action("unlock_dragon_trait", {"trait": "烬翼"})
-    engine.state.phase = "in_combat"
+    engine.execute_action("battle_start", {})
+    player.current_hp = player.blood_limit
     engine.state.combat_subphase = "await_round_start"
-    r = engine.execute_action("use_dragon_wings", {"x": 1})
-    assert r["success"] is False
+    r = engine.execute_action("round_start", {})
+    assert r["success"], r
+    assert player.get_status_value("飞行") == 0
+

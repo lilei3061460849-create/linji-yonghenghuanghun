@@ -1,11 +1,11 @@
 """龙族起源事件「埋骨之地」（龙心谷专属）契约测试。
 
 事件（副本/龙心谷.md）：
-- 选项1 继承龙骨龙性：获得12龙性
+- 选项1 继承龙骨：记入12点代价累积（原「12龙性」已按 2026-10-23 用户令废除）
 - 选项2 拾取龙心残骸：获得【××龙心】（耐久6，可抵消6点同类型代价）
 - 选项3 掩埋龙骨：无事发生
 
-覆盖：正常路径（选项1/2）/ 边界（重复获得龙心合并、龙性累积）/ 错误输入（非法选项、草案事件不进运行时）。
+覆盖：正常路径（选项1/2）/ 边界（重复获得龙心合并、代价累积）/ 错误输入（非法选项、草案事件不进运行时）。
 """
 import os
 import sys
@@ -43,14 +43,14 @@ def _resolve(engine, option_id, **extra):
 # ---------- 正常路径 ----------
 
 def test_normal_option1_grants_dragon_nature():
-    """正常路径：选项1「继承龙骨龙性」获得12龙性。"""
+    """正常路径：选项1「继承龙骨」记入12点代价累积（龙性货币已废除）。"""
     engine = _engine("nature")
     _set_event(engine)
-    assert engine.state.dragon_nature == 0
+    assert engine.state.dragon_cost_points == 0
     r = _resolve(engine, 1)
     assert r["success"], r
-    assert "12龙性" in r["result"]["applied"][0]
-    assert engine.state.dragon_nature == 12, f"应获得12龙性，实{engine.state.dragon_nature}"
+    assert "代价累积+12" in r["result"]["applied"][0]
+    assert engine.state.dragon_cost_points == 12, f"应记入12点，实{engine.state.dragon_cost_points}"
 
 
 def test_normal_option2_grants_dragon_heart_consumable():
@@ -73,7 +73,7 @@ def test_normal_option3_is_reject():
     r = _resolve(engine, 3)
     assert r["success"], r
     assert "无事发生" in r["result"]["applied"]
-    assert engine.state.dragon_nature == 0
+    assert engine.state.dragon_cost_points == 0
     assert engine.state.shards == shards_before
 
 
@@ -93,12 +93,12 @@ def test_boundary_repeated_heart_merges_durability():
 
 
 def test_boundary_nature_accumulates_without_true_dragon_heart():
-    """边界：未持有真龙之心时，龙性只累积不消费。"""
+    """边界：未持有真龙之心时，代价累积照常记入，但不能兑换。"""
     engine = _engine("accum")
     _set_event(engine)
     _resolve(engine, 1)
     assert "真龙之心" not in engine.state.artifacts_owned
-    assert engine.state.dragon_nature == 12, "龙性应可累积，等待真龙之心消费"
+    assert engine.state.dragon_cost_points == 12, "累积应可保留，等待真龙之心兑换"
 
 
 # ---------- 错误输入 / 非法配置 ----------

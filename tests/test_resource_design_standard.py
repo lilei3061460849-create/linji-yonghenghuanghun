@@ -39,27 +39,13 @@ KNOWLEDGE = ROOT / "AI_EXPERIENCE.md"
 # 后，X 同时抬高陈述句数与无法开口回合数，故例外清空：任何道纹的 X 都必须有效。
 X_DOES_NOT_SCALE: set[str] = set()
 
-# 遗物条文中出现 X 变量的已知违例（池外遗物，2026-10-23 用户裁定「本来都是要改的」）。
-# 修复后必须从此集合删除对应名字，测试才能继续通过一半——见「快照写法」说明。
-RELIC_X_DEBT = {
-    ("事件遗物不入遗物池", "缄默面具"),
-    ("未实现副本草案遗物", "七年图纸"),
-    ("血族遗物初拥之夜", "鲜血之翼"),
-    ("龙族遗物真龙之心", "震岳龙躯"),
-    ("龙族遗物真龙之心", "烬翼"),
-    ("鲛族遗物沉沦海草案", "唤潮"),
-    ("鲛族遗物沉沦海草案", "海市蜃楼"),
-    ("鲛族遗物沉沦海草案", "织绡"),
-    ("鲛族遗物沉沦海草案", "化珠"),
-}
+# 遗物条文中出现 X 变量的已知违例。2026-10-23 用户令「遗物彻底重做、不保留原效果」
+# 后，血族/龙族/鲛族/事件/草案共 13 件全部改为无 X，违例清空。此集合保持为空：
+# 新增任何带 X 的遗物都会让快照测试立刻失败（遗物一律无 X）。
+RELIC_X_DEBT: set[tuple[str, str]] = set()
 
-# 遗物条文没有可识别触发时机的已知违例（同上，修一件删一件）。
-RELIC_TRIGGER_DEBT = {
-    ("未实现副本草案遗物", "无冕"),
-    ("血族遗物初拥之夜", "鲜血之翼"),
-    ("鲛族遗物沉沦海草案", "唤潮"),
-    ("鲛族遗物沉沦海草案", "织绡"),
-}
+# 遗物条文没有可识别触发时机的已知违例。同日重做后 13 件均补齐触发时机，清空同上。
+RELIC_TRIGGER_DEBT: set[tuple[str, str]] = set()
 
 TRIGGER_TOKENS = (
     "战始", "战终", "回始", "回终", "敌回始", "敌回终", "回合结束", "每回合",
@@ -190,20 +176,20 @@ def test_relic_pool_has_no_x_variable():
 
 
 def test_relic_x_variable_debt_is_frozen():
-    """池外遗物的 X 违例快照：已知 9 件；修好必须同步删除，新增会立刻失败。"""
+    """池外遗物的 X 违例快照：2026-10-23 重做后清零；新增会立刻失败。"""
     hits = {(s, n) for s, n, effect in _relic_entries() if re.search(r"X", effect)}
     assert hits == RELIC_X_DEBT, (
-        f"遗物 X 违例集合变化：新增 {sorted(hits - _normalise(RELIC_X_DEBT))}，"
-        f"已修复 {sorted(_normalise(RELIC_X_DEBT) - hits)}")
+        f"遗物 X 违例集合变化：新增 {sorted(hits - RELIC_X_DEBT)}，"
+        f"已修复 {sorted(RELIC_X_DEBT - hits)}")
 
 
 def test_relic_missing_trigger_debt_is_frozen():
-    """遗物必须有触发时机；已知常驻型 4 件挂账，新增无时机遗物会立刻失败。"""
+    """遗物必须有触发时机；2026-10-23 重做后清零，新增无时机遗物会立刻失败。"""
     missing = {(s, n) for s, n, effect in _relic_entries()
                if effect and not any(tok in effect for tok in TRIGGER_TOKENS)}
     assert missing == RELIC_TRIGGER_DEBT, (
-        f"缺触发时机的遗物集合变化：新增 {sorted(missing - _normalise(RELIC_TRIGGER_DEBT))}，"
-        f"已修复 {sorted(_normalise(RELIC_TRIGGER_DEBT) - missing)}")
+        f"缺触发时机的遗物集合变化：新增 {sorted(missing - RELIC_TRIGGER_DEBT)}，"
+        f"已修复 {sorted(RELIC_TRIGGER_DEBT - missing)}")
 
 
 # ==================== 法器：独立品类存在且有独占效果 ====================

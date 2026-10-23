@@ -1265,11 +1265,11 @@ class GameState:
     # 炼心在战斗中发动时不消耗出手，改为"下次局外行动多消耗1点精力"，此处累计待结算的额外精力消耗
     pending_energy_penalty: int = 0
 
-    # 熔谷终音"真龙之心"：龙性资源池。
-    # 已解锁的龙族项目本身以【遗物】形式存放在 self.relics（tags含"龙族"），
-    # 不再维护独立名单——dragon_traits 是对 relics 的只读视图，见下方 property。
-    dragon_nature: int = 0
-    # 震岳龙躯剩余持续回合数（0=未激活）；断尾求生已消耗的遗物记录见dragon_traits变化
+    # 熔谷终音"真龙之心"：代价累积账本（2026-10-23 用户令：废除「龙性」货币）。
+    # 不再是可支配资源——玩家实际支付的数值型【代价】自动累加，满 12 点换 1 件
+    # 未持有的龙族遗物。已解锁的龙族项目以【遗物】形式存放在 self.relics（tags含"龙族"）。
+    dragon_cost_points: int = 0
+    # 震岳龙躯已改为常驻被动（单次伤害封顶15），此字段仅为旧存档兼容保留，不再读取。
     dragon_body_shield_rounds: int = 0
     # 断尾求生：预先声明"若本次伤害会使自身命零，移除该龙族遗物来抵消伤害"；为空=未声明保护
     dragon_tail_sacrifice_declared: str = ""

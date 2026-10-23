@@ -242,26 +242,28 @@ def test_option2_immortal_body_halves_blood_limit_and_blocks_growth():
 # 3. 鲜血之翼
 # ========================================================================
 
-def test_option3_blood_wings_costs_bleed_and_grants_flight():
-    """正常路径：流血5X换取【飞行X】"""
+def test_option3_blood_wings_grants_flight_after_dodge():
+    """正常路径（2026-10-23 重做为被动）：每次成功闪避后自动获得【飞行】1回合，无需支付代价。"""
     engine = _new_engine(dbsuffix="wings")
     player = engine.state.player
     _grant(engine, 3)
     engine.execute_action("battle_start", {})
     engine.execute_action("round_start", {})
     hp_before = player.current_hp
-    r = engine.execute_action("use_blood_wings", {"x": 2})
-    assert r["success"] is True
-    assert player.current_hp == hp_before - 10
-    assert player.get_status_value("飞行") == 2
+    extra = engine.combat._note_dodge(player)
+    assert extra.get("blood_wings_flight") == 1
+    assert player.get_status_value("飞行") == 1
+    assert player.current_hp == hp_before, "被动触发不再索取流血代价"
 
 
-def test_option3_boundary_x_must_be_positive():
-    """边界：x<1应拒绝"""
+def test_option3_boundary_blood_wings_inactive_without_relic():
+    """边界：未持有鲜血之翼时闪避不产生飞行。"""
     engine = _new_engine(dbsuffix="wings_err")
-    _grant(engine, 3)
-    r = engine.execute_action("use_blood_wings", {"x": 0})
-    assert r["success"] is False
+    player = engine.state.player
+    engine.execute_action("battle_start", {})
+    engine.execute_action("round_start", {})
+    engine.combat._note_dodge(player)
+    assert player.get_status_value("飞行") == 0
 
 
 # ========================================================================

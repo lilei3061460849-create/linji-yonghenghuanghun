@@ -552,14 +552,14 @@ class GameEngine:
                             "remaining_groups": len(self.state.pending_diandang_discoveries),
                             "note": "领取【典当】发现：从当前组3选1里选1种获得，不消耗出手/精力"})
         if "真龙之心" in self.state.artifacts_owned:
-            actions.extend([
-                {"action_type": "pay_for_dragon_nature",
-                 "params_schema": {"cost_type": ["衰老", "枯竭", "萎缩"], "x": "integer",
-                                   "cost_share_target_ref": blood_pact_cost_targets}},
+            # 2026-10-23 用户令：龙性货币废除。数值型代价自动入账，
+            # 满 12 点可直接换 1 件龙族遗物；不再有「换取龙性」这一步。
+            actions.append(
                 {"action_type": "unlock_dragon_trait",
                  "params_schema": {"trait": [name for name in self.DRAGON_TRAITS
-                                                if name not in self.state.dragon_traits]}},
-            ])
+                                                if name not in self.state.dragon_traits]},
+                 "dragon_cost_points": self.state.dragon_cost_points,
+                 "note": "每累计支付12点数值型代价可换1件；不足12点时会被拒绝"})
         for employee in self.state.employees:
             if employee.is_debt_bound and employee.shards < 0:
                 actions.append({"action_type": "repay_debt_employee",
@@ -695,8 +695,6 @@ class GameEngine:
                                "params_schema": {"dragon_heart_type": "owned cost type"}})
         if "罪业金库" in self.state.artifacts_owned:
             actions.insert(0, {"action_type": "use_crime_vault", "params_schema": {"x": "integer"}})
-        if "烬翼" in self.state.dragon_traits:
-            actions.insert(0, {"action_type": "use_dragon_wings", "params_schema": {"x": "integer"}})
         if self.state.in_final_duel:
             actions.insert(0, {"action_type": "activate_duel_relic",
                                "params_schema": {"side": ["player_side", "opponent_side"],
@@ -886,11 +884,8 @@ class GameEngine:
                 action_type, schema = artifact_actions[artifact]
                 actions.append({"action_type": action_type, "params_schema": schema})
         trait_actions = {
-            "震岳龙躯": ("activate_dragon_body", {"x": "integer"}),
             "吞骸龙胃": ("devour_monster", {"monster_ref": "enemy:index", "dragon_heart": "name"}),
             "断尾求生": ("declare_tail_sacrifice", {"trait": "owned dragon relic"}),
-            "鲜血之翼": ("use_blood_wings", {
-                "x": "integer", "cost_share_target_ref": blood_pact_cost_targets}),
             "血族尖牙": ("enslave_as_chizu", {
                 "target_ref": target_options,
                 "cost_share_target_ref": blood_pact_cost_targets}),
@@ -1049,8 +1044,8 @@ class GameEngine:
         # 再结算defeat，战斗限定会把它挡在setup外导致擂主永不回槽（r16实战复现）。
         "activate_duel_relic", "use_black_card", "use_crime_vault",
         "fire_godfather_revolver", "select_shared_dragon_heart", "declare_fuyuebei_toll",
-        "activate_dragon_body", "devour_monster", "declare_tail_sacrifice",
-        "use_dragon_wings", "use_blood_wings", "enslave_as_chizu", "blood_feast",
+        "devour_monster", "declare_tail_sacrifice",
+        "enslave_as_chizu", "blood_feast",
         "command_ally", "resolve_ally_phases",
     }
 
@@ -1063,11 +1058,11 @@ class GameEngine:
         "define_spell", "undefine_spell", "lianxin_in_battle",
         "declare_evolution", "activate_duel_relic", "use_black_card",
         "use_crime_vault", "fire_godfather_revolver", "select_shared_dragon_heart",
-        "declare_fuyuebei_toll", "activate_dragon_body", "devour_monster",
-        "declare_tail_sacrifice", "use_dragon_wings", "use_blood_wings",
+        "declare_fuyuebei_toll", "devour_monster",
+        "declare_tail_sacrifice",
         "enslave_as_chizu", "blood_feast", "use_truth_eye",
         "command_ally", "resolve_ally_phases",
-        "pay_for_dragon_nature", "unlock_dragon_trait",
+        "unlock_dragon_trait",
     }
 
     def _bound_action_actor(self, action_type: str, params: dict) -> Optional[Entity]:
@@ -1289,9 +1284,9 @@ class GameEngine:
                 "define_spell", "undefine_spell",
                 "lianxin_in_battle", "declare_evolution", "activate_duel_relic",
                 "use_black_card", "use_crime_vault", "fire_godfather_revolver",
-                "select_shared_dragon_heart", "declare_fuyuebei_toll", "activate_dragon_body",
-                "devour_monster", "declare_tail_sacrifice", "use_dragon_wings",
-                "use_blood_wings", "enslave_as_chizu", "blood_feast", "use_truth_eye",
+                "select_shared_dragon_heart", "declare_fuyuebei_toll",
+                "devour_monster", "declare_tail_sacrifice",
+                "enslave_as_chizu", "blood_feast", "use_truth_eye",
                 # 轮回者指挥与友方自主行动都属于己方行动阶段，不能在怪物阶段插队。
                 "command_ally", "resolve_ally_phases",
             }
@@ -1300,7 +1295,7 @@ class GameEngine:
             if action_type == "consume_item" and params.get("name") == "活性土壤":
                 required = CombatSubphase.AWAIT_ROUND_START.value
             if action_type in ("use_black_card", "select_shared_dragon_heart",
-                               "use_crime_vault", "use_dragon_wings"):
+                               "use_crime_vault"):
                 required = CombatSubphase.AWAIT_ROUND_START.value
             if action_type == "activate_duel_relic" and self.state.in_final_duel:
                 required = CombatSubphase.AWAIT_ROUND_START.value
@@ -1676,20 +1671,12 @@ class GameEngine:
             return self._action_select_shared_dragon_heart(params)
         elif action_type == "declare_fuyuebei_toll":
             return self._action_declare_fuyuebei_toll(params)
-        elif action_type == "pay_for_dragon_nature":
-            return self._action_pay_for_dragon_nature(params)
         elif action_type == "unlock_dragon_trait":
             return self._action_unlock_dragon_trait(params)
-        elif action_type == "activate_dragon_body":
-            return self._action_activate_dragon_body(params)
         elif action_type == "devour_monster":
             return self._action_devour_monster(params)
         elif action_type == "declare_tail_sacrifice":
             return self._action_declare_tail_sacrifice(params)
-        elif action_type == "use_dragon_wings":
-            return self._action_use_dragon_wings(params)
-        elif action_type == "use_blood_wings":
-            return self._action_use_blood_wings(params)
         elif action_type == "enslave_as_chizu":
             return self._action_enslave_as_chizu(params)
         elif action_type == "use_truth_eye":
@@ -3719,7 +3706,7 @@ class GameEngine:
         "龙心谷": [
             ("共心环", "[战始]，选择自身拥有的一枚【××龙心】；本场战斗中，自身、[朋友]与[员工]均可消耗该龙心耐久，抵消同类型代价"),
             ("负岳碑", "当任意[朋友]或[员工]即将触发【撤退】时，可以流血20，抵消本次伤害并取消本次【撤退】"),
-            ("真龙之心", "每消耗12X龙性，获得X种不同龙族遗物（6X衰老=2X枯竭=X萎缩=12X龙性）"),
+            ("真龙之心", "你每实际支付1点数值型【代价】记1点代价累积；每满12点，获得1件未持有的龙族遗物"),
         ],
     }
 
@@ -7675,7 +7662,7 @@ class GameEngine:
             "first_embrace_traits": list(s.first_embrace_traits),
             "pending_first_embrace": s.pending_first_embrace,
             "chizu_names": list(s.chizu_names),
-            "dragon_nature": s.dragon_nature,
+            "dragon_cost_points": s.dragon_cost_points,
             "dragon_traits": list(s.dragon_traits),
             "has_sacrifice_action": s.has_sacrifice_action,
         }
@@ -8219,23 +8206,6 @@ class GameEngine:
 
     # ==================== 初拥之夜：可主动发动的具体能力 ====================
 
-    def _action_use_blood_wings(self, params: dict) -> dict:
-        """鲜血之翼：代价流血5X，发动【飞行X】回合"""
-        if "鲜血之翼" not in self.state.first_embrace_traits:
-            return {"success": False, "error": "没有鲜血之翼"}
-        player = self.state.player
-        x = params.get("x", 0)
-        if not player or not isinstance(x, int) or x < 1:
-            return {"success": False, "error": "X必须是正整数"}
-        payment = self.combat.pay_numeric_cost(
-            player, "流血", 5 * x,
-            cost_share_target_ref=params.get("cost_share_target_ref", ""),
-            cost_context={"timing": "player_action", "source": "鲜血之翼", "source_type": "relic", "tags": {"active_payment"}})
-        player.add_status(StatusEffect(name="飞行", value=x, remaining_rounds=x, source="鲜血之翼"))
-        return {"success": True, "action": "鲜血之翼",
-                "result": {"cost": payment, "bled": 5 * x,
-                           "flying_rounds": x, "hp": player.current_hp}}
-
     def _action_enslave_as_chizu(self, params: dict) -> dict:
         """血族尖牙：代价衰老20，使生命低于自身的一个[目标]转化为听命于你的赤族"""
         if "血族尖牙" not in self.state.first_embrace_traits:
@@ -8569,82 +8539,46 @@ class GameEngine:
         return {"success": True, "action": "负岳碑·预声明保护",
                 "result": {"protected": ally.name, "declared": list(self.state.fuyuebei_declared)}}
 
-    # ==================== 真龙之心：龙性资源与8种龙族遗物 ====================
+    # ==================== 真龙之心：代价累积与 8 种龙族遗物 ====================
+    # 2026-10-23 用户令：废除「龙性」货币。玩家实际支付的数值型【代价】自动记入
+    # `state.dragon_cost_points`（只作兑换门槛，不可花用、不可转账），每满 12 点
+    # 换 1 件未持有的龙族遗物。道纹/法术/事件里的代价本来就支持多途径支付，
+    # 这里不再需要「先换龙性再花龙性」的中间层。
 
-    DRAGON_NATURE_RATE = {"衰老": 2, "枯竭": 6, "萎缩": 12}  # 1点该类型代价 = N点龙性
     DRAGON_TRAITS = ["龙族血脉", "龙威", "龙族利爪", "龙息", "震岳龙躯", "吞骸龙胃", "断尾求生", "烬翼"]
-    # 龙族项目以【遗物】形式授予，此表提供其效果文本（与《物品索引》一致）
     DRAGON_TRAIT_EFFECTS = {
         "龙族血脉": "对怪物造成伤害后，直接使其［命零］；对非怪物造成伤害翻倍",
-        "龙威": "所有敌方必须优先选择自身为[目标]",
-        "龙族利爪": "你的攻击力等同当前法力×2",
+        "龙威": "［战始］起，所有敌方必须优先选择你为[目标]",
+        "龙族利爪": "［战始］起，你的[攻击力]等同当前法力×2",
         "龙息": "所有敌方[目标]行动前，受到10×当前回合数的必中伤害",
-        "震岳龙躯": "消耗6X点龙性，自身受到超出15点的所有伤害无效。持续X",
+        "震岳龙躯": "你受到的单次伤害超过15点时，超出部分无效",
         "吞骸龙胃": "任意怪物［命零］后，可将其吞噬：自身获得[回复12]，并选择一枚【××龙心】，使其当前耐久+6",
         "断尾求生": "自身即将［命零］时，可销毁一件本场获得的其他龙族遗物，抵消本次使自身［命零］的伤害",
-        "烬翼": "［回始］，可消耗3X点龙性，获得【飞行X】",
+        "烬翼": "［回始］若你的当前生命不高于[血限]一半，获得【飞行】1回合",
     }
     # 龙威通过prepare_monster_phase收窄合法目标列表实现；resolve只接受prepare列出的目标。
-
-    def _action_pay_for_dragon_nature(self, params: dict) -> dict:
-        """真龙之心：支付衰老/枯竭/萎缩代价换取龙性（6X衰老=2X枯竭=X萎缩=12X龙性）"""
-        if "真龙之心" not in self.state.artifacts_owned:
-            return {"success": False, "error": "没有真龙之心"}
-        cost_type = params.get("cost_type", "")
-        x = params.get("x", 0)
-        if cost_type not in self.DRAGON_NATURE_RATE or not isinstance(x, int) or x < 1:
-            return {"success": False, "error": "cost_type必须是衰老/枯竭/萎缩之一，x必须是正整数"}
-        player = self.state.player
-        if not player:
-            return {"success": False, "error": "没有玩家"}
-        payment = self.combat.pay_numeric_cost(
-            player, cost_type, x,
-            cost_share_target_ref=params.get("cost_share_target_ref", ""),
-            cost_context={"timing": "pre_battle_action", "source": "真龙之心", "source_type": "artifact", "tags": {"active_payment"}})
-        gained = x * self.DRAGON_NATURE_RATE[cost_type]
-        self.state.dragon_nature += gained
-        return {"success": True, "action": "真龙之心·换取龙性",
-                "result": {"paid": f"{cost_type}{x}", "cost": payment,
-                           "dragon_nature_gained": gained,
-                           "dragon_nature": self.state.dragon_nature}}
+    DRAGON_COST_PER_TRAIT = 12
 
     def _action_unlock_dragon_trait(self, params: dict) -> dict:
-        """真龙之心：每消耗12龙性，获得1件未持有的龙族遗物"""
+        """真龙之心：每满 12 点代价累积，获得 1 件未持有的龙族遗物。"""
         if "真龙之心" not in self.state.artifacts_owned:
             return {"success": False, "error": "没有真龙之心"}
         trait = params.get("trait", "")
         if trait not in self.DRAGON_TRAITS:
-            return {"success": False, "error": f"trait必须是{self.DRAGON_TRAITS}之一"}
+            return {"success": False,
+                    "error": f"trait必须是{self.DRAGON_TRAITS}之一，收到{trait!r}"}
         if trait in self.state.dragon_traits:
-            return {"success": False, "error": f"已持有{trait}，不能重复获得"}
-        if self.state.dragon_nature < 12:
-            return {"success": False, "error": f"龙性不足，需要12，当前{self.state.dragon_nature}"}
-        self.state.dragon_nature -= 12
-        self.state.grant_relic(trait, self.DRAGON_TRAIT_EFFECTS.get(trait, ""), tag="龙族")
-        # 【龙族利爪】2026-09-17 用户令改版：效果改为「攻击力 = 当前法力×2」，
-        # 不再写死初始 3 攻次 / 1 攻力——那两行直接覆盖玩家遗留字段，
-        # 而 models.py 的写穿对轮回者不生效（旧效果因此对玩家完全无效），
-        # 一旦写穿还会把玩家真实的[速限]/[法限]直接冲掉（见 models.py 注释）。
-        # 新效果走状态层，由 BATTLE_START 机制【龙族利爪】挂状态、
-        # models.py::effective_attack_power 读取。
-        return {"success": True, "action": "真龙之心·获得龙族遗物",
-                "result": {"trait": trait, "dragon_nature_remaining": self.state.dragon_nature,
-                           "dragon_traits": list(self.state.dragon_traits)}}
-
-    def _action_activate_dragon_body(self, params: dict) -> dict:
-        """震岳龙躯：消耗6X点龙性，自身受到超出15点的所有伤害无效，持续X回合"""
-        if "震岳龙躯" not in self.state.dragon_traits:
-            return {"success": False, "error": "没有震岳龙躯"}
-        x = params.get("x", 0)
-        if not isinstance(x, int) or x < 1:
-            return {"success": False, "error": "x必须是正整数"}
-        cost = 6 * x
-        if self.state.dragon_nature < cost:
-            return {"success": False, "error": f"龙性不足，需要{cost}，当前{self.state.dragon_nature}"}
-        self.state.dragon_nature -= cost
-        self.state.dragon_body_shield_rounds = x
-        return {"success": True, "action": "震岳龙躯",
-                "result": {"rounds": x, "dragon_nature": self.state.dragon_nature}}
+            return {"success": False, "error": f"已持有龙族遗物【{trait}】"}
+        if self.state.dragon_cost_points < self.DRAGON_COST_PER_TRAIT:
+            return {"success": False,
+                    "error": (f"代价累积不足：需要{self.DRAGON_COST_PER_TRAIT}点，"
+                              f"当前{self.state.dragon_cost_points}点（实际支付数值型代价即可累积）")}
+        self.state.dragon_cost_points -= self.DRAGON_COST_PER_TRAIT
+        effect = self.DRAGON_TRAIT_EFFECTS[trait]
+        self.state.grant_relic(trait, effect, tag="龙族")
+        return {"success": True, "action": f"真龙之心·解锁{trait}",
+                "result": {"trait": trait, "effect": effect,
+                           "cost_points_remaining": self.state.dragon_cost_points}}
 
     def _action_devour_monster(self, params: dict) -> dict:
         """吞骸龙胃：任意怪物[命零]后可将其吞噬，自身获得回复12，并选择一枚龙心使其耐久+6"""
@@ -8686,25 +8620,6 @@ class GameEngine:
         self.state.dragon_tail_sacrifice_declared = trait
         return {"success": True, "action": "断尾求生·预声明",
                 "result": {"declared_sacrifice": trait}}
-
-    def _action_use_dragon_wings(self, params: dict) -> dict:
-        """烬翼：[回始]可消耗3X点龙性，获得飞行X"""
-        if "烬翼" not in self.state.dragon_traits:
-            return {"success": False, "error": "没有烬翼"}
-        target_round = self.state.current_round + 1
-        if self.state.event_modifiers.get("dragon_wings_used_round") == target_round:
-            return {"success": False, "error": "烬翼本回始已经发动"}
-        x = params.get("x", 0)
-        if not isinstance(x, int) or x < 1:
-            return {"success": False, "error": "x必须是正整数"}
-        cost = 3 * x
-        if self.state.dragon_nature < cost:
-            return {"success": False, "error": f"龙性不足，需要{cost}，当前{self.state.dragon_nature}"}
-        self.state.dragon_nature -= cost
-        self.state.event_modifiers["dragon_wings_used_round"] = target_round
-        self.state.player.add_status(StatusEffect(name="飞行", value=x, remaining_rounds=x, source="烬翼"))
-        return {"success": True, "action": "烬翼",
-                "result": {"flying_rounds": x, "dragon_nature": self.state.dragon_nature}}
 
     def _action_battle_end(self, params: dict) -> dict:
         """战终；仍有未移出的存活敌人时不得跳过战斗直接结算（统一判定见 GameState.battle_won）。"""

@@ -16,7 +16,7 @@
 - battle_start_relic_choices：猩红果实 / 苍白之花（苍白之花已重做为被动，战始无需决策）
 - round_start_relic_choices：回锋刀（余火印已于2026-10-14删除；血契的旧回始效果已删除，仅保留代价平分）
 - 战始窗口法器：共心环（共享龙心）、黑金名片（敌方血限减半）
-- 回始窗口法器：罪业金库（碎片→格挡）、烬翼（龙性→飞行）
+- 回始窗口法器：罪业金库（碎片→格挡）
 - 战斗内法器：教父左轮（免费必中伤害）、鲜血之翼（流血→飞行）
 
 决策原则：能用且划算才用；不划算就显式拒绝（引擎强制逐件显式提交）。
@@ -32,9 +32,7 @@ from engine.ai_rules import (  # noqa: F401  （再导出：sim 侧既有 import
     try_select_shared_dragon_heart,
     try_use_black_card,
     try_use_crime_vault,
-    try_use_dragon_wings,
     try_fire_godfather_revolver,
-    try_use_blood_wings,
 )
 
 
@@ -59,7 +57,7 @@ def start_battle(engine):
 def start_round(engine):
     """回始窗口法器 + round_start。返回 (round_start结果, 法器结果列表)。"""
     logs: list[dict] = []
-    for fn in (try_use_crime_vault, try_use_dragon_wings):
+    for fn in (try_use_crime_vault,):
         r = fn(engine)
         if r and r.get("success"):
             logs.append(r)

@@ -253,8 +253,11 @@ def _silent_mask_effect(ctx: TriggerContext, targets: list) -> str:
     （另一字面规则），不在本机制范围，保持不变。
 
     X=0（未登记 silent_mask_x）时不发放，保持与旧块一致的无操作语义。
+    2026-10-23 起固定 +2，不再读 silent_mask_x（遗物无 X 变量）。
     """
-    x = ctx.state.event_modifiers.get("silent_mask_x", 0)
+    # 2026-10-23 用户令：遗物不得有 X 变量，改为固定 +2。
+    # 事件「献出声音」里的失忆X 仍然计入玩家当场支付的代价，但不再驱动本遗物数值。
+    x = 2
     player = ctx.target
     if x > 0:
         player.mana_limit += x
@@ -565,6 +568,21 @@ def _player_subject(ctx: TriggerContext) -> bool:
     return ctx.target is ctx.state.player and ctx.target is not None
 
 
+def _ember_wing_effect(ctx: TriggerContext, targets: list) -> str:
+    """【烬翼】2026-10-23 重做为被动：回始时生命不高于血限一半，自动获得飞行1回合。"""
+    entity = ctx.target
+    if entity is None or entity.current_hp * 2 > entity.blood_limit:
+        return ""
+    apply_verb(ctx.combat, "status", {
+        "target": entity, "name": "飞行", "duration": 1, "value": 1,
+        "source": "烬翼"})
+    return f"烬翼：{entity.name}获得【飞行】1回合"
+
+
+EMBER_WING = Mechanism(
+    name="烬翼·回始飞行", when=Trigger.phase(Phase.ROUND_START), target=SELF,
+    condition=all_(_player_subject, side_has("烬翼")), effect=_ember_wing_effect, priority=25)
+
 BLOOD_LINEAGE = Mechanism(
     name="血族血脉·回终", when=Trigger.phase(Phase.ROUND_END_POST_MEDIOCRITY), target=SELF,
     condition=all_(entity_type("轮回者"), side_has("血族血脉")), effect=_blood_lineage_effect, priority=10)
@@ -593,5 +611,6 @@ DRAGON_BLOODLINE = Mechanism(
 # 2026-10-13 用户令：【三相残韵盘】遗物删除，SANXIANG_END（【三相残韵盘·战终】）一并移除。
 
 for _mechanism in (BLOOD_LINEAGE, RED_CURSE, FIRST_ROUND_SHIELD, LEATHER_SHIELD,
-                   LEATHER_RECORD, ROUND_TRACKING_RESET, BULLETPROOF, DRAGON_BLOODLINE):
+                   LEATHER_RECORD, ROUND_TRACKING_RESET, BULLETPROOF, DRAGON_BLOODLINE,
+                   EMBER_WING):
     MECHANISMS.register(_mechanism)
