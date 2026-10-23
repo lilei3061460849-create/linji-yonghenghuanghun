@@ -62,12 +62,12 @@ def test_quanli_transform_edge_is_left_empty_on_purpose():
 
 
 def test_round_start_phase_no_longer_has_shuaibai():
-    """【衰败】的 ROUND_START 机制已删；回始为 烬翼 → 洞察·结算 → 畸变·标记。"""
+    """【衰败】的 ROUND_START 机制已删；回始只剩 洞察·结算 → 畸变·标记。"""
     from engine.mechanisms.registry import MECHANISMS
     import engine.mechanisms.builtins  # noqa: F401  （触发注册）
 
     names = [m.name for m in MECHANISMS.phase_mechanisms("round_start")]
-    assert names == ["烬翼·回始飞行", "洞察·结算", "畸变·标记"], names
+    assert names == ["洞察·结算", "畸变·标记"], names
 
 
 def test_no_runtime_trace_left_in_production():

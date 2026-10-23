@@ -4,13 +4,13 @@ pytest - 可选遗物/法器策略（sim/optional_actions.py）
 背景（用户：可以不用 但是不能不让用，修）：
 此前所有脚本把可选战始遗物（猩红果实/苍白之花）一律
 use:False 拒绝，回始遗物（血契/余火印，余火印已于2026-10-14删除）从不使用，终音法器（黑金名片/罪业金库/
-教父左轮/烬翼/鲜血之翼/共心环）没有任何发动策略——这些机制"存在但不可用"。
+教父左轮/共心环）没有任何发动策略——这些机制"存在但不可用"。
 
 本测试锁定：
 1. 战始遗物按情形主动发动（速度高→苍白之花；2026-10-13【三相残韵盘】删除）
 2. 回始遗物按情形主动发动（回锋刀；余火印已于2026-10-14删除，血契不再是回始主动遗物）
 3. 终音法器可被实际发动（黑金名片减敌血限/罪业金库换格挡/教父左轮必中伤害/
-   共心环共享龙心/鲜血之翼飞行）
+   共心环共享龙心）
 4. 不满足条件时显式拒绝（策略返回 use=False，而不是让引擎代猜）
 """
 import os
@@ -128,22 +128,6 @@ def test_shared_dragon_heart_selects_type(engine):
     assert bs.get("success"), bs
     assert any(l.get("action") == "共心环" and l.get("success") for l in artifact_logs)
     assert engine.state.shared_dragon_heart_type == "流血"
-
-
-def test_blood_wings_passive_flight_after_dodge(engine):
-    """鲜血之翼（2026-10-23 重做为被动）：成功闪避后自动飞行，不再有可选发动。"""
-    engine.state.grant_relic("鲜血之翼", "每次成功闪避后获得【飞行】1回合", tag="血族")
-    p = engine.state.player
-    p.current_hp = 60
-    p.blood_limit = 60
-    engine.state.energy = 0
-    bs, _ = start_battle(engine)
-    assert bs.get("success"), bs
-    rs, _ = start_round(engine)
-    assert rs.get("success"), rs
-    extra = engine.combat._note_dodge(p)
-    assert extra.get("blood_wings_flight") == 1
-    assert p.get_status_value("飞行") == 1
 
 
 def test_start_battle_and_start_round_keep_working(engine):

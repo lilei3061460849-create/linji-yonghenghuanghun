@@ -32,7 +32,8 @@ from .combat import CombatEngine
 from .spell_dsl import parse_spell_definition, SpellDslError
 from .combat_events import register_combat_event_observer
 from .consumables import (
-    ZIYU_TRIGGER_BATTLE_END, apply_zi_yu_trigger, note_action_targets)
+    ZIYU_TRIGGER_BATTLE_END, apply_zi_yu_trigger, note_action_targets,
+    WING_BLOOD, WING_EMBER, make_wing_item)
 from .events import EventPool
 from .rule_repository import RuleRepository
 from .dungeons import DEFAULT_INDEX
@@ -556,8 +557,10 @@ class GameEngine:
             # 满 12 点可直接换 1 件龙族遗物；不再有「换取龙性」这一步。
             actions.append(
                 {"action_type": "unlock_dragon_trait",
-                 "params_schema": {"trait": [name for name in self.DRAGON_TRAITS
-                                                if name not in self.state.dragon_traits]},
+                 "params_schema": {"trait": [name for name in
+                                                self.DRAGON_TRAITS + list(self.DRAGON_CONSUMABLE_TRAITS)
+                                                if name not in self.state.dragon_traits
+                                                and not any(c.name == name for c in self.state.consumables)]},
                  "dragon_cost_points": self.state.dragon_cost_points,
                  "note": "每累计支付12点数值型代价可换1件；不足12点时会被拒绝"})
         for employee in self.state.employees:
@@ -3711,10 +3714,12 @@ class GameEngine:
     }
 
     # 初拥之夜9选1（1~8限选1次，9号可重复触发权）
+    # 2026-10-23 用户令：【鲜血之翼】改名【血翼】并改为消耗品（耐久3/3）。
+    # 选项编号与总数（9选1）不变，只是选项3 从「授予遗物」改为「发放消耗品」。
     FIRST_EMBRACE_OPTIONS = {
         1: ("血族血脉", "[回终]若本回合造成伤害则获得等量[回复]，否则流血20"),
         2: ("不朽之躯", "当前[血限]减半；免疫衰老；[血限]无法增加"),
-        3: ("鲜血之翼", "代价：流血5X，发动【飞行X】回合"),
+        3: ("血翼", "消耗品（耐久3/3）：主动使用后获得【飞行】持续1回合；你每累计失去100%[血限]的生命，耐久+1"),
         4: ("血族尖牙", "代价：衰老20，使生命低于自身的一个[目标]转化为听命于你的赤族（诅咒：[回终]赤族流血20）"),
         5: ("真理", "专属道纹：冷却2场；提出X句陈述，要求[目标]逐句言明真理，任一句无法言明则无法开口，持续X回合；真伪由DM逐句裁定"),
         6: ("寒冰法力", "对[目标]每累计施加10法力，使其本回合出手次数-1"),
@@ -3722,6 +3727,9 @@ class GameEngine:
         8: ("血食", "可使一名听命于你的赤族[命零]，自身获得等同于该赤族当前生命的[回复]"),
         9: ("封存血脉", "保留触发权，随时再次触发初拥之夜"),
     }
+    # 选项 → 发放的消耗品（不占遗物位）：选项3 授予【血翼】。
+    FIRST_EMBRACE_CONSUMABLES = {3: WING_BLOOD}
+    FIRST_EMBRACE_RETAIN_CHOICE = 9
 
     # 遗物池定义（26件；【发现】只列候选，效果在对应触发时点应用）
     # 2026-10-13 用户令：【买路财】改制为轮回者【逃跑】行动，【三相残韵盘】删除
@@ -6019,6 +6027,22 @@ class GameEngine:
         if item.name in TWISTED_TOOL_LIBRARY:
             return self._consume_twisted_tool(item, params)
 
+        # 翼类消耗品（2026-10-23 用户令）：主动使用获得【飞行】1回合，耐久-1。
+        if item.kind == "wing" or item.name in {WING_BLOOD, WING_EMBER}:
+            player = self.state.player
+            if player is None or not player.is_alive:
+                return {"success": False, "error": "没有可行动的玩家"}
+            remaining = item.use()
+            player.add_status(StatusEffect(name="飞行", value=1, remaining_rounds=1,
+                                           source=item.name))
+            return {
+                "success": True,
+                "action": f"使用消耗品【{item.name}】",
+                "result": {"flying_rounds": 1, "uses_remaining": remaining,
+                           "max_uses": item.max_uses, "is_depleted": item.is_depleted},
+                "state": self.combat._get_combat_state(),
+            }
+
         # 雕塑：消耗1耐久造成15伤害或获得20格挡
         if item.kind == "sculpture":
             mode = params.get("mode", "damage")  # damage / shield
@@ -8150,7 +8174,7 @@ class GameEngine:
 
     def _action_choose_first_embrace(self, params: dict) -> dict:
         """
-        初拥之夜：9选1。1~8每项限选1次(除9外)，选择后[回复]30%[血限]。
+        初拥之夜：9选1。1~8每项限选1次(除9「封存血脉」外)，选择后[回复]30%[血限]。
         猩红尖牙触发的这一次选择完成后，若仍处于死斗胜利流程中，会紧接着完整封存角色。
         """
         if not self.state.pending_first_embrace:
@@ -8163,7 +8187,7 @@ class GameEngine:
         if not player:
             return {"success": False, "error": "没有玩家"}
 
-        if choice != 9:
+        if choice != self.FIRST_EMBRACE_RETAIN_CHOICE:
             already_chosen = name in self.state.first_embrace_traits
             if name == "真理":
                 # 兼容迁移前仍以遗物保存的旧档，及任何已持有同名道纹的状态。
@@ -8172,10 +8196,14 @@ class GameEngine:
             if already_chosen:
                 return {"success": False, "error": f"{name}已经选过，1~8每项限选1次"}
 
-        if choice != 9:
+        if choice != self.FIRST_EMBRACE_RETAIN_CHOICE:
             if name == "真理":
                 # 事件专属道纹由初拥直接授予；不进入普通学习/残韵流程。
                 player.dao_wen[name] = self._new_truth_daowen_instance()
+            elif choice in self.FIRST_EMBRACE_CONSUMABLES:
+                # 选项3：发放消耗品【血翼】，不占遗物位、不入遗物视图。
+                self.state.consumables.append(
+                    make_wing_item(self.FIRST_EMBRACE_CONSUMABLES[choice]))
             else:
                 # 其余初拥项目仍以遗物形式存放，继承遗物通用规则。
                 self.state.grant_relic(name, effect, tag="血族")
@@ -8331,7 +8359,8 @@ class GameEngine:
         names |= set(TWISTED_TOOL_LIBRARY)
         for items in self.TERMINAL_ARTIFACTS.values():
             names |= {n for n, _ in items}
-        names |= set(self.DRAGON_TRAITS)
+        names |= set(self.DRAGON_TRAITS) | set(self.DRAGON_CONSUMABLE_TRAITS)
+        names |= {WING_BLOOD, WING_EMBER}
         names |= {name for _, (name, _) in self.FIRST_EMBRACE_OPTIONS.items()}
         return names
 
@@ -8545,7 +8574,10 @@ class GameEngine:
     # 换 1 件未持有的龙族遗物。道纹/法术/事件里的代价本来就支持多途径支付，
     # 这里不再需要「先换龙性再花龙性」的中间层。
 
-    DRAGON_TRAITS = ["龙族血脉", "龙威", "龙族利爪", "龙息", "震岳龙躯", "吞骸龙胃", "断尾求生", "烬翼"]
+    # 2026-10-23 用户令：烬翼改为消耗品（耐久5/5），不再是龙族遗物；
+    # 兑换仍走真龙之心的 12 点代价累积，只是发的是消耗品而不是遗物。
+    DRAGON_TRAITS = ["龙族血脉", "龙威", "龙族利爪", "龙息", "震岳龙躯", "吞骸龙胃", "断尾求生"]
+    DRAGON_CONSUMABLE_TRAITS = {WING_EMBER: 5}
     DRAGON_TRAIT_EFFECTS = {
         "龙族血脉": "对怪物造成伤害后，直接使其［命零］；对非怪物造成伤害翻倍",
         "龙威": "［战始］起，所有敌方必须优先选择你为[目标]",
@@ -8554,26 +8586,36 @@ class GameEngine:
         "震岳龙躯": "你受到的单次伤害超过15点时，超出部分无效",
         "吞骸龙胃": "任意怪物［命零］后，可将其吞噬：自身获得[回复12]，并选择一枚【××龙心】，使其当前耐久+6",
         "断尾求生": "自身即将［命零］时，可销毁一件本场获得的其他龙族遗物，抵消本次使自身［命零］的伤害",
-        "烬翼": "［回始］若你的当前生命不高于[血限]一半，获得【飞行】1回合",
     }
     # 龙威通过prepare_monster_phase收窄合法目标列表实现；resolve只接受prepare列出的目标。
     DRAGON_COST_PER_TRAIT = 12
 
     def _action_unlock_dragon_trait(self, params: dict) -> dict:
-        """真龙之心：每满 12 点代价累积，获得 1 件未持有的龙族遗物。"""
+        """真龙之心：每满 12 点代价累积，获得 1 件未持有的龙族遗物/翼类消耗品。"""
         if "真龙之心" not in self.state.artifacts_owned:
             return {"success": False, "error": "没有真龙之心"}
         trait = params.get("trait", "")
-        if trait not in self.DRAGON_TRAITS:
+        options = self.DRAGON_TRAITS + list(self.DRAGON_CONSUMABLE_TRAITS)
+        if trait not in options:
             return {"success": False,
-                    "error": f"trait必须是{self.DRAGON_TRAITS}之一，收到{trait!r}"}
+                    "error": f"trait必须是{options}之一，收到{trait!r}"}
         if trait in self.state.dragon_traits:
             return {"success": False, "error": f"已持有龙族遗物【{trait}】"}
+        if trait in self.DRAGON_CONSUMABLE_TRAITS and any(
+                c.name == trait for c in self.state.consumables):
+            return {"success": False, "error": f"已持有【{trait}】（消耗品，耐久已满）"}
         if self.state.dragon_cost_points < self.DRAGON_COST_PER_TRAIT:
             return {"success": False,
                     "error": (f"代价累积不足：需要{self.DRAGON_COST_PER_TRAIT}点，"
                               f"当前{self.state.dragon_cost_points}点（实际支付数值型代价即可累积）")}
         self.state.dragon_cost_points -= self.DRAGON_COST_PER_TRAIT
+        if trait in self.DRAGON_CONSUMABLE_TRAITS:
+            item = make_wing_item(trait)
+            self.state.consumables.append(item)
+            return {"success": True, "action": f"真龙之心·获得消耗品{trait}",
+                    "result": {"trait": trait, "effect": item.effect, "kind": "consumable",
+                               "max_uses": item.max_uses,
+                               "cost_points_remaining": self.state.dragon_cost_points}}
         effect = self.DRAGON_TRAIT_EFFECTS[trait]
         self.state.grant_relic(trait, effect, tag="龙族")
         return {"success": True, "action": f"真龙之心·解锁{trait}",

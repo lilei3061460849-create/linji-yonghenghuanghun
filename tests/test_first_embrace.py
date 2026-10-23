@@ -20,6 +20,7 @@ import pytest
 
 from tests.attack_support import resolve_attack as resolve_player_attack
 from engine.api import GameEngine
+from engine.consumables import make_wing_item
 from engine.daowen import DaoWenEngine
 from engine.gamedata import learnability_error, learnable_daowen_pool
 from engine.models import Entity, DaoWen, DaoWenInstance, Relic
@@ -239,31 +240,74 @@ def test_option2_immortal_body_halves_blood_limit_and_blocks_growth():
 
 
 # ========================================================================
-# 3. 鲜血之翼
+# 3. 血翼（消耗品）
 # ========================================================================
 
-def test_option3_blood_wings_grants_flight_after_dodge():
-    """正常路径（2026-10-23 重做为被动）：每次成功闪避后自动获得【飞行】1回合，无需支付代价。"""
-    engine = _new_engine(dbsuffix="wings")
-    player = engine.state.player
-    _grant(engine, 3)
+def test_option3_grants_wing_consumable_not_relic():
+    """正常路径（2026-10-23 重做）：选项3 发放消耗品【血翼】3/3，不占遗物位。"""
+    engine = _new_engine(dbsuffix="wing_item")
+    engine.state.pending_first_embrace = True
+    r = engine.execute_action("choose_first_embrace", {"choice": 3})
+    assert r["success"], r.get("error")
+    wing = next((c for c in engine.state.consumables if c.name == "血翼"), None)
+    assert wing is not None, [c.name for c in engine.state.consumables]
+    assert (wing.current_uses, wing.max_uses) == (3, 3)
+    assert "血翼" not in [x.name for x in engine.state.relics]
+    assert "血翼" not in engine.state.first_embrace_traits
+
+
+def test_wing_consumable_active_use_grants_flight():
+    """正常路径：主动使用获得【飞行】1回合并扣 1 点耐久（消耗品不占出手）。"""
+    engine = _new_engine(dbsuffix="wing_use")
+    engine.state.consumables.append(make_wing_item("血翼"))
     engine.execute_action("battle_start", {})
     engine.execute_action("round_start", {})
-    hp_before = player.current_hp
-    extra = engine.combat._note_dodge(player)
-    assert extra.get("blood_wings_flight") == 1
+    player = engine.state.player
+    r = engine.execute_action("consume_item", {"name": "血翼"})
+    assert r["success"], r
     assert player.get_status_value("飞行") == 1
-    assert player.current_hp == hp_before, "被动触发不再索取流血代价"
+    assert r["result"]["uses_remaining"] == 2
 
 
-def test_option3_boundary_blood_wings_inactive_without_relic():
-    """边界：未持有鲜血之翼时闪避不产生飞行。"""
-    engine = _new_engine(dbsuffix="wings_err")
-    player = engine.state.player
+def test_wing_consumable_boundary_depleted_is_unusable_but_not_destroyed():
+    """边界：耐久归零后不可用，但条目仍在（不自动销毁）。"""
+    engine = _new_engine(dbsuffix="wing_empty")
+    wing = make_wing_item("血翼")
+    wing.current_uses = 0
+    engine.state.consumables.append(wing)
     engine.execute_action("battle_start", {})
     engine.execute_action("round_start", {})
-    engine.combat._note_dodge(player)
-    assert player.get_status_value("飞行") == 0
+    r = engine.execute_action("consume_item", {"name": "血翼"})
+    assert r["success"] is False
+    assert any(c.name == "血翼" and c.is_depleted for c in engine.state.consumables)
+
+
+def test_wing_consumable_recharges_every_full_blood_limit_lost():
+    """正常路径：每累计失去 100%[血限] 的生命，耐久+1（余数滚存）。"""
+    engine = _new_engine(dbsuffix="wing_recharge")
+    engine.state.consumables.append(make_wing_item("血翼"))
+    engine.execute_action("battle_start", {})
+    engine.execute_action("round_start", {})
+    player = engine.state.player
+    wing = next(c for c in engine.state.consumables if c.name == "血翼")
+    wing.current_uses = 1
+    limit = player.blood_limit
+    engine.combat.pay_numeric_cost(player, "流血", limit // 2)
+    assert wing.current_uses == 1, "未满一个血限不涨耐久"
+    engine.combat.pay_numeric_cost(player, "流血", limit - limit // 2)
+    assert wing.current_uses == 2, f"满一个血限应+1，实{wing.current_uses}"
+
+
+def test_wing_consumable_recharge_caps_at_max_durability():
+    """边界：耐久已满时不再增长。"""
+    engine = _new_engine(dbsuffix="wing_cap")
+    engine.state.consumables.append(make_wing_item("血翼"))
+    engine.execute_action("battle_start", {})
+    engine.execute_action("round_start", {})
+    player = engine.state.player
+    wing = next(c for c in engine.state.consumables if c.name == "血翼")
+    engine.combat.pay_numeric_cost(player, "流血", player.blood_limit)
+    assert wing.current_uses == wing.max_uses == 3
 
 
 # ========================================================================

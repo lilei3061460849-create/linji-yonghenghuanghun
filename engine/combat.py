@@ -421,11 +421,6 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         if self._relic_active(entity, "避风铃"):
             entity.gain_shield(3)
             extra["avoid_wind_shield"] = 3
-        # 鲜血之翼（初拥遗物，2026-10-23 重做为被动）：每次成功闪避后获得【飞行】1回合。
-        if self._relic_active(entity, "鲜血之翼"):
-            entity.add_status(StatusEffect(name="飞行", value=1, remaining_rounds=1,
-                                           source="鲜血之翼"))
-            extra["blood_wings_flight"] = 1
         if entity.has_status("急速"):
             entity._jisu_dodges = getattr(entity, "_jisu_dodges", 0) + 1
             if entity._jisu_dodges >= 2:

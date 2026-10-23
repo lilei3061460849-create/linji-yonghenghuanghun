@@ -70,10 +70,10 @@ def test_dongcha_is_registered():
     assert mech.priority == 30
     from engine.mechanisms.registry import MECHANISMS as REG
     assert [m.name for m in REG.phase_mechanisms(Phase.ROUND_START)] == \
-        ["烬翼·回始飞行", "洞察·结算", "畸变·标记"]
+        ["洞察·结算", "畸变·标记"]
         # 2026-10-11：【衰败】随道纹删除
         # 2026-10-03：【狂暴·标记】随道纹删除；2026-10-11：【自愈】随道纹删除
-        # 2026-10-23：【烬翼·回始飞行】新增（priority 25，先于洞察 30 结算）
+        # 2026-10-23：烬翼当日改为消耗品，回始机制已撤，不再占位
 
 
 def test_old_dongcha_block_removed():

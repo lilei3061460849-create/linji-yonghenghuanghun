@@ -553,7 +553,7 @@ class PlaceholderBackend(AIBackend):
         
         elif phase == "in_combat":
             pending_type = available_actions.get("action_type")
-            # 可选法器（黑金名片/罪业金库/烬翼/鲜血之翼/教父左轮/共心环）：
+            # 可选法器（黑金名片/罪业金库/教父左轮/共心环）：
             # 有引擎引用且对应行动在可用列表时，按策略函数尝试发动（可以不用但不能不让用）。
             # commit=False 只返回计划不执行，由 AIPlayer.play_turn 统一 execute_action。
             engine = getattr(self, "engine", None)

@@ -153,6 +153,9 @@ class Consumable:
     kind: str = "normal"
     # dragon_heart 专用：可抵消的代价类型（流血/衰老/疲惫）
     dragon_heart_type: str = ""
+    # 计数型消耗品的进度（2026-10-23：血翼「累计失去100%[血限]的生命」）。
+    # 满一个阈值即兑换 1 点耐久，余数留在这里继续滚存。
+    progress: int = 0
 
     @property
     def is_depleted(self) -> bool:
@@ -183,6 +186,7 @@ class Consumable:
             "is_depleted": self.is_depleted,
             "kind": self.kind,
             "dragon_heart_type": self.dragon_heart_type,
+            "progress": self.progress,
         }
 
 

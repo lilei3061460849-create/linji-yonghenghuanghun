@@ -15,7 +15,8 @@ from ..enums import (ActionPhase, TriggerTiming, InterruptType, DamageType,
                      EffectScope, EffectPolarity, CostType)
 from ..dm_rulings import Interrupt
 from ..combat_events import CombatEvent, CombatEventType, register_combat_event_observer
-from ..consumables import ZIYU_TRIGGER_TARGET_DEATH, apply_zi_yu_trigger
+from ..consumables import (ZIYU_TRIGGER_TARGET_DEATH, apply_zi_yu_trigger,
+                           note_blood_wing_hp_loss, note_ember_wing_monster_death)
 from ..combat_hooks import CombatHookManager
 from ..effect_context import EffectContext, make_context, normalize_context
 from ..mechanisms import MECHANISMS, Phase, TriggerBus, TriggerContext
@@ -178,6 +179,11 @@ class DamageDeathMixin:
         toll = self._settle_chenglu(entity, amount, parent_ctx)
         if toll:
             record["chenglu"] = toll
+        # 血翼（消耗品，2026-10-23）：玩家每累计失去 100%[血限] 的生命，耐久+1。
+        # 同样挂在唯一失血总账上，挨打/代价/反噬一律计入。
+        wing_logs = note_blood_wing_hp_loss(self.state, entity, amount)
+        if wing_logs:
+            record["wing_recharge"] = wing_logs
         return record
 
     def _settle_chenglu(self, entity: Entity, amount: int,
@@ -788,6 +794,10 @@ class DamageDeathMixin:
                 self.state.dead_monsters = []
             if entity not in self.state.dead_monsters:
                 self.state.dead_monsters.append(entity)
+            # 烬翼（消耗品，2026-10-23）：任意怪物［命零］时耐久+1（不超过上限）。
+            ember = note_ember_wing_monster_death(self.state, entity)
+            if ember:
+                entity._death_ctx["ember_wing_recharge"] = ember
         # 2026-09-17：【分裂】改为即时创生（见 _spawn_fenlie_clones），
         # 原「[命零]时按本体 20% 血限创造复制体」的分支已随重做删除。
 

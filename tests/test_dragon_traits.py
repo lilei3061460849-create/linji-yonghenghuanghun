@@ -3,8 +3,8 @@ pytest 风格测试 - 真龙之心（龙心谷终音法器，代价累积 + 8 �
 
 2026-10-23 用户令：废除「龙性」货币。玩家**实际支付**的数值型【代价】
 （流血/衰老/枯竭/萎缩/疲惫）自动记 1:1 入账，每满 12 点换 1 件龙族遗物。
-8 件龙族遗物：龙族血脉/龙威/龙族利爪/龙息/震岳龙躯/吞骸龙胃/断尾求生/烬翼，
-全部为被动、无 X、有触发时机（震岳龙躯与烬翼已由主动发动改为常驻被动）。
+7 件龙族遗物：龙族血脉/龙威/龙族利爪/龙息/震岳龙躯/吞骸龙胃/断尾求生（全部被动、无 X、有触发时机），
+外加消耗品【烬翼】（5/5，主动飞行；任意怪物命零时耐久+1）。
 
 覆盖范围：unlock_dragon_trait 的门槛校验 + 8 件龙族遗物各自的被动效果。
 运行方式：
@@ -339,30 +339,73 @@ def test_tail_sacrifice_error_declare_self_or_unowned_trait():
 # 8. 烬翼
 # ========================================================================
 
-def test_ember_wing_grants_flight_at_round_start_when_wounded():
-    """正常路径（重做后）：回始时生命不高于[血限]一半，自动获得飞行1回合。"""
+def test_ember_wing_unlock_grants_consumable_not_relic():
+    """正常路径（2026-10-23）：烬翼改为消耗品 5/5，兑换仍花 12 点，不占龙族遗物位。"""
     engine = _new_engine(dbsuffix="wings")
-    player = engine.state.player
-    _with_heart(engine)
+    _with_heart(engine, points=12)
+    r = engine.execute_action("unlock_dragon_trait", {"trait": "烬翼"})
+    assert r["success"], r.get("error")
+    wing = next((c for c in engine.state.consumables if c.name == "烬翼"), None)
+    assert wing is not None
+    assert (wing.current_uses, wing.max_uses) == (5, 5)
+    assert "烬翼" not in engine.state.dragon_traits
+    assert engine.state.dragon_cost_points == 0
+
+
+def test_ember_wing_active_use_grants_flight():
+    """正常路径：主动使用获得【飞行】1回合，耐久 5→4。"""
+    engine = _new_engine(dbsuffix="wings_use")
+    _with_heart(engine, points=12)
     engine.execute_action("unlock_dragon_trait", {"trait": "烬翼"})
     engine.execute_action("battle_start", {})
-    player.current_hp = max(1, player.blood_limit // 2)
-    engine.state.combat_subphase = "await_round_start"
-    r = engine.execute_action("round_start", {})
+    engine.execute_action("round_start", {})
+    player = engine.state.player
+    r = engine.execute_action("consume_item", {"name": "烬翼"})
     assert r["success"], r
     assert player.get_status_value("飞行") == 1
+    assert r["result"]["uses_remaining"] == 4
 
 
-def test_ember_wing_boundary_inactive_when_healthy():
-    """边界：生命高于一半时回始不触发（被动不主动发动）。"""
-    engine = _new_engine(dbsuffix="wings_ok")
-    player = engine.state.player
-    _with_heart(engine)
+def test_ember_wing_recharges_on_any_monster_death():
+    """正常路径：任意怪物［命零］时耐久+1。"""
+    engine = _new_engine(dbsuffix="wings_recharge")
+    _with_heart(engine, points=12)
     engine.execute_action("unlock_dragon_trait", {"trait": "烬翼"})
     engine.execute_action("battle_start", {})
-    player.current_hp = player.blood_limit
-    engine.state.combat_subphase = "await_round_start"
-    r = engine.execute_action("round_start", {})
-    assert r["success"], r
-    assert player.get_status_value("飞行") == 0
+    engine.execute_action("round_start", {})
+    wing = next(c for c in engine.state.consumables if c.name == "烬翼")
+    wing.current_uses = 2
+    monster = Entity(name="杂兵", entity_type="怪物", blood_limit=20, current_hp=20)
+    engine.state.enemies.append(monster)
+    monster.current_hp = 0
+    engine.combat._check_hp_zero_death(monster, None)
+    assert wing.current_uses == 3
 
+
+def test_ember_wing_recharge_ignores_non_monsters_and_caps():
+    """边界：非怪物命零不加耐久；耐久已满时不再增长。"""
+    engine = _new_engine(dbsuffix="wings_cap")
+    _with_heart(engine, points=12)
+    engine.execute_action("unlock_dragon_trait", {"trait": "烬翼"})
+    engine.execute_action("battle_start", {})
+    engine.execute_action("round_start", {})
+    wing = next(c for c in engine.state.consumables if c.name == "烬翼")
+    wing.current_uses = wing.max_uses
+    friend = Entity(name="朋友甲", entity_type="朋友", blood_limit=20, current_hp=20)
+    engine.state.friends.append(friend)
+    friend.current_hp = 0
+    engine.combat._check_hp_zero_death(friend, None)
+    assert wing.current_uses == wing.max_uses
+    monster = Entity(name="杂兵二", entity_type="怪物", blood_limit=20, current_hp=20)
+    engine.state.enemies.append(monster)
+    monster.current_hp = 0
+    engine.combat._check_hp_zero_death(monster, None)
+    assert wing.current_uses == wing.max_uses, "满耐久不得溢出"
+
+
+def test_ember_wing_duplicate_unlock_rejected():
+    """错误输入：已持有一件烬翼消耗品时不得重复兑换。"""
+    engine = _new_engine(dbsuffix="wings_dup")
+    _with_heart(engine, points=24)
+    assert engine.execute_action("unlock_dragon_trait", {"trait": "烬翼"})["success"]
+    assert engine.execute_action("unlock_dragon_trait", {"trait": "烬翼"})["success"] is False
