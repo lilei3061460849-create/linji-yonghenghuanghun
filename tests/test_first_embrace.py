@@ -360,7 +360,8 @@ def test_option5_truth_is_a_daowen_and_raises_dm_interrupt_without_spending_acti
                         and action.get("params_schema", {}).get("daowen_name") == "真理")
     assert "target_ref" in truth_action["params_schema"]
     assert "statement" in truth_action["params_schema"]
-    assert "x" not in truth_action["params_schema"]
+    # 2026-10-23 用户裁定：X = 陈述句数，不再是固定1
+    assert "x" in truth_action["params_schema"]
     assert not any(action.get("action_type") == "use_truth_eye" for action in available)
 
     actions_before = player.actions_used_this_round
@@ -368,9 +369,9 @@ def test_option5_truth_is_a_daowen_and_raises_dm_interrupt_without_spending_acti
     r = engine.execute_action("use_daowen", {
         "daowen_name": "真理", "target_ref": "enemy:0", "statement": "你藏着钥匙"})
     assert r["success"] is True
-    assert r["action"] == "真理"
+    assert r["action"] == "真理X=1"
     assert r["result"]["interrupt"]["context"]["ability"] == "真理"
-    assert "请DM裁定对方的回应是否属实" in r["result"]["interrupt"]["description"]
+    assert "请DM逐句裁定是否属实" in r["result"]["interrupt"]["description"]
     assert player.dao_wen["真理"].cooldown_remaining == 2
     assert player.actions_used_this_round == actions_before
     assert (player.current_hp, player.current_mana) == (hp_before, mana_before)
@@ -385,7 +386,7 @@ def test_legacy_truth_eye_action_alias_routes_to_the_new_daowen():
     result = engine.execute_action("use_truth_eye", {
         "target_ref": "enemy:0", "statement": "旧客户端兼容"})
     assert result["success"] is True
-    assert result["action"] == "真理"
+    assert result["action"] == "真理X=1"
     assert result["result"]["interrupt"]["context"]["ability"] == "真理"
     assert engine.state.player.dao_wen["真理"].cooldown_remaining == 2
 

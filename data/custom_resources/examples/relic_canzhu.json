@@ -1,0 +1,10 @@
+{
+  "name": "残烛",
+  "category": "遗物",
+  "uniqueness": "守夜灯按[法限]百分比回蓝，残烛固定 2 点；对低法限角色是稳定小额补给，无法由现有遗物复制。",
+  "summary": "[回始]获得 2 点法力",
+  "trigger": {"kind": "phase", "key": "round_start"},
+  "effects": [
+    {"verb": "mana", "target": "self", "amount": 2}
+  ]
+}

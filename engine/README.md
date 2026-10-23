@@ -57,7 +57,9 @@ engine/
 ├── dm_rulings.py        # DM 裁定库（SQLite + FTS，先例匹配）
 ├── document_sources.py  # 文档事实源文件名（规则正文/推演规范/README入口）
 ├── rule_sync.py         # 多事实源同步（规则正文/死者之书/物品索引/副本索引）
-├── document_validation.py # Markdown标题、文件链接与锚点校验
+├── document_validation.py # Markdown标题、文件链接与锚点校验（含资源设计标准 11 项标记）
+├── custom_resources.py  # 自定义资源 v1：JSON 声明 → 道纹注册表/Mechanism/consume_item
+│                        #   复用 verbs/Phase/relic_active；校验四条设计标准；示例见 data/custom_resources/examples
 ├── death_book.py        # 《死者之书》遗言节读写（文件是事实源；审核后只改 ## 遗言）
 ├── personality.py       # 角色性格特征（实例级，行为推断"先射箭后画靶"，命零即清除；不写模板不跨实例继承）
 ├── validator.py         # 规则校验器（20 条内置检查，违规入库 + 已迁移机制护栏）
@@ -237,6 +239,9 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `submit_ruling`（死之传承） | 轮回者命零后审核遗言：`action=approve/edit/reject`；通过或修改后写入`死者之书.md`的「## 遗言」节 |
 | `choose_terminal_artifact` | 死斗胜利后按副本领取终音法器(choice=序号) |
 | `choose_first_embrace` | 初拥之夜9选1(choice=1~9，1~8限选1次，9可重复) |
+| `define_resource` | 声明一条自定义资源（道纹/遗物/法器/消耗品）；`spec` 或 `specs`，默认就地授予。这是「当场设计」的唯一入口，不占出手 |
+| `activate_resource` | 主动激活自定义法器（默认不占出手；`costs_action=true` 才占） |
+| `list_resources` | 列出已注册的自定义资源 |
 | `use_black_card` | 黑金名片(罪孽都市终音)：敌方血限减半，等量碎片(允许负债≤50) |
 | `use_crime_vault` | 罪业金库(罪孽都市终音)：消耗X碎片(≤2%当前碎片)换2X格挡 |
 | `fire_godfather_revolver` | 教父左轮(罪孽都市终音)：对target打出30%血限×本场使用次数的必中伤害 |

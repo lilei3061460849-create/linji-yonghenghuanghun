@@ -35,9 +35,9 @@ ITEM_INDEX = ROOT / "物品索引.md"
 RULES_TEXT = ROOT / "规则正文.md"
 KNOWLEDGE = ROOT / "AI_EXPERIENCE.md"
 
-# 「X 不影响任何效果字段」的已知例外：等号右边是引擎结算字段，
-# 【真理】固定 X=1，X 不改变强度也不改变持续时间——与「必有 X，X 只能提升…」冲突，待裁定。
-X_DOES_NOT_SCALE = {"真理"}
+# 「X 不影响任何效果字段」的已知例外。2026-10-23 用户裁定【真理】改为「X 句话」
+# 后，X 同时抬高陈述句数与无法开口回合数，故例外清空：任何道纹的 X 都必须有效。
+X_DOES_NOT_SCALE: set[str] = set()
 
 # 遗物条文中出现 X 变量的已知违例（池外遗物，2026-10-23 用户裁定「本来都是要改的」）。
 # 修复后必须从此集合删除对应名字，测试才能继续通过一半——见「快照写法」说明。
@@ -157,8 +157,8 @@ def test_daowen_x_scales_strength_or_duration():
 # ==================== 道纹：局外发动须明示 ====================
 
 def test_out_of_combat_daowen_whitelist_is_explicit():
-    """默认局内；局外白名单只能由条文明示项构成，当前仅【消灾】。"""
-    assert OUT_OF_COMBAT_DAOWEN == frozenset({"消灾"})
+    """默认局内；局外白名单只能由条文明示项构成：消灾、真理（2026-10-23 裁定）。"""
+    assert OUT_OF_COMBAT_DAOWEN == frozenset({"消灾", "真理"})
 
 
 def test_unlisted_daowen_rejected_out_of_combat_and_listed_one_allowed(engine):
@@ -249,3 +249,63 @@ def test_consumable_without_registered_handler_is_rejected(engine):
     assert "没有已注册的效果处理器" in result["error"]
     assert item.current_uses == 2, "被拒绝的消耗品不得扣耐久"
     engine.state.consumables.remove(item)
+
+# ==================== 真理：X = 陈述句数 + 局外明示 ====================
+
+def test_zhenli_x_equals_sentence_count_and_scales_duration():
+    """真理的 X 是句数，同时抬高无法开口的回合数——X 不再是摆设。"""
+    DaoWenEngine.register_all()
+    one = DaoWenEngine.resolve("真理", 1)
+    three = DaoWenEngine.resolve("真理", 3)
+    assert one["truth_sentences"] == 1 and three["truth_sentences"] == 3
+    assert one["silence_rounds"] == 1 and three["silence_rounds"] == 3
+
+
+def test_zhenli_enforces_declared_sentence_count(engine):
+    """边界：提交的陈述句数必须等于 X，否则整次发动被拒。"""
+    from engine.models import DaoWen, DaoWenInstance, Entity
+
+    engine.state.phase = "in_combat"
+    engine.state.combat_subphase = "player_actions"
+    engine.state.player.dao_wen["真理"] = DaoWenInstance(
+        DaoWen(name="真理", formula="真理X", cost_type="冷却",
+               cost_formula="2场战斗", effect_formula="X句陈述"),
+        cooldown_remaining=0)
+    monster = Entity(name="受讯者", entity_type="怪物", blood_limit=50, current_hp=50,
+                     attack_count=1, attack_power=1)
+    engine.state.enemies.append(monster)
+
+    wrong = engine.execute_action("use_daowen", {
+        "daowen_name": "真理", "x": 3, "target_ref": "enemy:0",
+        "statement": "只有一句话。"})
+    assert not wrong["success"]
+    assert "正好3句" in wrong["error"]
+
+    right = engine.execute_action("use_daowen", {
+        "daowen_name": "真理", "x": 3, "target_ref": "enemy:0",
+        "statement": "第一句。第二句！第三句？"})
+    assert right["success"], right
+    assert right["result"]["sentences"] == ["第一句", "第二句", "第三句"]
+    assert right["result"]["silence_rounds"] == 3
+    engine.submit_ruling(interrupt_type="自定义", ruling_text="逐句属实")
+    engine.state.enemies.remove(monster)
+
+
+def test_zhenli_can_be_used_out_of_combat(engine):
+    """局外明示：【真理】列入白名单后，局外可用 target_name 指向不在场的对象。"""
+    from engine.models import DaoWen, DaoWenInstance
+
+    engine.state.phase = "pre_battle"
+    engine.state.player.dao_wen["真理"] = DaoWenInstance(
+        DaoWen(name="真理", formula="真理X", cost_type="冷却",
+               cost_formula="2场战斗", effect_formula="X句陈述"),
+        cooldown_remaining=0)
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "真理", "x": 1,
+        "target_name": "过路商人", "statement": "你卖过假货"})
+    assert result["success"], result
+    context = result["result"]["interrupt"]["context"]
+    assert context["target"] == "过路商人"
+    assert context["sentences"] == ["你卖过假货"]
+    engine.submit_ruling(interrupt_type="自定义", ruling_text="属实")
+    engine.state.phase = "in_combat"

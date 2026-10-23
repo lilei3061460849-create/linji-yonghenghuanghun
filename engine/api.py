@@ -44,6 +44,7 @@ from .dm_rulings import DMRulingsDB, DMRuling, Interrupt
 from .death_book import DeathBookStore, draft_legacy, validate_legacy
 from .ai_memory import clear_memory, condense_to_legacy
 from .effect_context import make_context, normalize_context
+from . import custom_resources
 from .personality import (
     get_personality as personality_get,
     record_behavior as personality_record,
@@ -93,9 +94,9 @@ FREE_CRYSTAL_COST_AMOUNT = 10
 
 # 局外可发动的道纹白名单（2026-10-23 用户裁定：默认局内，局外须明示）。
 # 「明示」＝该道纹条文自己写明可局外发动；没写的一律只能在战斗中发动。
-# 目前唯一明示项是【消灾】（条文：局外发动消耗×2）。
+# 明示项：【消灾】（条文：局外发动消耗×2）、【真理】（2026-10-23 用户裁定列入）。
 # 新增一项必须先改条文，再改这里；tests/test_resource_design_standard.py 钉死本集合。
-OUT_OF_COMBAT_DAOWEN = frozenset({"消灾"})
+OUT_OF_COMBAT_DAOWEN = frozenset({"消灾", "真理"})
 
 
 class GameEngine:
@@ -737,13 +738,14 @@ class GameEngine:
                                 "reason": "冷却中或被封印"})
                 continue
             max_x = self._max_legal_daowen_x(player, name)
-            # 【真理】固定X=1、只需目标与待裁定陈述；发动仍沿用初拥旧口径，
-            # 不消耗主动出手，也不经过普通数值道纹的闪避/法术反应流程。
+            # 【真理】X=陈述句数（2026-10-23 用户裁定）；只需目标与待裁定陈述，
+            # 发动仍沿用初拥旧口径，不消耗主动出手，也不经过普通数值道纹的闪避流程。
             if name == "真理":
                 params_schema = {
                     "daowen_name": name,
+                    "x": "int≥1（陈述句数）",
                     "target_ref": target_options,
-                    "statement": "string",
+                    "statement": "string（须正好X句）",
                 }
             else:
                 # 2026-10-09 用户令：波及 X≥2 下限 repealed，X 下限恒为 1（X_MIN 已拔除）。
@@ -944,10 +946,11 @@ class GameEngine:
         """按真实代价口径枚举当前可提交的最大X，不把当前法力直接冒充上限。
 
         y 为双参数道纹（如【分裂】X/Y）的第二参数，单参数道纹忽略。
-        【真理】效果不随X变化，行动schema固定为X=1。
+        【真理】的X=陈述句数（2026-10-23 用户裁定）：只受实际写出的句子上限约束，
+        这里给出一个宽松上限，最终以提交的陈述句数为准。
         """
         if name == "真理":
-            return 1
+            return 10
         upper = max(1, actor.current_mana, actor.current_hp, actor.blood_limit,
                     actor.current_speed, self.state.shards, self.state.fake_shards, 50)
         legal = 0
@@ -1247,7 +1250,8 @@ class GameEngine:
         if action_type == "use_daowen":
             name = params.get("daowen_name", "")
             # 默认局内；局外须条文明示（白名单见模块顶部 OUT_OF_COMBAT_DAOWEN）。
-            if phase == "pre_battle" and name in OUT_OF_COMBAT_DAOWEN:
+            if phase == "pre_battle" and (name in OUT_OF_COMBAT_DAOWEN
+                                          or custom_resources.allows_out_of_combat(name)):
                 return None
             if phase != "in_combat":
                 allowed = "、".join(f"【{n}】" for n in sorted(OUT_OF_COMBAT_DAOWEN))
@@ -1255,6 +1259,11 @@ class GameEngine:
                         "error": f"道纹默认仅在战斗中发动；局外发动须条文明示（当前明示：{allowed}）"}
         if action_type == "restart_battle" and phase != "in_combat":
             return {"success": False, "error": "只有进行中的战斗可以重来"}
+        # 自定义资源：声明与激活都是元操作（不占出手、不推进相位），局内外均可。
+        if action_type in {"define_resource", "activate_resource", "list_resources"} \
+                and phase not in {"pre_battle", "in_combat", "setup"}:
+            return {"success": False,
+                    "error": f"【{action_type}】只能在开局/局外/战斗阶段执行"}
         if action_type in self._COMBAT_ONLY_ACTIONS and phase != "in_combat":
             return {"success": False, "error": f"【{action_type}】只能在战斗中执行"}
         if action_type == "battle_end" and phase != "in_combat":
@@ -1723,6 +1732,12 @@ class GameEngine:
             return self._action_resolve_event(params)
         elif action_type == "read_death_book":
             return self._action_read_death_book(params)
+        elif action_type == "define_resource":
+            return self._action_define_resource(params)
+        elif action_type == "activate_resource":
+            return self._action_activate_resource(params)
+        elif action_type == "list_resources":
+            return self._action_list_resources(params)
         else:
             return {"success": False, "error": f"未知行动类型: {action_type}"}
 
@@ -3714,7 +3729,7 @@ class GameEngine:
         2: ("不朽之躯", "当前[血限]减半；免疫衰老；[血限]无法增加"),
         3: ("鲜血之翼", "代价：流血5X，发动【飞行X】回合"),
         4: ("血族尖牙", "代价：衰老20，使生命低于自身的一个[目标]转化为听命于你的赤族（诅咒：[回终]赤族流血20）"),
-        5: ("真理", "专属道纹：冷却2场；指定一个[目标]与陈述，要求其言明真理，否则无法开口；真伪由DM裁定"),
+        5: ("真理", "专属道纹：冷却2场；提出X句陈述，要求[目标]逐句言明真理，任一句无法言明则无法开口，持续X回合；真伪由DM逐句裁定"),
         6: ("寒冰法力", "对[目标]每累计施加10法力，使其本回合出手次数-1"),
         7: ("血影", "当自身被选为非必中判定的[目标]时，可流血10，取消本次判定"),
         8: ("血食", "可使一名听命于你的赤族[命零]，自身获得等同于该赤族当前生命的[回复]"),
@@ -5067,6 +5082,14 @@ class GameEngine:
         if shard_error:
             return {"success": False, "error": shard_error}
 
+        # 自定义道纹：法力以外的代价（流血/衰老/异变/碎片/冷却…）在占出手前支付，
+        # 付不起就当次发动失败、不消耗出手（与内建道纹同一口径）。
+        if calc.get("custom_effects") is not None:
+            custom_cost_error = custom_resources.pay_custom_cost(
+                self, actor, dw_instance, calc)
+            if custom_cost_error:
+                return {"success": False, "error": custom_cost_error}
+
         if self.state.phase == "in_combat":
             budget_error = self._consume_action_or_error(actor)
             if budget_error:
@@ -5105,11 +5128,19 @@ class GameEngine:
             }
 
         dragon_heart_use = params.get("dragon_heart_use", 0)
-        execution = self._execute_daowen_effect(
-            name, calc, actor, target, dragon_heart_use,
-            cost_share_target_ref=params.get("cost_share_target_ref", ""),
-            aoe_targets_override=aoe_targets_override,
-        )
+        if calc.get("custom_effects") is not None:
+            # 自定义道纹：效果由声明驱动，统一走 verbs 入口；目标由声明决定。
+            logs = custom_resources.apply_effects(
+                self.combat, calc["custom_effects"], actor=actor, target=target,
+                x=x, source=name)
+            execution = {"daowen": name, "effects": logs,
+                         "custom": True, "x": x}
+        else:
+            execution = self._execute_daowen_effect(
+                name, calc, actor, target, dragon_heart_use,
+                cost_share_target_ref=params.get("cost_share_target_ref", ""),
+                aoe_targets_override=aoe_targets_override,
+            )
         if dodge_log.get("dodged_names"):
             execution = dict(execution)
             execution["dodged"] = dodge_log
@@ -6079,6 +6110,27 @@ class GameEngine:
         if item.name in {"绝息淤泥", "活性土壤", "假钞贴", "穿甲弹", "洗劫面具", "赤泉囊", "龙血瓶",
                           "镇魂铁钉", "赶尸铃", "黄符"}:
             return self._consume_named_event_item(item, params)
+
+        # 自定义消耗品（2026-10-23）：声明里的 effects 由 verbs 执行，不占出手。
+        # 触发式（trigger 非空）的消耗品走机制自动结算，不接受手动使用。
+        custom_item = custom_resources.get_consumable(item.name)
+        if custom_item is not None:
+            if custom_item.spec.get("trigger") is not None:
+                return {"success": False,
+                        "error": f"消耗品【{item.name}】是被动触发型，不能手动使用"}
+            target_ref = params.get("target_ref", "")
+            refs = self.combat._combat_entity_refs()
+            target = refs.get(target_ref, self.state.player) if target_ref else self.state.player
+            if target_ref and target is None:
+                return {"success": False, "error": "target_ref不是当前合法目标"}
+            remaining = item.use()
+            logs = custom_resources.apply_effects(
+                self.combat, custom_item.spec["effects"],
+                actor=self.state.player, target=target,
+                x=int(params.get("x", 1)), source=item.name)
+            return {"success": True, "action": f"使用消耗品【{item.name}】",
+                    "result": {"uses_remaining": remaining, "effects": logs},
+                    "state": self.combat._get_combat_state()}
 
         # 普通消耗品：扣减耐久；异变类效果走统一入口 add_mutation
         # （裁定⑧= A4全量：任何角色的任何异变来源同一入口，达50层即【迷失】命零；
@@ -8040,15 +8092,15 @@ class GameEngine:
 
     @staticmethod
     def _new_truth_daowen_instance(cooldown_remaining: int = 0) -> DaoWenInstance:
-        """构造初拥专属道纹【真理】；X固定为1，冷却按完整战斗场数计。"""
+        """构造初拥专属道纹【真理】；X=陈述句数，冷却按完整战斗场数计。"""
         return DaoWenInstance(
             DaoWen(
-                name="真理", formula="固定X=1", cost_type="冷却",
+                name="真理", formula="真理X", cost_type="冷却",
                 cost_formula="2场战斗",
-                effect_formula="指定一个目标与陈述；要求其言明真理，否则无法开口；真伪由DM裁定",
+                effect_formula="提出X句陈述，要求目标逐句言明真理；任一句无法言明则无法开口，持续X回合；真伪由DM裁定",
                 tags=["初拥之夜", "血族专属"],
             ),
-            x_value=1,
+            x_value=1,  # 缺省X；发动时由 use_daowen 的 x 覆盖（自由控X）
             x_free=False,
             cooldown_remaining=max(0, int(cooldown_remaining)),
         )
@@ -8211,15 +8263,19 @@ class GameEngine:
     def _action_use_truth_daowen(
         self, params: dict, *, actor: Optional[Entity] = None, x: int = 1,
     ) -> dict:
-        """真理：指定目标与陈述，要求目标言明真理，否则无法开口；由DM裁定真伪，冷却2场。"""
+        """真理X：提出 X 句陈述，要求目标逐句言明真理，否则无法开口。
+
+        2026-10-23 用户裁定：X = 陈述句数（「X 句话」）；X 同时决定无法开口的持续回合。
+        局外发动同样允许（【真理】已列入 OUT_OF_COMBAT_DAOWEN 明示项）。
+        """
         actor = actor or self.state.player
         if actor is self.state.player:
             self._migrate_legacy_truth_eye()
         instance = actor.dao_wen.get("真理") if actor is not None else None
         if instance is None:
             return {"success": False, "error": "没有道纹【真理】"}
-        if not isinstance(x, int) or isinstance(x, bool) or x != 1:
-            return {"success": False, "error": "【真理】固定X=1"}
+        if not isinstance(x, int) or isinstance(x, bool) or x < 1:
+            return {"success": False, "error": "【真理】的X必须是≥1的整数（X=陈述句数）"}
         if instance.cooldown_remaining > 0:
             return {"success": False,
                     "error": f"真理冷却中，还需{instance.cooldown_remaining}场战斗"}
@@ -8230,25 +8286,40 @@ class GameEngine:
                          and actor in self.state.get_all_enemy_side())):
             return {"success": False, "error": "只有持有初拥血脉的轮回者才能发动【真理】"}
 
-        target = self.combat._combat_entity_refs().get(params.get("target_ref", ""))
+        refs = self.combat._combat_entity_refs()
+        target = refs.get(params.get("target_ref", ""))
+        target_name = params.get("target_name", "")
+        if target is None and not target_name:
+            return {"success": False, "error": "必须指定合法target_ref（局外可用target_name）"}
         statement = params.get("statement", "")
-        if target is None or not statement:
-            return {"success": False, "error": "必须指定合法target_ref与statement"}
+        if not statement:
+            return {"success": False, "error": "必须给出陈述statement"}
+        sentences = [part.strip() for part in re.split(r"[。！？；!?;\n]+", statement)
+                     if part.strip()]
+        if len(sentences) != x:
+            return {"success": False,
+                    "error": f"X={x}要求正好{x}句陈述，实际给出{len(sentences)}句"
+                             f"（以。！？；或换行分句）"}
+        subject = target.name if target is not None else target_name
 
         # 保持初拥旧行动口径：发动不消耗出手，不另加资源代价或普通道纹反应链。
         instance.cooldown_remaining = 2
         interrupt = Interrupt(
             interrupt_type=InterruptType.CUSTOM,
-            context={"ability": "真理", "target": target.name, "statement": statement},
-            description=f"对{target.name}发动【真理】，要求其就以下内容言明真理，否则无法开口：\n{statement}\n"
-                        f"请DM裁定对方的回应是否属实。",
+            context={"ability": "真理", "target": subject, "statement": statement,
+                     "sentences": sentences, "silence_rounds": x},
+            description=(f"对{subject}发动【真理X={x}】，要求其逐句言明真理，"
+                         f"任一句无法言明则无法开口，持续{x}回合：\n"
+                         + "\n".join(f"{i}. {s}" for i, s in enumerate(sentences, 1))
+                         + "\n请DM逐句裁定是否属实。"),
             options=[{"id": "truth", "label": "属实", "description": "按DM裁定的真实内容生效"},
                      {"id": "silence", "label": "无法开口", "description": "对方拒绝或无法说出真话，只能沉默"}],
             state_snapshot=self.state.to_dict(),
         )
         self._pending_interrupts.append(interrupt)
-        return {"success": True, "action": "真理",
-                "result": {"interrupt": interrupt.to_dict(), "cooldown_battles": 2}}
+        return {"success": True, "action": f"真理X={x}",
+                "result": {"interrupt": interrupt.to_dict(), "cooldown_battles": 2,
+                           "sentences": sentences, "silence_rounds": x}}
 
     def _action_use_truth_eye(self, params: dict) -> dict:
         """旧 action 名称兼容入口；新界面只暴露 use_daowen(daowen_name=真理)。"""
@@ -8280,6 +8351,118 @@ class GameEngine:
         })
         return {"success": True, "action": "血食",
                 "result": {"sacrificed": chizu.name, "healed": heal_detail["actual_heal"], "player_hp": player.current_hp}}
+
+    # ==================== 自定义资源：声明 / 激活 / 列表 ====================
+
+    def _builtin_resource_names(self) -> set[str]:
+        """内建资源名全集：自定义资源不得与其重名（命名唯一性）。"""
+        DaoWenEngine.register_all()
+        names = set(DaoWenEngine._registry) | {n for n, _ in self.RELIC_DEFS}
+        names |= set(TWISTED_TOOL_LIBRARY)
+        for items in self.TERMINAL_ARTIFACTS.values():
+            names |= {n for n, _ in items}
+        names |= set(self.DRAGON_TRAITS)
+        names |= {name for _, (name, _) in self.FIRST_EMBRACE_OPTIONS.items()}
+        return names
+
+    def _action_define_resource(self, params: dict) -> dict:
+        """声明一条自定义资源（就地注册，可选就地授予）。
+
+        这是「当场设计」的唯一入口：声明即用，不需要改代码。
+        params.spec 或 params.specs 为声明对象；grant=False 时只注册不发放。
+        """
+        specs = params.get("specs", params.get("spec"))
+        if specs is None:
+            return {"success": False, "error": "缺少 spec 或 specs"}
+        payload = specs if isinstance(specs, list) else [specs]
+        created: list[str] = []
+        for spec in payload:
+            try:
+                builtin = self._builtin_resource_names()
+                name = spec.get("name") if isinstance(spec, dict) else None
+                if name in builtin:
+                    return {"success": False,
+                            "error": f"【{name}】与现有资源重名：命名在全宇宙内唯一"}
+                resource = custom_resources.register(spec)
+            except custom_resources.CustomResourceError as exc:
+                return {"success": False, "error": f"声明被拒绝：{exc}"}
+            if params.get("grant", True):
+                self._grant_custom_resource(resource)
+            created.append(f"{resource.category}【{resource.name}】")
+        return {"success": True, "action": "声明自定义资源",
+                "result": {"created": created,
+                           "resources": [r.name for r in custom_resources.all_resources()]}}
+
+    def _grant_custom_resource(self, resource) -> dict:
+        """把自定义资源装进当前局：道纹进道纹栏、遗物进遗物栏、消耗品进背包。"""
+        spec, category, name = resource.spec, resource.category, resource.name
+        player = self.state.player
+        if player is None:
+            return {"granted": False, "reason": "没有玩家"}
+        if category == "道纹":
+            if name in player.dao_wen:
+                return {"granted": False, "reason": "已持有"}
+            player.dao_wen[name] = DaoWenInstance(DaoWen(
+                name=name, formula=f"{name}X",
+                cost_type=spec["cost"]["type"],
+                cost_formula=str(spec["cost"].get("amount", "X")),
+                effect_formula=spec.get("summary", "")))
+            return {"granted": True, "slot": "dao_wen"}
+        if category == "遗物":
+            self.state.grant_relic(name, spec.get("summary", ""))
+            return {"granted": True, "slot": "relics"}
+        if category == "消耗品":
+            uses = int(spec.get("uses", 1))
+            self.state.consumables.append(Consumable(
+                name=name, effect=spec.get("summary", ""),
+                current_uses=uses, max_uses=uses, kind="custom"))
+            return {"granted": True, "slot": "consumables"}
+        self.state.artifacts_owned.append(name)
+        return {"granted": True, "slot": "artifacts"}
+
+    def _action_activate_resource(self, params: dict) -> dict:
+        """主动使用一件自定义资源（法器，或无触发时机的自定义消耗品以外的主动项）。
+
+        法器默认不占出手（「不受限其他资源规则」）；声明 costs_action=True 时占 1 次。
+        """
+        name = params.get("name", "")
+        resource = custom_resources.get(name)
+        if resource is None:
+            return {"success": False, "error": f"没有自定义资源【{name}】"}
+        if resource.category == "消耗品":
+            return {"success": False, "error": "消耗品请用 consume_item 使用"}
+        if resource.category == "道纹":
+            return {"success": False, "error": "道纹请用 use_daowen 发动"}
+        if resource.category == "遗物":
+            return {"success": False, "error": "遗物是被动触发，不能主动激活"}
+
+        spec = resource.spec
+        player = self.state.player
+        if spec.get("trigger") is not None:
+            return {"success": False, "error": f"【{name}】是触发式资源，不能主动激活"}
+        if name not in self.state.artifacts_owned:
+            return {"success": False, "error": f"未持有法器【{name}】"}
+        if spec.get("costs_action") and self.state.phase == "in_combat":
+            budget_error = self._consume_action_or_error(player)
+            if budget_error:
+                return budget_error
+        target = self.combat._combat_entity_refs().get(
+            params.get("target_ref", "entity:0"), player)
+        logs = custom_resources.apply_effects(
+            self.combat, spec["effects"], actor=player, target=target or player,
+            x=int(params.get("x", 1)), source=name)
+        return {"success": True, "action": f"激活法器【{name}】",
+                "result": {"effects": logs},
+                "state": self.combat._get_combat_state()}
+
+    def _action_list_resources(self, params: dict) -> dict:
+        """列出已注册的自定义资源及其声明摘要。"""
+        return {"success": True, "action": "自定义资源清单",
+                "result": {"resources": [
+                    {"name": r.name, "category": r.category,
+                     "trigger": r.spec.get("trigger"),
+                     "effects": [e["verb"] for e in r.spec["effects"]]}
+                    for r in custom_resources.all_resources()]}}
 
     # ==================== 终音法器：可主动发动的具体效果 ====================
 

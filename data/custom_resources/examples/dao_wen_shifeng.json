@@ -1,0 +1,12 @@
+{
+  "name": "试锋",
+  "category": "道纹",
+  "uniqueness": "现有杀伐按 X² 缩放且不区分目标类型；试锋把伤害钉在线性 3X，为残韵路径提供低上限但可预测的定点刀。",
+  "summary": "对[目标]造成 3X 点伤害",
+  "cost": {"type": "法力", "amount": "X"},
+  "target": "target",
+  "out_of_combat": false,
+  "effects": [
+    {"verb": "damage", "target": "target", "amount": "3*X", "damage_type": "普通"}
+  ]
+}
