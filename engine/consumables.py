@@ -69,3 +69,102 @@ def note_action_targets(state, actor, targets) -> None:
         if rid and rid not in seen:
             seen.add(rid)
             state.player_selected_targets.append(rid)
+
+# ==================== 翼类消耗品（2026-10-23 用户令） ====================
+# 血翼（原血族遗物【鲜血之翼】）与烬翼（原龙族遗物【烬翼】）都是消耗品：
+# 主动使用获得【飞行】1 回合；耐久各有独立的回复触发。
+WING_BLOOD = "血翼"
+WING_EMBER = "烬翼"
+WING_ITEM_SPECS: dict[str, dict] = {
+    WING_BLOOD: {
+        "max_uses": 3,
+        "effect": ("主动使用（选一）：①本回合你造成的伤害给予你等量回复；②获得【飞行】1回合；"
+                   "③立刻逃跑。你每累计失去100%[血限]的生命，耐久+1"),
+    },
+    WING_EMBER: {
+        "max_uses": 5,
+        "effect": ("主动使用（选一）：①本回合你不会触发任何特殊事件（凡庸/雕塑/癌变/迷失/还债）；"
+                   "②获得【飞行】1回合；③立刻逃跑。任意怪物［命零］时，耐久+1"),
+    },
+}
+
+# 每次使用选一个模式；模式名是引擎参数，括号内文本用于错误提示与文档。
+WING_MODE_FLY = "fly"
+WING_MODE_FLEE = "flee"
+WING_MODE_LIFESTEAL = "lifesteal"   # 血翼专属
+WING_MODE_SUPPRESS = "suppress"     # 烬翼专属
+WING_MODES: dict[str, dict[str, str]] = {
+    WING_BLOOD: {
+        WING_MODE_LIFESTEAL: "本回合你造成的伤害给予你等量回复",
+        WING_MODE_FLY: "获得【飞行】1回合",
+        WING_MODE_FLEE: "立刻逃跑",
+    },
+    WING_EMBER: {
+        WING_MODE_SUPPRESS: "本回合你不会触发任何特殊事件",
+        WING_MODE_FLY: "获得【飞行】1回合",
+        WING_MODE_FLEE: "立刻逃跑",
+    },
+}
+
+# 模式生效时给持有者的状态名（「本回合」= remaining_rounds=1，回终到期）。
+WING_STATUS_LIFESTEAL = "噬血"
+WING_STATUS_SUPPRESS = "熄事"
+
+
+def make_wing_item(name: str):
+    """生成一件翼类消耗品（满耐久）。"""
+    from .models import Consumable
+
+    spec = WING_ITEM_SPECS[name]
+    return Consumable(name=name, effect=spec["effect"], current_uses=spec["max_uses"],
+                      max_uses=spec["max_uses"], kind="wing")
+
+
+def _find(state, name: str):
+    for item in getattr(state, "consumables", []) or []:
+        if getattr(item, "name", "") == name:
+            return item
+    return None
+
+
+def note_blood_wing_hp_loss(state, entity, amount: int) -> list[dict]:
+    """血翼：玩家每累计失去 100%[血限] 的生命，耐久+1（不超过耐久上限）。
+
+    挂在统一失血总账（`_record_hp_loss_event`）上，所以挨打、代价、反噬一律计入。
+    按「当前[血限]」分块计量，余数滚存到 `item.progress`；耐久已满时该块作废。
+    """
+    if state is None or entity is None or getattr(state, "player", None) is not entity:
+        return []
+    try:
+        amount = int(amount)
+    except (TypeError, ValueError):
+        return []
+    if amount <= 0:
+        return []
+    item = _find(state, WING_BLOOD)
+    if item is None:
+        return []
+    threshold = max(1, int(getattr(entity, "blood_limit", 0) or 1))
+    item.progress += amount
+    logs: list[dict] = []
+    while item.progress >= threshold:
+        item.progress -= threshold
+        if item.current_uses < item.max_uses:
+            item.current_uses += 1
+            logs.append({"item": item.name, "trigger": "hp_loss_total",
+                         "current_uses": item.current_uses, "max_uses": item.max_uses})
+    return logs
+
+
+def note_ember_wing_monster_death(state, entity) -> dict | None:
+    """烬翼：任意怪物［命零］时，耐久+1（不超过耐久上限）。"""
+    if state is None or entity is None:
+        return None
+    if getattr(entity, "entity_type", "") != "怪物":
+        return None
+    item = _find(state, WING_EMBER)
+    if item is None or item.current_uses >= item.max_uses:
+        return None
+    item.current_uses += 1
+    return {"item": item.name, "trigger": "monster_death",
+            "current_uses": item.current_uses, "max_uses": item.max_uses}

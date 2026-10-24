@@ -28,8 +28,7 @@ from .ai_rules import (
     battle_start_relic_choices, round_start_relic_choices,
     pick_wave_dodge_targets,
     try_fire_godfather_revolver, try_select_shared_dragon_heart,
-    try_use_black_card, try_use_blood_wings, try_use_crime_vault,
-    try_use_dragon_wings,
+    try_use_black_card, try_use_crime_vault,
 )
 from .ai_memory import context_for_ai, ensure_memory, remember_action
 
@@ -222,7 +221,7 @@ SYSTEM_PROMPT = """你是第四宇宙游戏的AI玩家。你的任务是根据�
 - battle_start / round_start / round_end / battle_end：阶段推进；存在候选时必须显式提交
   relic_choices / spell_choices，不能省略（无候选时不用传）
 - 其余动作（use_resonance / consume_item / command_ally / resolve_ally_phases / deploy_employee /
-  法器与龙性动作等）见"可用行动"列表
+  法器动作等）见"可用行动"列表
 """
 
 
@@ -554,7 +553,7 @@ class PlaceholderBackend(AIBackend):
         
         elif phase == "in_combat":
             pending_type = available_actions.get("action_type")
-            # 可选法器（黑金名片/罪业金库/烬翼/鲜血之翼/教父左轮/共心环）：
+            # 可选法器（黑金名片/罪业金库/教父左轮/共心环）：
             # 有引擎引用且对应行动在可用列表时，按策略函数尝试发动（可以不用但不能不让用）。
             # commit=False 只返回计划不执行，由 AIPlayer.play_turn 统一 execute_action。
             engine = getattr(self, "engine", None)
@@ -564,8 +563,6 @@ class PlaceholderBackend(AIBackend):
                     "select_shared_dragon_heart": try_select_shared_dragon_heart,
                     "use_black_card": try_use_black_card,
                     "use_crime_vault": try_use_crime_vault,
-                    "use_dragon_wings": try_use_dragon_wings,
-                    "use_blood_wings": try_use_blood_wings,
                     "fire_godfather_revolver": try_fire_godfather_revolver,
                 }
                 for action in actions:

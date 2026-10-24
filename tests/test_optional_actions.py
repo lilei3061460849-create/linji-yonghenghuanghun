@@ -4,13 +4,13 @@ pytest - 可选遗物/法器策略（sim/optional_actions.py）
 背景（用户：可以不用 但是不能不让用，修）：
 此前所有脚本把可选战始遗物（猩红果实/苍白之花）一律
 use:False 拒绝，回始遗物（血契/余火印，余火印已于2026-10-14删除）从不使用，终音法器（黑金名片/罪业金库/
-教父左轮/烬翼/鲜血之翼/共心环）没有任何发动策略——这些机制"存在但不可用"。
+教父左轮/共心环）没有任何发动策略——这些机制"存在但不可用"。
 
 本测试锁定：
 1. 战始遗物按情形主动发动（速度高→苍白之花；2026-10-13【三相残韵盘】删除）
 2. 回始遗物按情形主动发动（回锋刀；余火印已于2026-10-14删除，血契不再是回始主动遗物）
 3. 终音法器可被实际发动（黑金名片减敌血限/罪业金库换格挡/教父左轮必中伤害/
-   共心环共享龙心/鲜血之翼飞行）
+   共心环共享龙心）
 4. 不满足条件时显式拒绝（策略返回 use=False，而不是让引擎代猜）
 """
 import os
@@ -27,7 +27,7 @@ from engine.models import Consumable, Relic
 from sim.optional_actions import (
     battle_start_relic_choices, round_start_relic_choices,
     try_select_shared_dragon_heart, try_use_black_card,
-    try_use_crime_vault, try_use_blood_wings,
+    try_use_crime_vault,
     try_fire_godfather_revolver, start_battle, start_round,
 )
 
@@ -128,40 +128,6 @@ def test_shared_dragon_heart_selects_type(engine):
     assert bs.get("success"), bs
     assert any(l.get("action") == "共心环" and l.get("success") for l in artifact_logs)
     assert engine.state.shared_dragon_heart_type == "流血"
-
-
-def test_blood_wings_fly_when_threatened(engine):
-    """鲜血之翼：血厚且受致命威胁时发动飞行。"""
-    engine.state.grant_relic("鲜血之翼", "代价：流血5X，发动【飞行X】回合", tag="血族")
-    p = engine.state.player
-    p.current_hp = 60
-    p.blood_limit = 60
-    engine.state.energy = 0
-    bs, _ = start_battle(engine)
-    assert bs.get("success"), bs
-    rs, _ = start_round(engine)  # 进入 PLAYER_ACTIONS 子阶段
-    assert rs.get("success"), rs
-    for m in engine.state.enemies:
-        m.attack_count = 4
-        m.attack_power = 8  # 威胁32 ≥ 40%×60
-    r = try_use_blood_wings(engine)
-    assert r and r.get("success"), r
-    assert r["result"]["flying_rounds"] >= 1
-
-
-def test_blood_wings_declined_without_threat(engine):
-    """鲜血之翼：威胁不足时显式不发动（可以不用但不能不让用）。"""
-    engine.state.grant_relic("鲜血之翼", "代价：流血5X，发动【飞行X】回合", tag="血族")
-    p = engine.state.player
-    p.current_hp = 60
-    p.blood_limit = 60
-    engine.state.energy = 0
-    bs, _ = start_battle(engine)
-    assert bs.get("success"), bs
-    for m in engine.state.enemies:
-        m.attack_count = 1
-        m.attack_power = 1  # 威胁小
-    assert try_use_blood_wings(engine) is None
 
 
 def test_start_battle_and_start_round_keep_working(engine):

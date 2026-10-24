@@ -822,13 +822,21 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_zhenli(x: int, target: Entity = None) -> dict:
-        """真理X（固定X=1）：支付：冷却2场。对[目标]要求其就所述陈述言明真理，否则无法开口；真伪由DM裁定。"""
+        """真理X：支付：冷却2场。提出 X 句陈述，要求[目标]逐句言明真理。
+
+        2026-10-23 用户裁定：X 不再是固定值，改为「X 句话」——X 决定陈述句数，
+        每有一句无法言明真理，[目标]即无法开口，持续 X 回合（X 同时放大强度与持续）。
+        任一句的真伪均由 DM 裁定。
+        """
         target_name = target.name if target is not None else "未选定目标"
         return {
             "dao_wen": "真理", "x": x,
             "cost_type": CostType.COOLDOWN.value, "cost": 2,
             "truth_required": True,
-            "summary": f"冷却2场，对{target_name}要求其就所述陈述言明真理，否则无法开口；真伪由DM裁定",
+            "truth_sentences": x,
+            "silence_rounds": x,
+            "summary": (f"冷却2场，向{target_name}提出{x}句陈述，要求其逐句言明真理；"
+                        f"任一句无法言明则无法开口，持续{x}回合；真伪由DM裁定"),
         }
 
     # ========== 统一调度入口 ==========

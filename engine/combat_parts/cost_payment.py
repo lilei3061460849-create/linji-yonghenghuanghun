@@ -302,6 +302,10 @@ class CostPaymentMixin:
         """
         if not entity.can_trigger_mutation_lost():
             return {"lost": False, "entity": entity.name, "note": "怪物不会触发【迷失】"}
+        # 【烬翼·熄事】：本回合不触发特殊事件（异变层数保留，只是不结算迷失）。
+        if self.state.suppresses_special_events(entity):
+            return {"lost": False, "entity": entity.name, "suppressed": True,
+                    "note": f"{entity.name}受到【熄事】保护，本次不触发【迷失】"}
         allies = self._living_allies_of(entity)
         if not allies:
             # 无队友：命零。subtype 仍记为 "collapse" 以兼容死者之书既有死因分类
@@ -485,6 +489,13 @@ class CostPaymentMixin:
         owner_detail = self._apply_numeric_cost_part(payer, cost_type, owner_amount, normalized_ctx)
         ally_detail = (self._apply_numeric_cost_part(ally, cost_type, ally_amount, normalized_ctx)
                        if ally is not None else None)
+        # 2026-10-23 用户令：真龙之心改为「实际支付的数值型代价自动记门槛」，
+        # 不再有龙性货币。只记玩家本人承担的份额（朋友/员工代付不计）。
+        _paid_here = int(owner_detail.get("paid", 0) or 0)
+        if (_paid_here > 0 and payer is self.state.player
+                and "真龙之心" in self.state.artifacts_owned
+                and cost_type in {"流血", "衰老", "枯竭", "萎缩", "疲惫"}):
+            self.state.dragon_cost_points += _paid_here
         return {
             "cost_type": cost_type,
             "requested": amount,

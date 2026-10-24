@@ -57,7 +57,9 @@ engine/
 ├── dm_rulings.py        # DM 裁定库（SQLite + FTS，先例匹配）
 ├── document_sources.py  # 文档事实源文件名（规则正文/推演规范/README入口）
 ├── rule_sync.py         # 多事实源同步（规则正文/死者之书/物品索引/副本索引）
-├── document_validation.py # Markdown标题、文件链接与锚点校验
+├── document_validation.py # Markdown标题、文件链接与锚点校验（含资源设计标准 11 项标记）
+├── custom_resources.py  # 自定义资源 v1：JSON 声明 → 道纹注册表/Mechanism/consume_item
+│                        #   复用 verbs/Phase/relic_active；校验四条设计标准；示例见 data/custom_resources/examples
 ├── death_book.py        # 《死者之书》遗言节读写（文件是事实源；审核后只改 ## 遗言）
 ├── personality.py       # 角色性格特征（实例级，行为推断"先射箭后画靶"，命零即清除；不写模板不跨实例继承）
 ├── validator.py         # 规则校验器（20 条内置检查，违规入库 + 已迁移机制护栏）
@@ -206,7 +208,7 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 已实现，详见 README.md 与 AI_EXPERIENCE.md。要点：死斗胜利后按`current_region`从`GameEngine.TERMINAL_ARTIFACTS`
 对应列表中选1件（`choose_terminal_artifact`），选到"猩红尖牙"会先强制触发初拥之夜
 （`GameEngine.FIRST_EMBRACE_OPTIONS`9选1，`choose_first_embrace`）完成后才真正封存；
-"真龙之心"解锁后进入独立的龙性资源/8遗物系统（`GameEngine.DRAGON_NATURE_RATE`/`DRAGON_TRAITS`）。
+"真龙之心"解锁后进入龙族项目系统：`GameEngine.DRAGON_TRAITS` 7 件遗物 + `DRAGON_CONSUMABLE_TRAITS` 的消耗品【烬翼】。2026-10-23 起废除「龙性」货币：玩家实际支付的数值型【代价】自动记入 `state.dragon_cost_points`（只作兑换门槛，不可花用），满 12 点换 1 件。
 
 ## 行动类型一览
 
@@ -219,6 +221,7 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `setup_choose_region` | 选择副本；完成后默认下一步为 `world_initialize` |
 | `world_initialize` | 默认副本入口：按当前副本区域初始化 21×21 开放地图 |
 | `world_move` / `world_wait` / `world_interact` | 开放地图移动、等待与交互；地图遭遇使用带 `world_encounter_id` 的 `battle_start` |
+| `world_suggest_ally` | 向朋友/员工/临时朋友**提建议**（follow/guard/explore/hold）；不改变其位置，是否照做由该单位按 `world.suggestion_acceptance_percent` 自行判定，拒绝时行为与守点原样保留。范围5格，守卫可带 `x`/`y` |
 | `pre_battle_action` | 局外行动；旧线性模式仅在用户明确要求时使用 |
 | `use_daowen` | 发动道纹（可指定[朋友]/[员工]的actor_ref听从指令，由其自身支付法力并消耗出手；初拥专属【真理】需提交target_ref与statement，冷却2场且不消耗出手） |
 | `define_spell` | 统一自定义施法：用 `spell_name` 定义法术大全条目，或用 `spell` 定义新法术；所有法术类型均由此入口表达（1出手） |
@@ -229,26 +232,27 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `dismiss_employee` | 解雇[员工]（自由行动，无代价） |
 | `pay_employee_wage` | 战终对某[员工]的工资做出pay/refuse决策 |
 | `choose_hired_daowen` | 雇佣diy后，从3个发现的转化道纹候选中选择1个 |
-| `suppress_rebellion` | 员工背叛·镇压：背叛员工搬入state.enemies开战 |
+| `declare_betrayal` | 背叛：由[朋友]／[员工]自己声明夺书（自选项，无阈值、不自动触发）；`names` 指名背叛者 |
+| `suppress_rebellion` | 背叛·镇压：背叛者搬入state.enemies开战 |
 | `resolve_rebellion_battle` | 镇压结算(outcome=victory/defeat) |
-| `appease_rebellion` | 员工背叛·让利：全局工资+5，平息叛乱 |
-| `negotiate_rebellion` | 员工背叛·谈判：抛Interrupt交DM裁定 |
+| `appease_rebellion` | 背叛·让利：全局工资+5，平息叛乱（仅对[员工]背叛有效） |
+| `negotiate_rebellion` | 背叛·谈判：抛Interrupt交DM裁定 |
 | `resolve_final_duel` | 第8场死斗结算；失败时触发【死之传承】中断，可选带`death_book_entry`作草稿 |
 | `submit_ruling`（死之传承） | 轮回者命零后审核遗言：`action=approve/edit/reject`；通过或修改后写入`死者之书.md`的「## 遗言」节 |
 | `choose_terminal_artifact` | 死斗胜利后按副本领取终音法器(choice=序号) |
-| `choose_first_embrace` | 初拥之夜9选1(choice=1~9，1~8限选1次，9可重复) |
+| `choose_first_embrace` | 初拥之夜9选1(choice=1~9，1~8限选1次，9可重复)；选项3 发放消耗品【血翼】3/3，不占遗物位 |
+| `define_resource` | 声明一条自定义资源（道纹/遗物/法器/消耗品）；`spec` 或 `specs`，默认就地授予。这是「当场设计」的唯一入口，不占出手 |
+| `activate_resource` | 主动激活自定义法器（默认不占出手；`costs_action=true` 才占） |
+| `list_resources` | 列出已注册的自定义资源 |
 | `use_black_card` | 黑金名片(罪孽都市终音)：敌方血限减半，等量碎片(允许负债≤50) |
 | `use_crime_vault` | 罪业金库(罪孽都市终音)：消耗X碎片(≤2%当前碎片)换2X格挡 |
 | `fire_godfather_revolver` | 教父左轮(罪孽都市终音)：对target打出30%血限×本场使用次数的必中伤害 |
 | `select_shared_dragon_heart` | 共心环(龙心谷终音)：选定本场共享的龙心类型 |
 | `declare_fuyuebei_toll` | 负岳碑(龙心谷终音)：预声明保护某[朋友]/[员工]下次撤退 |
-| `pay_for_dragon_nature` | 真龙之心：支付衰老/枯竭/萎缩换龙性(cost_type,x) |
-| `unlock_dragon_trait` | 真龙之心：花12龙性解锁1种龙族遗物(trait) |
-| `activate_dragon_body` | 震岳龙躯：花6X龙性，激活X回合的15点伤害上限护体 |
+| `unlock_dragon_trait` | 真龙之心：代价累积满12点解锁1种龙族遗物(trait)；trait=烬翼 时改发消耗品【烬翼】5/5。震岳龙躯为常驻被动，无独立 action |
+| `consume_item` | 使用消耗品；翼类（血翼/烬翼）必须带 `mode`：血翼 `lifesteal`／`fly`／`flee`，烬翼 `suppress`／`fly`／`flee`，每次耗1点耐久 |
 | `devour_monster` | 吞骸龙胃：吞噬已命零的怪物，回复12+可选龙心+6耐久 |
 | `declare_tail_sacrifice` | 断尾求生：预声明命零时愿意移除的其他龙族遗物 |
-| `use_dragon_wings` | 烬翼：花3X龙性获得飞行X |
-| `use_blood_wings` | 初拥之夜·鲜血之翼：流血5X获得飞行X |
 | `enslave_as_chizu` | 初拥之夜·血族尖牙：衰老20，将生命低于自身的目标转化为赤族 |
 | `blood_feast` | 初拥之夜·血食：命零一名赤族，回复等量生命 |
 | `choose_diandang_daowen` | 领取【典当】发现：从当前组3选1里选1种获得，不消耗出手 |

@@ -239,6 +239,23 @@ class AfterDamageEffectsHook:
                         res.setdefault("噬伤血囊", []).append({
                             "holder": holder.name, "requested": heal_n, **healed})
 
+        # 【血翼·噬血】（消耗品模式，2026-10-23）：本回合你造成的伤害给予你等量回复。
+        # 订阅同一条伤害落地信号；只认攻击者自己身上带【噬血】状态的情况。
+        if (actual_damage > 0 and attacker is not None
+                and getattr(attacker, "is_alive", False)
+                and attacker.has_status("噬血")
+                and not attacker.has_status("坏死")):
+            healed = combat.state.apply_heal(attacker, actual_damage, ctx={
+                "timing": damage_ctx.timing if damage_ctx else "",
+                "source": "血翼", "source_type": "consumable",
+                "actor": attacker, "target": attacker, "owner": attacker,
+                "mechanic": "heal", "subtype": "wing_lifesteal",
+                "amount": actual_damage, "tags": {"consumable", "after_damage", "lifesteal"},
+                "parent_event_id": damage_event_id,
+            })
+            res.setdefault("血翼·噬血", []).append({
+                "holder": attacker.name, "requested": actual_damage, **healed})
+
         # 遗物【共生血囊】：由持有该遗物的创建者所创造的分裂复制体造成伤害后，
         # 复制体先回复等同实际失血的生命；超过复制体生命上限的部分再回复创建者。
         # 以实际生命减少量为基数，避免把超过目标剩余生命的过量伤害计入。

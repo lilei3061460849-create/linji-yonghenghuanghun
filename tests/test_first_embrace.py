@@ -20,6 +20,7 @@ import pytest
 
 from tests.attack_support import resolve_attack as resolve_player_attack
 from engine.api import GameEngine
+from engine.consumables import make_wing_item
 from engine.daowen import DaoWenEngine
 from engine.gamedata import learnability_error, learnable_daowen_pool
 from engine.models import Entity, DaoWen, DaoWenInstance, Relic
@@ -239,29 +240,74 @@ def test_option2_immortal_body_halves_blood_limit_and_blocks_growth():
 
 
 # ========================================================================
-# 3. 鲜血之翼
+# 3. 血翼（消耗品）
 # ========================================================================
 
-def test_option3_blood_wings_costs_bleed_and_grants_flight():
-    """正常路径：流血5X换取【飞行X】"""
-    engine = _new_engine(dbsuffix="wings")
-    player = engine.state.player
-    _grant(engine, 3)
+def test_option3_grants_wing_consumable_not_relic():
+    """正常路径（2026-10-23 重做）：选项3 发放消耗品【血翼】3/3，不占遗物位。"""
+    engine = _new_engine(dbsuffix="wing_item")
+    engine.state.pending_first_embrace = True
+    r = engine.execute_action("choose_first_embrace", {"choice": 3})
+    assert r["success"], r.get("error")
+    wing = next((c for c in engine.state.consumables if c.name == "血翼"), None)
+    assert wing is not None, [c.name for c in engine.state.consumables]
+    assert (wing.current_uses, wing.max_uses) == (3, 3)
+    assert "血翼" not in [x.name for x in engine.state.relics]
+    assert "血翼" not in engine.state.first_embrace_traits
+
+
+def test_wing_consumable_active_use_grants_flight():
+    """正常路径：主动使用获得【飞行】1回合并扣 1 点耐久（消耗品不占出手）。"""
+    engine = _new_engine(dbsuffix="wing_use")
+    engine.state.consumables.append(make_wing_item("血翼"))
     engine.execute_action("battle_start", {})
     engine.execute_action("round_start", {})
-    hp_before = player.current_hp
-    r = engine.execute_action("use_blood_wings", {"x": 2})
-    assert r["success"] is True
-    assert player.current_hp == hp_before - 10
-    assert player.get_status_value("飞行") == 2
+    player = engine.state.player
+    r = engine.execute_action("consume_item", {"name": "血翼", "mode": "fly"})
+    assert r["success"], r
+    assert player.get_status_value("飞行") == 1
+    assert r["result"]["uses_remaining"] == 2
 
 
-def test_option3_boundary_x_must_be_positive():
-    """边界：x<1应拒绝"""
-    engine = _new_engine(dbsuffix="wings_err")
-    _grant(engine, 3)
-    r = engine.execute_action("use_blood_wings", {"x": 0})
+def test_wing_consumable_boundary_depleted_is_unusable_but_not_destroyed():
+    """边界：耐久归零后不可用，但条目仍在（不自动销毁）。"""
+    engine = _new_engine(dbsuffix="wing_empty")
+    wing = make_wing_item("血翼")
+    wing.current_uses = 0
+    engine.state.consumables.append(wing)
+    engine.execute_action("battle_start", {})
+    engine.execute_action("round_start", {})
+    r = engine.execute_action("consume_item", {"name": "血翼", "mode": "fly"})
     assert r["success"] is False
+    assert any(c.name == "血翼" and c.is_depleted for c in engine.state.consumables)
+
+
+def test_wing_consumable_recharges_every_full_blood_limit_lost():
+    """正常路径：每累计失去 100%[血限] 的生命，耐久+1（余数滚存）。"""
+    engine = _new_engine(dbsuffix="wing_recharge")
+    engine.state.consumables.append(make_wing_item("血翼"))
+    engine.execute_action("battle_start", {})
+    engine.execute_action("round_start", {})
+    player = engine.state.player
+    wing = next(c for c in engine.state.consumables if c.name == "血翼")
+    wing.current_uses = 1
+    limit = player.blood_limit
+    engine.combat.pay_numeric_cost(player, "流血", limit // 2)
+    assert wing.current_uses == 1, "未满一个血限不涨耐久"
+    engine.combat.pay_numeric_cost(player, "流血", limit - limit // 2)
+    assert wing.current_uses == 2, f"满一个血限应+1，实{wing.current_uses}"
+
+
+def test_wing_consumable_recharge_caps_at_max_durability():
+    """边界：耐久已满时不再增长。"""
+    engine = _new_engine(dbsuffix="wing_cap")
+    engine.state.consumables.append(make_wing_item("血翼"))
+    engine.execute_action("battle_start", {})
+    engine.execute_action("round_start", {})
+    player = engine.state.player
+    wing = next(c for c in engine.state.consumables if c.name == "血翼")
+    engine.combat.pay_numeric_cost(player, "流血", player.blood_limit)
+    assert wing.current_uses == wing.max_uses == 3
 
 
 # ========================================================================
@@ -360,7 +406,8 @@ def test_option5_truth_is_a_daowen_and_raises_dm_interrupt_without_spending_acti
                         and action.get("params_schema", {}).get("daowen_name") == "真理")
     assert "target_ref" in truth_action["params_schema"]
     assert "statement" in truth_action["params_schema"]
-    assert "x" not in truth_action["params_schema"]
+    # 2026-10-23 用户裁定：X = 陈述句数，不再是固定1
+    assert "x" in truth_action["params_schema"]
     assert not any(action.get("action_type") == "use_truth_eye" for action in available)
 
     actions_before = player.actions_used_this_round
@@ -368,9 +415,9 @@ def test_option5_truth_is_a_daowen_and_raises_dm_interrupt_without_spending_acti
     r = engine.execute_action("use_daowen", {
         "daowen_name": "真理", "target_ref": "enemy:0", "statement": "你藏着钥匙"})
     assert r["success"] is True
-    assert r["action"] == "真理"
+    assert r["action"] == "真理X=1"
     assert r["result"]["interrupt"]["context"]["ability"] == "真理"
-    assert "请DM裁定对方的回应是否属实" in r["result"]["interrupt"]["description"]
+    assert "请DM逐句裁定是否属实" in r["result"]["interrupt"]["description"]
     assert player.dao_wen["真理"].cooldown_remaining == 2
     assert player.actions_used_this_round == actions_before
     assert (player.current_hp, player.current_mana) == (hp_before, mana_before)
@@ -385,7 +432,7 @@ def test_legacy_truth_eye_action_alias_routes_to_the_new_daowen():
     result = engine.execute_action("use_truth_eye", {
         "target_ref": "enemy:0", "statement": "旧客户端兼容"})
     assert result["success"] is True
-    assert result["action"] == "真理"
+    assert result["action"] == "真理X=1"
     assert result["result"]["interrupt"]["context"]["ability"] == "真理"
     assert engine.state.player.dao_wen["真理"].cooldown_remaining == 2
 

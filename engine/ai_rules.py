@@ -215,23 +215,6 @@ def try_use_crime_vault(engine, commit: bool = True) -> Optional[dict]:
     return engine.execute_action("use_crime_vault", params)
 
 
-def try_use_dragon_wings(engine, commit: bool = True) -> Optional[dict]:
-    """烬翼：[回始]消耗3X龙性，获得【飞行X】。威胁高且龙性够时起飞。"""
-    if "烬翼" not in engine.state.dragon_traits:
-        return None
-    p = engine.state.player
-    threat = sum(e.attack_count * e.attack_power for e in engine.state.enemies if e.is_alive)
-    if p is None or engine.state.dragon_nature < 6:
-        return None
-    if threat < p.current_hp * 0.3:
-        return None
-    x = min(2, engine.state.dragon_nature // 3)
-    params = {"x": max(1, x)}
-    if not commit:
-        return {"_plan": True, "action_type": "use_dragon_wings", "params": params}
-    return engine.execute_action("use_dragon_wings", params)
-
-
 # ---------------------------------------------------------------------------
 # 战斗内法器（PLAYER_ACTIONS）
 # ---------------------------------------------------------------------------
@@ -260,23 +243,6 @@ def try_fire_godfather_revolver(engine, commit: bool = True) -> Optional[dict]:
     if not commit:
         return {"_plan": True, "action_type": "fire_godfather_revolver", "params": params}
     return engine.execute_action("fire_godfather_revolver", params)
-
-
-def try_use_blood_wings(engine, commit: bool = True) -> Optional[dict]:
-    """鲜血之翼：代价流血5X，发动【飞行X】回合。血厚且受致命威胁时起飞。"""
-    if "鲜血之翼" not in engine.state.first_embrace_traits:
-        return None
-    p = engine.state.player
-    threat = sum(e.attack_count * e.attack_power for e in engine.state.enemies if e.is_alive)
-    if p is None or p.has_status("飞行"):
-        return None
-    if p.current_hp < 25 or threat < p.current_hp * 0.4:
-        return None
-    x = min(2, (p.current_hp - 10) // 5)
-    params = {"x": max(1, x)}
-    if not commit:
-        return {"_plan": True, "action_type": "use_blood_wings", "params": params}
-    return engine.execute_action("use_blood_wings", params)
 
 
 # ---------------------------------------------------------------------------

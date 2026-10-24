@@ -23,7 +23,8 @@ from .models import (
     Entity, GameState, DaoWen, DaoWenInstance, Spell,
     Relic, Consumable, StatusEffect, LongJiXin
 )
-from .world import WorldState, WorldActorState
+from .world import (ALLY_KINDS, ALLY_SUGGESTION_RANGE, ALLY_SUGGESTIONS,
+                    WorldState, WorldActorState, suggestion_acceptance_percent)
 from .enums import (GamePhase, CombatSubphase, ActionPhase, TriggerTiming,
                     InterruptType, EntityType, EffectScope, EffectPolarity)
 from .dice import DiceEngine
@@ -32,7 +33,10 @@ from .combat import CombatEngine
 from .spell_dsl import parse_spell_definition, SpellDslError
 from .combat_events import register_combat_event_observer
 from .consumables import (
-    ZIYU_TRIGGER_BATTLE_END, apply_zi_yu_trigger, note_action_targets)
+    ZIYU_TRIGGER_BATTLE_END, apply_zi_yu_trigger, note_action_targets,
+    WING_BLOOD, WING_EMBER, WING_MODE_FLEE, WING_MODE_FLY, WING_MODE_LIFESTEAL,
+    WING_MODE_SUPPRESS, WING_MODES, WING_STATUS_LIFESTEAL, WING_STATUS_SUPPRESS,
+    make_wing_item)
 from .events import EventPool
 from .rule_repository import RuleRepository
 from .dungeons import DEFAULT_INDEX
@@ -44,6 +48,7 @@ from .dm_rulings import DMRulingsDB, DMRuling, Interrupt
 from .death_book import DeathBookStore, draft_legacy, validate_legacy
 from .ai_memory import clear_memory, condense_to_legacy
 from .effect_context import make_context, normalize_context
+from . import custom_resources
 from .personality import (
     get_personality as personality_get,
     record_behavior as personality_record,
@@ -62,6 +67,7 @@ from .handlers.economy import (
     handle_dismiss_employee,
     handle_repay_debt_employee,
     handle_pay_employee_wage,
+    handle_declare_betrayal,
     handle_suppress_rebellion,
     handle_resolve_rebellion_battle,
     handle_appease_rebellion,
@@ -90,6 +96,12 @@ TWISTED_TOOL_LIBRARY = {
 # 【唯一】无数值、无法按 X=10 结算，不入池（见 物品索引.md#自由结晶）。
 FREE_CRYSTAL_COST_POOL = ("流血", "衰老", "枯竭", "萎缩", "疲惫", "失忆", "异变", "冷却")
 FREE_CRYSTAL_COST_AMOUNT = 10
+
+# 局外可发动的道纹白名单（2026-10-23 用户裁定：默认局内，局外须明示）。
+# 「明示」＝该道纹条文自己写明可局外发动；没写的一律只能在战斗中发动。
+# 明示项：【消灾】（条文：局外发动消耗×2）、【真理】（2026-10-23 用户裁定列入）。
+# 新增一项必须先改条文，再改这里；tests/test_resource_design_standard.py 钉死本集合。
+OUT_OF_COMBAT_DAOWEN = frozenset({"消灾", "真理"})
 
 
 class GameEngine:
@@ -545,14 +557,16 @@ class GameEngine:
                             "remaining_groups": len(self.state.pending_diandang_discoveries),
                             "note": "领取【典当】发现：从当前组3选1里选1种获得，不消耗出手/精力"})
         if "真龙之心" in self.state.artifacts_owned:
-            actions.extend([
-                {"action_type": "pay_for_dragon_nature",
-                 "params_schema": {"cost_type": ["衰老", "枯竭", "萎缩"], "x": "integer",
-                                   "cost_share_target_ref": blood_pact_cost_targets}},
+            # 2026-10-23 用户令：龙性货币废除。数值型代价自动入账，
+            # 满 12 点可直接换 1 件龙族遗物；不再有「换取龙性」这一步。
+            actions.append(
                 {"action_type": "unlock_dragon_trait",
-                 "params_schema": {"trait": [name for name in self.DRAGON_TRAITS
-                                                if name not in self.state.dragon_traits]}},
-            ])
+                 "params_schema": {"trait": [name for name in
+                                                self.DRAGON_TRAITS + list(self.DRAGON_CONSUMABLE_TRAITS)
+                                                if name not in self.state.dragon_traits
+                                                and not any(c.name == name for c in self.state.consumables)]},
+                 "dragon_cost_points": self.state.dragon_cost_points,
+                 "note": "每累计支付12点数值型代价可换1件；不足12点时会被拒绝"})
         for employee in self.state.employees:
             if employee.is_debt_bound and employee.shards < 0:
                 actions.append({"action_type": "repay_debt_employee",
@@ -605,6 +619,12 @@ class GameEngine:
                 {"action_type": "world_command_created_being", "params_schema": {
                     "behavior": ["explore", "follow", "guard"],
                     "x": "guard模式可选整数坐标", "y": "guard模式可选整数坐标"}},
+                {"action_type": "world_suggest_ally", "params_schema": {
+                    "target_actor_id": "相邻/近处友方单位的 actor_id（来自 world_status.allies）",
+                    "suggestion": sorted(ALLY_SUGGESTIONS),
+                    "x": "suggestion=guard 时可选：守卫坐标x",
+                    "y": "suggestion=guard 时可选：守卫坐标y"},
+                 "note": "只能建议，不能命令：朋友/员工/临时朋友会按自己的处境决定是否照做"},
                 {"action_type": "world_interact", "params_schema": {
                     "target_actor_id": "actor_id from visible_actors",
                     "choice": ["talk", "trade", "cooperate", "intimidate", "attack"],
@@ -688,8 +708,6 @@ class GameEngine:
                                "params_schema": {"dragon_heart_type": "owned cost type"}})
         if "罪业金库" in self.state.artifacts_owned:
             actions.insert(0, {"action_type": "use_crime_vault", "params_schema": {"x": "integer"}})
-        if "烬翼" in self.state.dragon_traits:
-            actions.insert(0, {"action_type": "use_dragon_wings", "params_schema": {"x": "integer"}})
         if self.state.in_final_duel:
             actions.insert(0, {"action_type": "activate_duel_relic",
                                "params_schema": {"side": ["player_side", "opponent_side"],
@@ -731,13 +749,14 @@ class GameEngine:
                                 "reason": "冷却中或被封印"})
                 continue
             max_x = self._max_legal_daowen_x(player, name)
-            # 【真理】固定X=1、只需目标与待裁定陈述；发动仍沿用初拥旧口径，
-            # 不消耗主动出手，也不经过普通数值道纹的闪避/法术反应流程。
+            # 【真理】X=陈述句数（2026-10-23 用户裁定）；只需目标与待裁定陈述，
+            # 发动仍沿用初拥旧口径，不消耗主动出手，也不经过普通数值道纹的闪避流程。
             if name == "真理":
                 params_schema = {
                     "daowen_name": name,
+                    "x": "int≥1（陈述句数）",
                     "target_ref": target_options,
-                    "statement": "string",
+                    "statement": "string（须正好X句）",
                 }
             else:
                 # 2026-10-09 用户令：波及 X≥2 下限 repealed，X 下限恒为 1（X_MIN 已拔除）。
@@ -848,9 +867,14 @@ class GameEngine:
             }})
         for item in self.state.consumables:
             if not item.is_depleted:
-                actions.append({"action_type": "consume_item", "params_schema": {
-                    "name": item.name, "target_ref": target_options,
-                }, "uses_remaining": item.current_uses})
+                schema: dict[str, Any] = {"name": item.name, "target_ref": target_options}
+                entry: dict[str, Any] = {"action_type": "consume_item",
+                                         "params_schema": schema,
+                                         "uses_remaining": item.current_uses}
+                if item.name in WING_MODES:
+                    schema["mode"] = dict(WING_MODES[item.name])
+                    entry["note"] = "翼类消耗品：每次使用选一个 mode，耗 1 点耐久"
+                actions.append(entry)
         plight_options = self.combat.get_plight_evolution_options()
         actions.append({"action_type": "declare_evolution", "available": bool(plight_options),
                         "params_schema": {"monster": "string", "daowen": "string", "x": "integer"},
@@ -878,11 +902,8 @@ class GameEngine:
                 action_type, schema = artifact_actions[artifact]
                 actions.append({"action_type": action_type, "params_schema": schema})
         trait_actions = {
-            "震岳龙躯": ("activate_dragon_body", {"x": "integer"}),
             "吞骸龙胃": ("devour_monster", {"monster_ref": "enemy:index", "dragon_heart": "name"}),
             "断尾求生": ("declare_tail_sacrifice", {"trait": "owned dragon relic"}),
-            "鲜血之翼": ("use_blood_wings", {
-                "x": "integer", "cost_share_target_ref": blood_pact_cost_targets}),
             "血族尖牙": ("enslave_as_chizu", {
                 "target_ref": target_options,
                 "cost_share_target_ref": blood_pact_cost_targets}),
@@ -938,10 +959,11 @@ class GameEngine:
         """按真实代价口径枚举当前可提交的最大X，不把当前法力直接冒充上限。
 
         y 为双参数道纹（如【分裂】X/Y）的第二参数，单参数道纹忽略。
-        【真理】效果不随X变化，行动schema固定为X=1。
+        【真理】的X=陈述句数（2026-10-23 用户裁定）：只受实际写出的句子上限约束，
+        这里给出一个宽松上限，最终以提交的陈述句数为准。
         """
         if name == "真理":
-            return 1
+            return 10
         upper = max(1, actor.current_mana, actor.current_hp, actor.blood_limit,
                     actor.current_speed, self.state.shards, self.state.fake_shards, 50)
         legal = 0
@@ -1040,8 +1062,8 @@ class GameEngine:
         # 再结算defeat，战斗限定会把它挡在setup外导致擂主永不回槽（r16实战复现）。
         "activate_duel_relic", "use_black_card", "use_crime_vault",
         "fire_godfather_revolver", "select_shared_dragon_heart", "declare_fuyuebei_toll",
-        "activate_dragon_body", "devour_monster", "declare_tail_sacrifice",
-        "use_dragon_wings", "use_blood_wings", "enslave_as_chizu", "blood_feast",
+        "devour_monster", "declare_tail_sacrifice",
+        "enslave_as_chizu", "blood_feast",
         "command_ally", "resolve_ally_phases",
     }
 
@@ -1054,11 +1076,11 @@ class GameEngine:
         "define_spell", "undefine_spell", "lianxin_in_battle",
         "declare_evolution", "activate_duel_relic", "use_black_card",
         "use_crime_vault", "fire_godfather_revolver", "select_shared_dragon_heart",
-        "declare_fuyuebei_toll", "activate_dragon_body", "devour_monster",
-        "declare_tail_sacrifice", "use_dragon_wings", "use_blood_wings",
+        "declare_fuyuebei_toll", "devour_monster",
+        "declare_tail_sacrifice",
         "enslave_as_chizu", "blood_feast", "use_truth_eye",
         "command_ally", "resolve_ally_phases",
-        "pay_for_dragon_nature", "unlock_dragon_trait",
+        "unlock_dragon_trait",
     }
 
     def _bound_action_actor(self, action_type: str, params: dict) -> Optional[Entity]:
@@ -1218,7 +1240,7 @@ class GameEngine:
             self.state.combat_subphase = CombatSubphase.PLAYER_ACTIONS.value
 
     def _phase_error(self, action_type: str, params: dict) -> Optional[dict]:
-        """执行入口的阶段门禁；【消灾】是唯一允许在局外发动的道纹。"""
+        """执行入口的阶段门禁；道纹默认局内发动，局外只放行条文明确许可项。"""
         phase = self.state.phase
         if self.state.pending_daowen_choices and action_type != "choose_hired_daowen":
             return {"success": False,
@@ -1240,12 +1262,21 @@ class GameEngine:
             return {"success": False, "error": f"尚有{self.state.energy}点精力，耗尽后才能进入战斗"}
         if action_type == "use_daowen":
             name = params.get("daowen_name", "")
-            if phase == "pre_battle" and name == "消灾":
+            # 默认局内；局外须条文明示（白名单见模块顶部 OUT_OF_COMBAT_DAOWEN）。
+            if phase == "pre_battle" and (name in OUT_OF_COMBAT_DAOWEN
+                                          or custom_resources.allows_out_of_combat(name)):
                 return None
             if phase != "in_combat":
-                return {"success": False, "error": "道纹只能在战斗中发动；局外唯一例外是【消灾】"}
+                allowed = "、".join(f"【{n}】" for n in sorted(OUT_OF_COMBAT_DAOWEN))
+                return {"success": False,
+                        "error": f"道纹默认仅在战斗中发动；局外发动须条文明示（当前明示：{allowed}）"}
         if action_type == "restart_battle" and phase != "in_combat":
             return {"success": False, "error": "只有进行中的战斗可以重来"}
+        # 自定义资源：声明与激活都是元操作（不占出手、不推进相位），局内外均可。
+        if action_type in {"define_resource", "activate_resource", "list_resources"} \
+                and phase not in {"pre_battle", "in_combat", "setup"}:
+            return {"success": False,
+                    "error": f"【{action_type}】只能在开局/局外/战斗阶段执行"}
         if action_type in self._COMBAT_ONLY_ACTIONS and phase != "in_combat":
             return {"success": False, "error": f"【{action_type}】只能在战斗中执行"}
         if action_type == "battle_end" and phase != "in_combat":
@@ -1271,9 +1302,9 @@ class GameEngine:
                 "define_spell", "undefine_spell",
                 "lianxin_in_battle", "declare_evolution", "activate_duel_relic",
                 "use_black_card", "use_crime_vault", "fire_godfather_revolver",
-                "select_shared_dragon_heart", "declare_fuyuebei_toll", "activate_dragon_body",
-                "devour_monster", "declare_tail_sacrifice", "use_dragon_wings",
-                "use_blood_wings", "enslave_as_chizu", "blood_feast", "use_truth_eye",
+                "select_shared_dragon_heart", "declare_fuyuebei_toll",
+                "devour_monster", "declare_tail_sacrifice",
+                "enslave_as_chizu", "blood_feast", "use_truth_eye",
                 # 轮回者指挥与友方自主行动都属于己方行动阶段，不能在怪物阶段插队。
                 "command_ally", "resolve_ally_phases",
             }
@@ -1282,7 +1313,7 @@ class GameEngine:
             if action_type == "consume_item" and params.get("name") == "活性土壤":
                 required = CombatSubphase.AWAIT_ROUND_START.value
             if action_type in ("use_black_card", "select_shared_dragon_heart",
-                               "use_crime_vault", "use_dragon_wings"):
+                               "use_crime_vault"):
                 required = CombatSubphase.AWAIT_ROUND_START.value
             if action_type == "activate_duel_relic" and self.state.in_final_duel:
                 required = CombatSubphase.AWAIT_ROUND_START.value
@@ -1567,6 +1598,8 @@ class GameEngine:
             return self._action_world_vision(params)
         elif action_type == "world_interact":
             return self._action_world_interact(params)
+        elif action_type == "world_suggest_ally":
+            return self._action_world_suggest_ally(params)
         elif action_type == "setup_attributes":
             return self._action_setup_attributes(params)
         elif action_type == "setup_choose_region":
@@ -1632,6 +1665,8 @@ class GameEngine:
             return self._action_pay_employee_wage(params)
         elif action_type == "choose_hired_daowen":
             return self._action_choose_hired_daowen(params)
+        elif action_type == "declare_betrayal":
+            return self._action_declare_betrayal(params)
         elif action_type == "suppress_rebellion":
             return self._action_suppress_rebellion(params)
         elif action_type == "resolve_rebellion_battle":
@@ -1658,20 +1693,12 @@ class GameEngine:
             return self._action_select_shared_dragon_heart(params)
         elif action_type == "declare_fuyuebei_toll":
             return self._action_declare_fuyuebei_toll(params)
-        elif action_type == "pay_for_dragon_nature":
-            return self._action_pay_for_dragon_nature(params)
         elif action_type == "unlock_dragon_trait":
             return self._action_unlock_dragon_trait(params)
-        elif action_type == "activate_dragon_body":
-            return self._action_activate_dragon_body(params)
         elif action_type == "devour_monster":
             return self._action_devour_monster(params)
         elif action_type == "declare_tail_sacrifice":
             return self._action_declare_tail_sacrifice(params)
-        elif action_type == "use_dragon_wings":
-            return self._action_use_dragon_wings(params)
-        elif action_type == "use_blood_wings":
-            return self._action_use_blood_wings(params)
         elif action_type == "enslave_as_chizu":
             return self._action_enslave_as_chizu(params)
         elif action_type == "use_truth_eye":
@@ -1714,6 +1741,12 @@ class GameEngine:
             return self._action_resolve_event(params)
         elif action_type == "read_death_book":
             return self._action_read_death_book(params)
+        elif action_type == "define_resource":
+            return self._action_define_resource(params)
+        elif action_type == "activate_resource":
+            return self._action_activate_resource(params)
+        elif action_type == "list_resources":
+            return self._action_list_resources(params)
         else:
             return {"success": False, "error": f"未知行动类型: {action_type}"}
 
@@ -2435,8 +2468,12 @@ class GameEngine:
                             current_mana=max(0, int(template.mana_limit)),
                             speed_limit=max(0, int(template.speed_limit)),
                             current_speed=max(0, int(template.speed_limit)),
-                            attack_count=max(0, int(template.attack_count)),
-                            attack_power=max(0, int(template.attack_power)),
+                            # 2026-10-24：攻击次数＝当前速度、攻击力＝当前法力（见
+                            # Entity.effective_attack_count/effective_attack_power）。
+                            # 直接复制模板的 attack_count/attack_power 会拿到开局前的 0，
+                            # 让流浪轮回者变成打不还手、怪物阶段也交不出合法提交的空壳。
+                            attack_count=max(0, int(template.speed_limit)),
+                            attack_power=max(0, int(template.mana_limit)),
                         )
                         self.state.enemies.append(npc)
                         spawned_reincarnators.append(npc)
@@ -2458,6 +2495,7 @@ class GameEngine:
             # 轮回者固定从安全起点入场；友方在附近，敌对单位与商人通过引擎骰子随机分散到远处。
             used = set()
             player_start = (1, 1)
+            player_actor_id = (getattr(self.state.player, "runtime_id", "") or "player") if self.state.player else ""
             for entity, kind, faction in entities:
                 if kind == "player":
                     pos = player_start
@@ -2482,10 +2520,15 @@ class GameEngine:
                     raise ValueError("随机出生位置发生重叠，请重新初始化地图")
                 used.add(pos)
                 actor_id = getattr(entity, "runtime_id", "") or f"{kind}:{entity.name}:{len(used)}"
-                mode = "manual" if kind in {"player", "friend", "employee", "temp_friend"} else "autonomous"
+                # 2026-10-24：只有轮回者本人是手动单位；朋友/员工/临时朋友自主行动，
+                # 玩家对它们只能提"建议"（world_suggest_ally），是否照做由它们自己判定。
+                mode = "manual" if kind == "player" else "autonomous"
+                owner = player_actor_id if kind in ALLY_KINDS else ""
                 world.add_actor(WorldActorState(actor_id=actor_id, name=entity.name, kind=kind,
                                                 x=pos[0], y=pos[1], alive=entity.is_alive,
-                                                faction=faction, mode=mode))
+                                                faction=faction, mode=mode,
+                                                behavior=("follow" if kind in ALLY_KINDS else "explore"),
+                                                owner_actor_id=owner))
                 if kind == "player":
                     world.record("world_entered", actor_id, region=self.state.current_region)
                 elif entity in spawned_monsters:
@@ -2829,6 +2872,17 @@ class GameEngine:
                 "visible_actors": visible_actors,
                 "visible_encounters": visible_encounters,
                 "known_locations": known_locations,
+                "allies": [
+                    {"actor_id": other.actor_id, "name": other.name, "kind": other.kind,
+                     "alive": other.alive,
+                     "position": [other.x, other.y], "behavior": other.behavior,
+                     "guard_position": (list(other.guard_position)
+                                        if other.guard_position else None),
+                     "owner_actor_id": other.owner_actor_id}
+                    for other in world.actors.values()
+                    if other.kind in ALLY_KINDS and other.owner_actor_id == actor_id
+                ],
+                "suggestion_range": ALLY_SUGGESTION_RANGE,
                 "hiring_signals": [
                     {"signal_id": signal.get("signal_id"),
                      "status": signal.get("status"),
@@ -3061,6 +3115,119 @@ class GameEngine:
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
+    def _ally_suggestion_chance(self, kind: str, suggestion: str, **factors) -> int:
+        """建议采纳率（独立方法，便于按单位类型/处境替换判定）。"""
+        return suggestion_acceptance_percent(kind, suggestion, **factors)
+
+    def _action_world_suggest_ally(self, params: dict) -> dict:
+        """对友方单位提一条建议。玩家只能建议：是否照做由该单位自己判定。
+
+        与 world_move 的关键区别：这个接口不改变任何单位的位置，只登记一次
+        "建议 + 该单位自己的决定"。被拒绝时它的行为与目标保持原样，玩家再从
+        world_status.allies 里看到它自己选了什么。
+        """
+        try:
+            world = self._world_from_state()
+            if world.final_duel_complete:
+                return {"success": False, "error": "最终生存阶段已经结算，地图行动已结束"}
+            player_id = next((key for key, actor in world.actors.items()
+                              if actor.kind == "player" and actor.alive), None)
+            if player_id is None:
+                return {"success": False, "error": "地图上没有存活的轮回者"}
+            target_id = params.get("target_actor_id")
+            if not isinstance(target_id, str) or target_id not in world.actors:
+                return {"success": False, "error": "必须指定 world_status.allies 里的友方单位"}
+            target = world.actors[target_id]
+            if target.kind not in ALLY_KINDS:
+                return {"success": False, "error": "只能向朋友/员工/临时朋友提建议"}
+            if not target.alive:
+                return {"success": False, "error": "目标单位已离场"}
+            if any(encounter.active and target_id in encounter.participants
+                   for encounter in world.encounters.values()):
+                return {"success": False, "error": "目标正处于遭遇中，无法听取建议"}
+            suggestion = params.get("suggestion")
+            if suggestion not in ALLY_SUGGESTIONS:
+                return {"success": False,
+                        "error": f"suggestion必须是{sorted(ALLY_SUGGESTIONS)}之一"}
+            player_actor = world.actors[player_id]
+            distance = abs(player_actor.x - target.x) + abs(player_actor.y - target.y)
+            if distance > ALLY_SUGGESTION_RANGE:
+                return {"success": False,
+                        "error": f"目标距离{distance}格，超出建议范围{ALLY_SUGGESTION_RANGE}"}
+            guard_position = None
+            if ALLY_SUGGESTIONS[suggestion] == "guard":
+                gx = params.get("x", target.x)
+                gy = params.get("y", target.y)
+                if (not isinstance(gx, int) or isinstance(gx, bool)
+                        or not isinstance(gy, int) or isinstance(gy, bool)
+                        or not world.map.is_passable((gx, gy))):
+                    return {"success": False, "error": "守卫坐标必须是可通行格上的整数坐标"}
+                guard_position = (gx, gy)
+
+            entity = self._world_entity_by_actor_id(world, target_id)
+            hp_ratio = 1.0
+            if entity is not None and entity.blood_limit > 0:
+                hp_ratio = max(0.0, min(1.0, entity.current_hp / entity.blood_limit))
+            player_entity = self.state.player
+            player_hp_ratio = 1.0
+            if player_entity is not None and player_entity.blood_limit > 0:
+                player_hp_ratio = max(0.0, min(1.0, player_entity.current_hp / player_entity.blood_limit))
+            chance = self._ally_suggestion_chance(
+                target.kind, suggestion,
+                current_behavior=target.behavior, hp_ratio=hp_ratio,
+                player_hp_ratio=player_hp_ratio, distance=distance)
+            roll = self.dice.auto_roll(
+                f"world_ally_suggestion_{target_id}_{world.clock.turn}_{suggestion}",
+                ["accept"] * chance + ["reject"] * (100 - chance),
+                context=f"{target.name}考虑轮回者的建议：{suggestion}")
+            accepted = roll["selected"] == "accept"
+            previous = {"behavior": target.behavior,
+                        "guard_position": list(target.guard_position) if target.guard_position else None}
+            world.record("ally_suggestion_made", player_id, target_actor_id=target_id,
+                         target_name=target.name, suggestion=suggestion,
+                         accepted=accepted, chance_percent=chance)
+            if accepted:
+                target.behavior = ALLY_SUGGESTIONS[suggestion]
+                target.guard_position = guard_position
+                target.owner_actor_id = player_id
+                target.mode = "autonomous"
+                world.record("ally_suggestion_accepted", target_id,
+                             suggestion=suggestion, behavior=target.behavior,
+                             guard_position=list(guard_position) if guard_position else None)
+            else:
+                # 拒绝：它自己做主，玩家只能看到它现在的选择。
+                world.record("ally_suggestion_rejected", target_id,
+                             suggestion=suggestion, kept_behavior=target.behavior)
+            self._sync_world_entity_positions(world)
+            self.state.world_state = world.to_dict()
+            return {
+                "success": True,
+                "action": f"建议{target.name}·{suggestion}",
+                "result": {
+                    "target": target.name, "target_actor_id": target_id,
+                    "suggestion": suggestion,
+                    "accepted": accepted,
+                    "chance_percent": chance,
+                    "behavior": target.behavior,
+                    "guard_position": list(target.guard_position) if target.guard_position else None,
+                    "previous": previous,
+                },
+                "instruction": ("它接受了建议，接下来会按此行动" if accepted
+                                else "它没有采纳，仍在按自己的判断行动；可以换个说法再试"),
+            }
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _world_entity_by_actor_id(self, world: WorldState, actor_id: str):
+        """actor_id → 真实实体（用于读取伤势等自身处境）。"""
+        candidates = ([self.state.player] if self.state.player else [])
+        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+            candidates.extend(getattr(self.state, group_name, []) or [])
+        if getattr(self.state, "merchant", None) is not None:
+            candidates.append(self.state.merchant)
+        return next((entity for entity in candidates if entity is not None
+                     and getattr(entity, "runtime_id", "") == actor_id), None)
+
     def _action_world_vision(self, params: dict) -> dict:
         try:
             world = self._world_from_state()
@@ -3125,7 +3292,7 @@ class GameEngine:
             cost_formula="X", effect_formula=""))
 
     def _action_resolve_redemption(self, params: dict) -> dict:
-        """救赎：接纳昏迷微光者为员工（待命，需派遣+战终工资，计入背叛），或当场【终结】。
+        """救赎：接纳昏迷微光者为员工（待命，需派遣+战终工资；背叛对他们同样开放），或当场【终结】。
 
         【终结】：救赎不是免费收获——把昏迷
         的微光者当场终结，效果等同击杀：它被还原为一次正常[命零]，[战终]按与普通击杀
@@ -3695,22 +3862,27 @@ class GameEngine:
         "龙心谷": [
             ("共心环", "[战始]，选择自身拥有的一枚【××龙心】；本场战斗中，自身、[朋友]与[员工]均可消耗该龙心耐久，抵消同类型代价"),
             ("负岳碑", "当任意[朋友]或[员工]即将触发【撤退】时，可以流血20，抵消本次伤害并取消本次【撤退】"),
-            ("真龙之心", "每消耗12X龙性，获得X种不同龙族遗物（6X衰老=2X枯竭=X萎缩=12X龙性）"),
+            ("真龙之心", "你每实际支付1点数值型【代价】记1点代价累积；每满12点，获得1件未持有的龙族遗物"),
         ],
     }
 
     # 初拥之夜9选1（1~8限选1次，9号可重复触发权）
+    # 2026-10-23 用户令：【鲜血之翼】改名【血翼】并改为消耗品（耐久3/3）。
+    # 选项编号与总数（9选1）不变，只是选项3 从「授予遗物」改为「发放消耗品」。
     FIRST_EMBRACE_OPTIONS = {
         1: ("血族血脉", "[回终]若本回合造成伤害则获得等量[回复]，否则流血20"),
         2: ("不朽之躯", "当前[血限]减半；免疫衰老；[血限]无法增加"),
-        3: ("鲜血之翼", "代价：流血5X，发动【飞行X】回合"),
+        3: ("血翼", "消耗品（耐久3/3）：主动使用后获得【飞行】持续1回合；你每累计失去100%[血限]的生命，耐久+1"),
         4: ("血族尖牙", "代价：衰老20，使生命低于自身的一个[目标]转化为听命于你的赤族（诅咒：[回终]赤族流血20）"),
-        5: ("真理", "专属道纹：冷却2场；指定一个[目标]与陈述，要求其言明真理，否则无法开口；真伪由DM裁定"),
+        5: ("真理", "专属道纹：冷却2场；提出X句陈述，要求[目标]逐句言明真理，任一句无法言明则无法开口，持续X回合；真伪由DM逐句裁定"),
         6: ("寒冰法力", "对[目标]每累计施加10法力，使其本回合出手次数-1"),
         7: ("血影", "当自身被选为非必中判定的[目标]时，可流血10，取消本次判定"),
         8: ("血食", "可使一名听命于你的赤族[命零]，自身获得等同于该赤族当前生命的[回复]"),
         9: ("封存血脉", "保留触发权，随时再次触发初拥之夜"),
     }
+    # 选项 → 发放的消耗品（不占遗物位）：选项3 授予【血翼】。
+    FIRST_EMBRACE_CONSUMABLES = {3: WING_BLOOD}
+    FIRST_EMBRACE_RETAIN_CHOICE = 9
 
     # 遗物池定义（26件；【发现】只列候选，效果在对应触发时点应用）
     # 2026-10-13 用户令：【买路财】改制为轮回者【逃跑】行动，【三相残韵盘】删除
@@ -4398,15 +4570,20 @@ class GameEngine:
                 "result": {"employee": name, "chosen": daowen_name,
                            "employee_daowen": list(emp.dao_wen.keys())}}
 
-    # ==================== 员工背叛（三选一处理分支） ====================
+    # ==================== 背叛（[朋友]／[员工]自选，三选一处理分支） ====================
 
     def _pending_rebellion_error(self, force: bool) -> Optional[dict]:
-        """未强制触发时，必须存在[战终]检查命中的待处理背叛才能选择处理分支"""
+        """未强制触发时，必须先有人声明背叛才能选择处理分支"""
         if force:
             return None
         if not self.state.rebellion_active:
-            return {"success": False, "error": "当前没有待处理的员工背叛"}
+            return {"success": False,
+                    "error": "当前没有待处理的背叛（[朋友]／[员工]尚未声明背叛）"}
         return None
+
+    def _action_declare_betrayal(self, params: dict) -> dict:
+        """[朋友]／[员工]声明背叛：自选项，不是引擎按数值触发的特殊事件。"""
+        return handle_declare_betrayal(self, params)
 
     def _action_suppress_rebellion(self, params: dict) -> dict:
         return handle_suppress_rebellion(self, params)
@@ -4833,7 +5010,7 @@ class GameEngine:
     def _compute_pending_wages(self):
         """战终首次结算：为每个"存活+已部署+非还债"的员工计算应付工资，写入 pending_wage_decisions。
         已经出现过的key(无论是否已决策)不会被重新计算，避免同一员工在同一场战斗内被反复计费。
-        wage_bonus(员工背叛·让利)在封顶后叠加，不影响12碎片的封顶本身。"""
+        wage_bonus(背叛·让利)在封顶后叠加，不影响12碎片的封顶本身。"""
         for e in self.state.employees:
             if e.is_alive and e.is_deployed and not e.is_debt_bound and e.name not in self.state.pending_wage_decisions:
                 # current_round 为1-indexed的"当前回合序号"，与 deployed_at_round 同口径，故+1为闭区间计数
@@ -5058,6 +5235,14 @@ class GameEngine:
         if shard_error:
             return {"success": False, "error": shard_error}
 
+        # 自定义道纹：法力以外的代价（流血/衰老/异变/碎片/冷却…）在占出手前支付，
+        # 付不起就当次发动失败、不消耗出手（与内建道纹同一口径）。
+        if calc.get("custom_effects") is not None:
+            custom_cost_error = custom_resources.pay_custom_cost(
+                self, actor, dw_instance, calc)
+            if custom_cost_error:
+                return {"success": False, "error": custom_cost_error}
+
         if self.state.phase == "in_combat":
             budget_error = self._consume_action_or_error(actor)
             if budget_error:
@@ -5096,11 +5281,19 @@ class GameEngine:
             }
 
         dragon_heart_use = params.get("dragon_heart_use", 0)
-        execution = self._execute_daowen_effect(
-            name, calc, actor, target, dragon_heart_use,
-            cost_share_target_ref=params.get("cost_share_target_ref", ""),
-            aoe_targets_override=aoe_targets_override,
-        )
+        if calc.get("custom_effects") is not None:
+            # 自定义道纹：效果由声明驱动，统一走 verbs 入口；目标由声明决定。
+            logs = custom_resources.apply_effects(
+                self.combat, calc["custom_effects"], actor=actor, target=target,
+                x=x, source=name)
+            execution = {"daowen": name, "effects": logs,
+                         "custom": True, "x": x}
+        else:
+            execution = self._execute_daowen_effect(
+                name, calc, actor, target, dragon_heart_use,
+                cost_share_target_ref=params.get("cost_share_target_ref", ""),
+                aoe_targets_override=aoe_targets_override,
+            )
         if dodge_log.get("dodged_names"):
             execution = dict(execution)
             execution["dodged"] = dodge_log
@@ -5832,30 +6025,20 @@ class GameEngine:
 
     ESCAPE_ACTION_COST = 5
 
-    def _action_declare_escape(self, params: dict) -> dict:
-        """逃跑（2026-10-13 改制）：轮回者行动，一次付清5次出手，
-        以当前状态强制脱离本场战斗，不再走DM追击裁定。
-
-        前置：非最终死斗；未持有生效中的【不离】（无法逃跑/撤退/被移出）；
-        本轮剩余出手≥5（原子消费，不足则一次不扣）。
-        脱战清理口径沿用原【买路财】撤退：敌方清空、临时朋友解散、员工撤部署、
-        朋友/员工撤退标记重置、精力回满、阶段回 pre_battle；不产生击杀碎片奖励。
-        """
-        escaper = self.state.player
-        if not escaper:
-            return {"success": False, "error": "没有玩家"}
+    def _escape_blocked_reason(self) -> str:
+        """逃跑前置校验：最终死斗与【不离】不可逃。返回错误文案，空串表示可逃。"""
         if self.state.in_final_duel:
-            return {"success": False, "error": "最终死斗无法逃跑"}
+            return "最终死斗无法逃跑"
         if any(r.name == "不离" for r in self.state.relics
                if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0):
-            return {"success": False, "error": "【不离】：无法逃跑、撤退，也无法被移出本场战斗"}
+            return "【不离】：无法逃跑、撤退，也无法被移出本场战斗"
+        return ""
 
-        budget_error = self._consume_actions_or_error(
-            escaper, self.ESCAPE_ACTION_COST, action_label="逃跑")
-        if budget_error:
-            return budget_error
+    def _force_disengage(self, *, reason: str) -> dict:
+        """强制脱战（清理口径 = 原买路财撤退，不改语义）。
 
-        # 强制脱战（清理口径 = 原买路财撤退，不改语义）
+        `declar_escape`（付 5 出手）与【血翼/烬翼·立刻逃跑】（付 1 耐久）共用。
+        """
         self.state.enemies.clear()
         self.state.temp_friends.clear()
         # 2026-10-14：逃跑不走战终结算，【增殖】战终待决随脱战作废（不得带入下场）。
@@ -5868,7 +6051,30 @@ class GameEngine:
             ally.has_retreated = False
         self.state.energy = self.state.energy_budget  # 无尽模式逐轮递减，见 GameState.energy_budget
         self.state.phase = "pre_battle"
+        return {"note": "本场战斗结束，未击败任何怪物，不产生击杀碎片奖励", "reason": reason}
 
+    def _action_declare_escape(self, params: dict) -> dict:
+        """逃跑（2026-10-13 改制）：轮回者行动，一次付清5次出手，
+        以当前状态强制脱离本场战斗，不再走DM追击裁定。
+
+        前置：非最终死斗；未持有生效中的【不离】（无法逃跑/撤退/被移出）；
+        本轮剩余出手≥5（原子消费，不足则一次不扣）。
+        脱战清理口径沿用原【买路财】撤退：敌方清空、临时朋友解散、员工撤部署、
+        朋友/员工撤退标记重置、精力回满、阶段回 pre_battle；不产生击杀碎片奖励。
+        """
+        escaper = self.state.player
+        if not escaper:
+            return {"success": False, "error": "没有玩家"}
+        blocked = self._escape_blocked_reason()
+        if blocked:
+            return {"success": False, "error": blocked}
+
+        budget_error = self._consume_actions_or_error(
+            escaper, self.ESCAPE_ACTION_COST, action_label="逃跑")
+        if budget_error:
+            return budget_error
+
+        self._force_disengage(reason="逃跑")
         return {
             "success": True, "action": "逃跑·强制脱战",
             "result": {"actions_paid": self.ESCAPE_ACTION_COST,
@@ -5992,6 +6198,47 @@ class GameEngine:
         if item.name in TWISTED_TOOL_LIBRARY:
             return self._consume_twisted_tool(item, params)
 
+        # 翼类消耗品（2026-10-23 用户令）：每次使用选一个模式，耗 1 点耐久。
+        #   血翼：噬血（本回合你造成的伤害给予等量回复）／飞行1／立刻逃跑
+        #   烬翼：熄事（本回合不触发任何特殊事件）／飞行1／立刻逃跑
+        if item.kind == "wing" or item.name in WING_MODES:
+            player = self.state.player
+            if player is None or not player.is_alive:
+                return {"success": False, "error": "没有可行动的玩家"}
+            modes = WING_MODES.get(item.name, {})
+            mode = params.get("mode", "")
+            if mode not in modes:
+                return {"success": False,
+                        "error": (f"【{item.name}】需要mode参数，可选："
+                                  + "；".join(f"{k}={v}" for k, v in modes.items()))}
+            if mode == WING_MODE_FLEE:
+                blocked = self._escape_blocked_reason()
+                if blocked:
+                    return {"success": False, "error": blocked}
+            remaining = item.use()
+            result: dict[str, Any] = {"mode": mode, "effect": modes[mode],
+                                      "uses_remaining": remaining,
+                                      "max_uses": item.max_uses,
+                                      "is_depleted": item.is_depleted}
+            if mode == WING_MODE_FLY:
+                player.add_status(StatusEffect(name="飞行", value=1, remaining_rounds=1,
+                                               source=item.name))
+                result["flying_rounds"] = 1
+            elif mode == WING_MODE_LIFESTEAL:
+                player.add_status(StatusEffect(name=WING_STATUS_LIFESTEAL, value=1,
+                                               remaining_rounds=1, source=item.name))
+            elif mode == WING_MODE_SUPPRESS:
+                player.add_status(StatusEffect(name=WING_STATUS_SUPPRESS, value=1,
+                                               remaining_rounds=1, source=item.name))
+            elif mode == WING_MODE_FLEE:
+                result.update(self._force_disengage(reason=f"{item.name}·立刻逃跑"))
+            return {
+                "success": True,
+                "action": f"使用消耗品【{item.name}】（{modes[mode]}）",
+                "result": result,
+                "state": self.combat._get_combat_state(),
+            }
+
         # 雕塑：消耗1耐久造成15伤害或获得20格挡
         if item.kind == "sculpture":
             mode = params.get("mode", "damage")  # damage / shield
@@ -6070,6 +6317,27 @@ class GameEngine:
         if item.name in {"绝息淤泥", "活性土壤", "假钞贴", "穿甲弹", "洗劫面具", "赤泉囊", "龙血瓶",
                           "镇魂铁钉", "赶尸铃", "黄符"}:
             return self._consume_named_event_item(item, params)
+
+        # 自定义消耗品（2026-10-23）：声明里的 effects 由 verbs 执行，不占出手。
+        # 触发式（trigger 非空）的消耗品走机制自动结算，不接受手动使用。
+        custom_item = custom_resources.get_consumable(item.name)
+        if custom_item is not None:
+            if custom_item.spec.get("trigger") is not None:
+                return {"success": False,
+                        "error": f"消耗品【{item.name}】是被动触发型，不能手动使用"}
+            target_ref = params.get("target_ref", "")
+            refs = self.combat._combat_entity_refs()
+            target = refs.get(target_ref, self.state.player) if target_ref else self.state.player
+            if target_ref and target is None:
+                return {"success": False, "error": "target_ref不是当前合法目标"}
+            remaining = item.use()
+            logs = custom_resources.apply_effects(
+                self.combat, custom_item.spec["effects"],
+                actor=self.state.player, target=target,
+                x=int(params.get("x", 1)), source=item.name)
+            return {"success": True, "action": f"使用消耗品【{item.name}】",
+                    "result": {"uses_remaining": remaining, "effects": logs},
+                    "state": self.combat._get_combat_state()}
 
         # 普通消耗品：扣减耐久；异变类效果走统一入口 add_mutation
         # （裁定⑧= A4全量：任何角色的任何异变来源同一入口，达50层即【迷失】命零；
@@ -7614,7 +7882,7 @@ class GameEngine:
             "first_embrace_traits": list(s.first_embrace_traits),
             "pending_first_embrace": s.pending_first_embrace,
             "chizu_names": list(s.chizu_names),
-            "dragon_nature": s.dragon_nature,
+            "dragon_cost_points": s.dragon_cost_points,
             "dragon_traits": list(s.dragon_traits),
             "has_sacrifice_action": s.has_sacrifice_action,
         }
@@ -8031,15 +8299,15 @@ class GameEngine:
 
     @staticmethod
     def _new_truth_daowen_instance(cooldown_remaining: int = 0) -> DaoWenInstance:
-        """构造初拥专属道纹【真理】；X固定为1，冷却按完整战斗场数计。"""
+        """构造初拥专属道纹【真理】；X=陈述句数，冷却按完整战斗场数计。"""
         return DaoWenInstance(
             DaoWen(
-                name="真理", formula="固定X=1", cost_type="冷却",
+                name="真理", formula="真理X", cost_type="冷却",
                 cost_formula="2场战斗",
-                effect_formula="指定一个目标与陈述；要求其言明真理，否则无法开口；真伪由DM裁定",
+                effect_formula="提出X句陈述，要求目标逐句言明真理；任一句无法言明则无法开口，持续X回合；真伪由DM裁定",
                 tags=["初拥之夜", "血族专属"],
             ),
-            x_value=1,
+            x_value=1,  # 缺省X；发动时由 use_daowen 的 x 覆盖（自由控X）
             x_free=False,
             cooldown_remaining=max(0, int(cooldown_remaining)),
         )
@@ -8102,7 +8370,7 @@ class GameEngine:
 
     def _action_choose_first_embrace(self, params: dict) -> dict:
         """
-        初拥之夜：9选1。1~8每项限选1次(除9外)，选择后[回复]30%[血限]。
+        初拥之夜：9选1。1~8每项限选1次(除9「封存血脉」外)，选择后[回复]30%[血限]。
         猩红尖牙触发的这一次选择完成后，若仍处于死斗胜利流程中，会紧接着完整封存角色。
         """
         if not self.state.pending_first_embrace:
@@ -8115,7 +8383,7 @@ class GameEngine:
         if not player:
             return {"success": False, "error": "没有玩家"}
 
-        if choice != 9:
+        if choice != self.FIRST_EMBRACE_RETAIN_CHOICE:
             already_chosen = name in self.state.first_embrace_traits
             if name == "真理":
                 # 兼容迁移前仍以遗物保存的旧档，及任何已持有同名道纹的状态。
@@ -8124,10 +8392,14 @@ class GameEngine:
             if already_chosen:
                 return {"success": False, "error": f"{name}已经选过，1~8每项限选1次"}
 
-        if choice != 9:
+        if choice != self.FIRST_EMBRACE_RETAIN_CHOICE:
             if name == "真理":
                 # 事件专属道纹由初拥直接授予；不进入普通学习/残韵流程。
                 player.dao_wen[name] = self._new_truth_daowen_instance()
+            elif choice in self.FIRST_EMBRACE_CONSUMABLES:
+                # 选项3：发放消耗品【血翼】，不占遗物位、不入遗物视图。
+                self.state.consumables.append(
+                    make_wing_item(self.FIRST_EMBRACE_CONSUMABLES[choice]))
             else:
                 # 其余初拥项目仍以遗物形式存放，继承遗物通用规则。
                 self.state.grant_relic(name, effect, tag="血族")
@@ -8158,23 +8430,6 @@ class GameEngine:
 
     # ==================== 初拥之夜：可主动发动的具体能力 ====================
 
-    def _action_use_blood_wings(self, params: dict) -> dict:
-        """鲜血之翼：代价流血5X，发动【飞行X】回合"""
-        if "鲜血之翼" not in self.state.first_embrace_traits:
-            return {"success": False, "error": "没有鲜血之翼"}
-        player = self.state.player
-        x = params.get("x", 0)
-        if not player or not isinstance(x, int) or x < 1:
-            return {"success": False, "error": "X必须是正整数"}
-        payment = self.combat.pay_numeric_cost(
-            player, "流血", 5 * x,
-            cost_share_target_ref=params.get("cost_share_target_ref", ""),
-            cost_context={"timing": "player_action", "source": "鲜血之翼", "source_type": "relic", "tags": {"active_payment"}})
-        player.add_status(StatusEffect(name="飞行", value=x, remaining_rounds=x, source="鲜血之翼"))
-        return {"success": True, "action": "鲜血之翼",
-                "result": {"cost": payment, "bled": 5 * x,
-                           "flying_rounds": x, "hp": player.current_hp}}
-
     def _action_enslave_as_chizu(self, params: dict) -> dict:
         """血族尖牙：代价衰老20，使生命低于自身的一个[目标]转化为听命于你的赤族"""
         if "血族尖牙" not in self.state.first_embrace_traits:
@@ -8202,15 +8457,19 @@ class GameEngine:
     def _action_use_truth_daowen(
         self, params: dict, *, actor: Optional[Entity] = None, x: int = 1,
     ) -> dict:
-        """真理：指定目标与陈述，要求目标言明真理，否则无法开口；由DM裁定真伪，冷却2场。"""
+        """真理X：提出 X 句陈述，要求目标逐句言明真理，否则无法开口。
+
+        2026-10-23 用户裁定：X = 陈述句数（「X 句话」）；X 同时决定无法开口的持续回合。
+        局外发动同样允许（【真理】已列入 OUT_OF_COMBAT_DAOWEN 明示项）。
+        """
         actor = actor or self.state.player
         if actor is self.state.player:
             self._migrate_legacy_truth_eye()
         instance = actor.dao_wen.get("真理") if actor is not None else None
         if instance is None:
             return {"success": False, "error": "没有道纹【真理】"}
-        if not isinstance(x, int) or isinstance(x, bool) or x != 1:
-            return {"success": False, "error": "【真理】固定X=1"}
+        if not isinstance(x, int) or isinstance(x, bool) or x < 1:
+            return {"success": False, "error": "【真理】的X必须是≥1的整数（X=陈述句数）"}
         if instance.cooldown_remaining > 0:
             return {"success": False,
                     "error": f"真理冷却中，还需{instance.cooldown_remaining}场战斗"}
@@ -8221,25 +8480,40 @@ class GameEngine:
                          and actor in self.state.get_all_enemy_side())):
             return {"success": False, "error": "只有持有初拥血脉的轮回者才能发动【真理】"}
 
-        target = self.combat._combat_entity_refs().get(params.get("target_ref", ""))
+        refs = self.combat._combat_entity_refs()
+        target = refs.get(params.get("target_ref", ""))
+        target_name = params.get("target_name", "")
+        if target is None and not target_name:
+            return {"success": False, "error": "必须指定合法target_ref（局外可用target_name）"}
         statement = params.get("statement", "")
-        if target is None or not statement:
-            return {"success": False, "error": "必须指定合法target_ref与statement"}
+        if not statement:
+            return {"success": False, "error": "必须给出陈述statement"}
+        sentences = [part.strip() for part in re.split(r"[。！？；!?;\n]+", statement)
+                     if part.strip()]
+        if len(sentences) != x:
+            return {"success": False,
+                    "error": f"X={x}要求正好{x}句陈述，实际给出{len(sentences)}句"
+                             f"（以。！？；或换行分句）"}
+        subject = target.name if target is not None else target_name
 
         # 保持初拥旧行动口径：发动不消耗出手，不另加资源代价或普通道纹反应链。
         instance.cooldown_remaining = 2
         interrupt = Interrupt(
             interrupt_type=InterruptType.CUSTOM,
-            context={"ability": "真理", "target": target.name, "statement": statement},
-            description=f"对{target.name}发动【真理】，要求其就以下内容言明真理，否则无法开口：\n{statement}\n"
-                        f"请DM裁定对方的回应是否属实。",
+            context={"ability": "真理", "target": subject, "statement": statement,
+                     "sentences": sentences, "silence_rounds": x},
+            description=(f"对{subject}发动【真理X={x}】，要求其逐句言明真理，"
+                         f"任一句无法言明则无法开口，持续{x}回合：\n"
+                         + "\n".join(f"{i}. {s}" for i, s in enumerate(sentences, 1))
+                         + "\n请DM逐句裁定是否属实。"),
             options=[{"id": "truth", "label": "属实", "description": "按DM裁定的真实内容生效"},
                      {"id": "silence", "label": "无法开口", "description": "对方拒绝或无法说出真话，只能沉默"}],
             state_snapshot=self.state.to_dict(),
         )
         self._pending_interrupts.append(interrupt)
-        return {"success": True, "action": "真理",
-                "result": {"interrupt": interrupt.to_dict(), "cooldown_battles": 2}}
+        return {"success": True, "action": f"真理X={x}",
+                "result": {"interrupt": interrupt.to_dict(), "cooldown_battles": 2,
+                           "sentences": sentences, "silence_rounds": x}}
 
     def _action_use_truth_eye(self, params: dict) -> dict:
         """旧 action 名称兼容入口；新界面只暴露 use_daowen(daowen_name=真理)。"""
@@ -8271,6 +8545,119 @@ class GameEngine:
         })
         return {"success": True, "action": "血食",
                 "result": {"sacrificed": chizu.name, "healed": heal_detail["actual_heal"], "player_hp": player.current_hp}}
+
+    # ==================== 自定义资源：声明 / 激活 / 列表 ====================
+
+    def _builtin_resource_names(self) -> set[str]:
+        """内建资源名全集：自定义资源不得与其重名（命名唯一性）。"""
+        DaoWenEngine.register_all()
+        names = set(DaoWenEngine._registry) | {n for n, _ in self.RELIC_DEFS}
+        names |= set(TWISTED_TOOL_LIBRARY)
+        for items in self.TERMINAL_ARTIFACTS.values():
+            names |= {n for n, _ in items}
+        names |= set(self.DRAGON_TRAITS) | set(self.DRAGON_CONSUMABLE_TRAITS)
+        names |= {WING_BLOOD, WING_EMBER}
+        names |= {name for _, (name, _) in self.FIRST_EMBRACE_OPTIONS.items()}
+        return names
+
+    def _action_define_resource(self, params: dict) -> dict:
+        """声明一条自定义资源（就地注册，可选就地授予）。
+
+        这是「当场设计」的唯一入口：声明即用，不需要改代码。
+        params.spec 或 params.specs 为声明对象；grant=False 时只注册不发放。
+        """
+        specs = params.get("specs", params.get("spec"))
+        if specs is None:
+            return {"success": False, "error": "缺少 spec 或 specs"}
+        payload = specs if isinstance(specs, list) else [specs]
+        created: list[str] = []
+        for spec in payload:
+            try:
+                builtin = self._builtin_resource_names()
+                name = spec.get("name") if isinstance(spec, dict) else None
+                if name in builtin:
+                    return {"success": False,
+                            "error": f"【{name}】与现有资源重名：命名在全宇宙内唯一"}
+                resource = custom_resources.register(spec)
+            except custom_resources.CustomResourceError as exc:
+                return {"success": False, "error": f"声明被拒绝：{exc}"}
+            if params.get("grant", True):
+                self._grant_custom_resource(resource)
+            created.append(f"{resource.category}【{resource.name}】")
+        return {"success": True, "action": "声明自定义资源",
+                "result": {"created": created,
+                           "resources": [r.name for r in custom_resources.all_resources()]}}
+
+    def _grant_custom_resource(self, resource) -> dict:
+        """把自定义资源装进当前局：道纹进道纹栏、遗物进遗物栏、消耗品进背包。"""
+        spec, category, name = resource.spec, resource.category, resource.name
+        player = self.state.player
+        if player is None:
+            return {"granted": False, "reason": "没有玩家"}
+        if category == "道纹":
+            if name in player.dao_wen:
+                return {"granted": False, "reason": "已持有"}
+            player.dao_wen[name] = DaoWenInstance(DaoWen(
+                name=name, formula=f"{name}X",
+                cost_type=spec["cost"]["type"],
+                cost_formula=str(spec["cost"].get("amount", "X")),
+                effect_formula=spec.get("summary", "")))
+            return {"granted": True, "slot": "dao_wen"}
+        if category == "遗物":
+            self.state.grant_relic(name, spec.get("summary", ""))
+            return {"granted": True, "slot": "relics"}
+        if category == "消耗品":
+            uses = int(spec.get("uses", 1))
+            self.state.consumables.append(Consumable(
+                name=name, effect=spec.get("summary", ""),
+                current_uses=uses, max_uses=uses, kind="custom"))
+            return {"granted": True, "slot": "consumables"}
+        self.state.artifacts_owned.append(name)
+        return {"granted": True, "slot": "artifacts"}
+
+    def _action_activate_resource(self, params: dict) -> dict:
+        """主动使用一件自定义资源（法器，或无触发时机的自定义消耗品以外的主动项）。
+
+        法器默认不占出手（「不受限其他资源规则」）；声明 costs_action=True 时占 1 次。
+        """
+        name = params.get("name", "")
+        resource = custom_resources.get(name)
+        if resource is None:
+            return {"success": False, "error": f"没有自定义资源【{name}】"}
+        if resource.category == "消耗品":
+            return {"success": False, "error": "消耗品请用 consume_item 使用"}
+        if resource.category == "道纹":
+            return {"success": False, "error": "道纹请用 use_daowen 发动"}
+        if resource.category == "遗物":
+            return {"success": False, "error": "遗物是被动触发，不能主动激活"}
+
+        spec = resource.spec
+        player = self.state.player
+        if spec.get("trigger") is not None:
+            return {"success": False, "error": f"【{name}】是触发式资源，不能主动激活"}
+        if name not in self.state.artifacts_owned:
+            return {"success": False, "error": f"未持有法器【{name}】"}
+        if spec.get("costs_action") and self.state.phase == "in_combat":
+            budget_error = self._consume_action_or_error(player)
+            if budget_error:
+                return budget_error
+        target = self.combat._combat_entity_refs().get(
+            params.get("target_ref", "entity:0"), player)
+        logs = custom_resources.apply_effects(
+            self.combat, spec["effects"], actor=player, target=target or player,
+            x=int(params.get("x", 1)), source=name)
+        return {"success": True, "action": f"激活法器【{name}】",
+                "result": {"effects": logs},
+                "state": self.combat._get_combat_state()}
+
+    def _action_list_resources(self, params: dict) -> dict:
+        """列出已注册的自定义资源及其声明摘要。"""
+        return {"success": True, "action": "自定义资源清单",
+                "result": {"resources": [
+                    {"name": r.name, "category": r.category,
+                     "trigger": r.spec.get("trigger"),
+                     "effects": [e["verb"] for e in r.spec["effects"]]}
+                    for r in custom_resources.all_resources()]}}
 
     # ==================== 终音法器：可主动发动的具体效果 ====================
 
@@ -8377,82 +8764,59 @@ class GameEngine:
         return {"success": True, "action": "负岳碑·预声明保护",
                 "result": {"protected": ally.name, "declared": list(self.state.fuyuebei_declared)}}
 
-    # ==================== 真龙之心：龙性资源与8种龙族遗物 ====================
+    # ==================== 真龙之心：代价累积与 8 种龙族遗物 ====================
+    # 2026-10-23 用户令：废除「龙性」货币。玩家实际支付的数值型【代价】自动记入
+    # `state.dragon_cost_points`（只作兑换门槛，不可花用、不可转账），每满 12 点
+    # 换 1 件未持有的龙族遗物。道纹/法术/事件里的代价本来就支持多途径支付，
+    # 这里不再需要「先换龙性再花龙性」的中间层。
 
-    DRAGON_NATURE_RATE = {"衰老": 2, "枯竭": 6, "萎缩": 12}  # 1点该类型代价 = N点龙性
-    DRAGON_TRAITS = ["龙族血脉", "龙威", "龙族利爪", "龙息", "震岳龙躯", "吞骸龙胃", "断尾求生", "烬翼"]
-    # 龙族项目以【遗物】形式授予，此表提供其效果文本（与《物品索引》一致）
+    # 2026-10-23 用户令：烬翼改为消耗品（耐久5/5），不再是龙族遗物；
+    # 兑换仍走真龙之心的 12 点代价累积，只是发的是消耗品而不是遗物。
+    DRAGON_TRAITS = ["龙族血脉", "龙威", "龙族利爪", "龙息", "震岳龙躯", "吞骸龙胃", "断尾求生"]
+    DRAGON_CONSUMABLE_TRAITS = {WING_EMBER: 5}
     DRAGON_TRAIT_EFFECTS = {
         "龙族血脉": "对怪物造成伤害后，直接使其［命零］；对非怪物造成伤害翻倍",
-        "龙威": "所有敌方必须优先选择自身为[目标]",
-        "龙族利爪": "你的攻击力等同当前法力×2",
+        "龙威": "［战始］起，所有敌方必须优先选择你为[目标]",
+        "龙族利爪": "［战始］起，你的[攻击力]等同当前法力×2",
         "龙息": "所有敌方[目标]行动前，受到10×当前回合数的必中伤害",
-        "震岳龙躯": "消耗6X点龙性，自身受到超出15点的所有伤害无效。持续X",
+        "震岳龙躯": "你受到的单次伤害超过15点时，超出部分无效",
         "吞骸龙胃": "任意怪物［命零］后，可将其吞噬：自身获得[回复12]，并选择一枚【××龙心】，使其当前耐久+6",
         "断尾求生": "自身即将［命零］时，可销毁一件本场获得的其他龙族遗物，抵消本次使自身［命零］的伤害",
-        "烬翼": "［回始］，可消耗3X点龙性，获得【飞行X】",
     }
     # 龙威通过prepare_monster_phase收窄合法目标列表实现；resolve只接受prepare列出的目标。
-
-    def _action_pay_for_dragon_nature(self, params: dict) -> dict:
-        """真龙之心：支付衰老/枯竭/萎缩代价换取龙性（6X衰老=2X枯竭=X萎缩=12X龙性）"""
-        if "真龙之心" not in self.state.artifacts_owned:
-            return {"success": False, "error": "没有真龙之心"}
-        cost_type = params.get("cost_type", "")
-        x = params.get("x", 0)
-        if cost_type not in self.DRAGON_NATURE_RATE or not isinstance(x, int) or x < 1:
-            return {"success": False, "error": "cost_type必须是衰老/枯竭/萎缩之一，x必须是正整数"}
-        player = self.state.player
-        if not player:
-            return {"success": False, "error": "没有玩家"}
-        payment = self.combat.pay_numeric_cost(
-            player, cost_type, x,
-            cost_share_target_ref=params.get("cost_share_target_ref", ""),
-            cost_context={"timing": "pre_battle_action", "source": "真龙之心", "source_type": "artifact", "tags": {"active_payment"}})
-        gained = x * self.DRAGON_NATURE_RATE[cost_type]
-        self.state.dragon_nature += gained
-        return {"success": True, "action": "真龙之心·换取龙性",
-                "result": {"paid": f"{cost_type}{x}", "cost": payment,
-                           "dragon_nature_gained": gained,
-                           "dragon_nature": self.state.dragon_nature}}
+    DRAGON_COST_PER_TRAIT = 12
 
     def _action_unlock_dragon_trait(self, params: dict) -> dict:
-        """真龙之心：每消耗12龙性，获得1件未持有的龙族遗物"""
+        """真龙之心：每满 12 点代价累积，获得 1 件未持有的龙族遗物/翼类消耗品。"""
         if "真龙之心" not in self.state.artifacts_owned:
             return {"success": False, "error": "没有真龙之心"}
         trait = params.get("trait", "")
-        if trait not in self.DRAGON_TRAITS:
-            return {"success": False, "error": f"trait必须是{self.DRAGON_TRAITS}之一"}
+        options = self.DRAGON_TRAITS + list(self.DRAGON_CONSUMABLE_TRAITS)
+        if trait not in options:
+            return {"success": False,
+                    "error": f"trait必须是{options}之一，收到{trait!r}"}
         if trait in self.state.dragon_traits:
-            return {"success": False, "error": f"已持有{trait}，不能重复获得"}
-        if self.state.dragon_nature < 12:
-            return {"success": False, "error": f"龙性不足，需要12，当前{self.state.dragon_nature}"}
-        self.state.dragon_nature -= 12
-        self.state.grant_relic(trait, self.DRAGON_TRAIT_EFFECTS.get(trait, ""), tag="龙族")
-        # 【龙族利爪】2026-09-17 用户令改版：效果改为「攻击力 = 当前法力×2」，
-        # 不再写死初始 3 攻次 / 1 攻力——那两行直接覆盖玩家遗留字段，
-        # 而 models.py 的写穿对轮回者不生效（旧效果因此对玩家完全无效），
-        # 一旦写穿还会把玩家真实的[速限]/[法限]直接冲掉（见 models.py 注释）。
-        # 新效果走状态层，由 BATTLE_START 机制【龙族利爪】挂状态、
-        # models.py::effective_attack_power 读取。
-        return {"success": True, "action": "真龙之心·获得龙族遗物",
-                "result": {"trait": trait, "dragon_nature_remaining": self.state.dragon_nature,
-                           "dragon_traits": list(self.state.dragon_traits)}}
-
-    def _action_activate_dragon_body(self, params: dict) -> dict:
-        """震岳龙躯：消耗6X点龙性，自身受到超出15点的所有伤害无效，持续X回合"""
-        if "震岳龙躯" not in self.state.dragon_traits:
-            return {"success": False, "error": "没有震岳龙躯"}
-        x = params.get("x", 0)
-        if not isinstance(x, int) or x < 1:
-            return {"success": False, "error": "x必须是正整数"}
-        cost = 6 * x
-        if self.state.dragon_nature < cost:
-            return {"success": False, "error": f"龙性不足，需要{cost}，当前{self.state.dragon_nature}"}
-        self.state.dragon_nature -= cost
-        self.state.dragon_body_shield_rounds = x
-        return {"success": True, "action": "震岳龙躯",
-                "result": {"rounds": x, "dragon_nature": self.state.dragon_nature}}
+            return {"success": False, "error": f"已持有龙族遗物【{trait}】"}
+        if trait in self.DRAGON_CONSUMABLE_TRAITS and any(
+                c.name == trait for c in self.state.consumables):
+            return {"success": False, "error": f"已持有【{trait}】（消耗品，耐久已满）"}
+        if self.state.dragon_cost_points < self.DRAGON_COST_PER_TRAIT:
+            return {"success": False,
+                    "error": (f"代价累积不足：需要{self.DRAGON_COST_PER_TRAIT}点，"
+                              f"当前{self.state.dragon_cost_points}点（实际支付数值型代价即可累积）")}
+        self.state.dragon_cost_points -= self.DRAGON_COST_PER_TRAIT
+        if trait in self.DRAGON_CONSUMABLE_TRAITS:
+            item = make_wing_item(trait)
+            self.state.consumables.append(item)
+            return {"success": True, "action": f"真龙之心·获得消耗品{trait}",
+                    "result": {"trait": trait, "effect": item.effect, "kind": "consumable",
+                               "max_uses": item.max_uses,
+                               "cost_points_remaining": self.state.dragon_cost_points}}
+        effect = self.DRAGON_TRAIT_EFFECTS[trait]
+        self.state.grant_relic(trait, effect, tag="龙族")
+        return {"success": True, "action": f"真龙之心·解锁{trait}",
+                "result": {"trait": trait, "effect": effect,
+                           "cost_points_remaining": self.state.dragon_cost_points}}
 
     def _action_devour_monster(self, params: dict) -> dict:
         """吞骸龙胃：任意怪物[命零]后可将其吞噬，自身获得回复12，并选择一枚龙心使其耐久+6"""
@@ -8494,25 +8858,6 @@ class GameEngine:
         self.state.dragon_tail_sacrifice_declared = trait
         return {"success": True, "action": "断尾求生·预声明",
                 "result": {"declared_sacrifice": trait}}
-
-    def _action_use_dragon_wings(self, params: dict) -> dict:
-        """烬翼：[回始]可消耗3X点龙性，获得飞行X"""
-        if "烬翼" not in self.state.dragon_traits:
-            return {"success": False, "error": "没有烬翼"}
-        target_round = self.state.current_round + 1
-        if self.state.event_modifiers.get("dragon_wings_used_round") == target_round:
-            return {"success": False, "error": "烬翼本回始已经发动"}
-        x = params.get("x", 0)
-        if not isinstance(x, int) or x < 1:
-            return {"success": False, "error": "x必须是正整数"}
-        cost = 3 * x
-        if self.state.dragon_nature < cost:
-            return {"success": False, "error": f"龙性不足，需要{cost}，当前{self.state.dragon_nature}"}
-        self.state.dragon_nature -= cost
-        self.state.event_modifiers["dragon_wings_used_round"] = target_round
-        self.state.player.add_status(StatusEffect(name="飞行", value=x, remaining_rounds=x, source="烬翼"))
-        return {"success": True, "action": "烬翼",
-                "result": {"flying_rounds": x, "dragon_nature": self.state.dragon_nature}}
 
     def _action_battle_end(self, params: dict) -> dict:
         """战终；仍有未移出的存活敌人时不得跳过战斗直接结算（统一判定见 GameState.battle_won）。"""
@@ -8898,9 +9243,9 @@ class GameEngine:
 
         self.state.phase = "pre_battle"
 
-        rebellion_check = self.combat.check_employee_rebellion()
-        if rebellion_check.get("rebellion"):
-            self.state.rebellion_active = True
+        # 2026-10-24 用户令：背叛改为[朋友]／[员工]的自选项——[战终]不再按
+        # 攻击总值判定、不自动置 rebellion_active，只把可选对象报给 AI。
+        betrayal_check = self.combat.betrayal_candidates()
 
         # 捕获战终结果数值，因【最终的冠冕】可能在下面把self.state整个替换为新轮回者的空白状态
         battle_end_result = {
@@ -8920,7 +9265,9 @@ class GameEngine:
             "spell_logs": spell_logs,
             "scoped_effects_rolled_back": scoped_rollbacks,
             "spell_bindings_removed": spell_bindings_removed,
-            "employee_rebellion": rebellion_check,
+            "betrayal": {**betrayal_check,
+                         "pending": self.state.rebellion_active,
+                         "rebels": list(self.state.rebellion_rebels)},
             "employee_promotions": promoted,   # [员工]出场存活满3场 → 转为[朋友]
             "player_dead": (not self.state.player.is_alive) if self.state.player else False,
         }

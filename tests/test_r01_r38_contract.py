@@ -96,7 +96,8 @@ def test_r01_r10_boundary_xiaozai_is_only_out_of_combat_daowen(tmp_path):
 
     _dw(player, "固执")
     denied = engine.execute_action("use_daowen", {"daowen_name": "固执", "x": 1})
-    assert not denied["success"] and "唯一例外" in denied["error"]
+    # 2026-10-23 用户裁定：默认局内，局外须条文明示——【消灾】仍是唯一明示项。
+    assert not denied["success"] and "局外发动须条文明示" in denied["error"]
 
 
 def test_r01_r10_illegal_phase_and_missing_target_are_atomic(tmp_path):

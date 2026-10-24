@@ -31,7 +31,7 @@ MEDIOCRITY_ROUNDS = Entity.MEDIOCRITY_ROUNDS
 
 
 # 实现分片：方法体在 engine/combat_parts/*.py，本文件保留门面与核心结算
-# （__init__ / 伤害与数值管线 / resolve_attack / 回合管理 / 员工背叛与死之传承 /
+# （__init__ / 伤害与数值管线 / resolve_attack / 回合管理 / 背叛候选与死之传承 /
 #  遗物结算 / 凡庸与目标合法性）。拆分不改变行为与对外契约：CombatEngine 仍是
 # 唯一入口，全部引用方（含 self.combat.X 与 CombatEngine.X）经 MRO 解析不变。
 # 新增分片时请同步 engine/validator.py 的机制护栏扫描范围。
@@ -1283,25 +1283,26 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     # ========== 辅助方法 ==========
     
 
-    # ========== 大流程：员工背叛 / 死之传承 ==========
+    # ========== 大流程：背叛候选 / 死之传承 ==========
 
-    def check_employee_rebellion(self) -> dict:
+    def betrayal_candidates(self) -> dict:
+        """背叛候选（2026-10-24 用户令：改为[朋友]／[员工]的自选项）。
+
+        旧口径在[战终]按「员工攻击总值 ≥ 玩家生命 + 朋友攻击总值」判定，
+        命中即全体员工作为特殊事件夺书。现改为：没有阈值、不自动触发、
+        也不由 DM 代为发动——由扮演他们的 AI 自己决定要不要夺书，再用
+        `declare_betrayal` 显式声明。这里只列出人选，不含任何判定。
         """
-        员工背叛（[战终]检查）：所有[员工]攻击次数×攻击力相加，
-        若 ≥ 轮回者当前生命 + 所有[朋友]攻击总值，则所有员工背叛夺取《死者之书》。
-        """
-        emps = [e for e in self.state.employees if e.is_alive]
-        if not emps:
-            return {"rebellion": False, "reason": "无员工"}
-        emp_atk = sum(e.attack_count * e.attack_power for e in emps)
-        friend_atk = sum(f.attack_count * f.attack_power for f in self.state.friends if f.is_alive)
-        player_hp = self.state.player.current_hp if (self.state.player and self.state.player.is_alive) else 0
-        threshold = player_hp + friend_atk
-        if emp_atk >= threshold:
-            return {"rebellion": True, "rebels": [e.name for e in emps],
-                    "employee_attack_total": emp_atk, "threshold": threshold,
-                    "options": ["镇压（与所有背叛员工开战）", "让利（本场每名员工工资+5碎片）", "谈判（给出合理方案）"]}
-        return {"rebellion": False, "employee_attack_total": emp_atk, "threshold": threshold}
+        employees = [e.name for e in self.state.employees if e.is_alive]
+        friends = [f.name for f in self.state.friends if f.is_alive]
+        return {
+            "rebellion": False,
+            "automatic": False,
+            "reason": "背叛是[朋友]／[员工]的自选项，引擎不按数值判定",
+            "candidates": employees + friends,
+            "employees": employees,
+            "friends": friends,
+        }
 
     def trigger_death_legacy(self, legacy: dict[str, str] | str) -> dict:
         """新增一页遗言；一句话，上限=`state.death_book_capacity`（默认20字）。
@@ -1504,6 +1505,12 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """结算一名角色的凡庸。调用方必须已按非轮回者优先排好序。"""
         if not entity.is_alive:
             return []
+        # 【烬翼·熄事】：本回合不触发特殊事件（凡庸不结算，计数照常清零）。
+        if self.state.suppresses_special_events(entity):
+            entity.no_action_rounds = 0
+            entity.no_damage_rounds = 0
+            return [{"type": "mediocrity", "entity": entity.name, "suppressed": True,
+                     "note": f"{entity.name}受到【熄事】保护，本次不触发【凡庸】"}]
         self._hp_loss_recording += 1  # 凡庸直接命零=特殊死因，不触发「失去生命后」
         try:
             entity.current_hp = 0

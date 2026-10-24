@@ -253,8 +253,11 @@ def _silent_mask_effect(ctx: TriggerContext, targets: list) -> str:
     （另一字面规则），不在本机制范围，保持不变。
 
     X=0（未登记 silent_mask_x）时不发放，保持与旧块一致的无操作语义。
+    2026-10-23 起固定 +2，不再读 silent_mask_x（遗物无 X 变量）。
     """
-    x = ctx.state.event_modifiers.get("silent_mask_x", 0)
+    # 2026-10-23 用户令：遗物不得有 X 变量，改为固定 +2。
+    # 事件「献出声音」里的失忆X 仍然计入玩家当场支付的代价，但不再驱动本遗物数值。
+    x = 2
     player = ctx.target
     if x > 0:
         player.mana_limit += x

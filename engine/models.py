@@ -153,6 +153,9 @@ class Consumable:
     kind: str = "normal"
     # dragon_heart 专用：可抵消的代价类型（流血/衰老/疲惫）
     dragon_heart_type: str = ""
+    # 计数型消耗品的进度（2026-10-23：血翼「累计失去100%[血限]的生命」）。
+    # 满一个阈值即兑换 1 点耐久，余数留在这里继续滚存。
+    progress: int = 0
 
     @property
     def is_depleted(self) -> bool:
@@ -183,6 +186,7 @@ class Consumable:
             "is_depleted": self.is_depleted,
             "kind": self.kind,
             "dragon_heart_type": self.dragon_heart_type,
+            "progress": self.progress,
         }
 
 
@@ -1229,11 +1233,14 @@ class GameState:
     # 字段名保留 delayed_monster_reentries 是为了不打断既有调用方与存档。
     delayed_monster_reentries: list[dict] = field(default_factory=list)
 
-    # 员工背叛：待处理标记（[战终]检查命中后置真，三个处理分支任一生效后清空）
+    # 背叛（2026-10-24 用户令：不再是特殊事件，改为[朋友]／[员工]的自选项）：
+    #   rebellion_active   —— 已有人声明背叛、等待轮回者选镇压/让利/谈判；
+    #   rebellion_rebels   —— 声明背叛者的名字（可能同时含[员工]与[朋友]）。
     rebellion_active: bool = False
-    # 员工背叛·镇压子战斗：进行中标记（employees已搬入enemies，需resolve_rebellion_battle结算）
+    rebellion_rebels: list[str] = field(default_factory=list)
+    # 背叛·镇压子战斗：进行中标记（背叛者已搬入enemies，需resolve_rebellion_battle结算）
     rebellion_in_progress: bool = False
-    # 员工背叛·让利：每场工资在原公式基础上的固定加成（本次轮回持续生效）
+    # 背叛·让利：每场工资在原公式基础上的固定加成（本次轮回持续生效）
     wage_bonus: int = 0
 
     # 养蛊场（怪物互斗）训练模式：开启后怪物阶段的合法目标从「玩家侧」扩为「其它怪物」，
@@ -1265,11 +1272,11 @@ class GameState:
     # 炼心在战斗中发动时不消耗出手，改为"下次局外行动多消耗1点精力"，此处累计待结算的额外精力消耗
     pending_energy_penalty: int = 0
 
-    # 熔谷终音"真龙之心"：龙性资源池。
-    # 已解锁的龙族项目本身以【遗物】形式存放在 self.relics（tags含"龙族"），
-    # 不再维护独立名单——dragon_traits 是对 relics 的只读视图，见下方 property。
-    dragon_nature: int = 0
-    # 震岳龙躯剩余持续回合数（0=未激活）；断尾求生已消耗的遗物记录见dragon_traits变化
+    # 熔谷终音"真龙之心"：代价累积账本（2026-10-23 用户令：废除「龙性」货币）。
+    # 不再是可支配资源——玩家实际支付的数值型【代价】自动累加，满 12 点换 1 件
+    # 未持有的龙族遗物。已解锁的龙族项目以【遗物】形式存放在 self.relics（tags含"龙族"）。
+    dragon_cost_points: int = 0
+    # 震岳龙躯已改为常驻被动（单次伤害封顶15），此字段仅为旧存档兼容保留，不再读取。
     dragon_body_shield_rounds: int = 0
     # 断尾求生：预先声明"若本次伤害会使自身命零，移除该龙族遗物来抵消伤害"；为空=未声明保护
     dragon_tail_sacrifice_declared: str = ""
@@ -1855,6 +1862,7 @@ class GameState:
                 for entry in getattr(self, "delayed_monster_reentries", [])
             ],
             "rebellion_active": self.rebellion_active,
+            "rebellion_rebels": list(self.rebellion_rebels),
             "rebellion_in_progress": self.rebellion_in_progress,
             "wage_bonus": self.wage_bonus,
             "in_final_duel": self.in_final_duel,
@@ -1985,3 +1993,18 @@ class GameState:
     def battle_over(self) -> bool:
         """战斗胜负已定（胜或负任一成立）。"""
         return self.battle_lost() or self.battle_won()
+
+    # ==================== 特殊事件抑制（烬翼·熄事，2026-10-23） ====================
+    SPECIAL_EVENT_SUPPRESSION_STATUS = "熄事"
+
+    def suppresses_special_events(self, entity) -> bool:
+        """该角色本回合是否免疫特殊事件的**触发**结算。
+
+        【烬翼】「熄事」模式：状态 remaining_rounds=1，回终自然到期。
+        覆盖会落到该角色身上的触发：致死类（凡庸／癌变／迷失）与永久离场类
+        （雕塑／还债）。只拦"触发"，不拦玩家主动选择的行动（例如主动逃跑），
+        也不拦别人身上触发的事件。
+        """
+        if entity is None:
+            return False
+        return bool(entity.has_status(self.SPECIAL_EVENT_SUPPRESSION_STATUS))

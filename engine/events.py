@@ -418,11 +418,12 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             return {"applied": applied, "instructions": [], "random": roll["record"]}
 
     # ---- 龙族起源事件：埋骨之地（龙心谷专属） ----
-    # 结算覆盖：获得龙性（选项1）/ 获得龙心资源（选项2）/ 拒绝（选项3）。
+    # 结算覆盖：记入12点代价累积（选项1）/ 获得龙心资源（选项2）/ 拒绝（选项3）。
+    # 2026-10-23 用户令：龙性货币废除；选项1 改为直接记入真龙之心的兑换门槛。
     if event_name == "埋骨之地":
         if text.startswith("继承龙骨"):
-            engine.state.dragon_nature += 12
-            applied.append("获得12龙性")
+            engine.state.dragon_cost_points += 12
+            applied.append("代价累积+12（真龙之心兑换门槛）")
             return {"applied": applied, "instructions": instructions}
         if text.startswith("拾取龙心"):
             from .models import Consumable

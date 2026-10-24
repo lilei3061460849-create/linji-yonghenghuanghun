@@ -1,0 +1,9 @@
+{
+  "name": "回春散",
+  "category": "消耗品",
+  "uses": 2,
+  "summary": "使自身获得 15 点回复",
+  "effects": [
+    {"verb": "heal", "target": "self", "amount": 15}
+  ]
+}

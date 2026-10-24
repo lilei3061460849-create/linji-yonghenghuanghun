@@ -196,6 +196,9 @@ class MonsterLifeMixin:
         """任一角色恢复量达阈值即癌变。怪物仍吸收进书；轮回者/同伴直接命零。"""
         if entity is None or not entity.is_alive or entity.is_proliferated:
             return None
+        # 【烬翼·熄事】：本回合不触发特殊事件（癌变在此拦下，进度照常累计）。
+        if self.state.suppresses_special_events(entity):
+            return None
         # 2026-09-23：【第一杯】重做，旧「持有者免疫癌变」条款废止（原为钱袋并入的效果）。
         # 现在持有者照样癌变——而且因为「受到的回复翻倍」，累计回复更快撞上 2×血限。
         # 新条文只有「受到的[回复]与失去的生命翻倍」，两条倍率的唯一事实源在
@@ -297,6 +300,9 @@ class MonsterLifeMixin:
             if not monster.is_alive or monster.is_sculptured \
                     or monster.is_proliferated or monster.is_debt_bound:
                 continue
+            # 【烬翼·熄事】：本回合不触发任何特殊事件（还债/救赎/癌变/雕塑一并跳过）。
+            if self.state.suppresses_special_events(monster):
+                continue
 
             # 1. 雕塑：攻击次数**和**攻击力都归0（DM裁定 2026-09-10，原为「之一归0」）
             if self._can_be_sculptured(monster) and (
@@ -337,6 +343,9 @@ class MonsterLifeMixin:
             if id(ally) in seen:
                 continue
             if not ally.is_alive or ally.is_sculptured or ally.is_proliferated or ally.is_debt_bound:
+                continue
+            # 【烬翼·熄事】：本回合不触发任何特殊事件（含还债吞噬）。
+            if self.state.suppresses_special_events(ally):
                 continue
             debt_balance = self.state.shards if ally is self.state.player else ally.shards
             debt_peak = max(0, int(getattr(self.state, "shards_peak", 0) if ally is self.state.player
@@ -435,6 +444,10 @@ class MonsterLifeMixin:
 
     def _sculpture_monster(self, monster: Entity) -> dict:
         """雕塑：任一角色攻击次数和攻击力同时归0→化为雕塑消耗品（耐久=血限5%）"""
+        if self.state.suppresses_special_events(monster):
+            # 【烬翼·熄事】：本回合不触发特殊事件；雕塑不成立，角色留在场上。
+            return {"type": "sculpture", "monster": monster.name, "suppressed": True,
+                    "note": f"{monster.name}受到【熄事】保护，本次不触发【雕塑】"}
         # 耐久 = ceil([血限] × durability_ratio)，至少 durability_min（事实源见 toml）
         durability = max(special_events.durability_min("diaosu"),
                          math.ceil(monster.blood_limit * special_events.durability_ratio("diaosu")))
@@ -631,19 +644,29 @@ class MonsterLifeMixin:
 
     def initiate_negotiation(self, proposal: str) -> Interrupt:
         """
-        员工背叛·谈判声明：给出合理的谈判方案破解叛乱，需要DM裁定方案是否成立。
+        背叛·谈判声明：给出合理的谈判方案破解叛乱，需要DM裁定方案是否成立。
+
+        2026-10-24 起背叛是[朋友]／[员工]的自选项，谈判对象是声明背叛的人
+        （state.rebellion_rebels），不再是"全体员工按攻击总值对撞"。
         """
+        declared = list(getattr(self.state, "rebellion_rebels", []) or [])
+        if declared:
+            wanted = set(declared)
+            rebels = [e.name for e in self.state.employees + self.state.friends
+                      if e.name in wanted]
+        else:
+            rebels = [e.name for e in self.state.employees]
         return Interrupt(
             interrupt_type=InterruptType.STAFF_MUTINY,
             context={
-                "employees": [e.name for e in self.state.employees],
-                "employee_attack_total": sum(e.attack_count * e.attack_power for e in self.state.employees),
+                "rebels": rebels,
                 "player_hp": self.state.player.current_hp if self.state.player else 0,
                 "shards": self.state.shards,
                 "proposal": proposal,
             },
             description=(
-                f"轮回者尝试以谈判方案破解员工背叛：\n\n{proposal}\n\n"
+                f"轮回者尝试以谈判方案破解背叛：\n\n{proposal}\n\n"
+                f"背叛者：{'、'.join(rebels) or '（未具名）'}\n"
                 f"请DM裁定该方案是否合理、能否平息叛乱。"
             ),
             options=[

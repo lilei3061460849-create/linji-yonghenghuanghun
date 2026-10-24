@@ -1,0 +1,10 @@
+{
+  "name": "回响铃",
+  "category": "法器",
+  "uniqueness": "现有法器都绑定战始/回始或耐久武器；回响铃是随时可激活的即时增益，提供‘先手改变节奏’这一现有资源没有的能力。",
+  "summary": "主动激活：自身获得【回响】3回合",
+  "costs_action": false,
+  "effects": [
+    {"verb": "status", "target": "self", "name": "回响", "duration": 3, "amount": 1}
+  ]
+}
