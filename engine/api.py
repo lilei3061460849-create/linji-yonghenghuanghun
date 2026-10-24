@@ -2465,8 +2465,12 @@ class GameEngine:
                             current_mana=max(0, int(template.mana_limit)),
                             speed_limit=max(0, int(template.speed_limit)),
                             current_speed=max(0, int(template.speed_limit)),
-                            attack_count=max(0, int(template.attack_count)),
-                            attack_power=max(0, int(template.attack_power)),
+                            # 2026-10-24：攻击次数＝当前速度、攻击力＝当前法力（见
+                            # Entity.effective_attack_count/effective_attack_power）。
+                            # 直接复制模板的 attack_count/attack_power 会拿到开局前的 0，
+                            # 让流浪轮回者变成打不还手、怪物阶段也交不出合法提交的空壳。
+                            attack_count=max(0, int(template.speed_limit)),
+                            attack_power=max(0, int(template.mana_limit)),
                         )
                         self.state.enemies.append(npc)
                         spawned_reincarnators.append(npc)

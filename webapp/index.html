@@ -695,14 +695,14 @@ function renderBattle(){
     row.append(prep);
   }
   if (has("resolve_ally_phases")) row.append(allyBtn());
-  if (has("prepare_monster_phase")) row.append(monsterBtn(dodgeBoxes));
+  if (has("prepare_monster_phase") || has("resolve_monster_phase")) row.append(monsterBtn(dodgeBoxes));
   if (has("round_end")) row.append(roundEndBtn());
   if (has("round_start")) row.append(roundStartBtn());
   if (has("battle_end")) row.append(endBtn());
   body.append(row);
 
   const foes = (b.combatants || []).filter(c => c.side === "enemy" && c.alive && c.ref);
-  if (foes.length && has("prepare_monster_phase")){
+  if (foes.length && (has("prepare_monster_phase") || has("resolve_monster_phase"))){
     const dodgeWrap = el("div","kv");
     dodgeWrap.append(document.createTextNode("敌方阶段尝试闪避："));
     foes.forEach((c) => {

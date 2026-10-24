@@ -280,6 +280,8 @@ class WorldActorState:
     # 视野半径按上下左右的曼哈顿距离计；造物每次培养提高1。
     vision_range: int = 1
     guard_position: Coord | None = None
+    # 上一格位置：只用于避免自主单位在障碍前两格来回横跳（见跟随/守卫分支）。
+    last_position: Coord | None = None
     known_cells: set[str] = field(default_factory=set)
     visited_cells: set[str] = field(default_factory=set)
     memory: list[dict[str, Any]] = field(default_factory=list)
@@ -302,6 +304,8 @@ class WorldActorState:
         values["memory"] = list(values.get("memory", []))
         guard_position = values.get("guard_position")
         values["guard_position"] = tuple(guard_position) if guard_position is not None else None
+        last_position = values.get("last_position")
+        values["last_position"] = tuple(last_position) if last_position is not None else None
         values.setdefault("behavior", "explore")
         values.setdefault("owner_actor_id", "")
         values.setdefault("vision_range", 1)
@@ -338,6 +342,8 @@ class WorldState:
     final_duel_winner: str = ""
     # 雇佣信号跨回合保存；轮回者可以离开信号发出地点继续行动。
     hiring_signals: list[dict[str, Any]] = field(default_factory=list)
+    # 单位最近踩过的格子（只保留最近若干步）：跟随者可以"沿路"找主人，不偷看迷雾。
+    trails: dict[str, list[Coord]] = field(default_factory=dict)
 
     @classmethod
     def create(cls, *, width: int = 21, height: int = 21, seed: int = 0) -> "WorldState":
@@ -450,6 +456,21 @@ class WorldState:
         for actor in caught:
             self.record("actor_caught_by_shrinking_boundary", actor.actor_id,
                         ring=ring, position=list(actor.position))
+            # 2026-10-24：若该格四邻全是墙/已被圈层吞掉，它已经无处可撤——
+            # 此时必须给一条生路，否则单位会被永久封死在 void 里，
+            # 跟随的同伴也就永远跟不上玩家（实跑发现）。
+            if any(self.map.is_passable(neighbor) for neighbor in (
+                    (actor.x + 1, actor.y), (actor.x - 1, actor.y),
+                    (actor.x, actor.y + 1), (actor.x, actor.y - 1))):
+                continue
+            destination = self._nearest_passable_cell(actor.position)
+            if destination is None or destination == actor.position:
+                continue
+            origin = actor.position
+            actor.x, actor.y = destination
+            self.record("actor_displaced_by_shrinking_boundary", actor.actor_id,
+                        origin=list(origin), destination=list(destination),
+                        reason="no_passable_exit")
         next_ring = self.shrink_count
         next_turn = (next_ring * self.shrink_interval
                      if next_ring * 2 < min(self.map.width, self.map.height) - 1
@@ -457,6 +478,18 @@ class WorldState:
         return {"ring": ring, "removed_cells": len(removed),
                 "caught_actor_ids": [actor.actor_id for actor in caught],
                 "next_shrink_turn": next_turn}
+
+    def _nearest_passable_cell(self, origin: Coord) -> Coord | None:
+        """从 origin 向外找最近的可通行格（同距离时取 y、x 较小的）。"""
+        width, height = self.map.width, self.map.height
+        candidates = [
+            (x, y) for y in range(height) for x in range(width)
+            if self.map.is_passable((x, y))
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda pos: (
+            abs(pos[0] - origin[0]) + abs(pos[1] - origin[1]), pos[1], pos[0]))
 
     def move_actor(self, actor_id: str, destination: Coord) -> dict[str, Any]:
         actor = self._living_actor(actor_id)
@@ -471,11 +504,13 @@ class WorldState:
             raise ValueError("目标格不可通行")
         # 世界规则允许多个单位占据同一格；进入同格后立即检查敌对遭遇。
         origin = actor.position
+        actor.last_position = origin
         actor.x, actor.y = destination
         actor.visited_cells.add(self.map.key(destination))
         self.clock.advance(1)
         shrink = self._shrink_boundary_if_due()
         self.record("actor_moved", actor_id, origin=list(origin), destination=list(destination))
+        self._append_trail(actor_id, destination)
         self.visible_cells(actor_id)
         encounters = self.detect_adjacent_encounters(actor_id)
         interactions = self.detect_adjacent_interactions(actor_id, origin)
@@ -492,13 +527,27 @@ class WorldState:
             result["boundary_shrunk"] = shrink
         return result
 
-    def _find_known_path(self, actor_id: str, start: Coord, goal: Coord) -> list[Coord] | None:
-        """只在该单位已知的可通行格中寻路，不读取迷雾里的地形。"""
+    def _append_trail(self, actor_id: str, position: Coord) -> None:
+        """记录单位最近踩过的格子；供跟随者沿路找主人（上限 80 格）。"""
+        trail = self.trails.setdefault(actor_id, [])
+        trail.append((position[0], position[1]))
+        if len(trail) > 80:
+            del trail[:-80]
+
+    def _find_known_path(self, actor_id: str, start: Coord, goal: Coord,
+                         extra_cells: set[Coord] | None = None) -> list[Coord] | None:
+        """只在该单位已知的可通行格中寻路，不读取迷雾里的地形。
+
+        extra_cells 用于"跟着主人走过的路走"：那些格子是主人亲自踩过的，
+        对跟随者而言是已知可通行格，不算偷看迷雾。
+        """
         actor = self.actors.get(actor_id)
         if actor is None:
             return None
         known = {self.map.parse(key) for key in actor.known_cells}
         known.add(start)
+        for cell in extra_cells or ():
+            known.add(cell)
         if goal not in known or not self.map.is_passable(goal):
             return None
         queue = deque([start])
@@ -709,27 +758,54 @@ class WorldState:
                 elif actor.behavior == "guard":
                     target_position = actor.guard_position or actor.position
                 if target_position is not None and target_position != actor.position:
-                    path = self._find_known_path(actor_id, actor.position, target_position)
-                    if path and len(path) > 1:
-                        preferred = path[1]
-                        if preferred in candidates or preferred == target_position:
-                            destination = preferred
+                    # 死路记忆：主人/守点在已知地形外时，单位只能逐步试探。在同一个
+                    # 格子上反复来回（实跑发现的两格横跳）就是死路，记下来不再重踩。
+                    dead_ends = {entry.get("cell") for entry in actor.memory
+                                 if entry.get("kind") == "dead_end"}
+                    forward = [candidate for candidate in candidates
+                               if self.map.key(candidate) not in dead_ends]
+                    pool = forward or candidates
+                    current_distance = (abs(target_position[0] - actor.x)
+                                        + abs(target_position[1] - actor.y))
+                    # 同伴跟着主人走：主人踩过的格子 + 主人已探明的地形，对跟随者
+                    # 视为已知路线（同一队共享已走过的路），仍不读取任何人没见过的迷雾。
+                    trail: set[Coord] = set()
+                    if owner is not None and actor.behavior == "follow":
+                        trail.update(self.trails.get(owner.actor_id, []))
+                        trail.update(self.map.parse(key) for key in owner.known_cells)
+                    path = self._find_known_path(actor_id, actor.position, target_position,
+                                                 extra_cells=trail)
+                    # 有已知路线（含主人足迹）时以路线优先：死路记忆只用于无路线时的
+                    # 试探，不能反过来把已经走通的路堵掉。
+                    if path and len(path) > 1 and (path[1] in candidates
+                                                   or path[1] == target_position):
+                        destination = path[1]
+                    closer = [candidate for candidate in pool
+                              if abs(target_position[0] - candidate[0])
+                              + abs(target_position[1] - candidate[1]) < current_distance]
+                    if destination is None and closer:
+                        destination = min(
+                            closer,
+                            key=lambda pos: (
+                                abs(target_position[0] - pos[0])
+                                + abs(target_position[1] - pos[1]),
+                                self.map.key(pos) in actor.visited_cells,
+                                pos[1], pos[0]))
                     if destination is None:
-                        # 主人位置/守卫点是已知目标，但未知地形不能直接参与寻路。
-                        # 仅根据当前可见的相邻格尝试接近，遇墙后再探索新的可见区域。
-                        current_distance = (abs(target_position[0] - actor.x)
-                                            + abs(target_position[1] - actor.y))
-                        closer = [candidate for candidate in candidates
-                                  if abs(target_position[0] - candidate[0])
-                                  + abs(target_position[1] - candidate[1]) < current_distance]
-                        if closer:
-                            destination = min(
-                                closer,
-                                key=lambda pos: (
-                                    abs(target_position[0] - pos[0])
-                                    + abs(target_position[1] - pos[1]),
-                                    self.map.key(pos) in actor.visited_cells,
-                                    pos[1], pos[0]))
+                        # 没有任何一格能靠近目标：这里就是死路，记下来，然后换方向
+                        # 探新格（不直接原路退回，否则会在两格之间无限横跳）。
+                        actor.memory.append({"kind": "dead_end",
+                                             "cell": self.map.key(actor.position),
+                                             "turn": self.clock.turn})
+                        actor.memory = actor.memory[-50:]
+                        options = [candidate for candidate in candidates
+                                   if candidate != actor.last_position] or list(candidates)
+                        walkable = [candidate for candidate in options
+                                    if self.map.key(candidate) not in dead_ends] or options
+                        destination = min(
+                            walkable,
+                            key=lambda pos: (self.map.key(pos) in actor.visited_cells,
+                                             pos[1], pos[0]))
                 if (actor.behavior in {"follow", "guard"}
                         and target_position == actor.position):
                     continue
@@ -783,10 +859,12 @@ class WorldState:
                 offset = (self.clock.turn + stable_identity) % len(choices)
                 destination = choices[offset]
             origin = actor.position
+            actor.last_position = origin
             actor.x, actor.y = destination
             actor.visited_cells.add(self.map.key(destination))
             self.record("actor_moved", actor_id, origin=list(origin),
                         destination=list(destination), autonomous=True)
+            self._append_trail(actor_id, destination)
             self.visible_cells(actor_id)
             generated.append({"type": "actor_moved", "actor_id": actor_id,
                               "from": list(origin), "to": list(destination)})
@@ -978,6 +1056,8 @@ class WorldState:
             "final_duel_complete": self.final_duel_complete,
             "final_duel_winner": self.final_duel_winner,
             "hiring_signals": [dict(signal) for signal in self.hiring_signals],
+            "trails": {key: [list(cell) for cell in cells]
+                       for key, cells in self.trails.items()},
         }
 
     @classmethod
@@ -1006,4 +1086,6 @@ class WorldState:
             final_duel_complete=bool(data.get("final_duel_complete", False)),
             final_duel_winner=str(data.get("final_duel_winner", "") or ""),
             hiring_signals=[dict(signal) for signal in data.get("hiring_signals", [])],
+            trails={str(key): [(int(cell[0]), int(cell[1])) for cell in cells]
+                    for key, cells in (data.get("trails") or {}).items()},
         )

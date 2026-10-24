@@ -2339,3 +2339,65 @@ def test_suggestion_is_rejected_out_of_range_and_acceptance_is_clamped():
     assert suggestion_acceptance_percent(
         "temp_friend", "explore", current_behavior="follow", hp_ratio=0.1,
         player_hp_ratio=0.1, distance=10) == 5
+
+
+def test_ally_does_not_oscillate_between_two_cells_when_route_is_blocked(tmp_path):
+    """主人被一堵墙挡住去路时，跟随者不得在相邻两格之间无限横跳。"""
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "follow-oscillation.db"),
+                        save_dir=str(tmp_path), rng_seed=97, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=40, current_hp=40, speed_limit=4, current_speed=4)
+    friend = Entity("朋友甲", "朋友", blood_limit=30, current_hp=30)
+    engine.state.player = player
+    engine.state.phase = "pre_battle"
+    engine.state.friends = [friend]
+    world = WorldState(clock=WorldClock(), map=_open_map(width=9, height=9))
+    # 竖墙把左侧走廊与右侧隔开，走廊尽头 (2,1) 是死路。
+    for y in range(9):
+        world.map.terrain["4,{}".format(y)] = "wall"
+    world.add_actor(WorldActorState(player.runtime_id, player.name, "player", 6, 1,
+                                    faction="player", mode="manual"))
+    world.add_actor(WorldActorState(friend.runtime_id, friend.name, "friend", 1, 1,
+                                    faction="friend", mode="autonomous", behavior="follow",
+                                    owner_actor_id=player.runtime_id))
+    engine.state.world_state = world.to_dict()
+
+    trail = []
+    for _ in range(8):
+        engine.execute_action("world_wait", {"turns": 1})
+        state = WorldState.from_dict(engine.state.world_state)
+        trail.append(state.actors[friend.runtime_id].position)
+
+    # 允许它来回探路，但不允许出现 A→B→A→B 这种原地打转。
+    assert len(set(trail)) >= 3, trail
+    assert not (trail[0] == trail[2] == trail[4] and trail[1] == trail[3] == trail[5]), trail
+
+
+def test_actor_trapped_by_shrinking_boundary_is_moved_to_reachable_cell():
+    """圈层吞掉单位所在格且四邻全封死时，必须给它一条生路，不能永久卡在 void 里。"""
+    world = WorldState(clock=WorldClock(), map=_open_map(width=5, height=5))
+    world.add_actor(WorldActorState("p", "玩家", "player", 2, 2, faction="player", mode="manual"))
+    world.add_actor(WorldActorState("m", "游荡者", "enemy", 0, 0, faction="enemy",
+                                    mode="manual"))
+    world.shrink_interval = 1
+    world.clock.advance(1)
+    world._shrink_boundary_if_due()
+
+    actor = world.actors["m"]
+    assert world.map.is_passable(actor.position), actor.position
+    assert any(event["type"] == "actor_displaced_by_shrinking_boundary"
+               for event in world.event_log)
+    assert any(event["type"] == "actor_caught_by_shrinking_boundary"
+               for event in world.event_log)
+
+
+def test_world_trails_and_last_position_survive_serialization():
+    world = WorldState(clock=WorldClock(), map=_open_map(width=7, height=7))
+    world.add_actor(WorldActorState("p", "玩家", "player", 1, 1, faction="player", mode="manual"))
+    world.move_actor("p", (2, 1))
+    world.move_actor("p", (2, 2))
+    restored = WorldState.from_dict(world.to_dict())
+    assert restored.trails["p"] == [(2, 1), (2, 2)]
+    assert restored.actors["p"].last_position == (2, 1)  # 上一格，不是当前格

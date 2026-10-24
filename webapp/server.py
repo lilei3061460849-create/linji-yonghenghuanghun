@@ -28,7 +28,10 @@ sys.path.insert(0, str(ROOT))
 from engine.api import GameEngine  # noqa: E402
 from engine.models import Entity  # noqa: E402
 from engine.world import WorldState  # noqa: E402
-from sim.monster_phase_submit import monster_phase_choices  # noqa: E402
+from sim.monster_phase_submit import (  # noqa: E402
+    daowen_submission,
+    decline_reaction_spell_choices,
+)
 
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
@@ -332,24 +335,67 @@ def _ui_attack(params: dict[str, Any]) -> dict[str, Any]:
     return _execute("resolve_attack", {"token": pending.get("token"), "hits": hits})
 
 
+def _monster_choices(engine: GameEngine, actors: list[dict],
+                     dodge_refs: set[str]) -> list[dict]:
+    """把 prepare 快照转成合法提交。
+
+    与 sim 助手同一口径，但**即使每次攻击的击数为 0 也要交出对应组数的
+    attack_actions**（引擎要求组数正好等于 base_attack_actions，hits 可以为空）。
+    攻击次数为 0 的敌人（例如刚被削速的轮回者）否则永远交不出合法提交。
+    """
+    choices = []
+    for actor in actors:
+        option = actor["daowen_options"][0] if actor.get("daowen_options") else None
+        dao = daowen_submission(option) if option else None
+        action_count = int(actor.get("base_attack_actions") or 0)
+        hit_count = int(actor.get("base_hits_per_attack") or 0)
+        if option:
+            if option.get("resolves_as") == "疯狂":
+                action_count += int(option.get("x", 0) or 0)
+            elif option.get("resolves_as") == "狂暴":
+                action_count += 1
+            elif option.get("resolves_as") == "变形":
+                index = int(str(actor["actor_ref"]).split(":", 1)[1])
+                hit_count = int(engine.state.enemies[index].attack_power)
+        targets = actor.get("attack_target_options") or []
+        if not targets or action_count <= 0:
+            attack_actions: list[dict] = []
+        else:
+            target_option = targets[0]
+            base_spells = decline_reaction_spell_choices(target_option)
+            dodge = actor["actor_ref"] in dodge_refs
+            attack_actions = [
+                {"hits": [{"target_ref": target_option["ref"], "dodge": dodge,
+                           "blood_shadow": False,
+                           "spell_choices": json.loads(json.dumps(base_spells))}
+                          for _ in range(hit_count)]}
+                for _ in range(action_count)
+            ]
+        choices.append({"actor_ref": actor["actor_ref"], "daowen": dao,
+                        "attack_actions": attack_actions})
+    return choices
+
+
 def _ui_monster_phase(params: dict[str, Any]) -> dict[str, Any]:
     engine: GameEngine = SESSION["engine"]
-    prepared = engine.execute_action("prepare_monster_phase", {})
-    if not prepared.get("success"):
-        _log(f"✗ 敌方阶段：{prepared.get('error')}")
-        return prepared
-    actors = prepared["result"]["actors"]
-    choices = monster_phase_choices(actors, engine=engine)
-    dodge_refs = set(params.get("dodge_refs") or [])
-    for choice in choices:
-        if choice["actor_ref"] in dodge_refs:
-            for attack in choice["attack_actions"]:
-                for hit in attack["hits"]:
-                    hit["dodge"] = True
+    # 上一次提交被拒时引擎保留 pending 与同一个 token：直接复用快照重交，
+    # 而不是再 prepare（那会报"子阶段不符"并把玩家卡死）。
+    pending = engine.state.pending_monster_phase
+    if pending:
+        actors = pending["options"]["actors"]
+        token = pending["token"]
+    else:
+        prepared = engine.execute_action("prepare_monster_phase", {})
+        if not prepared.get("success"):
+            _log(f"✗ 敌方阶段：{prepared.get('error')}")
+            return prepared
+        actors = prepared["result"]["actors"]
+        token = prepared["result"]["token"]
+    choices = _monster_choices(engine, actors, set(params.get("dodge_refs") or []))
     result = engine.execute_action("resolve_monster_phase",
-                                   {"token": prepared["result"]["token"], "choices": choices})
+                                   {"token": token, "choices": choices})
     if not result.get("success"):
-        result["error"] = (result.get("error") or "") + "（闪避可能需要速度预算；取消闪避后重试）"
+        result["error"] = (result.get("error") or "") + "（闪避可能超出速度预算；取消闪避后重试）"
     _log(_describe("resolve_monster_phase", params, result))
     return result
 
