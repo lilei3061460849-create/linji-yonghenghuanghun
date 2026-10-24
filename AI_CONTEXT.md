@@ -28,8 +28,8 @@
 
 | # | 角色 | 原始文件 | SHA-256 |
 | --- | --- | --- | --- |
-| 1 | 世界观与角色档案（故事正典） | [故事文档.md](故事文档.md) | `ae8292c82df103c8b061e8c90d30bbfd35a31cd9cd7be3dbc0c229c2b2fa5e08` |
-| 2 | AI 角色扮演约束（节选：职责、性格、扮演要求） | [AI_EXPERIENCE.md](AI_EXPERIENCE.md) | `440d1bef6ec76e288bb168ee3a40cd6c6e9ea09ac6941f8d553ffc72a5349955` |
+| 1 | 世界观正典（故事文档） | [故事文档.md](故事文档.md) | `ae8292c82df103c8b061e8c90d30bbfd35a31cd9cd7be3dbc0c229c2b2fa5e08` |
+| 2 | AI 角色扮演约束（节选：职责、性格、扮演要求） | [AI_EXPERIENCE.md](AI_EXPERIENCE.md) | `adb7e6ac3754220d745cf4786489cfafc02aaa41f669cc05e790a38946458b8d` |
 | 3 | 机制速查·行动 | [规则正文.md](规则正文.md) | `bf2aa0a8fa75c8018d0ecb9012d0a81d69466ad6dcbbf18a5083bed342707e5a` |
 | 4 | 机制速查·道纹 | [全道纹索引.md](全道纹索引.md) | `54d34eff5b57145bb426747f3c3d63b288d74818269e5fbb819235814a5ca37f` |
 | 5 | 机制速查·物品 | [物品索引.md](物品索引.md) | `9929ce061ebac32c7f50c90e74064bb0ccd5c96b1667bc4c6df77fadcf150fd8` |
@@ -42,7 +42,7 @@
 > 每一块为来源文件经过滤后的文字；机制速查为结构化摘录，不是原文全文（战斗行动为整段照录）。
 > 正文采用代码块呈现，以防嵌套相对链接在此聚合文件内被错误解析。
 
-### 来源 1：世界观与角色档案（故事正典）
+### 来源 1：世界观正典（故事文档）
 
 - 路径：`故事文档.md`
 - SHA-256：`ae8292c82df103c8b061e8c90d30bbfd35a31cd9cd7be3dbc0c229c2b2fa5e08`
@@ -134,7 +134,7 @@
 ### 来源 2：AI 角色扮演约束（节选：职责、性格、扮演要求）
 
 - 路径：`AI_EXPERIENCE.md`
-- SHA-256：`440d1bef6ec76e288bb168ee3a40cd6c6e9ea09ac6941f8d553ffc72a5349955`
+- SHA-256：`adb7e6ac3754220d745cf4786489cfafc02aaa41f669cc05e790a38946458b8d`
 
 ```markdown
 ### 职责划分

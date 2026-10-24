@@ -90,9 +90,10 @@ def context_sources() -> list[ContextSource]:
     """
     return [
         ContextSource(
-            "世界观与角色档案（故事正典）",
+            "世界观正典（故事文档）",
             ROOT / "故事文档.md",
-            keep_headings=("世界观与底层因果法则", "角色记忆档案"),
+            # 「角色记忆档案」节 2026-09 起已不在故事文档里，不再保留失效标题。
+            keep_headings=("世界观与底层因果法则",),
             drop_headings=("收录规则", "待核查区", "正文区"),
             drop_phrases=("战报正文区", "待核查区", "独立性声明", "战报.md", "收录规则", "不随引擎数值调整"),
         ),
