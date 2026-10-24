@@ -2871,13 +2871,13 @@ class GameEngine:
                 "known_locations": known_locations,
                 "allies": [
                     {"actor_id": other.actor_id, "name": other.name, "kind": other.kind,
+                     "alive": other.alive,
                      "position": [other.x, other.y], "behavior": other.behavior,
                      "guard_position": (list(other.guard_position)
                                         if other.guard_position else None),
                      "owner_actor_id": other.owner_actor_id}
                     for other in world.actors.values()
-                    if other.alive and other.kind in ALLY_KINDS
-                    and other.owner_actor_id == actor_id
+                    if other.kind in ALLY_KINDS and other.owner_actor_id == actor_id
                 ],
                 "suggestion_range": ALLY_SUGGESTION_RANGE,
                 "hiring_signals": [

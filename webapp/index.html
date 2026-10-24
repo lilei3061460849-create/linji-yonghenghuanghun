@@ -139,6 +139,11 @@
       </div>
     </div>
 
+    <div class="card" id="pendingCard" style="display:none">
+      <h2>待决 <span id="pendingPhase"></span></h2>
+      <div id="pendingBody" class="stack"></div>
+    </div>
+
     <div class="card" id="eventCard" style="display:none">
       <h2>事件 <span id="eventName"></span></h2>
       <div id="eventBody" class="stack"></div>
@@ -291,7 +296,7 @@ function summarize(action, result){
 }
 
 function render(){
-  renderHeader(); renderSheet(); renderMap(); renderAllies(); renderNear(); renderLocations();
+  renderHeader(); renderSheet(); renderPending(); renderMap(); renderAllies(); renderNear(); renderLocations();
   renderEvent(); renderBattle(); renderLog(); renderFacts(); renderOver();
 }
 
@@ -426,6 +431,7 @@ function renderAllies(){
     const dist = Math.abs(a.position[0]-px) + Math.abs(a.position[1]-py);
     const head = el("div","row");
     head.append(el("span","name",a.name), el("span","tag", BEHAVIOR_LABEL[a.behavior] || a.behavior));
+    if (a.alive === false) head.append(el("span","tag","已阵亡"));
     if (a.guard_position) head.append(el("span","tag",`守点 ${a.guard_position[0]},${a.guard_position[1]}`));
     card.append(head, el("div","meta", `位置 (${a.position[0]}, ${a.position[1]}) · 距离 ${dist} 格`));
     if (dist > (S.world.suggestion_range || 5)){
@@ -434,7 +440,7 @@ function renderAllies(){
     const row = el("div","row"); row.style.marginTop = "6px";
     for (const [value, label] of SUGGESTIONS){
       const b = el("button", value === "explore" ? "" : "", label);
-      b.disabled = dist > (S.world.suggestion_range || 5);
+      b.disabled = a.alive === false || dist > (S.world.suggestion_range || 5);
       b.onclick = () => act("world_suggest_ally", {target_actor_id: a.actor_id, suggestion: value});
       row.append(b);
     }
@@ -522,6 +528,51 @@ function collectFields(container){
     }
   }
   return out;
+}
+
+function renderPending(){
+  const card = $("pendingCard"), body = $("pendingBody");
+  body.innerHTML = "";
+  const actions = (S && S.actions && S.actions.actions) || [];
+  const phase = (S && S.actions && S.actions.phase) || "";
+  const gating = actions.some(a => a.action_type === "resolve_redemption")
+    || /待选/.test(phase);
+  if (!S || !S.started || !gating){ card.style.display = "none"; return; }
+  card.style.display = "";
+  $("pendingPhase").textContent = phase;
+  if (S.actions.pending && S.actions.pending.name){
+    body.append(el("div","kv", `微光者 ${S.actions.pending.name} 等待处置：接纳为待命员工，或直接终结。`));
+  }
+  for (const action of actions){
+    const row = el("div","row");
+    const name = action.action_type;
+    const schema = action.params_schema || {};
+    const inputs = {};
+    for (const [key, hint] of Object.entries(schema)){
+      if (key === "option" || key === "name") continue;
+      const box = el("div","field"); box.style.margin = "0";
+      box.append(el("label", null, key), fieldInput({key, hint}));
+      inputs[key] = box.querySelector("[data-key]");
+      row.append(box);
+    }
+    if (name === "resolve_redemption"){
+      const nameInput = el("input"); nameInput.type = "text"; nameInput.placeholder = "接纳后的名字";
+      nameInput.value = (S.actions.pending || {}).name || "赎罪者";
+      const accept = el("button","primary","接纳");
+      accept.onclick = () => act("resolve_redemption", {option: "接纳", name: nameInput.value || "赎罪者"});
+      const finish = el("button","danger","终结");
+      finish.onclick = () => act("resolve_redemption", {option: "终结"});
+      row.append(nameInput, accept, finish);
+    } else {
+      const send = el("button","primary", "提交 " + name);
+      send.onclick = () => {
+        const params = collectFields(row);
+        act(name, params);
+      };
+      row.append(send);
+    }
+    body.append(row);
+  }
 }
 
 function renderEvent(){
