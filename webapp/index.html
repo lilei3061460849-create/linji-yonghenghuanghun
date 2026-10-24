@@ -135,6 +135,7 @@
           <span class="hint">点相邻格 / WASD、方向键移动 · 每步都会推进世界时间</span>
         </div>
         <div id="posLabel" class="hint"></div>
+        <div id="staleBanner" class="banner" style="display:none;width:100%;text-align:center"></div>
       </div>
     </div>
 
@@ -158,6 +159,11 @@
     <div class="card" id="overCard" style="display:none">
       <h2>结局</h2>
       <div id="overBody" class="kv"></div>
+    </div>
+
+    <div class="card">
+      <h2>角色 <span id="regionLabel"></span></h2>
+      <div id="sheet" class="kv"></div>
     </div>
 
     <div class="card">
@@ -217,6 +223,7 @@
       <label style="width:auto;color:var(--text)"><input id="fFriend" type="checkbox" checked /> 开局带一名随行朋友（可体验建议系统）</label>
     </div>
     <div class="row" style="margin-top:12px;justify-content:flex-end">
+      <button id="cancelBtn">取消</button>
       <button id="startBtn" class="primary">进入副本</button>
     </div>
     <div class="hint" style="text-align:left;margin-top:8px">
@@ -284,7 +291,7 @@ function summarize(action, result){
 }
 
 function render(){
-  renderHeader(); renderMap(); renderAllies(); renderNear(); renderLocations();
+  renderHeader(); renderSheet(); renderMap(); renderAllies(); renderNear(); renderLocations();
   renderEvent(); renderBattle(); renderLog(); renderFacts(); renderOver();
 }
 
@@ -312,6 +319,9 @@ function renderHeader(){
   $("turnLabel").textContent = w
     ? (ended ? `第 ${w.world_turn} 回合 · 本局已结束` : `第 ${w.world_turn} 回合 · 膨胀圈 ${w.boundary.shrunk_rings}`)
     : "";
+  const stale = $("staleBanner");
+  stale.style.display = (w && w.stale) ? "" : "none";
+  if (w && w.stale) stale.textContent = (w.blocked || "地图暂时冻结") + " —— 先处理当前事件。";
   if (ended) $("posLabel").textContent = "结局已出：胜者离开副本。";
   else $("posLabel").textContent = (w && w.self)
     ? `你位于 (${w.self.position[0]}, ${w.self.position[1]}) · 建议范围 ${w.suggestion_range} 格`
@@ -386,6 +396,22 @@ function unitClass(actor){
   if (actor.kind === "merchant") return "merchant";
   if (actor.kind === "enemy") return "enemy";
   return "neutral";
+}
+
+function renderSheet(){
+  const box = $("sheet"); box.innerHTML = "";
+  const p = S && S.player;
+  if (!p) return;
+  $("regionLabel").textContent = p.region || "";
+  const line = (label, value) => {
+    const d = el("div");
+    d.append(el("b", null, label + "："), document.createTextNode(value || "无"));
+    box.append(d);
+  };
+  line("遗物", (p.relics || []).join("、"));
+  line("道纹", (p.daowen || []).join("、"));
+  line("消耗品", (p.consumables || []).map(c => `${c.name} ${c.uses}/${c.max_uses}`).join("、"));
+  line("属性", `血 ${p.hp_limit} · 速 ${p.speed_limit} · 法 ${p.mana_limit} · 攻 ${p.attack_count}×${p.attack_power}`);
 }
 
 function renderAllies(){
@@ -771,6 +797,10 @@ async function startGame(){
   finally { $("startBtn").disabled = false; }
 }
 $("startBtn").onclick = startGame;
+$("cancelBtn").onclick = () => {
+  if (S && S.started) $("newModal").classList.add("hidden");
+  else toast("先开一局吧");
+};
 
 (async function boot(){
   try {
