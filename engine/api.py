@@ -23,7 +23,8 @@ from .models import (
     Entity, GameState, DaoWen, DaoWenInstance, Spell,
     Relic, Consumable, StatusEffect, LongJiXin
 )
-from .world import WorldState, WorldActorState
+from .world import (ALLY_KINDS, ALLY_SUGGESTION_RANGE, ALLY_SUGGESTIONS,
+                    WorldState, WorldActorState, suggestion_acceptance_percent)
 from .enums import (GamePhase, CombatSubphase, ActionPhase, TriggerTiming,
                     InterruptType, EntityType, EffectScope, EffectPolarity)
 from .dice import DiceEngine
@@ -617,6 +618,12 @@ class GameEngine:
                 {"action_type": "world_command_created_being", "params_schema": {
                     "behavior": ["explore", "follow", "guard"],
                     "x": "guard模式可选整数坐标", "y": "guard模式可选整数坐标"}},
+                {"action_type": "world_suggest_ally", "params_schema": {
+                    "target_actor_id": "相邻/近处友方单位的 actor_id（来自 world_status.allies）",
+                    "suggestion": sorted(ALLY_SUGGESTIONS),
+                    "x": "suggestion=guard 时可选：守卫坐标x",
+                    "y": "suggestion=guard 时可选：守卫坐标y"},
+                 "note": "只能建议，不能命令：朋友/员工/临时朋友会按自己的处境决定是否照做"},
                 {"action_type": "world_interact", "params_schema": {
                     "target_actor_id": "actor_id from visible_actors",
                     "choice": ["talk", "trade", "cooperate", "intimidate", "attack"],
@@ -1590,6 +1597,8 @@ class GameEngine:
             return self._action_world_vision(params)
         elif action_type == "world_interact":
             return self._action_world_interact(params)
+        elif action_type == "world_suggest_ally":
+            return self._action_world_suggest_ally(params)
         elif action_type == "setup_attributes":
             return self._action_setup_attributes(params)
         elif action_type == "setup_choose_region":
@@ -2479,6 +2488,7 @@ class GameEngine:
             # 轮回者固定从安全起点入场；友方在附近，敌对单位与商人通过引擎骰子随机分散到远处。
             used = set()
             player_start = (1, 1)
+            player_actor_id = (getattr(self.state.player, "runtime_id", "") or "player") if self.state.player else ""
             for entity, kind, faction in entities:
                 if kind == "player":
                     pos = player_start
@@ -2503,10 +2513,15 @@ class GameEngine:
                     raise ValueError("随机出生位置发生重叠，请重新初始化地图")
                 used.add(pos)
                 actor_id = getattr(entity, "runtime_id", "") or f"{kind}:{entity.name}:{len(used)}"
-                mode = "manual" if kind in {"player", "friend", "employee", "temp_friend"} else "autonomous"
+                # 2026-10-24：只有轮回者本人是手动单位；朋友/员工/临时朋友自主行动，
+                # 玩家对它们只能提"建议"（world_suggest_ally），是否照做由它们自己判定。
+                mode = "manual" if kind == "player" else "autonomous"
+                owner = player_actor_id if kind in ALLY_KINDS else ""
                 world.add_actor(WorldActorState(actor_id=actor_id, name=entity.name, kind=kind,
                                                 x=pos[0], y=pos[1], alive=entity.is_alive,
-                                                faction=faction, mode=mode))
+                                                faction=faction, mode=mode,
+                                                behavior=("follow" if kind in ALLY_KINDS else "explore"),
+                                                owner_actor_id=owner))
                 if kind == "player":
                     world.record("world_entered", actor_id, region=self.state.current_region)
                 elif entity in spawned_monsters:
@@ -2850,6 +2865,17 @@ class GameEngine:
                 "visible_actors": visible_actors,
                 "visible_encounters": visible_encounters,
                 "known_locations": known_locations,
+                "allies": [
+                    {"actor_id": other.actor_id, "name": other.name, "kind": other.kind,
+                     "position": [other.x, other.y], "behavior": other.behavior,
+                     "guard_position": (list(other.guard_position)
+                                        if other.guard_position else None),
+                     "owner_actor_id": other.owner_actor_id}
+                    for other in world.actors.values()
+                    if other.alive and other.kind in ALLY_KINDS
+                    and other.owner_actor_id == actor_id
+                ],
+                "suggestion_range": ALLY_SUGGESTION_RANGE,
                 "hiring_signals": [
                     {"signal_id": signal.get("signal_id"),
                      "status": signal.get("status"),
@@ -3081,6 +3107,119 @@ class GameEngine:
                     "instruction": "胁迫失败，接着调用battle_start处理这次遭遇"}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
+
+    def _ally_suggestion_chance(self, kind: str, suggestion: str, **factors) -> int:
+        """建议采纳率（独立方法，便于按单位类型/处境替换判定）。"""
+        return suggestion_acceptance_percent(kind, suggestion, **factors)
+
+    def _action_world_suggest_ally(self, params: dict) -> dict:
+        """对友方单位提一条建议。玩家只能建议：是否照做由该单位自己判定。
+
+        与 world_move 的关键区别：这个接口不改变任何单位的位置，只登记一次
+        "建议 + 该单位自己的决定"。被拒绝时它的行为与目标保持原样，玩家再从
+        world_status.allies 里看到它自己选了什么。
+        """
+        try:
+            world = self._world_from_state()
+            if world.final_duel_complete:
+                return {"success": False, "error": "最终生存阶段已经结算，地图行动已结束"}
+            player_id = next((key for key, actor in world.actors.items()
+                              if actor.kind == "player" and actor.alive), None)
+            if player_id is None:
+                return {"success": False, "error": "地图上没有存活的轮回者"}
+            target_id = params.get("target_actor_id")
+            if not isinstance(target_id, str) or target_id not in world.actors:
+                return {"success": False, "error": "必须指定 world_status.allies 里的友方单位"}
+            target = world.actors[target_id]
+            if target.kind not in ALLY_KINDS:
+                return {"success": False, "error": "只能向朋友/员工/临时朋友提建议"}
+            if not target.alive:
+                return {"success": False, "error": "目标单位已离场"}
+            if any(encounter.active and target_id in encounter.participants
+                   for encounter in world.encounters.values()):
+                return {"success": False, "error": "目标正处于遭遇中，无法听取建议"}
+            suggestion = params.get("suggestion")
+            if suggestion not in ALLY_SUGGESTIONS:
+                return {"success": False,
+                        "error": f"suggestion必须是{sorted(ALLY_SUGGESTIONS)}之一"}
+            player_actor = world.actors[player_id]
+            distance = abs(player_actor.x - target.x) + abs(player_actor.y - target.y)
+            if distance > ALLY_SUGGESTION_RANGE:
+                return {"success": False,
+                        "error": f"目标距离{distance}格，超出建议范围{ALLY_SUGGESTION_RANGE}"}
+            guard_position = None
+            if ALLY_SUGGESTIONS[suggestion] == "guard":
+                gx = params.get("x", target.x)
+                gy = params.get("y", target.y)
+                if (not isinstance(gx, int) or isinstance(gx, bool)
+                        or not isinstance(gy, int) or isinstance(gy, bool)
+                        or not world.map.is_passable((gx, gy))):
+                    return {"success": False, "error": "守卫坐标必须是可通行格上的整数坐标"}
+                guard_position = (gx, gy)
+
+            entity = self._world_entity_by_actor_id(world, target_id)
+            hp_ratio = 1.0
+            if entity is not None and entity.blood_limit > 0:
+                hp_ratio = max(0.0, min(1.0, entity.current_hp / entity.blood_limit))
+            player_entity = self.state.player
+            player_hp_ratio = 1.0
+            if player_entity is not None and player_entity.blood_limit > 0:
+                player_hp_ratio = max(0.0, min(1.0, player_entity.current_hp / player_entity.blood_limit))
+            chance = self._ally_suggestion_chance(
+                target.kind, suggestion,
+                current_behavior=target.behavior, hp_ratio=hp_ratio,
+                player_hp_ratio=player_hp_ratio, distance=distance)
+            roll = self.dice.auto_roll(
+                f"world_ally_suggestion_{target_id}_{world.clock.turn}_{suggestion}",
+                ["accept"] * chance + ["reject"] * (100 - chance),
+                context=f"{target.name}考虑轮回者的建议：{suggestion}")
+            accepted = roll["selected"] == "accept"
+            previous = {"behavior": target.behavior,
+                        "guard_position": list(target.guard_position) if target.guard_position else None}
+            world.record("ally_suggestion_made", player_id, target_actor_id=target_id,
+                         target_name=target.name, suggestion=suggestion,
+                         accepted=accepted, chance_percent=chance)
+            if accepted:
+                target.behavior = ALLY_SUGGESTIONS[suggestion]
+                target.guard_position = guard_position
+                target.owner_actor_id = player_id
+                target.mode = "autonomous"
+                world.record("ally_suggestion_accepted", target_id,
+                             suggestion=suggestion, behavior=target.behavior,
+                             guard_position=list(guard_position) if guard_position else None)
+            else:
+                # 拒绝：它自己做主，玩家只能看到它现在的选择。
+                world.record("ally_suggestion_rejected", target_id,
+                             suggestion=suggestion, kept_behavior=target.behavior)
+            self._sync_world_entity_positions(world)
+            self.state.world_state = world.to_dict()
+            return {
+                "success": True,
+                "action": f"建议{target.name}·{suggestion}",
+                "result": {
+                    "target": target.name, "target_actor_id": target_id,
+                    "suggestion": suggestion,
+                    "accepted": accepted,
+                    "chance_percent": chance,
+                    "behavior": target.behavior,
+                    "guard_position": list(target.guard_position) if target.guard_position else None,
+                    "previous": previous,
+                },
+                "instruction": ("它接受了建议，接下来会按此行动" if accepted
+                                else "它没有采纳，仍在按自己的判断行动；可以换个说法再试"),
+            }
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
+
+    def _world_entity_by_actor_id(self, world: WorldState, actor_id: str):
+        """actor_id → 真实实体（用于读取伤势等自身处境）。"""
+        candidates = ([self.state.player] if self.state.player else [])
+        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+            candidates.extend(getattr(self.state, group_name, []) or [])
+        if getattr(self.state, "merchant", None) is not None:
+            candidates.append(self.state.merchant)
+        return next((entity for entity in candidates if entity is not None
+                     and getattr(entity, "runtime_id", "") == actor_id), None)
 
     def _action_world_vision(self, params: dict) -> dict:
         try:

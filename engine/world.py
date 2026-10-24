@@ -14,6 +14,64 @@ from typing import Any
 Coord = tuple[int, int]
 DIRECTIONS: tuple[Coord, ...] = ((0, -1), (0, 1), (-1, 0), (1, 0))
 
+# 地图上会自主行动的友方单位类别（2026-10-24）。玩家对它们只能提"建议"。
+ALLY_KINDS: frozenset[str] = frozenset({"friend", "employee", "temp_friend"})
+# 建议必须说得出口：超过这个曼哈顿距离就传不过去。
+ALLY_SUGGESTION_RANGE = 5
+
+# 建议类型 → 该单位被采纳后的 behavior。
+ALLY_SUGGESTIONS: dict[str, str] = {
+    "follow": "follow",      # 跟着我
+    "guard": "guard",        # 守在这里
+    "explore": "explore",    # 自己去看看
+    "hold": "guard",         # 原地待命（= 守卫当前格）
+}
+
+# 关系基础采纳率：临时朋友是被胁迫来的，听话程度最低。
+ALLY_BASE_ACCEPTANCE: dict[str, int] = {
+    "friend": 65,
+    "employee": 55,
+    "temp_friend": 40,
+}
+
+
+def suggestion_acceptance_percent(
+    kind: str,
+    suggestion: str,
+    *,
+    current_behavior: str = "explore",
+    hp_ratio: float = 1.0,
+    player_hp_ratio: float = 1.0,
+    distance: int = 1,
+) -> int:
+    """友方单位对一条"建议"的自主采纳概率（5%~95%，整数百分比）。
+
+    这是**建议**不是命令：玩家提交的只是意向，是否照做由本单位按自身处境判定。
+    影响因素都是单位自己能感知的事实：
+      * 关系基础值（朋友 > 员工 > 临时朋友）；
+      * 自身伤势：健康照做，重伤先自保；
+      * 建议与其当前行为一致 → 顺水推舟；
+      * 玩家的处境：队长快死了，跟着他没好处；
+      * 守卫点/集合点的距离：太远的要求更容易被敷衍。
+    """
+    if suggestion not in ALLY_SUGGESTIONS:
+        raise ValueError(f"未知建议类型：{suggestion!r}")
+    chance = ALLY_BASE_ACCEPTANCE.get(kind, 50)
+    if hp_ratio >= 0.6:
+        chance += 10
+    elif hp_ratio < 0.3:
+        chance -= 20
+    target_behavior = ALLY_SUGGESTIONS[suggestion]
+    if current_behavior == target_behavior:
+        chance += 25
+    if player_hp_ratio < 0.3:
+        chance -= 10
+    if distance > 8:
+        chance -= 15
+    elif distance <= 2:
+        chance += 5
+    return max(5, min(95, int(chance)))
+
 
 @dataclass
 class WorldClock:
@@ -597,7 +655,7 @@ class WorldState:
                     and actor.faction in {"enemy", "friend", "employee", "temp_friend"}
                     and not (self.final_duel_search and actor_id in self.final_duel_finalists)
                     # 明确指挥造物跟随/守卫时，服从命令优先于自主搜刮资源。
-                    and not (actor.kind == "friend" and actor.owner_actor_id
+                    and not (actor.kind in ALLY_KINDS and actor.owner_actor_id
                              and actor.behavior in {"follow", "guard"})):
                 remembered_goals = [
                     entry for entry in actor.memory
@@ -638,11 +696,16 @@ class WorldState:
                                 self.map.key(pos) in actor.visited_cells,
                                 pos[1], pos[0]))
                         break
-            if actor.kind == "friend" and actor.owner_actor_id:
+            # 2026-10-24：朋友/员工/临时朋友也上地图自主行动（此前 mode=manual 原地不动）。
+            # 玩家只能"建议"，是否照做由单位自己按 `suggestion_acceptance_percent` 判定。
+            if (actor.kind in ALLY_KINDS and actor.owner_actor_id):
                 owner = self.actors.get(actor.owner_actor_id)
                 target_position = None
                 if actor.behavior == "follow" and owner is not None and owner.alive:
                     target_position = owner.position
+                    # 跟到身边就停，不踩到主人那一格（否则两人叠在一格，地图上看不见玩家）。
+                    if (abs(actor.x - owner.x) + abs(actor.y - owner.y)) <= 1:
+                        continue
                 elif actor.behavior == "guard":
                     target_position = actor.guard_position or actor.position
                 if target_position is not None and target_position != actor.position:

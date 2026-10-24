@@ -2234,3 +2234,108 @@ def test_final_duel_loss_still_settles_world_before_death_legacy_interrupt():
     assert any(event["type"] == "final_duel_completed"
                and event["details"]["winner"] == final["winner_id"]
                for event in replay["world_event_log"])
+
+
+def _engine_with_map_friend(tmp_path, *, name="map-ally", friend_at=(3, 1), seed=7):
+    """构造一个朋友已被登记进地图的引擎，用于验证自主行动与建议接口。"""
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / f"{name}.db"), save_dir=str(tmp_path),
+                        rng_seed=seed, autosave=False)
+    player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
+    friend = Entity("朋友甲", "朋友", blood_limit=30, current_hp=30)
+    engine.state.player = player
+    engine.state.phase = "pre_battle"
+    engine.state.friends = [friend]
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    world.add_actor(WorldActorState(player.runtime_id, player.name, "player", 1, 1,
+                                    faction="player", mode="manual"))
+    world.add_actor(WorldActorState(friend.runtime_id, friend.name, "friend",
+                                    friend_at[0], friend_at[1], faction="friend",
+                                    mode="autonomous", behavior="follow",
+                                    owner_actor_id=player.runtime_id))
+    friend.world_x, friend.world_y = friend_at
+    engine.state.world_state = world.to_dict()
+    return engine, player, friend, world
+
+
+def test_map_friend_follows_player_without_being_commanded(tmp_path):
+    """朋友在地图上自主跟随：玩家移动后它自己走，且不踩玩家所在格。"""
+    engine, player, friend, _ = _engine_with_map_friend(tmp_path)
+
+    moved = engine.execute_action("world_move", {"x": 1, "y": 2})
+    assert moved["success"], moved
+    status = engine.execute_action("world_status", {})
+    assert status["success"], status
+    ally = next(item for item in status["result"]["allies"]
+                if item["actor_id"] == friend.runtime_id)
+    assert ally["behavior"] == "follow"
+    assert ally["position"] != [3, 1]  # 玩家移动那一回合它已经自己动了一步
+    engine.execute_action("world_wait", {"turns": 1})
+    status = engine.execute_action("world_status", {})
+    ally = next(item for item in status["result"]["allies"]
+                if item["actor_id"] == friend.runtime_id)
+    distance = abs(ally["position"][0] - 1) + abs(ally["position"][1] - 2)
+    assert distance <= 1, ally
+    assert ally["position"] != [1, 2]
+
+
+def test_guard_suggestion_is_executed_by_the_ally_itself(tmp_path, monkeypatch):
+    """建议守卫：采纳后由单位自己走到守卫点并停下（玩家不直接搬动它）。"""
+    engine, player, friend, _ = _engine_with_map_friend(tmp_path, friend_at=(3, 1))
+    monkeypatch.setattr(engine, "_ally_suggestion_chance", lambda *a, **k: 100)
+
+    result = engine.execute_action("world_suggest_ally", {
+        "target_actor_id": friend.runtime_id, "suggestion": "guard", "x": 5, "y": 5,
+    })
+    assert result["success"], result
+    assert result["result"]["accepted"] is True
+    assert result["result"]["behavior"] == "guard"
+
+    for _ in range(8):
+        engine.execute_action("world_wait", {"turns": 1})
+    status = engine.execute_action("world_status", {})
+    ally = next(item for item in status["result"]["allies"]
+                if item["actor_id"] == friend.runtime_id)
+    assert ally["behavior"] == "guard"
+    assert ally["guard_position"] == [5, 5]
+    assert ally["position"] == [5, 5], ally
+
+
+def test_suggestion_can_be_refused_and_ally_keeps_its_own_behavior(tmp_path, monkeypatch):
+    """拒绝建议：行为与目标保持原样，只留下它自己做的决定。"""
+    engine, player, friend, _ = _engine_with_map_friend(tmp_path, friend_at=(2, 1))
+    monkeypatch.setattr(engine, "_ally_suggestion_chance", lambda *a, **k: 100)
+    engine.execute_action("world_suggest_ally", {
+        "target_actor_id": friend.runtime_id, "suggestion": "hold",
+    })
+    monkeypatch.setattr(engine, "_ally_suggestion_chance", lambda *a, **k: 0)
+
+    result = engine.execute_action("world_suggest_ally", {
+        "target_actor_id": friend.runtime_id, "suggestion": "explore",
+    })
+    assert result["success"], result
+    assert result["result"]["accepted"] is False
+    assert result["result"]["behavior"] == "guard"
+
+    events = WorldState.from_dict(engine.state.world_state).event_log
+    assert any(event["type"] == "ally_suggestion_rejected" for event in events)
+    assert not any(event["type"] == "ally_suggestion_accepted"
+                   and event["details"].get("suggestion") == "explore" for event in events)
+
+
+def test_suggestion_is_rejected_out_of_range_and_acceptance_is_clamped():
+    from engine.world import suggestion_acceptance_percent
+
+    world = WorldState(clock=WorldClock(), map=_open_map(width=11, height=11))
+    world.add_actor(WorldActorState("p", "玩家", "player", 0, 0, faction="player", mode="manual"))
+    world.add_actor(WorldActorState("f", "朋友", "friend", 10, 10, faction="friend",
+                                    mode="autonomous", behavior="follow", owner_actor_id="p"))
+    # 纯函数独立校验：基础值 + 处境修正后钳制在 5~95。
+    assert suggestion_acceptance_percent(
+        "friend", "follow", current_behavior="follow", hp_ratio=1.0,
+        player_hp_ratio=1.0, distance=1) == 95
+    assert suggestion_acceptance_percent(
+        "temp_friend", "explore", current_behavior="follow", hp_ratio=0.1,
+        player_hp_ratio=0.1, distance=10) == 5
