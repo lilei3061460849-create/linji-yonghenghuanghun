@@ -90,7 +90,7 @@ def test_every_special_event_has_a_signed_page_in_the_book():
     """每条非致死特殊事件在书里都有一页，署名 ？？？，数值位与原文都在页里。"""
     text = BOOK.read_text(encoding="utf-8")
     for entry in special_events.all():
-        # 条目可自带 chapter 覆盖（【背叛】已改为「同伴规则」，不再是特殊事件）
+        # 条目可自带 chapter 覆盖（【夺书】已改为「同伴规则」，不再是特殊事件）
         chapter = entry.get("chapter") or special_events.chapter
         heading = f"### {special_events.signature}·{chapter}·{entry['name']}"
         assert heading in text, f"死者之书缺少规则页：{heading}"
@@ -137,7 +137,7 @@ def test_structured_numbers_agree_with_rule_lines():
 def test_remaining_special_events_are_registered_and_debt_threshold_is_source_driven():
     """十项遗留特殊事件全部进入结构化事实源，还债阈值不再硬编码。"""
     expected = {
-        "死者之页", "还债", "背叛", "许愿", "逃跑与追击",
+        "死者之页", "还债", "夺书", "许愿", "逃跑与追击",
         "进化", "撤退", "最终的冠冕", "救赎", "初拥之夜",
     }
     registered = {entry["name"] for entry in special_events.all()}

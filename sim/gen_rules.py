@@ -79,7 +79,7 @@ def render_section() -> str:
     all_events.sort(key=lambda pair: pair[1].get("order", 0))
     for kind, entry in all_events:
         name = entry["name"]
-        # 条目可自带 chapter 覆盖（2026-10-24：【背叛】不再是特殊事件，
+        # 条目可自带 chapter 覆盖（2026-10-24：【夺书】不再是特殊事件，
         # 以 chapter="同伴规则" 单独成章；其余事件仍渲染进「特殊事件」章）。
         chapter = entry.get("chapter") or CHAPTER
         lines.append(f"### {SIGNATURE}·{chapter}·{name}")

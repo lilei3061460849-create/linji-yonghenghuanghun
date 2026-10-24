@@ -73,9 +73,9 @@ def _collapse_legacy(legacy: Any) -> str:
 
 
 def validate_legacy(legacy: Any, capacity: int = DEFAULT_CAPACITY) -> dict[str, str]:
-    """单句校验：一句话，非空，不超过字数上限。
+    """单页校验：〖遗言〗一句话，不超过字数上限（可留空——他最后什么也没说）；〖生平〗引擎生成。
 
-    入参可以是纯字符串，也可以是 `{"text": ...}`（+可选 title）。旧三段式字段一律拒绝——
+    入参可以是纯字符串（只写遗言），也可以是 `{"text"/"life"/"title"}`。旧三段式字段一律拒绝——
     格式只有一种；存量旧书页的兼容放在**读取端**（`parse_legacies` 按第一句折叠）。
     """
     allowed_extra = {"title", "action", "option", LIFE_FIELD}
@@ -92,13 +92,13 @@ def validate_legacy(legacy: Any, capacity: int = DEFAULT_CAPACITY) -> dict[str, 
         raise ValueError("遗言必须是一句话（字符串）或包含 text 的对象")
 
     text = _collapse_legacy(legacy)
-    if not isinstance(text, str) or not text.strip():
-        raise ValueError("遗言必须是非空字符串")
-    text = text.strip()
-    if len(text) > capacity:
+    text = text.strip() if isinstance(text, str) else ""
+    if text and len(text) > capacity:
         raise ValueError(f"遗言超过{capacity}字上限")
 
-    normalized: dict[str, str] = {LEGACY_FIELD: text}
+    normalized: dict[str, str] = {}
+    if text:
+        normalized[LEGACY_FIELD] = text
     title = legacy.get("title") if isinstance(legacy, dict) else None
     if isinstance(title, str) and title.strip():
         normalized["title"] = title.strip()
@@ -106,15 +106,21 @@ def validate_legacy(legacy: Any, capacity: int = DEFAULT_CAPACITY) -> dict[str, 
     if isinstance(life, str) and life.strip():
         # 生平是自动总结的叙述，不限 20 字；只做一次长度钳制防止整段书页被撑爆。
         normalized[LIFE_FIELD] = life.strip()[:DEFAULT_LIFE_CAPACITY]
+    if not normalized.get(LEGACY_FIELD) and not normalized.get(LIFE_FIELD):
+        raise ValueError("一页至少要有一项：〖生平〗或〖遗言〗")
     return normalized
 
 
-def summarize_life(state: Any, capacity: int = DEFAULT_LIFE_CAPACITY) -> str:
+def summarize_life(state: Any, cause: str = "",
+                   capacity: int = DEFAULT_LIFE_CAPACITY) -> str:
     """自动总结生平（2026-10-24 用户令：生平由引擎总结，遗言才由本人自定义）。
 
     只读引擎已有的**事实字段**：打到哪一场、在哪个副本、持几种道纹、带几件遗物、
-    余多少碎片。不写形容词，不编经历——叙事由玩家在外部补，这一行只保证「这一页
-    确实属于这个人的这一趟轮回」。
+    余多少碎片、死于什么。不写形容词，不编经历——叙事由玩家在外部补，这一行只保证
+    「这一页确实属于这个人的这一趟轮回」。
+
+    2026-10-25 用户令：**死因不是遗言**（「第4场连续五回合触发凡庸」只能算死因），
+    所以死因进生平、遗言留给本人自己写；没有本人的话就不写遗言那一行。
     """
     player = getattr(state, "player", None)
     if player is None:
@@ -134,50 +140,37 @@ def summarize_life(state: Any, capacity: int = DEFAULT_LIFE_CAPACITY) -> str:
         bits.append(f"携遗物{len(relics)}件")
     shards = int(getattr(state, "shards", 0) or 0)
     bits.append(f"余{shards}碎片")
-    return "，".join(bits)[:capacity]
+    life = "，".join(bits)
+    death_text = (CAUSE_DRAFTS.get(cause) or {}).get(LEGACY_FIELD, "")
+    if death_text:
+        life = f"{life}；{death_text}"
+    return life[:capacity]
 
 
 def draft_legacy(
     state: Any,
-    cause: str,
+    cause: str = "",
     last_action: Optional[dict] = None,
     capacity: int = DEFAULT_CAPACITY,
 ) -> dict[str, str]:
-    """按死因模板生成一句不超过字数上限的遗言草稿。
+    """起草一页：〖生平〗由引擎写，〖遗言〗留空等本人自定义。
 
-    DM裁定 2026-08-31 后每页只有一句话，所以草稿只保留「第N场 + 死因短句」；
-    旧三段式里的岔路/代价预算（含按资源状态改写的那套）随格式一起废止。
-    `last_action` 仅用于在字数允许时补一句最后动作，不再单独成段。
+    2026-10-25 用户令：**遗言不能由死因代填**——「第4场连续五回合触发凡庸」那只是死因，
+    已经被 `summarize_life` 写进生平；遗言栏只放本人真的说过的话，没说过就留空
+    （页面照写，只是没有遗言那一行）。旧版按死因模板拼「第N场+死因」的写法整段删除。
+    `last_action` 只为兼容旧调用方保留，不再参与文案。
     """
-    template = dict(CAUSE_DRAFTS.get(cause) or CAUSE_DRAFTS["attack"])
-    battle = int(getattr(state, "current_battle", 0) or 0)
-    text = template[LEGACY_FIELD]
-    if battle > 0:
-        prefix = f"第{battle}场"
-        if len(prefix + text) <= capacity:
-            text = prefix + text
-    if last_action:
-        params = last_action.get("params") or {}
-        hint = ""
-        if last_action.get("action") == "use_daowen":
-            hint = f"末手{params.get('daowen_name', '道纹')}"
-        elif last_action.get("action") == "declare_escape":
-            hint = "试图逃跑"
-        if hint and len(text) + len(hint) <= capacity:
-            text = f"{text}{hint}"
-    template[LEGACY_FIELD] = clip_text(text, capacity)
-
-    life = summarize_life(state, DEFAULT_LIFE_CAPACITY)
+    template: dict[str, str] = {}
+    life = summarize_life(state, cause, DEFAULT_LIFE_CAPACITY)
     if life:
         template[LIFE_FIELD] = life
 
     player = getattr(state, "player", None)
     player_name = getattr(player, "name", "") if player is not None else ""
     region = getattr(state, "current_region", "") or ""
+    battle = int(getattr(state, "current_battle", 0) or 0)
     title_bits = [bit for bit in (player_name, region, f"第{battle}场" if battle else "") if bit]
-    if template.get("title"):
-        pass
-    elif title_bits:
+    if title_bits:
         template["title"] = "·".join(title_bits)
     return validate_legacy(template, capacity)
 
@@ -187,12 +180,13 @@ def render_legacy_section(entries: list[dict[str, str]]) -> str:
         return f"{SECTION_HEADER}\n\n{EMPTY_MARK}\n"
     lines = [SECTION_HEADER, ""]
     for index, entry in enumerate(entries, 1):
-        title = entry.get("title") or f"遗言{index}"
+        title = entry.get("title") or f"死者之页{index}"
         lines.append(f"### {title}")
         lines.append("")
         if entry.get(LIFE_FIELD):
             lines.append(f"- {LIFE_LABEL}：{entry[LIFE_FIELD]}")
-        lines.append(f"- {LEGACY_LABEL}：{entry[LEGACY_FIELD]}")
+        if entry.get(LEGACY_FIELD):
+            lines.append(f"- {LEGACY_LABEL}：{entry[LEGACY_FIELD]}")
         lines.append("")
     return "\n".join(lines)
 
@@ -215,7 +209,10 @@ def _split_legacy_section(text: str) -> tuple[str, str, str]:
 
 
 def parse_legacies(text: str) -> list[dict[str, str]]:
-    """读回全部遗言页。新格式读「- 遗言：」；旧三段式书页按「- 触发点：」折叠读入。"""
+    """读回全部死者之页。新格式读「- 生平：」「- 遗言：」；旧三段式书页按「- 触发点：」折叠读入。
+
+    2026-10-25 起遗言可以没有（他最后什么也没说）——只要页里有生平或遗言就成立。
+    """
     _, section, _ = _split_legacy_section(text)
     if not section.strip() or (EMPTY_MARK in section and "### " not in section):
         return []
@@ -225,7 +222,7 @@ def parse_legacies(text: str) -> list[dict[str, str]]:
     current: dict[str, str] = {}
 
     def flush() -> None:
-        if current.get(LEGACY_FIELD):
+        if current.get(LEGACY_FIELD) or current.get(LIFE_FIELD):
             entries.append(dict(current))
 
     for raw in section.splitlines():

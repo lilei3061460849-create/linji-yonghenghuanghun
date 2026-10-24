@@ -810,24 +810,21 @@ def test_events_system():
     print("  ✓ 事件系统测试通过")
 
 
-def test_rebellion_and_legacy():
-    """测试背叛候选 + 死者之页（2026-10-24：背叛改为朋友/员工自选，引擎不再按数值判定）"""
-    print("\n=== 测试：背叛候选/死者之页 ===")
+def test_death_page_legacy():
+    """测试死者之页（2026-10-25：夺书不再是独立行动，按「视野内目标」通用机制处理）"""
+    print("\n=== 测试：死者之页 ===")
     from engine.models import GameState
     from engine.combat import CombatEngine
     from engine.dice import DiceEngine
-    # 背叛：引擎只列候选，不判定（员工攻击总值再高也不会自动背叛）
     st = GameState(); st.player = Entity(name="贾凡", entity_type="轮回者", blood_limit=60, current_hp=10)
     emp = Entity(name="追求者", entity_type="员工", blood_limit=96, current_hp=96, attack_count=8, attack_power=2)
     fri = Entity(name="阿岚", entity_type="朋友", blood_limit=40, current_hp=40, attack_count=2, attack_power=3)
     st.employees.append(emp); st.friends.append(fri)
     combat = CombatEngine(st, DiceEngine())
-    r = combat.betrayal_candidates()
-    assert r["rebellion"] is False and r["automatic"] is False, f"engine不得自动判定背叛: {r}"
-    assert set(r["candidates"]) == {"追求者", "阿岚"}, f"候选应含员工与朋友: {r}"
-    print("  ✓ 背叛：朋友/员工都是候选，引擎不按攻击总值判定")
 
-    # 死者之页
+    # 没有专门的夺书/背叛判定入口：想夺书的人直接开战
+    assert not hasattr(combat, "betrayal_candidates"), "夺书不应再有独立的引擎入口"
+
     st.player.is_alive = False; st.player.current_hp = 0
     legacy = {
         "text": "速度归零后受到致死攻击",
@@ -835,7 +832,6 @@ def test_rebellion_and_legacy():
     r3 = combat.trigger_death_legacy(legacy)
     assert r3["triggered"] and st.death_book_legacies == [legacy]
     print(f"  ✓ 死者之页：命零留单句遗言'{r3['legacy']['text'][:12]}...'")
-    print("  ✓ 背叛候选/死者之页测试通过")
 
 
 def test_relics_five_more():
@@ -1336,7 +1332,7 @@ def run_all_tests():
         test_flying_and_split,
         test_huoxue,
         test_events_system,
-        test_rebellion_and_legacy,
+        test_death_page_legacy,
         test_relics_five_more,
         test_evolution_yuanchu,
         test_evolution_plight_listing,

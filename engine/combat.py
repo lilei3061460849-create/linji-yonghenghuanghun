@@ -31,7 +31,7 @@ MEDIOCRITY_ROUNDS = Entity.MEDIOCRITY_ROUNDS
 
 
 # 实现分片：方法体在 engine/combat_parts/*.py，本文件保留门面与核心结算
-# （__init__ / 伤害与数值管线 / resolve_attack / 回合管理 / 背叛候选与死者之页 /
+# （__init__ / 伤害与数值管线 / resolve_attack / 回合管理 / 死者之页 /
 #  遗物结算 / 凡庸与目标合法性）。拆分不改变行为与对外契约：CombatEngine 仍是
 # 唯一入口，全部引用方（含 self.combat.X 与 CombatEngine.X）经 MRO 解析不变。
 # 新增分片时请同步 engine/validator.py 的机制护栏扫描范围。
@@ -1283,26 +1283,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     # ========== 辅助方法 ==========
     
 
-    # ========== 大流程：背叛候选 / 死者之页 ==========
-
-    def betrayal_candidates(self) -> dict:
-        """背叛候选（2026-10-24 用户令：改为[朋友]／[员工]的自选项）。
-
-        旧口径在[战终]按「员工攻击总值 ≥ 玩家生命 + 朋友攻击总值」判定，
-        命中即全体员工作为特殊事件夺书。现改为：没有阈值、不自动触发、
-        也不由 DM 代为发动——由扮演他们的 AI 自己决定要不要夺书，再用
-        `declare_betrayal` 显式声明。这里只列出人选，不含任何判定。
-        """
-        employees = [e.name for e in self.state.employees if e.is_alive]
-        friends = [f.name for f in self.state.friends if f.is_alive]
-        return {
-            "rebellion": False,
-            "automatic": False,
-            "reason": "背叛是[朋友]／[员工]的自选项，引擎不按数值判定",
-            "candidates": employees + friends,
-            "employees": employees,
-            "friends": friends,
-        }
+    # ========== 大流程：死者之页 ==========
 
     def trigger_death_legacy(self, legacy: dict[str, str] | str) -> dict:
         """新增一页遗言；一句话，上限=`state.death_book_capacity`（默认20字）。

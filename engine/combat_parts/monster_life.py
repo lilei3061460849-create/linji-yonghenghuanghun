@@ -642,37 +642,3 @@ class MonsterLifeMixin:
             state_snapshot=self.state.to_dict()
         )
 
-    def initiate_negotiation(self, proposal: str) -> Interrupt:
-        """
-        背叛·谈判声明：给出合理的谈判方案破解叛乱，需要DM裁定方案是否成立。
-
-        2026-10-24 起背叛是[朋友]／[员工]的自选项，谈判对象是声明背叛的人
-        （state.rebellion_rebels），不再是"全体员工按攻击总值对撞"。
-        """
-        declared = list(getattr(self.state, "rebellion_rebels", []) or [])
-        if declared:
-            wanted = set(declared)
-            rebels = [e.name for e in self.state.employees + self.state.friends
-                      if e.name in wanted]
-        else:
-            rebels = [e.name for e in self.state.employees]
-        return Interrupt(
-            interrupt_type=InterruptType.STAFF_MUTINY,
-            context={
-                "rebels": rebels,
-                "player_hp": self.state.player.current_hp if self.state.player else 0,
-                "shards": self.state.shards,
-                "proposal": proposal,
-            },
-            description=(
-                f"轮回者尝试以谈判方案破解背叛：\n\n{proposal}\n\n"
-                f"背叛者：{'、'.join(rebels) or '（未具名）'}\n"
-                f"请DM裁定该方案是否合理、能否平息叛乱。"
-            ),
-            options=[
-                {"id": "negotiation_success", "label": "谈判成功", "description": "叛乱平息，方案对应的代价/效果按DM裁定生效"},
-                {"id": "negotiation_fail", "label": "谈判失败", "description": "叛乱未平息，需改用镇压或让利处理"},
-            ],
-            state_snapshot=self.state.to_dict()
-        )
-

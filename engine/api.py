@@ -70,11 +70,6 @@ from .handlers.economy import (
     handle_dismiss_employee,
     handle_repay_debt_employee,
     handle_pay_employee_wage,
-    handle_declare_betrayal,
-    handle_suppress_rebellion,
-    handle_resolve_rebellion_battle,
-    handle_appease_rebellion,
-    handle_negotiate_rebellion,
 )
 from .handlers.duel import (
     handle_activate_duel_relic,
@@ -1060,7 +1055,7 @@ class GameEngine:
         "declare_parry", "cast", "focus", "rest",
         "deploy_employee", "lianxin_in_battle", "declare_evolution",
         "prepare_monster_phase", "resolve_monster_phase", "monster_phase",
-        "round_start", "round_end", "resolve_rebellion_battle",
+        "round_start", "round_end",
         # resolve_final_duel不在此列：死斗败者先过死者之页（reset进setup相）
         # 再结算defeat，战斗限定会把它挡在setup外导致擂主永不回槽（r16实战复现）。
         "activate_duel_relic", "use_black_card", "use_crime_vault",
@@ -1669,16 +1664,6 @@ class GameEngine:
             return self._action_pay_employee_wage(params)
         elif action_type == "choose_hired_daowen":
             return self._action_choose_hired_daowen(params)
-        elif action_type == "declare_betrayal":
-            return self._action_declare_betrayal(params)
-        elif action_type == "suppress_rebellion":
-            return self._action_suppress_rebellion(params)
-        elif action_type == "resolve_rebellion_battle":
-            return self._action_resolve_rebellion_battle(params)
-        elif action_type == "appease_rebellion":
-            return self._action_appease_rebellion(params)
-        elif action_type == "negotiate_rebellion":
-            return self._action_negotiate_rebellion(params)
         elif action_type == "activate_duel_relic":
             return self._action_activate_duel_relic(params)
         elif action_type == "resolve_final_duel":
@@ -3296,7 +3281,7 @@ class GameEngine:
             cost_formula="X", effect_formula=""))
 
     def _action_resolve_redemption(self, params: dict) -> dict:
-        """救赎：接纳昏迷微光者为员工（待命，需派遣+战终工资；背叛对他们同样开放），或当场【终结】。
+        """救赎：接纳昏迷微光者为员工（待命，需派遣+战终工资；夺书对他们同样开放），或当场【终结】。
 
         【终结】：救赎不是免费收获——把昏迷
         的微光者当场终结，效果等同击杀：它被还原为一次正常[命零]，[战终]按与普通击杀
@@ -4574,33 +4559,6 @@ class GameEngine:
                 "result": {"employee": name, "chosen": daowen_name,
                            "employee_daowen": list(emp.dao_wen.keys())}}
 
-    # ==================== 背叛（[朋友]／[员工]自选，三选一处理分支） ====================
-
-    def _pending_rebellion_error(self, force: bool) -> Optional[dict]:
-        """未强制触发时，必须先有人声明背叛才能选择处理分支"""
-        if force:
-            return None
-        if not self.state.rebellion_active:
-            return {"success": False,
-                    "error": "当前没有待处理的背叛（[朋友]／[员工]尚未声明背叛）"}
-        return None
-
-    def _action_declare_betrayal(self, params: dict) -> dict:
-        """[朋友]／[员工]声明背叛：自选项，不是引擎按数值触发的特殊事件。"""
-        return handle_declare_betrayal(self, params)
-
-    def _action_suppress_rebellion(self, params: dict) -> dict:
-        return handle_suppress_rebellion(self, params)
-
-    def _action_resolve_rebellion_battle(self, params: dict) -> dict:
-        return handle_resolve_rebellion_battle(self, params)
-
-    def _action_appease_rebellion(self, params: dict) -> dict:
-        return handle_appease_rebellion(self, params)
-
-    def _action_negotiate_rebellion(self, params: dict) -> dict:
-        return handle_negotiate_rebellion(self, params)
-
     def _pre_battle_lianxin(self, params: dict) -> dict:
         """炼心（龙心谷专属，局外版：已消耗1精力，见_action_pre_battle统一扣减）"""
         self.state.pending_lianxin = True
@@ -5014,12 +4972,12 @@ class GameEngine:
     def _compute_pending_wages(self):
         """战终首次结算：为每个"存活+已部署+非还债"的员工计算应付工资，写入 pending_wage_decisions。
         已经出现过的key(无论是否已决策)不会被重新计算，避免同一员工在同一场战斗内被反复计费。
-        wage_bonus(背叛·让利)在封顶后叠加，不影响12碎片的封顶本身。"""
+        工资只按公式算，不吃任何外部加成（原「让利+5」随背叛条目一并删除）。"""
         for e in self.state.employees:
             if e.is_alive and e.is_deployed and not e.is_debt_bound and e.name not in self.state.pending_wage_decisions:
                 # current_round 为1-indexed的"当前回合序号"，与 deployed_at_round 同口径，故+1为闭区间计数
                 rounds_participated = max(0, self.state.current_round - e.deployed_at_round + 1)
-                wage = min(self.WAGE_CAP, 2 * (1 + rounds_participated)) + self.state.wage_bonus
+                wage = min(self.WAGE_CAP, 2 * (1 + rounds_participated))
                 self.state.pending_wage_decisions[e.name] = wage
 
     def _action_repay_debt_employee(self, params: dict) -> dict:
@@ -9247,10 +9205,6 @@ class GameEngine:
 
         self.state.phase = "pre_battle"
 
-        # 2026-10-24 用户令：背叛改为[朋友]／[员工]的自选项——[战终]不再按
-        # 攻击总值判定、不自动置 rebellion_active，只把可选对象报给 AI。
-        betrayal_check = self.combat.betrayal_candidates()
-
         # 捕获战终结果数值，因【最终的冠冕】可能在下面把self.state整个替换为新轮回者的空白状态
         battle_end_result = {
             "shard_reward": shard_reward,
@@ -9269,9 +9223,6 @@ class GameEngine:
             "spell_logs": spell_logs,
             "scoped_effects_rolled_back": scoped_rollbacks,
             "spell_bindings_removed": spell_bindings_removed,
-            "betrayal": {**betrayal_check,
-                         "pending": self.state.rebellion_active,
-                         "rebels": list(self.state.rebellion_rebels)},
             "employee_promotions": promoted,   # [员工]出场存活满3场 → 转为[朋友]
             "player_dead": (not self.state.player.is_alive) if self.state.player else False,
         }
@@ -9346,8 +9297,9 @@ class GameEngine:
     def _queue_death_inheritance_if_needed(self, action_type: str = "") -> Optional[Interrupt]:
         """轮回者命零后只抛一次【死者之页】中断，草稿写入 context 待审核。
 
-        2026-10-24 用户令：一页两项——生平由引擎自动总结（`summarize_life`），
-        遗言由本人自定义（≤20字）。中断只给遗言，生平不接受改稿。
+        2026-10-24/25 用户令：一页两项——〖生平〗由引擎自动总结（`summarize_life`，
+        含死因这种事实），〖遗言〗由本人自定义（≤20字，也可以不写）。
+        死因不是遗言，所以草稿里不带任何死因模板文案；生平不接受改稿。
         """
         if self.state.death_inheritance_queued:
             return None
@@ -9365,6 +9317,7 @@ class GameEngine:
                 "text": condense_to_legacy(
                     player.ai_memory, cause, last_action,
                     self.state.death_book_capacity),
+                "life": summarize_life(self.state, cause),
             }, self.state.death_book_capacity)
             clear_memory(player)
             personality_remove(self.state, player)
@@ -9373,7 +9326,7 @@ class GameEngine:
                 self.state, cause, last_action,
                 self.state.death_book_capacity)
         if not draft.get(LIFE_FIELD):
-            life = summarize_life(self.state)
+            life = summarize_life(self.state, cause)
             if life:
                 draft = dict(draft, **{LIFE_FIELD: life})
         self.state.pending_death_draft = draft
@@ -9390,11 +9343,12 @@ class GameEngine:
             description=(
                 f"{player.name}已[命零]，其页将录入【死者之页】。\n"
                 f"生平（引擎自动总结，不可改）：{draft.get(LIFE_FIELD) or '（无）'}\n"
-                f"遗言草稿：「{draft['text']}」（上限{self.state.death_book_capacity}字，可自定义）\n"
+                f"遗言：{('「' + draft['text'] + '」') if draft.get('text') else '空'}"
+                f"（本人自定义，上限{self.state.death_book_capacity}字；不写就留空）\n"
                 "请审核：通过、修改后写入、或驳回（驳回不写入死者之书）。"
             ),
             options=[
-                {"id": "approve", "label": "通过", "description": "按草稿写入《死者之书》"},
+                {"id": "approve", "label": "通过", "description": "按草稿写入《死者之书》（无遗言则只写生平）"},
                 {"id": "edit", "label": "修改后写入", "description": "提交自定义遗言（生平不变）再写入"},
                 {"id": "reject", "label": "驳回", "description": "不写入《死者之书》，本轮回结束"},
             ],
@@ -9437,7 +9391,7 @@ class GameEngine:
         if prepared["action"] == "reject":
             self._reset_after_death()
             return {"written": False, "rejected": True,
-                    "instruction": "遗言已驳回，未写入死者之书；请调用 setup_attributes 开始新的轮回者"}
+                    "instruction": "已驳回，未写入死者之书；请调用 setup_attributes 开始新的轮回者"}
         written = self.death_book.append(prepared["legacy"])
         self._reset_after_death()
         return {
@@ -9445,7 +9399,7 @@ class GameEngine:
             "legacy": {k: written[k] for k in ("life", "text") if written.get(k)},
             "total_legacies": len(self.state.death_book_legacies),
             "path": str(self.death_book.path),
-            "instruction": "遗言已写入死者之书；请调用 setup_attributes 开始新的轮回者",
+            "instruction": "死者之页已写入；请调用 setup_attributes 开始新的轮回者",
         }
 
     def _action_read_death_book(self, params: dict) -> dict:
@@ -9496,7 +9450,7 @@ class GameEngine:
                 prepared = self._prepare_death_ruling(interrupt, ruling_data or {})
             except ValueError as exc:
                 return {"success": False, "error": str(exc),
-                        "instruction": "非法遗言未写入；中断仍在，请改提交合法遗言（一句话，≤20字）"}
+                        "instruction": "非法内容未写入；中断仍在，请改提交合法内容（遗言一句话、≤20字，也可不写遗言）"}
 
         interrupt = self._pending_interrupts.pop(0)
 

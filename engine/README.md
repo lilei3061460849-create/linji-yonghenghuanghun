@@ -232,11 +232,6 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `dismiss_employee` | 解雇[员工]（自由行动，无代价） |
 | `pay_employee_wage` | 战终对某[员工]的工资做出pay/refuse决策 |
 | `choose_hired_daowen` | 雇佣diy后，从3个发现的转化道纹候选中选择1个 |
-| `declare_betrayal` | 背叛：由[朋友]／[员工]自己声明夺书（自选项，无阈值、不自动触发）；`names` 指名背叛者 |
-| `suppress_rebellion` | 背叛·镇压：背叛者搬入state.enemies开战 |
-| `resolve_rebellion_battle` | 镇压结算(outcome=victory/defeat) |
-| `appease_rebellion` | 背叛·让利：全局工资+5，平息叛乱（仅对[员工]背叛有效） |
-| `negotiate_rebellion` | 背叛·谈判：抛Interrupt交DM裁定 |
 | `resolve_final_duel` | 第8场死斗结算；失败时触发【死者之页】中断，可选带`death_book_entry`作草稿 |
 | `submit_ruling`（死者之页） | 轮回者命零后审核其页：`action=approve/edit/reject`；生平由引擎自动总结（`summarize_life`），玩家只自定义`text`（≤20字），通过或修改后写入`死者之书.md`的「## 死者之页」节 |
 | `choose_terminal_artifact` | 死斗胜利后按副本领取终音法器(choice=序号) |
