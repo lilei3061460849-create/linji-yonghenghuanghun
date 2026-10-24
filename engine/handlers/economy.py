@@ -118,19 +118,68 @@ def handle_pay_employee_wage(engine: Any, params: Dict[str, Any]) -> Dict[str, A
         return {"success": False, "error": "decision必须是 pay 或 refuse"}
 
 
+def handle_declare_betrayal(engine: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """[朋友]／[员工]声明背叛（2026-10-24 用户令：自选项，不是特殊事件）。
+
+    没有攻击总值门槛，不自动触发：谁要夺书，谁自己声明。
+    """
+    if engine.state.rebellion_in_progress:
+        return {"success": False, "error": "镇压战斗尚未结算，先调用 resolve_rebellion_battle"}
+    if engine.state.rebellion_active:
+        return {"success": False, "error": "已有待处理的背叛，先选镇压／让利／谈判"}
+    if engine.state.enemies:
+        return {"success": False,
+                "error": "场上仍有敌方角色：背叛只能在战斗之外声明（[战终]后或局外）"}
+    raw = params.get("names")
+    if raw is None:
+        raw = [params["name"]] if params.get("name") else []
+    if isinstance(raw, str):
+        raw = [raw]
+    names = [str(x).strip() for x in raw if str(x).strip()]
+    if not names:
+        return {"success": False, "error": "必须指名背叛者（names）"}
+    pool: Dict[str, str] = {}
+    for e in engine.state.employees:
+        if e.is_alive:
+            pool[e.name] = "员工"
+    for f in engine.state.friends:
+        if f.is_alive:
+            pool[f.name] = "朋友"
+    unknown = [n for n in names if n not in pool]
+    if unknown:
+        return {"success": False, "error": f"不是存活的[朋友]／[员工]：{unknown}"}
+    engine.state.rebellion_rebels = names
+    engine.state.rebellion_active = True
+    return {
+        "success": True, "action": "背叛",
+        "result": {"rebels": names, "kinds": {n: pool[n] for n in names}},
+        "instruction": "背叛者已摊牌；轮回者须从镇压／让利／谈判中选一项应对"
+                       "（suppress_rebellion / appease_rebellion / negotiate_rebellion）",
+    }
+
+
 def handle_suppress_rebellion(engine: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """镇压背叛"""
+    """镇压背叛：把声明背叛的[朋友]／[员工]搬进state.enemies"""
     force = params.get("force", False)
     err = engine._pending_rebellion_error(force)
     if err:
         return err
-    if not engine.state.employees:
-        return {"success": False, "error": "没有员工可镇压"}
-    rebels = list(engine.state.employees)
+    declared = list(getattr(engine.state, "rebellion_rebels", []) or [])
+    if declared:
+        nameset = set(declared)
+        rebels = [e for e in engine.state.employees + engine.state.friends
+                  if e.name in nameset and e.is_alive]
+    else:
+        rebels = [e for e in engine.state.employees if e.is_alive]
+    if not rebels:
+        return {"success": False, "error": "没有可镇压的背叛者"}
     for e in rebels:
         e.is_deployed = True
         e.has_retreated = False
-    engine.state.employees = []
+    rebel_ids = {id(e) for e in rebels}
+    engine.state.employees = [e for e in engine.state.employees if id(e) not in rebel_ids]
+    engine.state.friends = [f for f in engine.state.friends if id(f) not in rebel_ids]
+    engine.state.rebellion_rebels = []
     engine.state.enemies = rebels
     engine.state.current_round = 0
     engine.combat.reset_monster_activation()
@@ -154,7 +203,7 @@ def handle_suppress_rebellion(engine: Any, params: Dict[str, Any]) -> Dict[str, 
 def handle_resolve_rebellion_battle(engine: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     """镇压战斗结算"""
     if not engine.state.rebellion_in_progress:
-        return {"success": False, "error": "当前没有进行中的员工背叛战斗"}
+        return {"success": False, "error": "当前没有进行中的背叛·镇压战斗"}
     outcome = params.get("outcome", "")
     if outcome not in ("victory", "defeat"):
         return {"success": False, "error": "outcome必须是 victory 或 defeat（战斗失败与主动撤退统一按defeat结算）"}
@@ -163,6 +212,7 @@ def handle_resolve_rebellion_battle(engine: Any, params: Dict[str, Any]) -> Dict
         engine.state.shards = 0
     engine.state.enemies = []
     engine.state.rebellion_in_progress = False
+    engine.state.rebellion_rebels = []
     engine.state.phase = "pre_battle"
     return {
         "success": True, "action": "镇压结算",
@@ -172,13 +222,20 @@ def handle_resolve_rebellion_battle(engine: Any, params: Dict[str, Any]) -> Dict
 
 
 def handle_appease_rebellion(engine: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """让利：平息叛乱"""
+    """让利：平息叛乱（只对[员工]有效——[朋友]不吃工资）"""
     force = params.get("force", False)
     err = engine._pending_rebellion_error(force)
     if err:
         return err
+    declared = list(getattr(engine.state, "rebellion_rebels", []) or [])
+    if declared:
+        employee_names = {e.name for e in engine.state.employees}
+        if not any(n in employee_names for n in declared):
+            return {"success": False,
+                    "error": "背叛者里没有[员工]：让利是加工资，对[朋友]无效——只能镇压或谈判"}
     engine.state.wage_bonus += 5
     engine.state.rebellion_active = False
+    engine.state.rebellion_rebels = []
     return {"success": True, "action": "让利", "result": {"wage_bonus": engine.state.wage_bonus}}
 
 
@@ -194,7 +251,7 @@ def handle_negotiate_rebellion(engine: Any, params: Dict[str, Any]) -> Dict[str,
     interrupt = engine.combat.initiate_negotiation(proposal)
     engine._pending_interrupts.append(interrupt)
     return {
-        "success": True, "action": "员工背叛·谈判",
+        "success": True, "action": "背叛·谈判",
         "interrupt": interrupt.to_dict(),
         "instruction": "需要DM裁定谈判方案是否合理；裁定后请调用 appease_rebellion(force=True) 平息叛乱"
                        "或改用 suppress_rebellion(force=True) 镇压",

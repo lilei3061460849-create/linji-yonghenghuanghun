@@ -811,25 +811,21 @@ def test_events_system():
 
 
 def test_rebellion_and_legacy():
-    """测试员工背叛检查 + 死之传承"""
-    print("\n=== 测试：员工背叛/死之传承 ===")
+    """测试背叛候选 + 死之传承（2026-10-24：背叛改为朋友/员工自选，引擎不再按数值判定）"""
+    print("\n=== 测试：背叛候选/死之传承 ===")
     from engine.models import GameState
     from engine.combat import CombatEngine
     from engine.dice import DiceEngine
-    # 员工背叛：员工攻击总值≥玩家HP+朋友攻击 → 背叛
+    # 背叛：引擎只列候选，不判定（员工攻击总值再高也不会自动背叛）
     st = GameState(); st.player = Entity(name="贾凡", entity_type="轮回者", blood_limit=60, current_hp=10)
     emp = Entity(name="追求者", entity_type="员工", blood_limit=96, current_hp=96, attack_count=8, attack_power=2)
-    st.employees.append(emp)  # 攻击总值16 ≥ 玩家HP10
+    fri = Entity(name="阿岚", entity_type="朋友", blood_limit=40, current_hp=40, attack_count=2, attack_power=3)
+    st.employees.append(emp); st.friends.append(fri)
     combat = CombatEngine(st, DiceEngine())
-    r = combat.check_employee_rebellion()
-    assert r["rebellion"] is True, f"应背叛(16≥10): {r}"
-    print(f"  ✓ 员工背叛：追求者攻击总值16 ≥ 阈值10，触发背叛")
-
-    # 不背叛：玩家HP高
-    st.player.current_hp = 50
-    r2 = combat.check_employee_rebellion()
-    assert r2["rebellion"] is False, f"HP50时不应背叛(16<50): {r2}"
-    print(f"  ✓ 员工背叛：玩家HP50 > 员工攻击16，不背叛")
+    r = combat.betrayal_candidates()
+    assert r["rebellion"] is False and r["automatic"] is False, f"engine不得自动判定背叛: {r}"
+    assert set(r["candidates"]) == {"追求者", "阿岚"}, f"候选应含员工与朋友: {r}"
+    print("  ✓ 背叛：朋友/员工都是候选，引擎不按攻击总值判定")
 
     # 死之传承
     st.player.is_alive = False; st.player.current_hp = 0
@@ -839,7 +835,7 @@ def test_rebellion_and_legacy():
     r3 = combat.trigger_death_legacy(legacy)
     assert r3["triggered"] and st.death_book_legacies == [legacy]
     print(f"  ✓ 死之传承：命零留单句遗言'{r3['legacy']['text'][:12]}...'")
-    print("  ✓ 员工背叛/死之传承测试通过")
+    print("  ✓ 背叛候选/死之传承测试通过")
 
 
 def test_relics_five_more():

@@ -1233,11 +1233,14 @@ class GameState:
     # 字段名保留 delayed_monster_reentries 是为了不打断既有调用方与存档。
     delayed_monster_reentries: list[dict] = field(default_factory=list)
 
-    # 员工背叛：待处理标记（[战终]检查命中后置真，三个处理分支任一生效后清空）
+    # 背叛（2026-10-24 用户令：不再是特殊事件，改为[朋友]／[员工]的自选项）：
+    #   rebellion_active   —— 已有人声明背叛、等待轮回者选镇压/让利/谈判；
+    #   rebellion_rebels   —— 声明背叛者的名字（可能同时含[员工]与[朋友]）。
     rebellion_active: bool = False
-    # 员工背叛·镇压子战斗：进行中标记（employees已搬入enemies，需resolve_rebellion_battle结算）
+    rebellion_rebels: list[str] = field(default_factory=list)
+    # 背叛·镇压子战斗：进行中标记（背叛者已搬入enemies，需resolve_rebellion_battle结算）
     rebellion_in_progress: bool = False
-    # 员工背叛·让利：每场工资在原公式基础上的固定加成（本次轮回持续生效）
+    # 背叛·让利：每场工资在原公式基础上的固定加成（本次轮回持续生效）
     wage_bonus: int = 0
 
     # 养蛊场（怪物互斗）训练模式：开启后怪物阶段的合法目标从「玩家侧」扩为「其它怪物」，
@@ -1859,6 +1862,7 @@ class GameState:
                 for entry in getattr(self, "delayed_monster_reentries", [])
             ],
             "rebellion_active": self.rebellion_active,
+            "rebellion_rebels": list(self.rebellion_rebels),
             "rebellion_in_progress": self.rebellion_in_progress,
             "wage_bonus": self.wage_bonus,
             "in_final_duel": self.in_final_duel,

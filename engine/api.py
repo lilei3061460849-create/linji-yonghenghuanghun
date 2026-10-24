@@ -67,6 +67,7 @@ from .handlers.economy import (
     handle_dismiss_employee,
     handle_repay_debt_employee,
     handle_pay_employee_wage,
+    handle_declare_betrayal,
     handle_suppress_rebellion,
     handle_resolve_rebellion_battle,
     handle_appease_rebellion,
@@ -1664,6 +1665,8 @@ class GameEngine:
             return self._action_pay_employee_wage(params)
         elif action_type == "choose_hired_daowen":
             return self._action_choose_hired_daowen(params)
+        elif action_type == "declare_betrayal":
+            return self._action_declare_betrayal(params)
         elif action_type == "suppress_rebellion":
             return self._action_suppress_rebellion(params)
         elif action_type == "resolve_rebellion_battle":
@@ -3289,7 +3292,7 @@ class GameEngine:
             cost_formula="X", effect_formula=""))
 
     def _action_resolve_redemption(self, params: dict) -> dict:
-        """救赎：接纳昏迷微光者为员工（待命，需派遣+战终工资，计入背叛），或当场【终结】。
+        """救赎：接纳昏迷微光者为员工（待命，需派遣+战终工资；背叛对他们同样开放），或当场【终结】。
 
         【终结】：救赎不是免费收获——把昏迷
         的微光者当场终结，效果等同击杀：它被还原为一次正常[命零]，[战终]按与普通击杀
@@ -4567,15 +4570,20 @@ class GameEngine:
                 "result": {"employee": name, "chosen": daowen_name,
                            "employee_daowen": list(emp.dao_wen.keys())}}
 
-    # ==================== 员工背叛（三选一处理分支） ====================
+    # ==================== 背叛（[朋友]／[员工]自选，三选一处理分支） ====================
 
     def _pending_rebellion_error(self, force: bool) -> Optional[dict]:
-        """未强制触发时，必须存在[战终]检查命中的待处理背叛才能选择处理分支"""
+        """未强制触发时，必须先有人声明背叛才能选择处理分支"""
         if force:
             return None
         if not self.state.rebellion_active:
-            return {"success": False, "error": "当前没有待处理的员工背叛"}
+            return {"success": False,
+                    "error": "当前没有待处理的背叛（[朋友]／[员工]尚未声明背叛）"}
         return None
+
+    def _action_declare_betrayal(self, params: dict) -> dict:
+        """[朋友]／[员工]声明背叛：自选项，不是引擎按数值触发的特殊事件。"""
+        return handle_declare_betrayal(self, params)
 
     def _action_suppress_rebellion(self, params: dict) -> dict:
         return handle_suppress_rebellion(self, params)
@@ -5002,7 +5010,7 @@ class GameEngine:
     def _compute_pending_wages(self):
         """战终首次结算：为每个"存活+已部署+非还债"的员工计算应付工资，写入 pending_wage_decisions。
         已经出现过的key(无论是否已决策)不会被重新计算，避免同一员工在同一场战斗内被反复计费。
-        wage_bonus(员工背叛·让利)在封顶后叠加，不影响12碎片的封顶本身。"""
+        wage_bonus(背叛·让利)在封顶后叠加，不影响12碎片的封顶本身。"""
         for e in self.state.employees:
             if e.is_alive and e.is_deployed and not e.is_debt_bound and e.name not in self.state.pending_wage_decisions:
                 # current_round 为1-indexed的"当前回合序号"，与 deployed_at_round 同口径，故+1为闭区间计数
@@ -9235,9 +9243,9 @@ class GameEngine:
 
         self.state.phase = "pre_battle"
 
-        rebellion_check = self.combat.check_employee_rebellion()
-        if rebellion_check.get("rebellion"):
-            self.state.rebellion_active = True
+        # 2026-10-24 用户令：背叛改为[朋友]／[员工]的自选项——[战终]不再按
+        # 攻击总值判定、不自动置 rebellion_active，只把可选对象报给 AI。
+        betrayal_check = self.combat.betrayal_candidates()
 
         # 捕获战终结果数值，因【最终的冠冕】可能在下面把self.state整个替换为新轮回者的空白状态
         battle_end_result = {
@@ -9257,7 +9265,9 @@ class GameEngine:
             "spell_logs": spell_logs,
             "scoped_effects_rolled_back": scoped_rollbacks,
             "spell_bindings_removed": spell_bindings_removed,
-            "employee_rebellion": rebellion_check,
+            "betrayal": {**betrayal_check,
+                         "pending": self.state.rebellion_active,
+                         "rebels": list(self.state.rebellion_rebels)},
             "employee_promotions": promoted,   # [员工]出场存活满3场 → 转为[朋友]
             "player_dead": (not self.state.player.is_alive) if self.state.player else False,
         }

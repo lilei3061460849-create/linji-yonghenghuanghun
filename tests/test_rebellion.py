@@ -1,13 +1,16 @@
 """
-pytest 风格测试 - 里程碑6：员工背叛三选一处理分支（镇压/让利/谈判）
+pytest 风格测试 - 背叛三选一处理分支（镇压/让利/谈判）
 
-原文：
-"员工背叛（[战终]检查，或被效果强制触发）：所有[员工]攻击总值≥轮回者当前生命+所有[朋友]攻击总值时，
-所有[员工]共同背叛夺取《死者之书》；被效果强制触发时跳过数值检查，直接背叛。
--镇压：与所有背叛[员工]开启战斗！若战斗失败或选择【撤退】，失去所有[碎片]，随后所有背叛[员工]携财逃跑；
-若战斗胜利，肃清叛徒并保留财产。
--让利：本次轮回所有[员工]每场工资+5，背叛平息。
--谈判：给出合理的谈判方案破解叛乱。"
+2026-10-24 用户令：背叛不再是按数值判定的特殊事件，改为[朋友]／[员工]的自选项——
+没有攻击总值门槛，引擎不自动触发，由扮演他们的 AI 自己声明（declare_betrayal）。
+原文（规则正文·同伴规则）：
+"背叛（[朋友]或[员工]的自选项；不是特殊事件，没有触发阈值）
+[朋友]或[员工]可以自己决定要不要背叛、夺取《死者之书》。没有攻击总值门槛，不在[战终]自动判定，
+也不由DM代为发动——想夺书的人自己开口，之后的代价由他自己承担。
+-镇压：与所有背叛者开启战斗！…若战斗胜利，肃清叛徒并保留财产。
+-让利：本次轮回所有[员工]每场工资+5，背叛平息（仅对[员工]背叛有效）。
+-谈判：给出合理的谈判方案破解叛乱。
+背叛者推翻并取代持有者后，夺得《死者之书》，成为新的轮回者。"
 
 设计要点(用户已确认思路：直接复用现有战斗体系，把背叛员工的面板"当出怪"塞进state.enemies)：
 1. suppress_rebellion：把state.employees整体搬进state.enemies(保留其完整面板与道纹)，
@@ -37,7 +40,7 @@ from engine.models import Entity, DaoWen, DaoWenInstance
 
 
 def _setup_with_rebellion(db_suffix: str) -> GameEngine:
-    """构造一个战终检查会判定背叛(员工攻击总值≥玩家生命)的局面，并推进到rebellion_active=True"""
+    """构造一个[员工]已声明背叛、等待处理（rebellion_active=True）的局面"""
     engine = GameEngine(db_path=f"data/test_rebellion_{db_suffix}.db", rng_seed=1)
     engine.execute_action("setup_attributes", {"blood_points": 11, "speed_points": 8, "mana_points": 6})
     finish_initial_daowen(engine)
@@ -53,11 +56,9 @@ def _setup_with_rebellion(db_suffix: str) -> GameEngine:
                  attack_count=5, attack_power=5, is_deployed=True)  # 攻击总值25 ≥ 玩家HP5
     engine.state.employees.append(emp)
     engine.state.enemies.clear()
-    engine.execute_action("battle_end", {})  # 第一次调用触发工资待决
-    engine.execute_action("pay_employee_wage", {"name": "彪悍打手", "decision": "pay"})
-    r = engine.execute_action("battle_end", {})  # 第二次真正完成战终，顺带做背叛检查
-    assert r["success"] is True
-    assert engine.state.rebellion_active is True, "测试前置条件：背叛必须已判定为待处理"
+    r = engine.execute_action("declare_betrayal", {"names": ["彪悍打手"]})
+    assert r["success"] is True, r
+    assert engine.state.rebellion_active is True, "测试前置条件：员工声明背叛后应待处理"
     return engine
 
 
@@ -77,8 +78,8 @@ def test_suppress_moves_employees_into_enemies_with_full_panel():
     assert len(engine.state.enemies) == 1
     rebel = engine.state.enemies[0]
     assert rebel.name == "彪悍打手"
-    # 该员工在前置battle_end中处于已部署参战状态，按文本规则战终攻次+1（5→6），镇压时保留成长后面板
-    assert rebel.attack_count == 6 and rebel.attack_power == 5 and rebel.current_hp == 50
+    # 镇压不再夹带[战终]攻次成长：面板原样搬进敌方（2026-10-24 起背叛是自选，不经战终判定）
+    assert rebel.attack_count == 5 and rebel.attack_power == 5 and rebel.current_hp == 50
     assert "弱化" in rebel.dao_wen
     assert engine.state.rebellion_in_progress is True
     assert engine.state.rebellion_active is False
@@ -176,7 +177,7 @@ def test_negotiate_raises_interrupt_for_dm_not_auto_resolved():
 # ========================================================================
 
 def test_force_bypasses_threshold_check():
-    """边界：force=True时跳过数值门槛，即使rebellion_active=False也能直接处理(如"被效果强制触发")"""
+    """边界：force=True时跳过"须先有人声明背叛"的前置，直接处理（供DM/剧本强制场景使用）"""
     engine = GameEngine(db_path="/tmp/linji_tests/test_rebellion_force.db", rng_seed=1)
     engine.execute_action("setup_attributes", {"blood_points": 11, "speed_points": 8, "mana_points": 6})
     finish_initial_daowen(engine)
@@ -202,7 +203,7 @@ def test_suppress_with_no_employees_rejected():
 
 
 def test_multiple_employees_all_rebel_together():
-    """边界：原文"所有[员工]共同背叛"——多名员工时应全部一起搬入state.enemies，不是只挑一个"""
+    """边界：force镇压仍把全部[员工]一起搬入state.enemies，不是只挑一个"""
     engine = GameEngine(db_path="/tmp/linji_tests/test_rebellion_multi.db", rng_seed=1)
     engine.execute_action("setup_attributes", {"blood_points": 11, "speed_points": 8, "mana_points": 6})
     finish_initial_daowen(engine)

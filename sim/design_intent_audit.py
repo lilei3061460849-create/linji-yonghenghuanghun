@@ -61,13 +61,14 @@ def _spy_evo(self, m, name, x):
     return r
 combat_mod.CombatEngine.execute_evolution = _spy_evo
 
-_orig_rebel = combat_mod.CombatEngine.check_employee_rebellion
+_orig_rebel = combat_mod.CombatEngine.betrayal_candidates
 def _spy_rebel(self):
+    # 2026-10-24：背叛改为[朋友]／[员工]自选项，引擎不再判定，只统计被点名的次数。
     r = _orig_rebel(self)
-    if r.get("rebellion"):
-        FIRES["员工背叛"] += 1
+    if r.get("candidates"):
+        FIRES["背叛候选"] += 1
     return r
-combat_mod.CombatEngine.check_employee_rebellion = _spy_rebel
+combat_mod.CombatEngine.betrayal_candidates = _spy_rebel
 
 _orig_resolve = combat_mod.CombatEngine._resolve_monster_daowen_choice
 def _spy_resolve(self, monster, choice, refs, activated, prepared_option):
@@ -157,7 +158,7 @@ def main():
         merged = dict(list(row["alt"].items()))
         merged.update(row["fires"])
         for k in ("凡庸", "封印", "伤害击杀", "救赎", "救赎触发", "雕塑", "癌变",
-                  "还债", "逃跑", "进化尝试", "进化成功", "员工背叛"):
+                  "还债", "逃跑", "进化尝试", "进化成功", "背叛候选"):
             v = merged.get(k, 0)
             bits.append(f"{k}={v}")
         print(f"{row['region']}: " + " ".join(bits)
