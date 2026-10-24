@@ -221,6 +221,7 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `setup_choose_region` | 选择副本；完成后默认下一步为 `world_initialize` |
 | `world_initialize` | 默认副本入口：按当前副本区域初始化 21×21 开放地图 |
 | `world_move` / `world_wait` / `world_interact` | 开放地图移动、等待与交互；地图遭遇使用带 `world_encounter_id` 的 `battle_start` |
+| `world_suggest_ally` | 向朋友/员工/临时朋友**提建议**（follow/guard/explore/hold）；不改变其位置，是否照做由该单位按 `world.suggestion_acceptance_percent` 自行判定，拒绝时行为与守点原样保留。范围5格，守卫可带 `x`/`y` |
 | `pre_battle_action` | 局外行动；旧线性模式仅在用户明确要求时使用 |
 | `use_daowen` | 发动道纹（可指定[朋友]/[员工]的actor_ref听从指令，由其自身支付法力并消耗出手；初拥专属【真理】需提交target_ref与statement，冷却2场且不消耗出手） |
 | `define_spell` | 统一自定义施法：用 `spell_name` 定义法术大全条目，或用 `spell` 定义新法术；所有法术类型均由此入口表达（1出手） |

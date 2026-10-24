@@ -556,7 +556,8 @@ function renderBattle(){
   }
   if (!b){ card.style.display = "none"; return; }
   card.style.display = "";
-  $("battlePhase").textContent = b.peaceful ? "战斗结束" : `第 ${b.round} 回合 · ${b.subphase}`;
+  $("battlePhase").textContent = b.peaceful ? "战斗结束"
+    : `第 ${b.round} 回合 · ${b.subphase}${b.actions_left !== undefined ? ` · 余 ${b.actions_left} 次出手` : ""}`;
   for (const c of b.combatants){
     const row = el("div", "combatant " + (c.side === "enemy" ? "side-enemy" : "side-player")
       + (c.alive ? "" : " dead"));
@@ -645,9 +646,25 @@ function renderBattle(){
     return;
   }
 
+  if (has("resolve_redemption")){
+    const line = el("div","kv","场上有【救赎】待选：接纳它成为同伴，或直接终结。");
+    const nameInput = el("input"); nameInput.type = "text"; nameInput.value = "赎罪者";
+    const accept = el("button","primary","接纳");
+    accept.onclick = () => act("resolve_redemption", {option: "接纳", name: nameInput.value || "赎罪者"});
+    const finish = el("button","danger","终结");
+    finish.onclick = () => act("resolve_redemption", {option: "终结"});
+    const line2 = el("div","row"); line2.append(nameInput, accept, finish);
+    body.append(line, line2);
+  }
   const dodgeBoxes = [];
+  const noActionsLeft = (b.actions_left !== undefined) && b.actions_left <= 0;
+  const noEnemy = b.enemies_alive === 0;
   if (has("prepare_attack")){
-    const prep = el("button","primary","准备攻击");
+    const prep = el("button","primary",
+      noEnemy ? "攻击（场上已无存活敌人）"
+        : noActionsLeft ? "准备攻击（本回合出手已用完）"
+        : `准备攻击（余 ${b.actions_left ?? "?"} 次）`);
+    prep.disabled = noActionsLeft || noEnemy;
     prep.onclick = () => act("prepare_attack", {actor_ref: "player:0"});
     row.append(prep);
   }

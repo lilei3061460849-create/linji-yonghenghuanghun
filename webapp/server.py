@@ -152,6 +152,11 @@ def _battle_view(engine: GameEngine) -> dict[str, Any] | None:
         "subphase": state.combat_subphase,
         "combatants": sides,
         "actions_used": state.player.actions_used_this_round,
+        "action_budget": engine._action_budget_of(state.player),
+        "actions_left": max(0, engine._action_budget_of(state.player)
+                            - state.player.actions_used_this_round),
+        "enemies_alive": sum(1 for entity in state.enemies
+                             if entity.is_alive and not entity.is_departed),
         "peaceful": state.phase == "battle_end",
         "pending_attack": None,
     }
