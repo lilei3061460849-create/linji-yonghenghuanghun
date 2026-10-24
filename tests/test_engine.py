@@ -811,8 +811,8 @@ def test_events_system():
 
 
 def test_rebellion_and_legacy():
-    """测试背叛候选 + 死之传承（2026-10-24：背叛改为朋友/员工自选，引擎不再按数值判定）"""
-    print("\n=== 测试：背叛候选/死之传承 ===")
+    """测试背叛候选 + 死者之页（2026-10-24：背叛改为朋友/员工自选，引擎不再按数值判定）"""
+    print("\n=== 测试：背叛候选/死者之页 ===")
     from engine.models import GameState
     from engine.combat import CombatEngine
     from engine.dice import DiceEngine
@@ -827,15 +827,15 @@ def test_rebellion_and_legacy():
     assert set(r["candidates"]) == {"追求者", "阿岚"}, f"候选应含员工与朋友: {r}"
     print("  ✓ 背叛：朋友/员工都是候选，引擎不按攻击总值判定")
 
-    # 死之传承
+    # 死者之页
     st.player.is_alive = False; st.player.current_hp = 0
     legacy = {
         "text": "速度归零后受到致死攻击",
     }
     r3 = combat.trigger_death_legacy(legacy)
     assert r3["triggered"] and st.death_book_legacies == [legacy]
-    print(f"  ✓ 死之传承：命零留单句遗言'{r3['legacy']['text'][:12]}...'")
-    print("  ✓ 背叛候选/死之传承测试通过")
+    print(f"  ✓ 死者之页：命零留单句遗言'{r3['legacy']['text'][:12]}...'")
+    print("  ✓ 背叛候选/死者之页测试通过")
 
 
 def test_relics_five_more():

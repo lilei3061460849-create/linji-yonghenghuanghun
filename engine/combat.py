@@ -31,7 +31,7 @@ MEDIOCRITY_ROUNDS = Entity.MEDIOCRITY_ROUNDS
 
 
 # 实现分片：方法体在 engine/combat_parts/*.py，本文件保留门面与核心结算
-# （__init__ / 伤害与数值管线 / resolve_attack / 回合管理 / 背叛候选与死之传承 /
+# （__init__ / 伤害与数值管线 / resolve_attack / 回合管理 / 背叛候选与死者之页 /
 #  遗物结算 / 凡庸与目标合法性）。拆分不改变行为与对外契约：CombatEngine 仍是
 # 唯一入口，全部引用方（含 self.combat.X 与 CombatEngine.X）经 MRO 解析不变。
 # 新增分片时请同步 engine/validator.py 的机制护栏扫描范围。
@@ -1283,7 +1283,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     # ========== 辅助方法 ==========
     
 
-    # ========== 大流程：背叛候选 / 死之传承 ==========
+    # ========== 大流程：背叛候选 / 死者之页 ==========
 
     def betrayal_candidates(self) -> dict:
         """背叛候选（2026-10-24 用户令：改为[朋友]／[员工]的自选项）。

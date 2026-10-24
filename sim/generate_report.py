@@ -192,7 +192,7 @@ def run_playthrough(seed=42):
                 b_lines.append(f"触发点：第{battle_no}场受到致死攻击[命零]")
                 b_lines.append("增益与减益清除：清除局内增益（回复/格挡/持续∞）与减益")
                 b_lines.append("代价保留项：代价不随[战终]清除")
-                b_lines.append("【死之传承】遗言：")
+                b_lines.append("【死者之页】遗言：")
                 b_lines.append("- 触发点：受到狂暴多段连击破盾命零")
                 b_lines.append("- 岔路：未能在关键轮次保留速度进行闪避")
                 b_lines.append("- 代价预算：愿以血限换法限建立更高格挡")

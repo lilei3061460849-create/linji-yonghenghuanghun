@@ -187,7 +187,7 @@ def test_normal_hand_grenade():
 
 def test_boundary_depleted_tool_rejected():
     engine = _setup_engine()
-    # 用不回血的工具耗尽：血泵走 heal() 后满血连用会叠癌变、抛死之传承，挡不住这条断言。
+    # 用不回血的工具耗尽：血泵走 heal() 后满血连用会叠癌变、抛死者之页，挡不住这条断言。
     c = _grant_tool(engine, "干扰仪")
     for _ in range(2):
         engine.execute_action("consume_item", {"name": "干扰仪"})

@@ -96,7 +96,7 @@ def test_sealed_candidate_fights_in_dungeon():
             assert rr["success"], rr
     for rnd in range(1, 30):
         if not e.state.player or not e.state.player.is_alive:
-            break  # 玩家阵亡：死之传承中断会阻塞后续行动，属正常失败路径
+            break  # 玩家阵亡：死者之页中断会阻塞后续行动，属正常失败路径
         _drain_redemption()
         rs = e.execute_action("round_start", {"relic_choices": round_start_relic_choices(e)})
         assert rs["success"], rs

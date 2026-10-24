@@ -21,7 +21,7 @@ def test_normal_auto_trigger_list_matches_rules_text():
         assert kw in line, f"五章列表应包含 {kw}，实际为：{line}"
     # 2026-10-24 起【背叛】不再是特殊事件、也不自动触发，故不在「全程自动触发」清单里：
     # 清单剩 13 项，背叛单独由[朋友]／[员工]自选声明。
-    expected_auto = ["死之传承","凡庸","癌变","还债","雕塑","许愿","逃跑与追击","进化","迷失","撤退","最终的冠冕","初拥之夜","救赎"]
+    expected_auto = ["死者之页","凡庸","癌变","还债","雕塑","许愿","逃跑与追击","进化","迷失","撤退","最终的冠冕","初拥之夜","救赎"]
     for kw in expected_auto:
         assert kw in line, f"同步后五章应含 {kw}"
     assert "背叛" not in line, f"背叛已改为自选项，不应留在自动触发清单里：{line}"

@@ -45,7 +45,10 @@ from .gamedata import (REGION_EXCLUSIVE_DAOWEN, ORIGINAL_MONSTER_DAOWEN,
                        UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN, FIRST_EMBRACE_DAOWEN,
                        learnability_error)
 from .dm_rulings import DMRulingsDB, DMRuling, Interrupt
-from .death_book import DeathBookStore, draft_legacy, validate_legacy
+from .death_book import (
+    DeathBookStore, draft_legacy, summarize_life, validate_legacy,
+    LIFE_FIELD,
+)
 from .ai_memory import clear_memory, condense_to_legacy
 from .effect_context import make_context, normalize_context
 from . import custom_resources
@@ -1058,7 +1061,7 @@ class GameEngine:
         "deploy_employee", "lianxin_in_battle", "declare_evolution",
         "prepare_monster_phase", "resolve_monster_phase", "monster_phase",
         "round_start", "round_end", "resolve_rebellion_battle",
-        # resolve_final_duel不在此列：死斗败者先过死之传承（reset进setup相）
+        # resolve_final_duel不在此列：死斗败者先过死者之页（reset进setup相）
         # 再结算defeat，战斗限定会把它挡在setup外导致擂主永不回槽（r16实战复现）。
         "activate_duel_relic", "use_black_card", "use_crime_vault",
         "fire_godfather_revolver", "select_shared_dragon_heart", "declare_fuyuebei_toll",
@@ -1429,14 +1432,15 @@ class GameEngine:
         # 豁免：自创法术 dm_approved 重提是"结算中断"的动作，不该被自己挡住
         # 注：旧 is_custom_approve 旁路口（局外自创法术的 dm_approved 重提）
         # 已于 2026-09-16 随局外自创入口一并删除，不再需要豁免待裁定门禁。
-        # 世界最终死斗中的轮回者可能已命零并触发【死之传承】；先允许战终把胜负
+        # 世界最终死斗中的轮回者可能已命零并触发【死者之页】；先允许战终把胜负
         # 和存活者写回世界，再让调用方处理遗言。普通 pending interrupt 仍封锁行动。
         pending_world_duel_death = (
             action_type == "battle_end"
             and bool(self.state.event_modifiers.get("world_final_duel"))
             and self.state.phase == GamePhase.IN_COMBAT.value
             and all(getattr(interrupt.interrupt_type, "value", interrupt.interrupt_type)
-                    == "死之传承" for interrupt in self._pending_interrupts)
+                    == InterruptType.DEATH_INHERITANCE.value
+                    for interrupt in self._pending_interrupts)
         )
         if (self._pending_interrupts and action_type != "restart_battle"
                 and not pending_world_duel_death):
@@ -1453,7 +1457,7 @@ class GameEngine:
         if queued:
             return {
                 "success": False,
-                "error": "轮回者已命零，死之传承等待审核",
+                "error": "轮回者已命零，死者之页等待审核",
                 "interrupt": queued.to_dict(),
                 "pending_interrupts": [i.to_dict() for i in self._pending_interrupts],
                 "result": {"player_dead": True},
@@ -1538,7 +1542,7 @@ class GameEngine:
                 result["interrupt"] = queued.to_dict()
                 result["instruction"] = (
                     (result.get("instruction") or "")
-                    + " 轮回者命零，死之传承等待审核；请调用 submit_ruling(approve/edit/reject)。"
+                    + " 轮回者命零，死者之页等待审核；请调用 submit_ruling(approve/edit/reject)。"
                 ).strip()
 
             self._last_result = result
@@ -6399,7 +6403,7 @@ class GameEngine:
                         "actor": self.state.player, "target": self.state.player,
                         "mechanic": "cost", "subtype": "mutation", "amount": layers,
                         "tags": {"consumable", "active_payment"}})
-                    # 变身不产生"死亡"，不触发死之传承；命零才走 collapse 死因
+                    # 变身不产生"死亡"，不触发死者之页；命零才走 collapse 死因
                     if res["lost"] == "death":
                         self.state.last_death_cause = "collapse"
                     mutation_info["note"] = res["note"]
@@ -9282,7 +9286,7 @@ class GameEngine:
             "result": battle_end_result,
         }
 
-    # ==================== 死之传承 / 死者之书 ====================
+    # ==================== 死者之页 / 死者之书 ====================
 
     def _reload_death_book(self):
         self.state.death_book_legacies = self.death_book.load()
@@ -9292,7 +9296,7 @@ class GameEngine:
 
         2026-10-05 用户令：癌变休整加成已废止，此处不再携带 rest_heal_bonus。"""
         wisdom = list(self.state.death_book_wisdom)
-        # 死斗败者先过死之传承（reset）再走resolve_final_duel(defeat)；
+        # 死斗败者先过死者之页（reset）再走resolve_final_duel(defeat)；
         # reset若清空擂主快照，defeat就无声吞掉擂主（r14实战复现）。
         was_duel = self.state.in_final_duel
         duel_snap = dict(self.state.duel_defending_snapshot) if was_duel else {}
@@ -9340,7 +9344,11 @@ class GameEngine:
         return "attack"
 
     def _queue_death_inheritance_if_needed(self, action_type: str = "") -> Optional[Interrupt]:
-        """轮回者命零后只抛一次死之传承中断，草稿写入 context 待审核。"""
+        """轮回者命零后只抛一次【死者之页】中断，草稿写入 context 待审核。
+
+        2026-10-24 用户令：一页两项——生平由引擎自动总结（`summarize_life`），
+        遗言由本人自定义（≤20字）。中断只给遗言，生平不接受改稿。
+        """
         if self.state.death_inheritance_queued:
             return None
         player = self.state.player
@@ -9352,7 +9360,7 @@ class GameEngine:
             draft = self.state.pending_death_draft
         elif getattr(player, "ai_memory", None):
             # 记忆只活到当前轮回者命零这一刻。先压缩出遗言，再立即清空
-            # 身世、经历、经验和人格缓存；是否真正写入仍交给死之传承审核。
+            # 身世、经历、经验和人格缓存；是否真正写入仍交给死者之页审核。
             draft = validate_legacy({
                 "text": condense_to_legacy(
                     player.ai_memory, cause, last_action,
@@ -9364,6 +9372,10 @@ class GameEngine:
             draft = draft_legacy(
                 self.state, cause, last_action,
                 self.state.death_book_capacity)
+        if not draft.get(LIFE_FIELD):
+            life = summarize_life(self.state)
+            if life:
+                draft = dict(draft, **{LIFE_FIELD: life})
         self.state.pending_death_draft = draft
         self.state.death_inheritance_queued = True
         interrupt = Interrupt(
@@ -9376,13 +9388,14 @@ class GameEngine:
                 "region": self.state.current_region,
             },
             description=(
-                f"{player.name}已[命零]，触发【死之传承】。\n"
-                f"草稿：「{draft['text']}」（上限{self.state.death_book_capacity}字）\n"
+                f"{player.name}已[命零]，其页将录入【死者之页】。\n"
+                f"生平（引擎自动总结，不可改）：{draft.get(LIFE_FIELD) or '（无）'}\n"
+                f"遗言草稿：「{draft['text']}」（上限{self.state.death_book_capacity}字，可自定义）\n"
                 "请审核：通过、修改后写入、或驳回（驳回不写入死者之书）。"
             ),
             options=[
                 {"id": "approve", "label": "通过", "description": "按草稿写入《死者之书》"},
-                {"id": "edit", "label": "修改后写入", "description": "提交修改后的遗言再写入"},
+                {"id": "edit", "label": "修改后写入", "description": "提交自定义遗言（生平不变）再写入"},
                 {"id": "reject", "label": "驳回", "description": "不写入《死者之书》，本轮回结束"},
             ],
             state_snapshot=self.state.to_dict(),
@@ -9397,21 +9410,26 @@ class GameEngine:
                    "approve": "approve", "edit": "edit", "reject": "reject"}
         action = aliases.get(action, action)
         if action not in {"approve", "edit", "reject"}:
-            raise ValueError("死之传承裁定必须是 approve / edit / reject")
+            raise ValueError("死者之页裁定必须是 approve / edit / reject")
         if action == "reject":
             return {"action": "reject"}
+        draft = interrupt.context.get("draft") or self.state.pending_death_draft or {}
         if action == "approve":
             source = (ruling_data or {})
             if source.get("text"):
+                source = dict(source)
+                # 生平只由引擎总结：通过时给了自定义遗言，也照样带上草稿的生平。
+                if not source.get(LIFE_FIELD) and draft.get(LIFE_FIELD):
+                    source[LIFE_FIELD] = draft[LIFE_FIELD]
                 legacy = validate_legacy(source, self.state.death_book_capacity)
             else:
-                legacy = validate_legacy(
-                    interrupt.context.get("draft") or self.state.pending_death_draft,
-                    self.state.death_book_capacity)
+                legacy = validate_legacy(draft, self.state.death_book_capacity)
             return {"action": "approve", "legacy": legacy}
         legacy = validate_legacy({
             "text": (ruling_data or {}).get("text"),
             **({"title": ruling_data["title"]} if (ruling_data or {}).get("title") else {}),
+            # 生平只由引擎总结：改稿时照抄草稿，玩家不能借 edit 改生平。
+            **({LIFE_FIELD: draft[LIFE_FIELD]} if draft.get(LIFE_FIELD) else {}),
         }, self.state.death_book_capacity)
         return {"action": "edit", "legacy": legacy}
 
@@ -9424,18 +9442,18 @@ class GameEngine:
         self._reset_after_death()
         return {
             "written": True,
-            "legacy": {"text": written["text"]},
+            "legacy": {k: written[k] for k in ("life", "text") if written.get(k)},
             "total_legacies": len(self.state.death_book_legacies),
             "path": str(self.death_book.path),
             "instruction": "遗言已写入死者之书；请调用 setup_attributes 开始新的轮回者",
         }
 
     def _action_read_death_book(self, params: dict) -> dict:
-        """翻阅《死者之书》：读回全部〖遗言〗与已积累的智慧条目。
+        """翻阅《死者之书》：读回全部〖死者之页〗（生平＋遗言）与已积累的智慧条目。
 
         纯查询：不消耗精力、不掷骰、不改任何数值——《死者之书》与轮回者灵魂绑定
         （《故事文档》世界观·死者之书与微光者），本就随身携带，翻阅不花代价。
-        在此之前遗言只有「写入」（死之传承 → `_commit_death_ruling`）没有「读取」：
+        在此之前死者之页只有「写入」（死者之页 → `_commit_death_ruling`）没有「读取」：
         `state.death_book_legacies` 只被序列化与计数，轮回者/AI 一条也看不到。
         """
         legacies = [dict(entry) for entry in self.state.death_book_legacies]
@@ -9446,7 +9464,7 @@ class GameEngine:
             "total_legacies": len(legacies),
             "wisdom": list(self.state.death_book_wisdom),
             "path": str(self.death_book.path),
-            "instruction": "已读回《死者之书》遗言，可作为本轮决策的前车之鉴",
+            "instruction": "已读回《死者之书》各页（生平＋遗言），可作为本轮决策的前车之鉴",
         }
 
     # ==================== DM裁定接口 ====================
