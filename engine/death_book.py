@@ -1,11 +1,13 @@
-"""《死者之书》遗言：文件是唯一事实源。
+"""《死者之书》的死页：文件是唯一事实源。
 
-只读写 `死者之书.md` 的「## 遗言」节，不得改动「## 法术大全」。
-新增遗言只需往该节追加一页，不必改引擎代码。
+只读写 `死者之书.md` 的「## 死者之页」节，不得改动「## 法术大全」。
+新增一页只需往该节追加，不必改引擎代码。
 
-**DM裁定 2026-08-31：遗言不再三段式**——每页只有一句话，上限 20 字，除此之外没有其他
-限制（旧「触发点／岔路／代价预算」三段式废止）。旧格式的书页在**读取**时按「触发点」
-那一句折叠载入（存量书不至于读不出来），**写入**一律走新的单句格式。
+**2026-10-24 用户令：原【死之传承】改名【死者之页】**——每页两项：
+  * 〖生平〗由引擎自动总结（`summarize_life`，只用事实字段，不编故事）；
+  * 〖遗言〗由本人自定义一句话，上限 20 字。
+旧书的「## 遗言」节仍按原样读入（存量页不至于读不出来），写入一律走新节的格式。
+**DM裁定 2026-08-31：遗言不再三段式**——旧「触发点／岔路／代价预算」字段只读不写。
 """
 from __future__ import annotations
 from .rules_source import lethal_events
@@ -16,15 +18,21 @@ from typing import Any, Optional
 
 
 LEGACY_FIELD = "text"
+LIFE_FIELD = "life"
 LEGACY_FIELDS = (LEGACY_FIELD,)
-FIELD_LABELS = {LEGACY_FIELD: "遗言"}
+FIELD_LABELS = {LEGACY_FIELD: "遗言", LIFE_FIELD: "生平"}
 LEGACY_LABEL = "遗言"
+LIFE_LABEL = "生平"
 # 旧三段式字段：只用于读取旧书页／兼容旧调用方，不再写出。
 DEPRECATED_FIELDS = ("trigger_point", "fork", "cost_budget")
 DEPRECATED_LABELS = {"trigger_point": "触发点", "fork": "岔路", "cost_budget": "代价预算"}
 DEFAULT_CAPACITY = 20
-SECTION_HEADER = "## 遗言"
-EMPTY_MARK = "当前没有遗言。"
+# 生平由引擎自动总结，不受遗言那 20 字约束；这里只防一句话长到无法阅读。
+DEFAULT_LIFE_CAPACITY = 120
+SECTION_HEADER = "## 死者之页"
+# 旧书用「## 遗言」作节名，读取时一并认；写入一律用新节名。
+SECTION_HEADERS = (SECTION_HEADER, "## 遗言")
+EMPTY_MARK = "当前没有死者之页。"
 
 # 可扩展草稿表：新增死因只需加一条，流程代码不用改。
 # 可扩展草稿表：新增死因只需加一条，流程代码不用改。
@@ -70,7 +78,7 @@ def validate_legacy(legacy: Any, capacity: int = DEFAULT_CAPACITY) -> dict[str, 
     入参可以是纯字符串，也可以是 `{"text": ...}`（+可选 title）。旧三段式字段一律拒绝——
     格式只有一种；存量旧书页的兼容放在**读取端**（`parse_legacies` 按第一句折叠）。
     """
-    allowed_extra = {"title", "action", "option"}
+    allowed_extra = {"title", "action", "option", LIFE_FIELD}
     if isinstance(legacy, dict):
         if set(legacy) & set(DEPRECATED_FIELDS):
             raise ValueError(
@@ -78,7 +86,8 @@ def validate_legacy(legacy: Any, capacity: int = DEFAULT_CAPACITY) -> dict[str, 
                 f"{capacity}字），旧三段式 trigger_point/fork/cost_budget 已废止")
         extra = set(legacy) - {LEGACY_FIELD} - allowed_extra
         if extra:
-            raise ValueError(f"遗言只能包含 {LEGACY_FIELD}(+title)，收到多余字段: {sorted(extra)}")
+            raise ValueError(
+                f"死者之页只能包含 {LEGACY_FIELD}/{LIFE_FIELD}(+title)，收到多余字段: {sorted(extra)}")
     elif not isinstance(legacy, str):
         raise ValueError("遗言必须是一句话（字符串）或包含 text 的对象")
 
@@ -93,7 +102,39 @@ def validate_legacy(legacy: Any, capacity: int = DEFAULT_CAPACITY) -> dict[str, 
     title = legacy.get("title") if isinstance(legacy, dict) else None
     if isinstance(title, str) and title.strip():
         normalized["title"] = title.strip()
+    life = legacy.get(LIFE_FIELD) if isinstance(legacy, dict) else None
+    if isinstance(life, str) and life.strip():
+        # 生平是自动总结的叙述，不限 20 字；只做一次长度钳制防止整段书页被撑爆。
+        normalized[LIFE_FIELD] = life.strip()[:DEFAULT_LIFE_CAPACITY]
     return normalized
+
+
+def summarize_life(state: Any, capacity: int = DEFAULT_LIFE_CAPACITY) -> str:
+    """自动总结生平（2026-10-24 用户令：生平由引擎总结，遗言才由本人自定义）。
+
+    只读引擎已有的**事实字段**：打到哪一场、在哪个副本、持几种道纹、带几件遗物、
+    余多少碎片。不写形容词，不编经历——叙事由玩家在外部补，这一行只保证「这一页
+    确实属于这个人的这一趟轮回」。
+    """
+    player = getattr(state, "player", None)
+    if player is None:
+        return ""
+    bits: list[str] = []
+    region = (getattr(state, "current_region", "") or "").strip()
+    battle = int(getattr(state, "current_battle", 0) or 0)
+    if region:
+        bits.append(f"在{region}")
+    if battle > 0:
+        bits.append(f"打到第{battle}场")
+    dao_wen = list(getattr(player, "dao_wen", {}) or {})
+    if dao_wen:
+        bits.append(f"持道纹{len(dao_wen)}种")
+    relics = list(getattr(state, "relics", []) or [])
+    if relics:
+        bits.append(f"携遗物{len(relics)}件")
+    shards = int(getattr(state, "shards", 0) or 0)
+    bits.append(f"余{shards}碎片")
+    return "，".join(bits)[:capacity]
 
 
 def draft_legacy(
@@ -126,6 +167,10 @@ def draft_legacy(
             text = f"{text}{hint}"
     template[LEGACY_FIELD] = clip_text(text, capacity)
 
+    life = summarize_life(state, DEFAULT_LIFE_CAPACITY)
+    if life:
+        template[LIFE_FIELD] = life
+
     player = getattr(state, "player", None)
     player_name = getattr(player, "name", "") if player is not None else ""
     region = getattr(state, "current_region", "") or ""
@@ -145,13 +190,19 @@ def render_legacy_section(entries: list[dict[str, str]]) -> str:
         title = entry.get("title") or f"遗言{index}"
         lines.append(f"### {title}")
         lines.append("")
+        if entry.get(LIFE_FIELD):
+            lines.append(f"- {LIFE_LABEL}：{entry[LIFE_FIELD]}")
         lines.append(f"- {LEGACY_LABEL}：{entry[LEGACY_FIELD]}")
         lines.append("")
     return "\n".join(lines)
 
 
 def _split_legacy_section(text: str) -> tuple[str, str, str]:
-    match = re.search(rf"^## 遗言\s*$", text, re.MULTILINE)
+    match = None
+    for header in SECTION_HEADERS:
+        match = re.search(rf"^{re.escape(header)}\s*$", text, re.MULTILINE)
+        if match:
+            break
     if not match:
         return text.rstrip() + "\n\n", "", ""
     prefix = text[: match.start()]
@@ -182,6 +233,9 @@ def parse_legacies(text: str) -> list[dict[str, str]]:
         if line.startswith("### "):
             flush()
             current = {"title": line[4:].strip()}
+            continue
+        if line.startswith(f"- {LIFE_LABEL}：") or line.startswith(f"- {LIFE_LABEL}:"):
+            current[LIFE_FIELD] = line.split("：", 1)[-1].split(":", 1)[-1].strip()
             continue
         for label, field in labels:
             if line.startswith(f"- {label}：") or line.startswith(f"- {label}:"):

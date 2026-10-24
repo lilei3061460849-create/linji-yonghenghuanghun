@@ -526,7 +526,7 @@ def _resolve_pending_event(engine):
         if result.get("completed") is False:
             return {"success": False,
                     "error": f"事件【{name}】需要DM裁定，平衡模拟器不能代替裁定"}
-        # 事件代价可能恰好致死（死之传承中断入队），之后的附赠发现会被门禁挡住；
+        # 事件代价可能恰好致死（死者之页中断入队），之后的附赠发现会被门禁挡住；
         # 交由 play() 按阵亡结束，不误标 invalid。
         if not engine.state.player or not engine.state.player.is_alive:
             return {"success": True, "player_dead": True}
@@ -1301,7 +1301,7 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
                     if not event_result.get("success"):
                         return {"cleared": cleared, "won": False, "invalid": True,
                                 "reason": f"event: {event_result.get('error')}"}
-                # 事件选项的代价可能恰好致死（如流血6且仅剩6血）——死之传承中断入队，
+                # 事件选项的代价可能恰好致死（如流血6且仅剩6血）——死者之页中断入队，
                 # 之后的任何行动都会被门禁挡住；直接按阵亡结束本局，不误标 invalid。
                 if not e.state.player or not e.state.player.is_alive:
                     return {"cleared": cleared, "won": False, "invalid": False, "final_daowen": sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else [],
@@ -1373,7 +1373,7 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
             if (not [x for x in e.state.enemies if x.is_alive] and not getattr(e.state, "monster_reinforcements", None)
                 and not getattr(e.state, "delayed_monster_reentries", None)):  # 增援/封印延迟回场未到不算清场
                 break
-            # 玩家可能在自己回合内命零（癌变/崩解/代价反噬）——此时死之传承中断已入队，
+            # 玩家可能在自己回合内命零（癌变/崩解/代价反噬）——此时死者之页中断已入队，
             # 不能再进怪物阶段（会被中断门禁挡成 invalid），直接按阵亡结算。
             if not e.state.player or not e.state.player.is_alive:
                 break
@@ -1428,7 +1428,7 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
         if not ended.get("success"):
             return {"cleared": cleared, "won": False, "invalid": True,
                     "reason": f"battle_end: {ended.get('error')}"}
-        # 战终结算可能触发癌变/凡庸等命零（回复过量/未造成伤害），死之传承中断
+        # 战终结算可能触发癌变/凡庸等命零（回复过量/未造成伤害），死者之页中断
         # 会入队阻塞后续行动；此时本场仍算通关（cleared+1），但轮回到此结束。
         if not e.state.player or not e.state.player.is_alive:
             return {"cleared": cleared + 1, "won": False, "invalid": False, "final_daowen": sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else [],

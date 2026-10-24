@@ -90,9 +90,10 @@ def context_sources() -> list[ContextSource]:
     """
     return [
         ContextSource(
-            "世界观与角色档案（故事正典）",
+            "世界观正典（故事文档）",
             ROOT / "故事文档.md",
-            keep_headings=("世界观与底层因果法则", "角色记忆档案"),
+            # 「角色记忆档案」节 2026-09 起已不在故事文档里，不再保留失效标题。
+            keep_headings=("世界观与底层因果法则",),
             drop_headings=("收录规则", "待核查区", "正文区"),
             drop_phrases=("战报正文区", "待核查区", "独立性声明", "战报.md", "收录规则", "不随引擎数值调整"),
         ),
@@ -178,6 +179,22 @@ def extract_daowen(root: Path, relpath: str) -> str:
     return "\n".join(out)
 
 
+def extract_actions(root: Path, relpath: str) -> str:
+    """行动速查：整段照录《规则正文》「战斗行动」节。
+
+    2026-10-24 用户令：AI 上下文必须能回答「这一手怎么打」，不能只列道纹名。
+    条文只有一处正文（规则正文·战斗行动），这里整段摘录，不另写一份口径。
+    """
+    raw = _read_raw(root, relpath)
+    match = re.search(
+        r"^###\s+战斗行动\s*$(?P<body>.*?)(?=^###\s|^##\s|\Z)",
+        raw, re.MULTILINE | re.DOTALL)
+    if not match:
+        return ""
+    return "\n".join(line.strip() for line in match.group("body").splitlines()
+                     if line.strip())
+
+
 def extract_relics(root: Path, relpath: str) -> str:
     """物品速查：遗物与已登记消耗品；占位条目及分类标题跳过。"""
     lines = _read_raw(root, relpath).splitlines()
@@ -254,6 +271,7 @@ def extract_roster(root: Path, relpath: str) -> str:
 def digest_sources() -> list[DigestSource]:
     """机制速查与角色名单：只摘名称与一行效果，供外部 AI 避免凭空编造。"""
     return [
+        DigestSource("机制速查·行动", "规则正文.md", extract_actions),
         DigestSource("机制速查·道纹", "全道纹索引.md", extract_daowen, count_label="条"),
         DigestSource("机制速查·物品", "物品索引.md", extract_relics, count_label="件"),
         DigestSource("机制速查·法术", "法术索引.md", extract_spells, count_label="式"),
@@ -483,7 +501,7 @@ def render_context() -> str:
         "> 只检查一致性则运行 `python3 sim/gen_ai_context.py --check`。",
         ">",
         "> 此文件是剧情优先的混合上下文，供只抓取一个 raw URL 的外部 AI 使用。",
-        "> 它提供世界观、角色名单、角色扮演与外部推演守则，并附机制速查：道纹、遗物、法术与已实现副本各取名称与一行效果。",
+        "> 它提供世界观、角色名单、角色扮演与外部推演守则，并附机制速查：战斗行动（怎么出手）、道纹、遗物、法术与已实现副本。",
         "> 速查只保证名称与效果方向；精确数值、边界与结算规则仍以对应原文为准，按需查询。",
         "> 本文件不是新的规则事实源，也不改变角色记忆与规则正本之间的优先级。",
         "",
@@ -499,7 +517,7 @@ def render_context() -> str:
         "",
         "## 单文件范围",
         "",
-        f"- 已收录 {len(loaded)} 份来源：世界观与角色记忆正典、AI 知识库（职责/性格/扮演要求/外部推演守则节选）、机制速查（道纹/遗物/法术/副本）与角色名单。",
+        f"- 已收录 {len(loaded)} 份来源：世界观与角色记忆正典、AI 知识库（职责/性格/扮演要求/外部推演守则节选）、机制速查（行动/道纹/遗物/法术/副本）与角色名单。",
         "- 不整批收录：通用规则正文、完整推演规范、副本机制细节与怪物池、战报、代码和开发资料。",
         "- 来源区块附原始文件 SHA-256 指纹，便于判断内容是否过期；区块正文经过筛选，**不得**反写来源。",
         "",
@@ -518,7 +536,7 @@ def render_context() -> str:
         "",
         "## 打包正文",
         "",
-        "> 每一块为来源文件经过滤后的文字；机制速查为结构化摘录，不是原文全文。",
+        "> 每一块为来源文件经过滤后的文字；机制速查为结构化摘录，不是原文全文（战斗行动为整段照录）。",
         "> 正文采用代码块呈现，以防嵌套相对链接在此聚合文件内被错误解析。",
     ])
     for index, (role, relative_path, body, digest) in enumerate(loaded, 1):

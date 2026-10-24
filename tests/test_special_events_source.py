@@ -137,7 +137,7 @@ def test_structured_numbers_agree_with_rule_lines():
 def test_remaining_special_events_are_registered_and_debt_threshold_is_source_driven():
     """十项遗留特殊事件全部进入结构化事实源，还债阈值不再硬编码。"""
     expected = {
-        "死之传承", "还债", "背叛", "许愿", "逃跑与追击",
+        "死者之页", "还债", "背叛", "许愿", "逃跑与追击",
         "进化", "撤退", "最终的冠冕", "救赎", "初拥之夜",
     }
     registered = {entry["name"] for entry in special_events.all()}

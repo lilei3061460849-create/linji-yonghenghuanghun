@@ -207,7 +207,7 @@ def test_monster_cast_bizhong_self_then_forces_debuff():
     e = _engine("loop")
     p = e.state.player
     p.current_speed = 6
-    # 本用例只验证必中姿态、勾魂与残韵出路；避免无关普攻把玩家打入死之传承中断。
+    # 本用例只验证必中姿态、勾魂与残韵出路；避免无关普攻把玩家打入死者之页中断。
     p.blood_limit = p.current_hp = 1000
     m = _monster({"必中": 3, "勾魂": 4}, name="勾魂使者")
     e.state.enemies.append(m)

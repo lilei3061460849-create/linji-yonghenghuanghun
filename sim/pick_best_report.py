@@ -337,7 +337,7 @@ def play_and_record(region: str, seed: int, battles: int = 7):
                 lines.extend(BR.format_monster_hits(idx, mp["result"].get("details", [])))
                 re_ = engine.execute_action("round_end", {})
                 if not re_.get("success"):
-                    # 怪物阶段致轮回者命零：死之传承中断挡住 round_end 属正常结局，
+                    # 怪物阶段致轮回者命零：死者之页中断挡住 round_end 属正常结局，
                     # 交由外层死亡分支处理，不得误报 invalid。
                     if mp["result"].get("player_dead") or (
                             engine.state.player and not engine.state.player.is_alive):

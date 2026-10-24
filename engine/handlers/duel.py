@@ -92,4 +92,4 @@ def handle_resolve_final_duel(engine: Any, params: Dict[str, Any]) -> Dict[str, 
                 engine.state.pending_death_draft = {}
         return {"success": True, "action": "死斗结算",
                 "result": {"outcome": "defeat",
-                           "instruction": "败者失去轮回者身份，已触发死之传承，等待审核后写入死者之书"}}
+                           "instruction": "败者失去轮回者身份，已触发死者之页，等待审核后写入死者之书"}}

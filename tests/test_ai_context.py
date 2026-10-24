@@ -28,9 +28,12 @@ ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / README_FILE
 
 REQUIRED_SOURCES = {"故事文档.md", "AI_EXPERIENCE.md"}
-DIGEST_SOURCES = {"全道纹索引.md", "物品索引.md", "法术索引.md", "副本索引.md", "角色记忆"}
+# 2026-10-24 用户令：AI 上下文必须能回答「这一手怎么打」。
+# 规则正文只以「战斗行动」节的整段摘录进入（见 extract_actions），
+# 其余机制原文照旧按需查询，因此它从 EXCLUDED_MECHANICS_SOURCES 移入速查。
+DIGEST_SOURCES = {"规则正文.md", "全道纹索引.md", "物品索引.md", "法术索引.md", "副本索引.md", "角色记忆"}
 EXCLUDED_MECHANICS_SOURCES = {
-    "规则正文.md", "推演规范.md", "死者之书.md",
+    "推演规范.md", "死者之书.md",
     "副本/扭曲都市.md", "副本/罪孽都市.md", "副本/龙心谷.md", "副本/乱葬岗.md",
 }
 
@@ -70,6 +73,17 @@ def test_context_covers_story_sources_digests_and_excludes_bulk_mechanics():
     for relpath, body in _bodies().items():
         assert f"- 路径：`{relpath}`" in text
         assert body in text, f"AI_CONTEXT 缺少过滤后的来源正文：{relpath}"
+
+
+def test_action_digest_is_only_the_combat_action_section():
+    """边界：规则正文进上下文的那一块只能是「战斗行动」整段，不许夹带别的规则章节。"""
+    body = _bodies()["规则正文.md"]
+    assert "攻击（占1次主动出手）" in body
+    assert "招架（回合外，不占出手，仅对攻击）" in body
+    # 只摘一节：篇幅有界，且其余章节标题一个都不许出现
+    assert len(body) < 3000, f"行动摘录过长，疑似整篇规则被塞进来：{len(body)} 字"
+    for other in ("基础定义", "道纹体系", "核心规则", "怪物准则", "特殊事件", "通用事件池"):
+        assert other not in body, f"行动摘录混入了《规则正文》其它章节：{other}"
 
 
 def test_context_body_contains_no_code_interface_format_or_future_plans():

@@ -2229,7 +2229,7 @@ def test_final_duel_loss_still_settles_world_before_death_legacy_interrupt():
     assert replay["battles"][-1]["outcome"] == "opponent_won"
     assert replay["battles"][-1]["round_count"] == 6  # 2026-10-22 连击效果×5后端数提前1回合
     assert any(entry["type"] == "pending_postgame_interrupt"
-               and entry["interrupt"]["interrupt_type"] == "死之传承"
+               and entry["interrupt"]["interrupt_type"] == "死者之页"
                for entry in replay["driver_timeline"])
     assert any(event["type"] == "final_duel_completed"
                and event["details"]["winner"] == final["winner_id"]
