@@ -190,7 +190,7 @@ class MonsterPhaseMixin:
                         .get("cost_type") == "冷却")
                     if cooldown_limited:
                         # 怪物不得把冷却型道纹的 X 调大来延长战斗控制效果。
-                        # 2026-10-05 用户令成文（规则正文·怪物准则5）：怪物使用
+                        # 2026-10-05 用户令成文（规则正文·怪物准则·共用面板）：怪物使用
                         # 冷却代价类的道纹 X 值只能≤1，一律按 X=1 结算。
                         max_x = 1
                         effective_x = 1
@@ -381,7 +381,7 @@ class MonsterPhaseMixin:
             DaoWenEngine.resolve(effective_name, _probe_x, target=target, caster=monster)
             .get("cost_type") == "冷却")
         if cooldown_limited:
-            effective_x = 1  # 怪物冷却代价类道纹 X≤1（规则正文·怪物准则5）
+            effective_x = 1  # 怪物冷却代价类道纹 X≤1（规则正文·怪物准则·共用面板）
         elif getattr(inst, "x_free", False):
             submitted_x = choice.get("x")
             # 提交方没有给 X 时**回退到可负担上限**而非报错。

@@ -1,4 +1,6 @@
-"""非致死类特殊事件：data/rules/special_events.toml ↔ 引擎 ↔ 规则正文 ↔ 《死者之书》四方一致。
+"""非致死类特殊事件：data/rules/special_events.toml ↔ 引擎 ↔ 《死者之书》三方一致。
+
+2026-10-25 用户令：特殊事件正文只留在《死者之书》，规则正文只留指针——书是唯一正本。
 
 雕塑批（2026-10-09）。雕塑是 规则正文「特殊事件」节里的**非致死**特殊事件（攻次攻力
 双归零 → 永久离场化为消耗品，非[命零]），2026-10-08 样板批只移植了致死类三事件
@@ -6,8 +8,8 @@
 
     data/rules/special_events.toml ──► 引擎常量（MonsterLifeMixin.SCULPTURE_*）
                                     ──► 《死者之书.md》「## 规则」节「特殊事件」章
-    规则正文.md「特殊事件」节 ──► rule_lines 逐行照录（断言与 规则正文 逐字一致，
-                               且与结构化数值互相咬住——改 toml 不改 规则正文 挂测试）
+    rule_lines ──► 《死者之书》逐行照录（断言与书逐字一致，且与结构化数值互相咬住，
+                  并断言规则正文里不再复述正文，防止长出第二份正本）
     tests 钉住：order 与致死事件合并后不许撞车、三份事实源署名一致且两份事件
     文件同章、雕塑耐久计算真的走 toml（临时改值验证，不是恰好长得一样）。
 
@@ -105,14 +107,28 @@ def test_every_special_event_has_a_signed_page_in_the_book():
             assert rule_line in page, f"{entry['name']} 页缺少规则正文：{rule_line[:60]}"
 
 
-def test_rule_lines_match_rules_text_verbatim():
-    """rule_lines 必须是 规则正文「特殊事件」节原文的逐行照录。"""
-    rules_lines = RULES_TEXT.read_text(encoding="utf-8").splitlines()
+def test_rule_lines_match_the_book_verbatim():
+    """rule_lines 逐行照录进《死者之书》——书是特殊事件正文的唯一正本（2026-10-25）。"""
+    book_lines = BOOK.read_text(encoding="utf-8").splitlines()
     for entry in special_events.all():
         assert entry["rule_lines"], f"{entry['name']} 的 rule_lines 为空"
         for line in entry["rule_lines"]:
-            assert line in rules_lines, (
-                f"{entry['name']} 的 rule_line 不是 规则正文 原文行：{line[:60]}")
+            assert line in book_lines, (
+                f"{entry['name']} 的 rule_line 不是《死者之书》原文行：{line[:60]}")
+
+
+def test_rules_text_no_longer_carries_special_event_bodies():
+    """规则正文只留指针：特殊事件正文不得回写到规则正文（两份正文必然漂移）。"""
+    rules = RULES_TEXT.read_text(encoding="utf-8")
+    section = rules.split("### 特殊事件", 1)[1].split("\n### ", 1)[0]
+    assert "《死者之书.md》" in section, "规则正文的特殊事件节必须指向《死者之书》"
+    for entry in special_events.all():
+        # 夺书改挂「同伴规则」章，正文在规则正文·同伴规则里，不属于特殊事件章
+        if entry.get("chapter"):
+            continue
+        for line in entry["rule_lines"]:
+            assert line not in rules, (
+                f"{entry['name']} 的正文又重新出现在规则正文里：{line[:60]}")
 
 
 def test_structured_numbers_agree_with_rule_lines():

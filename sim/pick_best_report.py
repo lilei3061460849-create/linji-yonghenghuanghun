@@ -92,7 +92,7 @@ def _decline_spells(option):
 
 def _resolve_monster_plight(engine, rng) -> list:
     """
-    让陷入困境的怪物按【怪物准则#3】行动：逃跑与进化二选一，每场限一次。
+    让陷入困境的怪物按【怪物准则·困境】行动：逃跑与进化二选一，每场限一次。
 
     决策口径（AI 扮演怪物方，为生存与胜利作最优选择）：
       - 异变预算足够时优先【进化】，借用轮回者的道纹翻盘；
@@ -316,7 +316,7 @@ def play_and_record(region: str, seed: int, battles: int = 7):
                         lines.extend(BR.format_player_action(idx, entry["ally"], act.get("detail") or {}))
                         idx += 1
 
-                # 怪物准则#3：陷入困境时强制在【逃跑】与【进化】中二选一，每场限一次。
+                # 怪物准则·困境：陷入困境时强制在【逃跑】与【进化】中二选一，每场限一次。
                 # 引擎只负责标注困境，须由扮演怪物方的 AI 主动调用，
                 # 此前战报生成器从不调用，导致该机制在战报中从未出现。
                 lines.extend(_resolve_monster_plight(engine, rng))

@@ -28,16 +28,19 @@ def test_normal_auto_trigger_list_matches_rules_text():
     assert "夺书" not in line, f"夺书不是自动触发事件，不应留在清单里：{line}"
     assert "【夺书】不在其列" in playbook
     # 验证特殊事件节的标题与五章一致（不校验数量，仅校验关键词存在）
-    assert "凡庸（任一角色连续五回合" in rules
-    assert "多个角色触发凡庸时，非轮回者优先触发" in rules
+    # 2026-10-25：特殊事件正文只留在《死者之书》，规则正文只留指针
+    book = pathlib.Path("死者之书.md").read_text(encoding="utf-8")
+    assert "凡庸（任一角色连续五回合" in book
+    assert "多个角色触发凡庸时，非轮回者优先触发" in book
     assert "初始道纹发现：候选〔甲、乙、丙〕→选择【所选】" in playbook
     assert "遗物发现：候选〔甲、乙、丙〕→选择【所选】" in playbook
     assert "禁止只写选择结果" in playbook
-    assert "癌变（任一角色在本场战斗内累计受到回复" in rules
-    assert "累计回复属于局内减益追踪，[战终]清零" in rules
-    assert "迷失（非怪物角色【异变】达到" in rules
-    assert "怪物不会触发" in rules
-    assert "救赎（怪物当前生命≤其[血限]10%" in rules
+    assert "癌变（任一角色在本场战斗内累计受到回复" in book
+    assert "累计回复属于局内减益追踪，[战终]清零" in book
+    assert "迷失（非怪物角色【异变】达到" in book
+    assert "怪物不会触发" in book
+    assert "救赎（怪物当前生命≤其[血限]10%" in book
+    assert "### 特殊事件" in rules and "《死者之书.md》" in rules.split("### 特殊事件", 1)[1]
 
 def test_boundary_no_zengsheng_in_active_code():
     """边界：活跃代码层不再出现中文“增生”（旧名），已统一为癌变；增殖道纹不受影响"""
@@ -125,10 +128,11 @@ def test_boundary_bengjie_term_retired_in_favour_of_mishi():
     旧称二字在下方拼接成串，避免本文件被同类批量改名再次误伤。
     """
     retired = "崩" + "解"
-    for rel in ("规则正文.md", "推演规范.md"):
+    for rel in ("规则正文.md", "推演规范.md", "死者之书.md"):
         text = pathlib.Path(rel).read_text(encoding="utf-8")
         assert retired not in text, f"{rel} 仍出现旧称“{retired}”，应统一为“迷失”"
-        assert "迷失" in text, f"{rel} 应已改用“迷失”"
+    # 2026-10-25：特殊事件正文只留在《死者之书》，规则正文只留指针，故不再在规则正文里找「迷失」
+    assert "### ？？？·特殊事件·迷失" in pathlib.Path("死者之书.md").read_text(encoding="utf-8")
     hits = []
     for root in (pathlib.Path("engine"),):
         for p in root.rglob("*.py"):
