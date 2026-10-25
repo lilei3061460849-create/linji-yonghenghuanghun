@@ -1304,7 +1304,7 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
                 # 事件选项的代价可能恰好致死（如流血6且仅剩6血）——死者之页中断入队，
                 # 之后的任何行动都会被门禁挡住；直接按阵亡结束本局，不误标 invalid。
                 if not e.state.player or not e.state.player.is_alive:
-                    return {"cleared": cleared, "won": False, "invalid": False, "final_daowen": sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else [],
+                    return {"cleared": cleared, "won": False, "invalid": False, "final_daowen": (sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else []),
                                         "consumable_uses": sum(v for k2, v in getattr(ai, "used", {}).items() if str(k2).startswith("消耗品")),
                             "pm": _postmortem(e, cleared, todo), "death_trace": (_death_trace_payload(e, cleared, round_snapshots) if death_trace else None)}
             else:
@@ -1411,14 +1411,18 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
         # 救赎触发→离场有2倍差距，根因=败场提前 return 跳过扫描、把突围战绩丢了）。
         prev_gone = _alt_victory_scan(e, ev_mark, prev_gone, telemetry)
         if not e.state.player or not e.state.player.is_alive:
-            return {"cleared": cleared, "won": False, "invalid": False, "final_daowen": sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else [],
+            return {"cleared": cleared, "won": False, "invalid": False, "final_daowen": (sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else []),
                                 "consumable_uses": sum(v for k2, v in getattr(ai, "used", {}).items() if str(k2).startswith("消耗品")),
                     "pm": _postmortem(e, cleared, todo), "death_trace": (_death_trace_payload(e, cleared, round_snapshots) if death_trace else None)}
         if [x for x in e.state.enemies if x.is_alive]:
-            return {"cleared": cleared, "won": False, "invalid": False, "final_daowen": sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else [],
+            return {"cleared": cleared, "won": False, "invalid": False, "final_daowen": (sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else []),
                                 "consumable_uses": sum(v for k2, v in getattr(ai, "used", {}).items() if str(k2).startswith("消耗品")),
                     "pm": _postmortem(e, cleared, todo), "death_trace": (_death_trace_payload(e, cleared, round_snapshots) if death_trace else None)}
         _resolve_pending_choices(e)   # 战后【救赎】等待结算门禁（api.py:824）会挡住 battle_end
+        # 第7场战终的【最终的冠冕】可能把玩家封存/移出 state，battle_end 之后再读
+        # state.player 会读到 None，把终局构筑读成空表。故先留一份快照。
+        final_daowen = (sorted(e.state.player.dao_wen)
+                        if getattr(e.state, "player", None) else [])
         ended = e.execute_action("battle_end", {})
         if not ended.get("success") and "救赎" in str(ended.get("error", "")):
             # 救赎可能由 battle_end 自身的前置结算队列（战终凡庸结算把残血无原
@@ -1431,7 +1435,7 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
         # 战终结算可能触发癌变/凡庸等命零（回复过量/未造成伤害），死者之页中断
         # 会入队阻塞后续行动；此时本场仍算通关（cleared+1），但轮回到此结束。
         if not e.state.player or not e.state.player.is_alive:
-            return {"cleared": cleared + 1, "won": False, "invalid": False, "final_daowen": sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else [],
+            return {"cleared": cleared + 1, "won": False, "invalid": False, "final_daowen": list(final_daowen),
                                 "consumable_uses": sum(v for k2, v in getattr(ai, "used", {}).items() if str(k2).startswith("消耗品")),
                     "pm": _postmortem(e, cleared, todo), "death_trace": (_death_trace_payload(e, cleared, round_snapshots) if death_trace else None)}
         cleared += 1
@@ -1443,7 +1447,7 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
         if outcome == "sealed":
             # DM裁定（2026-08-22）：第7场封存≠完整轮回——只有打过死斗（PvP）
             # 才算完成一次完整轮回；封存只是"进队当擂主"，won 只认死斗胜利。
-            return {"cleared": cleared, "won": False, "invalid": False, "final_daowen": sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else [],
+            return {"cleared": cleared, "won": False, "invalid": False, "final_daowen": list(final_daowen),
                                 "consumable_uses": sum(v for k2, v in getattr(ai, "used", {}).items() if str(k2).startswith("消耗品")),
                     "duel_fought": False, "sealed": True,
                     "sealed_name": crown.get("sealed_name")}
@@ -1472,7 +1476,9 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
                         if x.entity_type == "轮回者"), "")  # 守擂擂主名（供PvP经验记录）
             if not duel_won or not e.state.player or not e.state.player.is_alive:
                 # 打过死斗但落败：轮回不完整（DM裁定2026-08-22），继续只留下 PV数据。
-                out = {"cleared": cleared, "won": False, "invalid": False, "final_daowen": sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else [],
+                print("DBG timeout branch player=", getattr(e.state, "player", None),
+                      "dao_wen=", sorted(getattr(e.state.player, "dao_wen", {}) or {}) if getattr(e.state, "player", None) else None, flush=True)
+                out = {"cleared": cleared, "won": False, "invalid": False, "final_daowen": list(final_daowen),
                                     "consumable_uses": sum(v for k2, v in getattr(ai, "used", {}).items() if str(k2).startswith("消耗品")),
                        "duel_fought": True, "duel_won": False,
                        "duel_opponent": opp,
@@ -1503,13 +1509,13 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
                     # 若选了猩红尖牙会触发初拥之夜，需继续选择
                     if e.state.pending_first_embrace:
                         e.execute_action("choose_first_embrace", {"choice": 1})
-            return {"cleared": cleared, "won": True, "invalid": False, "final_daowen": sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else [],
+            return {"cleared": cleared, "won": True, "invalid": False, "final_daowen": list(final_daowen),
                                 "consumable_uses": sum(v for k2, v in getattr(ai, "used", {}).items() if str(k2).startswith("消耗品")),
                     "duel_fought": True, "duel_won": True, "duel_opponent": opp,
                     "duel_rounds": duel_rounds, "terminal_artifact": True}
 
     # 循环走满 7 场却未见冠冕（理论上不应到达）：按裁定同样不算完整轮回。
-    return {"cleared": cleared, "won": False, "invalid": False, "final_daowen": sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else [],
+    return {"cleared": cleared, "won": False, "invalid": False, "final_daowen": list(final_daowen),
                         "consumable_uses": sum(v for k2, v in getattr(ai, "used", {}).items() if str(k2).startswith("消耗品")),
             "duel_fought": False, "note": "未见最终的冠冕"}
 
