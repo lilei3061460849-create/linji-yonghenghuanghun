@@ -1476,8 +1476,6 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
                         if x.entity_type == "轮回者"), "")  # 守擂擂主名（供PvP经验记录）
             if not duel_won or not e.state.player or not e.state.player.is_alive:
                 # 打过死斗但落败：轮回不完整（DM裁定2026-08-22），继续只留下 PV数据。
-                print("DBG timeout branch player=", getattr(e.state, "player", None),
-                      "dao_wen=", sorted(getattr(e.state.player, "dao_wen", {}) or {}) if getattr(e.state, "player", None) else None, flush=True)
                 out = {"cleared": cleared, "won": False, "invalid": False, "final_daowen": list(final_daowen),
                                     "consumable_uses": sum(v for k2, v in getattr(ai, "used", {}).items() if str(k2).startswith("消耗品")),
                        "duel_fought": True, "duel_won": False,
