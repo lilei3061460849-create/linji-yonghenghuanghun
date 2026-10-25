@@ -2,8 +2,8 @@
 pytest 风格测试 - 里程碑4b：出手预算校验
 
 DM裁定记录：
-- 出手次数公式按entity_type分流：轮回者按`action_count`（当前固定2次）；[朋友]/[员工](微光者)=攻击次数/3(向上取整)；
-  怪物走独立的run_monster_phase固定规则，不受此约束。
+- 出手次数：所有角色都按`action_count`（基础2次 +【疯狂】/【无力】/【蓄锐·增】等修正）；
+  怪物走独立的 run_monster_phase（基础 2 槽），不受此约束。
 - 普攻本身不消耗速度；速度消耗只来自正文明确的闪避等机制。
 - 消耗1出手的动作：attack、use_daowen(含指挥朋友/员工)、deploy_employee(消耗玩家的出手)、
   declare_wish；declare_escape（逃跑）一次付清5出手（2026-10-13 改制）。
@@ -227,6 +227,20 @@ def test_deploy_employee_rejected_when_player_budget_exhausted():
     assert r["success"] is False
     emp = next(e for e in engine.state.employees if e.name == "小周")
     assert emp.is_deployed is False, "预算不足时不应部署成功"
+
+
+def test_rules_text_gives_every_role_the_same_base_two_slots():
+    """规则正文的[速限]条目必须与引擎一致：全体基础 2 次，不再有攻击次数/3 的旧式。
+
+    2026-10-25：正文残留「[朋友]/[员工] = [攻击次数] / 3」，而 Entity.action_count
+    对所有角色都是 2 +【疯狂】/【无力】/【蓄锐·增】。以正文为准会让 DM 给错预算。
+    """
+    from pathlib import Path
+
+    rules = (Path(__file__).resolve().parents[1] / "规则正文.md").read_text(encoding="utf-8")
+    line = next(l for l in rules.splitlines() if l.startswith("[速限]（速度上限）："))
+    assert "所有角色的出手预算都是基础 2 次" in line
+    assert "攻击次数" not in line
 
 
 if __name__ == "__main__":

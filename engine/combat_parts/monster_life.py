@@ -233,7 +233,7 @@ class MonsterLifeMixin:
         return math.ceil(monster.blood_limit * self.REDEMPTION_HP_RATIO)
 
     def check_redemption(self, monster: Entity, *, force: bool = False) -> Optional[dict]:
-        """救赎：通常要求残血且没有六种原始怪物道纹；自由结晶可强制触发。"""
+        """救赎：通常要求残血且没有原始怪物道纹（全力／疯狂／减速／必中）；自由结晶可强制触发。"""
         if monster is None or monster.entity_type != "怪物" or not monster.is_alive:
             return None
         if monster.is_sculptured or monster.is_proliferated or monster.is_debt_bound:
@@ -311,7 +311,7 @@ class MonsterLifeMixin:
                 results.append(self._sculpture_monster(monster))
                 continue
 
-            # 2. 救赎：残血且没有六种原始怪物道纹
+            # 2. 救赎：残血且没有原始怪物道纹（全力／疯狂／减速／必中）
             redemption = self.check_redemption(monster)
             if redemption:
                 results.append(redemption)
