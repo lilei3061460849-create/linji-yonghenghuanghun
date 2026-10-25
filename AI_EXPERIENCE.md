@@ -524,7 +524,10 @@ python3 sim/blade_session.py status | log
 - 轮回者普攻走两阶段 `prepare_attack`/`resolve_attack`，防御逐击写在 `hits` 项里。击数、伤害上限、闪避与招架的支付和结算**只有一处正文**：[规则正文·战斗行动](规则正文.md#战斗行动)，本文件不复述。驱动器侧的硬约束是引擎校验（`damage_budget`）与「超速的闪避+招架总数整次驳回」。
 - 出手槽：轮回者基础 **2 次**，受【疯狂】/【无力】/【蓄锐·增】修正。**蓄锐**消耗 1 出手、下【回始】+1 出手；实测本回合内不加，纯持久战才划算（`sim/blade_session.py` 的 rest 分支可复验）。
 - 被引擎驳回的动作**不落盘**：驱动器先试算、通过才写进流水，否则一次非法提交会把整条重放链永久卡死。
-- 敌方阶段走 `prepare_monster_phase`/`resolve_monster_phase`：怪物预算＝每回合 1 次攻击＋1 种道纹，`base_hits_per_attack`＝面板攻击次数，每击独立闪避判定。白板敌方（0 道纹）只有普攻。
+- 敌方阶段走 `prepare_monster_phase`/`resolve_monster_phase`：怪物预算＝每回合 1 次攻击＋1 种道纹。
+  2026-10-25 起怪物攻击与玩家攻击是**同一套逐击契约**：`hit_count`＝当前速度、`damage_budget`＝击数×当前法力，
+  每击显式提交 `damage`/`dodge`/`parry`/`blood_shadow`（`base_hits_per_attack` 只是同值的兼容旧键）。
+  于是怪物也能招架、也能被招架，伤害可按击杀分配，不再有"怪物一刀固定面板攻力"的旧路。白板敌方（0 道纹）只有普攻。
 - **驱动器走真实 `battle_start`**，但先把 `engine.monster_pool[当前副本]` 清空：战始快照照常建立（`restart_battle` 全靠它），却不抽随机怪，敌方再按指定面板注入。因此 `restart_battle` 在白板对局里同样可用；重来会清空 `state.enemies`，驱动器随后按原面板重新注入并 `round_start`。
 
 ### 现场新增道纹/遗物/法术与「重来」的配合（实测口径）

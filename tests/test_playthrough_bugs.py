@@ -132,7 +132,11 @@ def test_resonance_on_enemy_grants_dest_and_rewrites_next_activation():
             "actor_ref": actor["actor_ref"],
             "daowen": {"name": "弱化", "target_ref": "player:0",
                        "dodge": False, "blood_shadow": False, "trigger_spell_choices": {}},
-            "attack_actions": [{"hits": [{"target_ref": "player:0", "dodge": False, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}}]}],
+            # 2026-10-25：击数＝[攻击次数]＝当前速度，按 prepare 契约提交完整命中数
+            "attack_actions": [{"hits": [{"target_ref": "player:0", "dodge": False,
+                                          "blood_shadow": False,
+                                          "spell_choices": {"before": {}, "after": {}}}
+                                         for _ in range(actor["base_hits_per_attack"])]}],
         }],
     })
     assert phase["success"], phase

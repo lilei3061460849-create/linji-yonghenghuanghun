@@ -830,8 +830,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 result["note"] = "招架空刀：未返还速度"
                 return result
 
-        # 伤害结算。新白刃战由攻击者为每击自由分配非负整数伤害；
-        # 未传 allocated_damage 的旧调用仍按当前攻击力结算，以兼容怪物阶段等入口。
+        # 伤害结算。新白刃战由攻击者为每击自由分配非负整数伤害（玩家侧与怪物阶段
+        # 均显式传 allocated_damage）；未传的旧调用仍按当前攻击力结算，兼容
+        # NPC 遭遇战等尚未接入逐击契约的入口。
         damage = (attacker.effective_attack_power()
                   if allocated_damage is None else allocated_damage)
         # 逆鳞（F2）：下次伤害+全部层数后清空

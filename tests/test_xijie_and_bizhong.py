@@ -29,8 +29,10 @@ def _engine(region="罪孽都市"):
 
 
 def _monster(engine, *, name="靶怪", hp=500, atk=8, hits=1, shards=20, daowen=None):
+    # 2026-10-25：怪物攻击并入玩家同一套面板后，击数＝[攻击次数]＝当前速度，
+    # 故 speed_limit 必须与 hits 同值（旧面板两者可以各写一个数）。
     m = Entity(name=name, entity_type="怪物", blood_limit=hp, current_hp=hp,
-               speed_limit=6, current_speed=6,
+               speed_limit=hits, current_speed=hits,
                attack_count=hits, attack_power=atk, shards=shards, fake_shards=0)
     m.relics = []
     if daowen:

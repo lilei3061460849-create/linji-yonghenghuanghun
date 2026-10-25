@@ -28,6 +28,9 @@ def _lineup(n: int = 2) -> list[dict]:
     return [dict(d) for d in eligible[:n]]
 
 
+# 2026-10-25：怪物攻击并入玩家同一套面板后，击数＝[攻击次数]＝当前速度。
+# 这里统一用 X=1 发动候选道纹：满 X 发动的【变形】会把法力付光再与速度互换，
+# 结果当回合速度归零、可出手击数变成 0（那是真实后果，不是本文件要测的东西）。
 def _prepare(e):
     prep = e.execute_action("prepare_monster_phase", {})
     assert prep["success"], prep.get("error")
@@ -56,7 +59,7 @@ def test_default_battle_attack_targets_are_player_side_only():
     daowen = None
     if actor["daowen_options"] and not actor["daowen_options"][0].get("requires_target"):
         opt = actor["daowen_options"][0]
-        daowen = {"name": opt["name"], "x": opt.get("x") or 1, "dodge": False, "blood_shadow": False}
+        daowen = {"name": opt["name"], "x": 1, "dodge": False, "blood_shadow": False}
     rogue = {"actor_ref": actor["actor_ref"], "daowen": daowen,
              "attack_actions": [{"hits": [dict(hit, target_ref="enemy:1")
                                           for _ in range(max(1, actor["base_hits_per_attack"]))]}
@@ -84,7 +87,7 @@ def test_arena_ffa_lets_monsters_fight_each_other():
                                  for _ in range(max(1, actor["base_attack_actions"]))]}
     if actor["daowen_options"]:      # 有合法道纹时必须提交一个（引擎契约）
         opt = actor["daowen_options"][0]
-        choice["daowen"] = {"name": opt["name"], "x": opt.get("x") or 1,
+        choice["daowen"] = {"name": opt["name"], "x": 1,
                             "dodge": False, "blood_shadow": False}
         if opt.get("requires_target"):
             choice["daowen"]["target_ref"] = "enemy:1"
@@ -103,7 +106,7 @@ def test_arena_ffa_allows_single_actor_submission():
     daowen = None
     if actor["daowen_options"]:
         opt = actor["daowen_options"][0]
-        daowen = {"name": opt["name"], "x": opt.get("x") or 1,
+        daowen = {"name": opt["name"], "x": 1,
                   "dodge": False, "blood_shadow": False}
         if opt.get("requires_target"):
             daowen["target_ref"] = actor["attack_target_options"][0]["ref"]
@@ -181,7 +184,7 @@ def test_free_actions_allows_double_attack_double_daowen_and_mixed():
         hits = max(1, a["base_hits_per_attack"])
 
         def dao(opt):
-            cand = {"name": opt["name"], "x": opt.get("x") or 1,
+            cand = {"name": opt["name"], "x": 1,
                     "dodge": False, "blood_shadow": False}
             if opt.get("requires_target"):
                 cand["target_ref"] = ref
@@ -200,7 +203,7 @@ def test_free_actions_allows_double_attack_double_daowen_and_mixed():
     e, res = _free_env()
     a = next(x for x in res["actors"] if x["actor_ref"] == "enemy:0")
     opt = a["daowen_options"][0]
-    same = {"name": opt["name"], "x": opt.get("x") or 1, "dodge": False, "blood_shadow": False}
+    same = {"name": opt["name"], "x": 1, "dodge": False, "blood_shadow": False}
     if opt.get("requires_target"):
         same["target_ref"] = a["attack_target_options"][0]["ref"]
     bad = e.execute_action("resolve_monster_phase", {"token": res["token"], "choices": [
@@ -224,7 +227,7 @@ def test_free_actions_round_advances_even_without_attacks():
         ref_target = actor["attack_target_options"][0]["ref"]
 
         def dao(opt):
-            cand = {"name": opt["name"], "x": opt.get("x") or 1,
+            cand = {"name": opt["name"], "x": 1,
                     "dodge": False, "blood_shadow": False}
             if opt.get("requires_target"):
                 cand["target_ref"] = ref_target

@@ -558,10 +558,15 @@ class Entity:
         【全速】覆盖：生效期间攻击次数锁定 = [速限]。
         由于 clamp_immortal_body 已让「当前速度≤[速限]」无条件成立，本效果实为
         增益——把被削的速度补满到上限，并免疫后续减速。走状态层，对全体角色生效。
+
+        【手雷减攻】只减普攻次数，不减速度、也不减出手预算（2026-10-25 起对全体同口径：
+        怪物阶段不再单独读旧面板字段 attack_count 算击数，击数一律走本方法）。
         """
         if self.get_status_value("全速"):
-            return max(0, self.speed_limit)
-        return max(0, self.current_speed)
+            hits = self.speed_limit
+        else:
+            hits = self.current_speed
+        return max(0, hits - self.get_status_value("手雷减攻"))
 
     def effective_attack_power(self) -> int:
         """攻击力＝ 当前法力。

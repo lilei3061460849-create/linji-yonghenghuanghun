@@ -220,12 +220,16 @@ def test_negative_and_zero_x_rejected(tmp_path):
 # ---------------- 预演评分选 X（选案 C） ----------------
 
 def _preview_scenario(tmp_path, dw, *, monster_hp=300, monster_mana=40,
-                      monster_speed=3, player_mana=10, player_speed=3,
+                      monster_speed=2, player_mana=10, player_speed=3,
                       seed=20260822):
-    """构造一个可预演的怪物阶段，返回 (engine, monster, actor, prep)。"""
+    """构造一个可预演的怪物阶段，返回 (engine, monster, actor, prep)。
+
+    2026-10-25：怪物攻击并入玩家同一套机制后，击数＝[攻击次数]＝当前速度，
+    故 attack_count 必须与 speed_limit 同值（旧面板两者可以各写一个数）。
+    """
     e = _engine(tmp_path, seed)
     m = Entity("测试怪", "怪物", blood_limit=monster_hp, current_hp=monster_hp,
-               attack_count=2, attack_power=monster_mana,
+               attack_count=monster_speed, attack_power=monster_mana,
                mana_limit=monster_mana, current_mana=monster_mana,
                speed_limit=monster_speed, current_speed=monster_speed)
     m.dao_wen[dw] = DaoWenInstance(

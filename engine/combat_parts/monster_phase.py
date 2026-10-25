@@ -249,6 +249,10 @@ class MonsterPhaseMixin:
             for target_option in attack_targets:
                 entity = refs[target_option["ref"]]
                 blood_pact_options = self.blood_shadow_cost_share_options(entity)
+                # 2026-10-25 用户令：怪物攻击与玩家攻击同一套逐击契约，
+                # 目标侧可选防御也照同一套字段暴露（闪避/招架都要付当前速度）。
+                target_option["can_dodge"] = entity.current_speed > 0
+                target_option["can_parry"] = entity.current_speed > 0
                 target_option["can_blood_shadow"] = (
                     self.state.side_has(entity, "血影")
                     and (entity.current_hp > 10 or bool(blood_pact_options)))
@@ -263,6 +267,11 @@ class MonsterPhaseMixin:
             # （与【波及】目标数限制同族：prepare不得给出无法满足的义务）。
             base_actions = (0 if not attack_targets
                             else self._monster_attack_actions(monster, activated))
+            # 2026-10-25 用户令：怪物攻击并入玩家同一套攻击机制——
+            # 击数＝当前速度（[攻击次数]＝[当前速度]，对全体同口径），
+            # 每击伤害由攻击者在 damage_budget 内自由分配，目标可逐击闪避或招架。
+            hit_count = max(0, monster.effective_attack_count())
+            damage_budget = hit_count * monster.effective_attack_power()
             actors.append({
                 "actor_ref": actor_ref,
                 "monster": monster.name,
@@ -271,7 +280,17 @@ class MonsterPhaseMixin:
                 "daowen_options": daowen_options,
                 "attack_target_options": attack_targets,
                 "base_attack_actions": base_actions,
-                "base_hits_per_attack": max(0, monster.attack_count - monster.get_status_value("手雷减攻")),
+                "hit_count": hit_count,
+                "damage_budget": damage_budget,
+                "hits_schema": [{
+                    "target_ref": [o["ref"] for o in attack_targets],
+                    "damage": "非负整数；所有击的总和不得超过damage_budget",
+                    "dodge": "boolean", "parry": "boolean", "blood_shadow": "boolean",
+                    "dodge_relic_target_ref": "持有回锋刀且闪避时必填",
+                    "spell_choices": "按目标spell_options完整提交",
+                } for _ in range(hit_count)],
+                # 兼容旧键：2026-10-25 起与 hit_count 同值，仅供旧推演稿读取。
+                "base_hits_per_attack": hit_count,
                 "dodge_must_be_explicit": True,
                 # 只暴露实际适用的致死进度；怪物不再显示迷失倒计时。
                 "lethal_counters": {k: list(v) for k, v in monster.lethal_counters().items()},
@@ -965,10 +984,21 @@ class MonsterPhaseMixin:
                         f"{expected_actions}或{2 * expected_actions}个")
             elif not isinstance(attack_actions, list) or len(attack_actions) != expected_actions:
                 raise ValueError(f"{monster.name}必须提交{expected_actions}个attack_actions")
-            hits_per_action = max(0, monster.attack_count - monster.get_status_value("手雷减攻"))
+            # 出手数按 prepare 快照校验（快照即契约）；但**击数与伤害预算在出手时取当前面板**
+            # ——[攻击次数]＝[当前速度]、[攻击力]＝[当前法力] 都是实时量，本 actor 的道纹
+            # 结算可能已经改过速度/法力（如【变形】把两者互换），照玩家侧同一口径重取。
+            defense_spend: dict[str, int] = {}
+            # 防御额度按提交前的速度快照计（闪避/招架在结算中会实时扣速度，
+            # 若按实时值再比一次就会把自己花掉的速度重复计入）。
+            speed_snapshot: dict[str, int] = {ref: e.current_speed for ref, e in refs.items()}
             for action_index, attack_action in enumerate(attack_actions):
                 if not isinstance(attack_action, dict) or not isinstance(attack_action.get("hits"), list):
                     raise ValueError("每个attack_action必须包含hits列表")
+                # 伤害预算按**每次攻击出手**独立计算（与玩家侧一次攻击一份预算同口径）；
+                # 自由行动下的第二次攻击是另一份预算，不与前一份叠加。
+                allocated_total = 0
+                hits_per_action = max(0, monster.effective_attack_count())
+                damage_budget = hits_per_action * monster.effective_attack_power()
                 hits = attack_action["hits"]
                 if len(hits) != hits_per_action:
                     raise ValueError(f"{monster.name}每个攻击出手必须提交{hits_per_action}次命中选择")
@@ -977,11 +1007,25 @@ class MonsterPhaseMixin:
                     target["ref"]: target for target in expected[actor_ref]["attack_target_options"]
                 }
                 for hit_index, hit in enumerate(hits):
-                    if (not isinstance(hit, dict) or not isinstance(hit.get("dodge"), bool)
+                    if not isinstance(hit, dict):
+                        raise ValueError("每次攻击必须是包含target_ref的对象")
+                    # 2026-10-25 用户令：与玩家攻击同一套逐击字段——
+                    # 每击显式提交 damage（伤害分配）与 parry（目标招架）。
+                    # 旧推演稿未带这两项时按「等伤一刀、不招架」补齐（与玩家侧同口径）。
+                    hit.setdefault("damage", monster.effective_attack_power())
+                    hit.setdefault("parry", False)
+                    if (not isinstance(hit.get("damage"), int) or isinstance(hit.get("damage"), bool)
+                            or hit["damage"] < 0):
+                        raise ValueError("每击damage必须是非负整数")
+                    if (not isinstance(hit.get("dodge"), bool) or not isinstance(hit.get("parry"), bool)
                             or not isinstance(hit.get("blood_shadow"), bool)):
-                        raise ValueError("每次攻击必须显式提交target_ref、dodge与blood_shadow")
-                    if hit["dodge"] and hit["blood_shadow"]:
-                        raise ValueError("同一次判定不能同时闪避并使用血影")
+                        raise ValueError("每次攻击必须显式提交target_ref、dodge、parry与blood_shadow")
+                    if sum((hit["dodge"], hit["parry"], hit["blood_shadow"])) > 1:
+                        raise ValueError("同一次判定只能选择闪避、招架、血影之一")
+                    allocated_total += hit["damage"]
+                    if allocated_total > damage_budget:
+                        raise ValueError(
+                            f"{monster.name}分配总伤害{allocated_total}超过上限{damage_budget}")
                     if hit.get("target_ref") not in legal_attack_options:
                         raise ValueError("怪物攻击目标不在prepare合法选项中")
                     target = refs.get(hit.get("target_ref", ""))
@@ -1005,6 +1049,14 @@ class MonsterPhaseMixin:
                         self.consume_bizhong(monster)
                     if hit["dodge"] and not must_hit and target.current_speed < 1:
                         raise ValueError(f"{target.name}速度不足，不能选择闪避")
+                    if hit["parry"] and not must_hit and target.current_speed < 1:
+                        raise ValueError(f"{target.name}速度不足，不能选择招架")
+                    # 一次攻击内同一目标的闪避与招架总数不得超过其当前速度（与玩家侧同口径）。
+                    if (hit["dodge"] or hit["parry"]) and not must_hit:
+                        defense_spend[hit["target_ref"]] = (
+                            defense_spend.get(hit["target_ref"], 0) + 1)
+                        if defense_spend[hit["target_ref"]] > speed_snapshot.get(hit["target_ref"], 0):
+                            raise ValueError(f"{target.name}速度不足以完成全部防御")
                     option = legal_attack_options[hit["target_ref"]]
                     if hit["blood_shadow"] and not option.get("can_blood_shadow"):
                         raise ValueError(f"{target.name}不能使用血影")
@@ -1020,7 +1072,9 @@ class MonsterPhaseMixin:
                     attack_target = target
                     reaction_choices = hit.get("spell_choices")
                     resolved = self.resolve_attack(
-                        monster, attack_target, dodge=hit["dodge"], blood_shadow=hit["blood_shadow"],
+                        monster, attack_target, dodge=hit["dodge"], parry=hit["parry"],
+                        allocated_damage=hit["damage"],
+                        blood_shadow=hit["blood_shadow"],
                         spell_choices=reaction_choices, entity_refs=refs,
                         dodge_relic_target_ref=hit.get("dodge_relic_target_ref"),
                         cost_share_target_ref=hit.get("cost_share_target_ref", ""),
