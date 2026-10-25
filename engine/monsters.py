@@ -274,6 +274,6 @@ def make_monster_entity(monster_def: dict):
     from .gamedata import ORIGINAL_MONSTER_DAOWEN
     if any(name in ORIGINAL_MONSTER_DAOWEN for name in m.dao_wen):
         m._had_monster_daowen = True
-    # 注意：不在此设 is_flying。飞行状态由遗物或怪物专属道纹附加效果结算。
+    # 注意：不在此设 is_flying。飞行是状态，由消耗品（血翼／烬翼）的飞行选项结算。
     # （2026-09-15 用户令已删除"登场回合不出道纹"的白板限制）。
     return m

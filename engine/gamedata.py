@@ -13,7 +13,7 @@ REGION_EXCLUSIVE_DAOWEN = {
     "乱葬岗": {"分裂", "瓦解", "勾魂", "招魂"},  # 【缄默】【冥气】已遗物化，闭环留「？？」
 }
 
-ORIGINAL_MONSTER_DAOWEN = {"全力", "疯狂", "减速", "必中"}  # 【飞行】并入骨天使的【变形】
+ORIGINAL_MONSTER_DAOWEN = {"全力", "疯狂", "减速", "必中"}  # 【飞行】是状态、不是道纹
 
 # 副本阶级（道纹递增机制已于 2026-09-16 用户令废止；阶级仍用于出怪公式上界等）
 REGION_TIERS = {
@@ -38,9 +38,6 @@ SHAFA_LOOP_DAOWEN = (
 
 # 原始 ∪ 转化。学习门禁与残韵归属用此并集。救赎只看四种原始怪物道纹，不含转化。
 MONSTER_DAOWEN = ORIGINAL_MONSTER_DAOWEN | MONSTER_TRANSFORM_DAOWEN
-
-# 怪物专属道纹附加效果：独立【飞行】删除后并入骨天使的【变形】。
-MONSTER_DAOWEN_BONUSES = {"骨天使": {"变形": "飞行"}}
 
 # 所属副本尚未接入运行时，但计算已实现；局外学习仍按专属道纹拒绝。
 UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN = {

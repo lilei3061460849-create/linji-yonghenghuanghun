@@ -140,13 +140,11 @@ def test_time_preference_converts_dao_wen_cooldown_to_rounds(tmp_path):
     assert not instance.can_use()
 
 
-def test_removed_trigger_traits_stay_out_of_dao_wen_pool_and_flight_is_monster_specific():
+def test_removed_trigger_traits_stay_out_of_dao_wen_pool():
     from engine.daowen import DaoWenEngine, RELICIZED_DAOWEN_SLOTS
-    from engine.gamedata import MONSTER_DAOWEN_BONUSES
 
     DaoWenEngine.register_all()
     active = set(DaoWenEngine.list_all())
     removed = set(RELICIZED_DAOWEN_SLOTS) | {"坠落", "眩晕", "飞行"}
 
     assert not (active & removed)
-    assert MONSTER_DAOWEN_BONUSES["骨天使"]["变形"] == "飞行"

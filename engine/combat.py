@@ -55,7 +55,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     }
     
     # 原始怪物道纹（道纹归属规则：各组起点）——【原初X】可借用范围
-    ORIGINAL_MONSTER_DAOWEN = ("全力", "疯狂", "减速", "必中")  # 【飞行】并入骨天使的【变形】
+    ORIGINAL_MONSTER_DAOWEN = ("全力", "疯狂", "减速", "必中")  # 【飞行】是状态、不是道纹
     # 原始怪物道纹每次实际发动时支付异变5X（X 恒为面板/借用时写定的值；
     # 2026-09-16 用户令：道纹递增机制已废止）；效果持续期间（未再次发动）不再重复计费。
     # 必中为次数型（下X次选择[目标]无法闪避），余数记在 entity._bizhong_left。
