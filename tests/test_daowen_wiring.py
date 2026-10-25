@@ -5,6 +5,7 @@
 """
 import os
 import sys
+from pathlib import Path
 
 from tests.setup_support import finish_initial_daowen
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -248,3 +249,23 @@ def test_relicized_trigger_daowen_registry_and_flight_rehoming():
     calc = DaoWenEngine.resolve("变形", 1, target=bone_angel, caster=bone_angel)
     engine.combat.apply_daowen_effect("变形", calc, bone_angel, bone_angel)
     assert bone_angel.has_status("飞行")
+
+
+def test_flight_is_a_state_and_the_rule_text_says_so():
+    """飞行是状态、不是道纹：规则正文必须写清它的效果，引擎按同一口径拦目标。
+
+    2026-10-25 用户令：飞行本来就不该是道纹，属于状态。规则正文若没有这条，
+    读者只知道「有飞行状态」却查不到它能免疫锁定，实现就成了唯一事实源。
+    """
+    rules = Path("规则正文.md").read_text(encoding="utf-8")
+    section = rules.split("### 战斗行动", 1)[1].split("\n### ", 1)[0]
+    assert "飞行（状态，不是道纹）" in section
+    assert "非飞行者无法把飞行者选为[目标]" in section
+    assert "飞行" not in DaoWenEngine._registry
+
+    engine = _engine("flight_targeting")
+    p = engine.state.player
+    m = _monster(engine, ap=8)
+    p.is_flying = True
+    assert engine.combat.is_targetable(p, m) is True, "飞行者可以选地面目标"
+    assert engine.combat.is_targetable(m, p) is False, "非飞行者不能选飞行目标"
