@@ -619,6 +619,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 n += 1
             if self._any_active_relic("疯狂"):
                 n += 1
+            # 【沉重枷锁】与【疯狂】对称：出手预算直接 -1，不经速度绕道
+            # （2026-10-25 用户令：出手预算＝基础 2 次，不再由速度换算）。
+            if self._any_active_relic("沉重枷锁"):
+                n -= 1
             return max(0, n)
         n = DaoWenEngine.single_round_action_count(entity)
         # 癫狂之脑（通用遗物池，2026-10-03 新增）：你每回合的出手次数+1。
@@ -627,6 +631,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         # 【疯狂】（2026-10-25 遗物化）：所有角色每回合出手次数+1。
         if self._any_active_relic("疯狂"):
             n += 1
+        # 【沉重枷锁】：所有角色每回合出手次数-1。
+        if self._any_active_relic("沉重枷锁"):
+            n -= 1
         return n
 
     def _current_context_timing(self) -> str:
@@ -969,21 +976,6 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         if player is not None:
             effects.extend(self._dispatch_phase(Phase.ROUND_START_PREPARE, target=player))
 
-        # 沉重枷锁：场上存在有效持有者时，回始全场每名角色失去1点当前速度，
-        # 即本回合少一次出手；通过唯一失速入口结算，速度类遗物仍能收到真实信号。
-        if self._any_active_relic("沉重枷锁"):
-            seen_for_chain: set[int] = set()
-            for chained in self.state.get_all_player_side() + self.state.get_all_enemy_side():
-                if id(chained) in seen_for_chain:
-                    continue
-                seen_for_chain.add(id(chained))
-                if chained.is_alive:
-                    self._lose_current_speed(chained, 1, ctx={
-                        "timing": "round_start", "source": "沉重枷锁", "source_type": "relic",
-                        "actor": None, "target": chained, "owner": None, "mechanic": "speed_change",
-                        "subtype": "current_speed", "amount": -1, "tags": {"relic", "round_start"},
-                    })
-
         # 活血追踪归零 + 出手预算归零（回始重置本回合已用出手次数）+ 血誓戒每回合限一次归零 + 血族血脉判定归零
         seen_entities: set[int] = set()
         for e in self.state.get_all_player_side() + self.state.get_all_enemy_side():
@@ -1145,10 +1137,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         mediocrity_ready: list[tuple[Entity, str]] = []
 
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
-            # 蚀界残钟：场上有持有者时，每个角色在回终第一拍失去“当前攻击力×攻击次数”的血限。
+            # 蚀界残钟：场上有持有者时，每个角色在回终第一拍失去「当前法力×当前速度」的血限。
             # 保持旧【畸变】的回终锚点，走统一血限变化/命零管线，不手改 current_hp。
             if entity.is_alive and self._any_active_relic("蚀界残钟"):
-                # 统一属性模型：攻击力=当前法力，攻击次数=当前速度；轮回者的旧 attack_power/attack_count 字段不再是真实面板。
                 erosion = max(0, int(entity.current_mana) * int(entity.current_speed))
                 if erosion > 0:
                     change = self._apply_blood_limit_change(
