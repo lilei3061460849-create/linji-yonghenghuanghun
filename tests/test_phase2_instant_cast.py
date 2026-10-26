@@ -25,6 +25,7 @@ from engine.spell_execution import (
     ExecutionStatus, InterruptReason, Lifecycle, SpellExecution, StepResult, StepStatus,
     TriggerType,
 )
+from tests.setup_support import grant_extra_actions
 from tests.test_dragon_heart import _new_engine, _start_with_enemy
 
 # 返回 dict 里是 .value 字符串；这里取枚举值做断言，避免在测试里手写字面量。
@@ -68,6 +69,9 @@ def _setup(suffix, mana=10):
     player.mana_limit = 30
     player.current_mana = mana
     player.current_hp = 30
+    # 2026-10-25 法术阶级改按「重数」：瞬发法术每步一重，3 步即 3 阶 = 3 次出手。
+    # 夹具用【蓄锐·增】把预算补到 9 次出手，专测逐步结算语义。
+    grant_extra_actions(player, 7)
     return engine
 
 

@@ -4148,7 +4148,7 @@ class GameEngine:
             parsed = parse_spell_definition(trigger, flow, set(DaoWenEngine.list_all()))
         except SpellDslError as exc:
             return {"error": f"自创法术句式错误：{exc}"}
-        from .spell_dsl import collect_step_daowen, TRIGGER_INSTANT
+        from .spell_dsl import collect_step_daowen, spell_tier, TRIGGER_INSTANT
         from .spell_execution import Lifecycle, TriggerType
         # 生命周期校验（Part 6）：允许的取值只有 battle / permanent。
         # 战斗中自创的法术默认是 battle——本场战斗的即兴产物，[战终]即失效；
@@ -4168,7 +4168,7 @@ class GameEngine:
         return {"spell": Spell(
             name=name.strip(), required_daowen=list(required),
             trigger_condition=trigger.strip(), effect_flow=flow.strip(),
-            rank=len(required),
+            rank=spell_tier(parsed.trigger, parsed.steps),
             custom_conditions=list(definition.get("custom_conditions") or []),
             automatic=parsed.trigger == TriggerTiming.SELF_TURN_END.value
                        or bool(definition.get("automatic", False)),
@@ -4231,16 +4231,18 @@ class GameEngine:
         if "error" in built:
             return {"success": False, "error": built["error"]}
         # 先扣出手再写入：出手预算不足时不产生任何效果，也不白造出法术。
-        spell_tier = max(1, len(set(built["spell"].required_daowen)))
+        # 【法术阶级】2026-10-25 用户令：阶数＝重数（触发时机一重＋每步一重），
+        # 不再按「用了几种道纹」计价；定义与施展同价。
+        tier = built["spell"].rank
         budget_error = self._consume_actions_or_error(
-            player, spell_tier, action_type="define_spell")
+            player, tier, action_type="define_spell")
         if budget_error:
             return budget_error
         player.spells.append(built["spell"])
         parsed = built["parsed"]
         wired = parsed.trigger in self.combat._WIRED_TRIGGERS
         result = {"spell": built["spell"].to_dict(), "wired": wired,
-                  "tier": spell_tier, "cost": f"{spell_tier}次主动出手"}
+                  "tier": tier, "cost": f"{tier}次主动出手"}
         if not wired:
             result["warning"] = (f"触发时机【{parsed.trigger}】已通过句式校验，"
                                  "但该时机暂未接入战斗结算管线，本法术目前不会实际触发")
@@ -5654,10 +5656,11 @@ class GameEngine:
                 return {"success": False,
                         "error": f"瞬发法术第{idx}步的trigger_spell_choices非法：{exc}"}
         # 结构合法：按【法术阶级规则】整次 cast 一次付清 X 次出手
-        # （X = 用到的不同道纹种数；见 法术索引.md「法术阶级规则」——
-        #  施展或定义X阶法术必须在声明时一次性消耗X次出手机会，出手不足时不能开始施法）。
-        # 出手不按步骤数扣；此后无论哪一步中断（法力不足等），出手都已用掉——施法失败不退出手。
-        spell_tier = max(1, len(set(execution.definition.required_daowen)))
+        # （2026-10-25 用户令：X＝重数＝触发时机一重＋每个效果步骤各一重；
+        #  见 法术索引.md「法术阶级规则」——施展或定义X阶法术必须在声明时一次性
+        #  消耗X次出手机会，出手不足时不能开始施法）。
+        # 此后无论哪一步中断（法力不足等），出手都已用掉——施法失败不退出手。
+        tier = execution.definition.rank
         huangfu_mana = 0
         if huangfu_spell is not None:
             huangfu_mana = max(1, huangfu_spell.rank or 1)
@@ -5668,7 +5671,7 @@ class GameEngine:
                 return {"success": False,
                         "error": f"【黄符】施法实际需要{effective_huangfu_mana}点法力，{actor.name}当前{actor.current_mana}"}
         budget_err = self._consume_actions_or_error(
-            actor, spell_tier, action_type="cast")
+            actor, tier, action_type="cast")
         if budget_err:
             for daowen in huangfu_temp_granted:
                 actor.dao_wen.pop(daowen, None)
@@ -5707,8 +5710,8 @@ class GameEngine:
             "interrupt_detail": execution.interrupt_detail or None,
             "step_results": execution.step_summaries(),
             "steps": step_logs,
-            "tier": spell_tier,
-            "cost": f"{spell_tier}次主动出手",
+            "tier": tier,
+            "cost": f"{tier}次主动出手",
         }
         if huangfu_spell is not None:
             cast_result["huangfu_mana_spent"] = huangfu_mana

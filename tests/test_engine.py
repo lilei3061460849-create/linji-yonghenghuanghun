@@ -13,7 +13,7 @@ from engine.dice import DiceEngine
 from engine.enums import CostType, EntityType
 from engine.gamedata import SHAFA_LOOP_DAOWEN
 from tests.monster_phase_support import resolve_monster_phase
-from tests.setup_support import finish_initial_daowen
+from tests.setup_support import finish_initial_daowen, grant_extra_actions
 import math
 
 
@@ -565,16 +565,17 @@ def test_out_of_combat_actions():
     # 法术统一通过战斗中的自定义施法定义，立即写入 spells 并消耗一次主动出手。
     engine.state.phase = "in_combat"
     engine.state.combat_subphase = "player_actions"
+    grant_extra_actions(player, 7)  # 阶数＝重数后，2 阶法术要 2 次出手
     used = player.actions_used_this_round
     r = engine.execute_action("define_spell", {"spell_name": "先发制人"})
     assert r["success"], f"定义法术失败: {r}"
     assert "先发制人" in [spell.name for spell in player.spells]
     assert player.armed_spells == []
-    assert player.actions_used_this_round == used + 1, "定义法术应消耗1次主动出手"
+    assert player.actions_used_this_round == used + 2, "先发制人（受到伤害前＋杀伐）定义应消耗2次出手"
     r = engine.execute_action("undefine_spell", {"spell_name": "先发制人"})
     assert r["success"], f"移除法术失败: {r}"
     assert player.spells == []
-    assert player.actions_used_this_round == used + 1, "移除不应再扣出手"
+    assert player.actions_used_this_round == used + 2, "移除不应再扣出手"
     engine.state.phase = "pre_battle"
     print("  ✓ 法术定义/移除：持道纹即可定义，定义耗1次出手")
 

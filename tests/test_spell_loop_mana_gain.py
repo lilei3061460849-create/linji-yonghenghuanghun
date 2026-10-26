@@ -18,6 +18,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.models import StatusEffect,  DaoWen, DaoWenInstance, Relic
+from tests.setup_support import grant_extra_actions
 from tests.test_dragon_heart import _new_engine, _start_with_enemy
 
 # 与官方条目 死者之书.md「## 可学法术 → 血炼周天」同构（现已是内置法术，
@@ -39,8 +40,12 @@ def _engine_with_loop_spell(suffix, *, hp, mana, spells=None):
     for name in ("透支", "再生"):
         player.dao_wen[name] = DaoWenInstance(
             DaoWen(name=name, formula="", cost_type="", cost_formula="X", effect_formula=""))
-    # 2026-09-16：自创法术只能在战斗中用 define_spell 完成（消耗1次主动出手）。
+    # 2026-09-16：自创法术只能在战斗中用 define_spell 完成。
     _start_with_enemy(engine)
+    # 2026-10-25：法术阶数＝重数。周天自持 = 失去生命后 + 再生 + 透支 = 3 阶 = 3 次出手；
+    # 条件分支的两臂各算一重，本文件的「血溅」分支写法到 6 阶。基础出手只 2 次，
+    # 先用【蓄锐·增】把预算补到 11（9 阶上限 + 基础 2）再定义。
+    grant_extra_actions(engine.state.player, 9)  # 战斗开始时可能替换 player 对象，取最新引用
     _define_spells(engine, spells if spells is not None else (SPELL,))
     foe = engine.state.enemies[0]
     foe.current_hp = 99999
@@ -111,10 +116,10 @@ def _engine_with_branch_spell(suffix, *, mana):
     engine = _new_engine(suffix)
     player = engine.state.player
     engine.state.relics = []   # 同上（承露盏由本夹具显式追加，不受影响）。
-    # 2026-10-11 对齐 法术索引.md「法术阶级规则」：施展3阶法术（杀伐/再生/透支）
-    # 须一次付清3次出手，基础预算只有2次 → 用【疯狂】+1 把出手预算抬到3
-    # （action_count 是只读属性，只能走正文[速限]的修正项）。
-    player.add_status(StatusEffect(name="疯狂", remaining_rounds=-1, value=1, source="test"))
+    # 2026-10-25 用户令：法术阶级＝重数。血溅五步 = 失去生命后 + 条件分支两臂各 2 步
+    # = 6 阶，须一次付清 6 次出手；基础预算只有 2 次，故用【蓄锐·增】把预算补足。
+    # （action_count 是只读属性，只能走正文的修正项。）
+    grant_extra_actions(engine.state.player, 9)
     for name in ("杀伐", "再生", "透支"):
         player.dao_wen[name] = DaoWenInstance(
             DaoWen(name=name, formula="", cost_type="", cost_formula="X", effect_formula=""))
