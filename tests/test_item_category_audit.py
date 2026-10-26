@@ -220,11 +220,13 @@ def test_pool_relic_text_snapshot():
     assert len(defs) == 28
     names = [n for n, _ in defs]
     assert len(set(names)) == 28
+    # 2026-10-25：引擎早有实现的【共生血囊】补登记；【万魂幡】改归法器并退出本池。
+    assert "共生血囊" in names and "万魂幡" not in names
     for n, fx in defs:
         assert not re.search(r"持续\d*X", fx), f"{n}：遗物不得有持续X"
         assert "自选" not in fx, f"{n}：遗物数值不得自选"
     with_ke = {n for n, fx in defs if "可" in fx}
-    assert with_ke == {"万魂幡", "同魂笔", "血契"}, with_ke
+    assert with_ke == {"同魂笔", "血契"}, with_ke
 
 
 def test_pool_relics_all_in_index():

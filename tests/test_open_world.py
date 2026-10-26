@@ -907,7 +907,7 @@ def test_ten_thousand_souls_banner_unlocks_creation_outside_graveyard(tmp_path):
     engine.state.shards = 10
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
     engine.state.current_region = "扭曲都市"
-    engine.state.relics.append(Relic(name="万魂幡", effect="允许在乱葬岗外造生"))
+    engine.state.artifacts_owned.append("万魂幡")  # 法器：允许在乱葬岗外造生
 
     result = engine.execute_action("pre_battle_action", {
         "sub_action": "造生", "name": "幡下造物",
@@ -916,6 +916,30 @@ def test_ten_thousand_souls_banner_unlocks_creation_outside_graveyard(tmp_path):
     assert any(getattr(friend, "is_created_being", False)
                for friend in engine.state.friends)
     assert engine.state.shards == 0
+
+
+def test_creation_outside_graveyard_is_gated_without_the_artifact(tmp_path):
+    """错误输入／边界：万魂幡是法器——没有它时乱葬岗以外不得造生，挂在遗物上也不算。"""
+    from engine.api import GameEngine
+    from engine.models import Entity, Relic
+
+    engine = GameEngine(db_path=str(tmp_path / "souls-gate.db"),
+                        save_dir=str(tmp_path), rng_seed=112, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
+    engine.state.phase = "pre_battle"
+    engine.state.shards = 10
+    assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
+    engine.state.current_region = "扭曲都市"
+
+    denied = engine.execute_action("pre_battle_action", {"sub_action": "造生", "name": "越界造物"})
+    assert not denied["success"], denied
+    assert "乱葬岗" in denied["error"], denied
+
+    # 旧口径（把万魂幡当遗物持有）不得再解锁：它已改归法器。
+    engine.state.relics.append(Relic(name="万魂幡", effect="允许在乱葬岗外造生"))
+    still_denied = engine.execute_action("pre_battle_action", {"sub_action": "造生", "name": "越界造物"})
+    assert not still_denied["success"], still_denied
+    assert engine.state.friends == []
 
 
 def test_creation_builds_one_map_being_then_cultivates_stats_and_vision_not_preferences(tmp_path):

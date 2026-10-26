@@ -527,8 +527,7 @@ class GameEngine:
                             "params_schema": {"name": pending_learned,
                                               "recipient": "现存轮回者/朋友/员工/造物名称或runtime_id"},
                             "note": "学习成果可以暂存，待未来结识朋友后再分配"})
-        has_ten_thousand_souls_banner = any(
-            relic.name == "万魂幡" for relic in (self.state.relics or []))
+        has_ten_thousand_souls_banner = "万魂幡" in (self.state.artifacts_owned or [])
         if (has_ten_thousand_souls_banner
                 and not any(action.get("params_schema", {}).get("sub_action") == "造生"
                             for action in actions)):
@@ -3692,7 +3691,7 @@ class GameEngine:
         # 缺少该校验会让任意副本都能用他人专属行动，统计与平衡数据将失真。
         REGION_EXCLUSIVE = {"维修": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "造生": "乱葬岗"}
         need_region = REGION_EXCLUSIVE.get(action)
-        if action == "造生" and any(relic.name == "万魂幡" for relic in (self.state.relics or [])):
+        if action == "造生" and "万魂幡" in (self.state.artifacts_owned or []):
             need_region = None
         if need_region and self.state.current_region != need_region:
             if not world_mode:
@@ -3905,7 +3904,9 @@ class GameEngine:
         ("蚀界残钟", "每回终，所有角色各自失去等同于其当前法力×当前速度的血限"),
         ("窥隙法匣", "每次成功闪避后，下回合获得10点法力"),
         ("逐影胫骨", "每累计成功闪避两次，速度+1"),
-        ("万魂幡", "持有者可在乱葬岗以外发动造生；造生仍只培养其唯一造物"),
+        # 2026-10-25 用户令：引擎早有实现（combat_hooks 的复制体吸血），此前漏登记，补进遗物池。
+        ("共生血囊", "由你创造的复制体造成伤害时，复制体按目标实际减少的生命回复；"
+                     "超出复制体生命上限的回复量改为回复创造者"),
         # 2026-10-25 用户令：两条原始怪物道纹遗物化，进通用遗物池。
         ("疯狂", "所有角色每回合出手次数+1"),
         ("减速", "［战始］所有敌人的当前速度减半，[战终]复原"),
@@ -4581,7 +4582,7 @@ class GameEngine:
             return {"success": False, "error": "没有玩家"}
         if not self.state.world_state:
             return {"success": False, "error": "造生需要先初始化开放世界"}
-        has_banner = any(relic.name == "万魂幡" for relic in (self.state.relics or []))
+        has_banner = "万魂幡" in (self.state.artifacts_owned or [])
         if self.state.current_region != "乱葬岗" and not has_banner:
             return {"success": False, "error": "造生只能在乱葬岗发动；持有万魂幡时不受地点限制"}
         from .monsters import MONSTER_PREFERENCE_POOL
@@ -8513,6 +8514,10 @@ class GameEngine:
 
     # ==================== 自定义资源：声明 / 激活 / 列表 ====================
 
+    # 乱葬岗「亡者的执念」三选一法器（副本/乱葬岗.md）。
+    # 该副本终音尚未接入引擎：三件都只登记名字与效果，不发放。
+    DRAFT_ARTIFACTS = ("染血嫁衣", "燃魂灯", "万魂幡")
+
     def _builtin_resource_names(self) -> set[str]:
         """内建资源名全集：自定义资源不得与其重名（命名唯一性）。"""
         DaoWenEngine.register_all()
@@ -8520,6 +8525,7 @@ class GameEngine:
         names |= set(TWISTED_TOOL_LIBRARY)
         for items in self.TERMINAL_ARTIFACTS.values():
             names |= {n for n, _ in items}
+        names |= set(self.DRAFT_ARTIFACTS)
         names |= set(self.DRAGON_TRAITS) | set(self.DRAGON_CONSUMABLE_TRAITS)
         names |= {WING_BLOOD, WING_EMBER}
         names |= {name for _, (name, _) in self.FIRST_EMBRACE_OPTIONS.items()}
