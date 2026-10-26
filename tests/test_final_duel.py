@@ -534,6 +534,9 @@ def test_duel_round_end_keeps_both_reincarnator_mana():
     _finish_battle_7(challenger)
     opp = next(e for e in challenger.state.enemies if e.entity_type == "轮回者")
     player = challenger.state.player
+    # 只测双方面板法力保留；候选快照里的随机遗物不属于本断言范围。
+    challenger.state.relics.clear()
+    challenger.state.opponent_relics.clear()
 
     rs = challenger.execute_action("round_start", {})
     assert rs["success"] is True

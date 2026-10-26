@@ -54,8 +54,8 @@ COST_AMOUNT_KEYS = ("cost", "cost_shards", "cost_hp", "cost_blood_limit", "cost_
 def test_daowen_registry_every_daowen_has_positive_cost_channel():
     """现行道纹 X=1 时必有金额>0 的代价通道（法力/失忆/异变/疲惫/流血/衰老/碎片/枯竭/冷却）。"""
     DaoWenEngine.register_all()
-    # 2026-10-25 用户令：【疯狂】【减速】遗物化 → 41 → 39。
-    assert len(DaoWenEngine._registry) == 39
+    # 2026-10-26 用户令：【血契】转为通用道纹 → 39 → 40。
+    assert len(DaoWenEngine._registry) == 40
     # 删除/遗物化边界必须是硬约束，防止后续注册时意外复活旧道纹。
     assert "坠落" not in DaoWenEngine._registry
     assert "眩晕" not in DaoWenEngine._registry
@@ -212,21 +212,22 @@ def test_scarlet_fruit_is_pure_passive_hp_may_exceed_blood_limit():
 
 
 def test_pool_relic_text_snapshot():
-    """遗物池文本快照：28 件、无持续X/自选X；含「可」的遗物集合固定（F3 池内子集）。
+    """遗物池文本快照：27 件、无持续X/自选X；含「可」的遗物集合固定（F3 池内子集）。
 
-    2026-10-25：【疯狂】【减速】两条原始道纹遗物化，池子 26 → 28。
+    2026-10-26：【血契】转为道纹，遗物池 28 → 27。
     """
     defs = GameEngine.RELIC_DEFS
-    assert len(defs) == 28
+    assert len(defs) == 27
     names = [n for n, _ in defs]
-    assert len(set(names)) == 28
+    assert len(set(names)) == 27
     # 2026-10-25：引擎早有实现的【共生血囊】补登记；【万魂幡】改归法器并退出本池。
     assert "共生血囊" in names and "万魂幡" not in names
     for n, fx in defs:
         assert not re.search(r"持续\d*X", fx), f"{n}：遗物不得有持续X"
         assert "自选" not in fx, f"{n}：遗物数值不得自选"
     with_ke = {n for n, fx in defs if "可" in fx}
-    assert with_ke == {"同魂笔", "血契"}, with_ke
+    assert with_ke == {"同魂笔"}, with_ke
+    assert "血契" not in names
 
 
 def test_pool_relics_all_in_index():

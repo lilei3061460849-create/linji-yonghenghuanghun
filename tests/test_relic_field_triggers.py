@@ -26,6 +26,7 @@ def _engine(tmp_path, suffix="field"):
     e.execute_action("setup_choose_resonance", {"resonance_type": "转换"})
     setup = e.execute_action("setup_choose_region", {"region": "罪孽都市"})
     e.execute_action("choose_discovered_relic", {"relic_name": setup["result"]["relic_choices"][0]})
+    e.state.relics.clear()  # 本文件逐项显式授予被测遗物，开局随机项会干扰死亡/失速反应
     e.state.energy = 0
     return e
 

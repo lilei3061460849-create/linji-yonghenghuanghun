@@ -56,9 +56,7 @@ class DaoWenEngine:
         # 2026-10-11 用户令（A14）：【无神】【借力】【衰败】整条删除，不补位。
     ]
 
-    # 2026-10-09 用户令：**波及 X≥2 下限 repealed**——整套 X_MIN 装置拔除。
-    # 波及「选择X个[目标]建立/解除波及效果，数值平分」：X=1 完全合法，
-    # 平分份数=目标数，单目标时全值落于该目标（与多目标同一条分路，无特判）。
+    # 波及X：选择X个目标建立/解除无限期效果分摊关系；X决定目标数与法力消耗。
 
     # X上限规则（代价类型 → 最大值函数）
     X_LIMITS = {
@@ -214,19 +212,30 @@ class DaoWenEngine:
     
     @staticmethod
     def calculate_boba(x: int) -> dict:
-        """波及X：支付：法力2X。选择X个[目标]建立/解除波及效果，持续∞。你发动的道纹同时作用于所有拥有波及效果的目标；数值平分。"""
+        """波及X：支付：法力2X。选择X个目标，目标之间平分道纹效果，持续∞。"""
         return {
             "dao_wen": "波及",
             "x": x,
             "cost_type": CostType.MANA.value,
             "cost": 2 * x,
             "mark_targets": x,
-            "duration": -1,  # ∞
-            "summary": f"支付：{2 * x}法力，选择{x}个目标建立/解除波及效果（持续∞）"
+            "duration": -1,
+            "summary": f"支付：{2 * x}法力，选择{x}个目标建立/解除波及效果（目标之间平分道纹效果，持续∞）"
         }
     
     # ---- 杀伐11节点闭环后半（增殖至封印）----
     
+    @staticmethod
+    def calculate_xueqi(x: int, target: Entity = None) -> dict:
+        """血契X：支付法力10X；选择X个目标，目标之间平分数值型代价，持续∞。"""
+        cost = 10 * x
+        return {
+            "dao_wen": "血契", "x": x,
+            "cost_type": CostType.MANA.value, "cost": cost,
+            "mark_targets": x, "duration": -1,
+            "summary": f"支付：法力{cost}，选择{x}个目标建立血契分担组（目标之间平分数值型代价，持续∞）",
+        }
+
     @staticmethod
     def calculate_zengzhi(x: int, target: Entity = None) -> dict:
         """增殖X：支付：流血10X。［战终］［目标］［血限］+2X
@@ -826,6 +835,7 @@ class DaoWenEngine:
             "固执": cls.calculate_guzhi,
             "连击": cls.calculate_lianji,
             "波及": cls.calculate_boba,
+            "血契": cls.calculate_xueqi,
             "增殖": cls.calculate_zengzhi,
             "束缚": cls.calculate_shufu,
             "透支": cls.calculate_touzhi,

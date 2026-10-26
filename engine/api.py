@@ -685,11 +685,6 @@ class GameEngine:
     def _get_battle_start_actions(self) -> dict:
         relic_choices_schema: dict[str, Any] = {"_instruction": "按当前回始遗物逐件显式提交"}
         player = self.state.player
-        # 2026-10-12 用户令：【血契】只保留「数值型代价可与朋友/员工平分」，
-        # 与【透支】重合的「[回始]流血4X换X法力」已删除，故它不再是回始主动遗物，
-        # `血契`/`对手血契` 两个回始决策键取消。平分仍通过各代价提交处的
-        # cost_share_target_ref 生效（见 _get_pre_battle_actions / use_daowen /
-        # 负岳碑 / 血族血脉 四处，全部保留）。
         round_start_schema: dict[str, Any] = {"relic_choices": relic_choices_schema}
         global_spells = self.combat.prepare_global_trigger_spells(TriggerTiming.ROUND_START.value)
         if global_spells:
@@ -771,9 +766,20 @@ class GameEngine:
                     "cost_share_target_ref": (
                         [{"ref": ref, "name": entity.name}
                          for ref, entity in self.combat.blood_pact_targets().items()]
-                        if self.combat._has_active_blood_pact(player) else []
+                        if (self.combat._has_active_blood_pact(player)
+                            and not self.combat._blood_pact_group(player)) else []
                     ),
                 }
+                if name in ("波及", "血契"):
+                    selectable = [{"ref": ref, "name": entity.name}
+                                  for ref, entity in refs.items()
+                                  if entity.is_alive and entity is not player]
+                    params_schema["dodge_targets"] = {
+                        "exact_count": "X", "targets": selectable,
+                        "entry": {"target_ref": "存活非自身目标引用",
+                                  "dodge": "敌对目标可选布尔值",
+                                  "blood_shadow": "可选布尔值"},
+                    }
             actions.append({
                 "action_type": "use_daowen", "available": max_x >= 1,
                 "params_schema": params_schema,
@@ -787,14 +793,14 @@ class GameEngine:
                 fixed_x = instance.x_value if instance.x_value > 0 else 1
                 # 波及X（固定X）：合法目标不足X时该指令永远无法发动——
                 # 与玩家侧同一规则。
-                if name == "波及":
+                if name in ("波及", "血契"):
                     wave_candidates = [e for e in refs.values()
                                        if e.is_alive and e is not actor]
                     if len(wave_candidates) < fixed_x:
                         actions.append({"action_type": "use_daowen", "available": False,
                                         "params_schema": {"actor_ref": actor_ref,
                                                           "daowen_name": name, "x": fixed_x},
-                                        "reason": f"波及{fixed_x}需要{fixed_x}个目标，"
+                                        "reason": f"{name}{fixed_x}需要{fixed_x}个目标，"
                                                   f"当前仅{len(wave_candidates)}个存活非自身角色"})
                         continue
                 actions.append({"action_type": "use_daowen", "available": True,
@@ -1008,10 +1014,10 @@ class GameEngine:
             legal = x
         # 波及X：X还不得超过合法目标数（全部存活非自身角色）——否则schema会给出
         # 永远无法发动的X。
-        if name == "波及":
-            wave_candidates = [e for e in self.combat._combat_entity_refs().values()
-                               if e.is_alive and e is not actor]
-            legal = min(legal, len(wave_candidates))
+        if name in ("波及", "血契"):
+            candidates = [e for e in self.combat._combat_entity_refs().values()
+                          if e.is_alive and e is not actor]
+            legal = min(legal, len(candidates))
         return legal
 
     def _get_battle_end_actions(self) -> dict:
@@ -1019,6 +1025,7 @@ class GameEngine:
         player = self.state.player
         if (player and self.state._relic_active(player, "血族血脉")
                 and self.combat._has_active_blood_pact(player)
+                and not self.combat._blood_pact_group(player)
                 and player.damage_dealt_this_round <= 0):
             round_end_schema["blood_lineage_cost_share_target_ref"] = [
                 {"ref": ref, "name": entity.name}
@@ -3874,14 +3881,13 @@ class GameEngine:
     FIRST_EMBRACE_CONSUMABLES = {3: WING_BLOOD}
     FIRST_EMBRACE_RETAIN_CHOICE = 9
 
-    # 遗物池定义（26件；【发现】只列候选，效果在对应触发时点应用）
+    # 遗物池定义（27件；【发现】只列候选，效果在对应触发时点应用）
     # 2026-10-13 用户令：【买路财】改制为轮回者【逃跑】行动，【三相残韵盘】删除
     # （发现侧由道纹【典当】承接），两件均移出遗物池。
     RELIC_DEFS = [
         ("血誓戒", "[回始]首次主动支付流血代价时，获得等同于本次流血的格挡；若支付后生命≤30%，改为获得等量生命"),
         ("同魂笔", "当你对[目标]发动残韵时，可以选择另一个[目标]，使其拥有的一种道纹受到同种残韵影响。"),
         ("回锋刀", "每失去1点速度后，对[目标]造成3点伤害；[回始]，对[目标]造成3×（你的[速限]-你的当前速度）的伤害。"),
-        ("血契", "数值型【代价】可与一名存活的[朋友]或[员工]平分，无法整除时余数按随机数分配（通用规则见规则正文《基础定义·平分规则》）。"),
         ("避风铃", "每次闪避后获得3格挡；当前速度归零时获得15格挡"),
         ("守夜灯", "[回终]，你获得等同于当前回合数的法力。"),
         ("无所求", "每当你在事件中选择「拒绝」类选项，永久获得1点属性点。"),
@@ -4898,10 +4904,11 @@ class GameEngine:
         _real_self_buff = bool(_bizhong_st and _bizhong_st.remaining_rounds > 0)
         if hostile_possible and _real_self_buff:
             log["must_hit"] = True
-            return log, None
+            if name != "血契":
+                return log, None
         if hostile_possible and self.combat.bizhong_remaining(actor) > 0:
             log["must_hit"] = self.combat.consume_bizhong(actor)
-            if log["must_hit"]:
+            if log["must_hit"] and name != "血契":
                 return log, None
         if blood_shadow:
             if (target is None or not self._hostile_to(actor, target)
@@ -4914,6 +4921,53 @@ class GameEngine:
             log["blood_shadow"] = True
             log["fully_dodged"] = True
             return log, None
+        if name == "血契":
+            refs = self.combat._combat_entity_refs()
+            if not isinstance(dodge_targets, list) or len(dodge_targets) != wave_count:
+                raise ValueError(f"血契必须显式提交恰好{wave_count}个目标")
+            entries = {}
+            for entry in dodge_targets:
+                if (not isinstance(entry, dict) or not isinstance(entry.get("target_ref"), str)
+                        or not isinstance(entry.get("dodge", False), bool)
+                        or not isinstance(entry.get("blood_shadow", False), bool)
+                        or entry.get("dodge", False) and entry.get("blood_shadow", False)):
+                    raise ValueError("血契每个目标必须提交target_ref及合法的dodge/blood_shadow")
+                ref = entry["target_ref"]
+                if ref in entries:
+                    raise ValueError("血契目标不得重复")
+                ent = refs.get(ref)
+                if ent is None or not ent.is_alive or ent is actor:
+                    raise ValueError("血契目标必须是存活的非自身目标")
+                if not self.combat.is_targetable(actor, ent):
+                    raise ValueError(f"{ent.name}处于飞行，无法被选中")
+                entries[ref] = (entry, ent)
+            accepted = []
+            for entry, ent in entries.values():
+                hostile = self._hostile_to(actor, ent)
+                if not hostile or log["must_hit"]:
+                    accepted.append(ent)
+                    continue
+                if entry.get("blood_shadow"):
+                    if not self.state._relic_active(ent, "血影") or ent.current_hp <= 10:
+                        raise ValueError(f"{ent.name}不能使用血影")
+                    self.combat.pay_numeric_cost(
+                        ent, "流血", 10,
+                        cost_share_target_ref=entry.get("cost_share_target_ref", ""),
+                        cost_context={"timing": "reaction", "source": "血影",
+                                      "source_type": "relic", "tags": {"active_payment"}})
+                    log["dodged_names"].append({"name": ent.name, "blood_shadow": True})
+                elif entry.get("dodge"):
+                    if ent.current_speed < 1:
+                        raise ValueError(f"{ent.name}速度不足")
+                    extra = self.combat._spend_dodge_speed(
+                        ent, entry.get("dodge_relic_target_ref"))
+                    log["dodged_names"].append({"name": ent.name, "speed_after": ent.current_speed, **extra})
+                else:
+                    accepted.append(ent)
+            log["blood_pact_targets"] = [entity.name for entity in accepted]
+            log["fully_dodged"] = not accepted
+            return log, accepted
+
         if name == "波及":
             refs = self.combat._combat_entity_refs()
             if not isinstance(dodge_targets, list) or len(dodge_targets) != wave_count:
@@ -5092,8 +5146,8 @@ class GameEngine:
         import inspect
         DaoWenEngine.register_all()
         requires_target = "target" in inspect.signature(DaoWenEngine._registry[name]).parameters
-        if name == "波及" and not (target_ref or target_name):
-            # 波及X：目标由dodge_targets显式提交X个；主引用取首个已提交目标。
+        if name in ("波及", "血契") and not (target_ref or target_name):
+            # 多目标道纹：从dodge_targets取首个引用作为通用目标。
             submitted = list(params.get("dodge_targets") or [])
             if submitted and isinstance(submitted[0], dict) and submitted[0].get("target_ref"):
                 target_ref = submitted[0]["target_ref"]
@@ -5117,6 +5171,23 @@ class GameEngine:
             target = matches[0]
         if is_command and target is actor:
             return {"success": False, "error": "听从指令发动道纹必须指定一个非自身目标"}
+        if name == "血契":
+            pact_entries = list(params.get("dodge_targets") or [])
+            if len(pact_entries) != x:
+                return {"success": False, "error": f"血契X={x}必须显式选择恰好{x}个目标"}
+            pact_refs = [entry.get("target_ref") for entry in pact_entries
+                         if isinstance(entry, dict)]
+            if len(pact_refs) != x or len(set(pact_refs)) != x:
+                return {"success": False, "error": "血契目标必须是X个互不重复的target_ref"}
+            if any(ref not in refs or refs[ref] is actor or not refs[ref].is_alive
+                   or not self.combat.is_targetable(actor, refs[ref])
+                   for ref in pact_refs):
+                return {"success": False, "error": "血契目标必须为当前可选的存活非自身角色"}
+            if any(("dodge" in entry and not isinstance(entry["dodge"], bool))
+                   or ("blood_shadow" in entry and not isinstance(entry["blood_shadow"], bool))
+                   or entry.get("dodge", False) and entry.get("blood_shadow", False)
+                   for entry in pact_entries):
+                return {"success": False, "error": "血契目标的dodge/blood_shadow必须为互斥布尔值"}
         if target is not actor and not self.combat.is_targetable(actor, target):
             return {"success": False, "error": f"{target.name}处于飞行，无法被选中"}
         # 自愈X「目标死亡时」：显式目标（默认自身不算选中；波及X 记全部已提交目标）。
@@ -5232,9 +5303,12 @@ class GameEngine:
             blood_shadow_cost_share_target_ref=params.get(
                 "blood_shadow_cost_share_target_ref", ""),
             dodge_relic_target_ref=params.get("dodge_relic_target_ref", ""),
-            wave_count=int(calc.get("mark_targets", 0)),
+            wave_count=int(calc.get("mark_targets", x if name == "血契" else 0)),
             activation_x=x,
         )
+        if name == "血契":
+            calc["blood_pact_target_ids"] = [str(entity.runtime_id)
+                                                for entity in (aoe_targets_override or [])]
         if dodge_log.get("fully_dodged"):
             self._advance_duel_turn()
             if self.state.in_final_duel and not self._duel_side_can_act("player_side") and not self._duel_side_can_act("opponent_side"):

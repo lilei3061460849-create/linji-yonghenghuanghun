@@ -88,7 +88,7 @@ def test_daowen_and_relic_quotas_are_independent():
     for name in ("杀伐", "庇护"):
         p.dao_wen.pop(name, None)
     assert len(p.dao_wen) <= 3
-    e.state.relics = [Relic("守夜灯", ""), Relic("无所求", ""), Relic("血契", "")]
+    e.state.relics = [Relic("守夜灯", ""), Relic("无所求", ""), Relic("忘忧香", "")]
     assert len({r.name for r in e.state.relics}) == 3 == p.relic_capacity
 
 

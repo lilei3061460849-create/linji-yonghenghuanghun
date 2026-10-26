@@ -71,32 +71,56 @@ class CostPaymentMixin:
 
     SHAREABLE_NUMERIC_COSTS = {"流血", "衰老", "枯竭", "萎缩", "疲惫", "异变"}
 
+    def _blood_pact_group(self, payer: Optional[Entity]) -> list[Entity]:
+        """返回【血契】绑定且仍存活的目标组。"""
+        if payer is None:
+            return []
+        pact = next((st for st in payer.status_effects
+                     if st.name == "血契" and st.remaining_rounds != 0), None)
+        if pact is None:
+            return []
+        import json
+        try:
+            target_ids = json.loads(pact.source or "[]")
+            if not isinstance(target_ids, list):
+                target_ids = [target_ids]
+        except (TypeError, ValueError):
+            # 兼容早期开发版将单个 runtime_id 直接写进 source 的快照。
+            target_ids = [pact.source]
+        ids = {str(value) for value in target_ids if value}
+        return [entity for entity in self._combat_entity_refs().values()
+                if entity.is_alive and str(entity.runtime_id) in ids]
+
     def blood_pact_targets(self, payer: Optional[Entity] = None) -> dict[str, Entity]:
-        """【血契】可共同承担代价的存活朋友/员工；不要求玩家侧员工已部署。"""
+        """当前【血契】道纹绑定的存活目标组；旧存档遗物仍兼容读取。"""
         payer = payer or self.state.player
-        if payer is self.state.player:
-            targets: dict[str, Entity] = {}
-            for prefix, entities in (("friend", self.state.friends), ("employee", self.state.employees)):
-                for index, entity in enumerate(entities):
-                    if entity.is_alive:
-                        targets[f"{prefix}:{index}"] = entity
-            return targets
-        if payer is not None and payer.entity_type == "轮回者" and self.state.on_enemy_side(payer):
-            return {
-                f"enemy:{index}": entity
-                for index, entity in enumerate(self.state.enemies)
-                if entity is not payer and entity.is_alive
-                and entity.entity_type in ("朋友", "员工")
-            }
+        if payer is None:
+            return {}
+        group = self._blood_pact_group(payer)
+        if group:
+            refs = self._combat_entity_refs()
+            return {ref: entity for ref, entity in refs.items() if entity in group}
+        # 兼容已有存档/旧测试中的血契遗物；新遗物池已移除该条目。
+        if payer is self.state.player and self._has_legacy_blood_pact(payer):
+            return {f"{prefix}:{i}": e for prefix, group in
+                    (("friend", self.state.friends), ("employee", self.state.employees))
+                    for i, e in enumerate(group) if e.is_alive}
+        if (payer.entity_type == "轮回者" and self.state.on_enemy_side(payer)
+                and self._has_legacy_blood_pact(payer)):
+            return {f"enemy:{i}": e for i, e in enumerate(self.state.enemies)
+                    if e is not payer and e.is_alive and e.entity_type in ("朋友", "员工")}
         return {}
 
-    def _has_active_blood_pact(self, payer: Entity) -> bool:
+    def _has_legacy_blood_pact(self, payer: Entity) -> bool:
         if payer is self.state.player:
             return (any(relic.name == "血契" for relic in self.state.relics)
                     and self.state.sealed_relics.get("血契", 0) <= 0)
         if payer is not None and payer.entity_type == "轮回者" and self.state.on_enemy_side(payer):
             return any(relic.name == "血契" for relic in self.state.opponent_relics)
         return False
+
+    def _has_active_blood_pact(self, payer: Entity) -> bool:
+        return bool(self.blood_pact_targets(payer))
 
     def blood_shadow_cost_share_options(self, payer: Entity) -> list[dict]:
         """血影要求所有承担者支付后仍存活，返回可执行的血契分担引用。"""
@@ -138,12 +162,26 @@ class CostPaymentMixin:
         ally = None
         owner_amount = amount
         ally_amount = 0
+        pact_group = self._blood_pact_group(payer)
+        if pact_group:
+            if cost_share_target_ref:
+                raise ValueError("血契持续期间由绑定目标组自动平分，不接受单目标分担引用")
+            parts = self._divide_flat(amount, len(pact_group)) if pact_group else []
+            for entity, part in zip(pact_group, parts):
+                if part <= 0 or forced:
+                    continue
+                capacity = (None if cost_type == "衰老" and self.state.side_has(entity, "不朽之躯")
+                            else self._cost_capacity(entity, cost_type))
+                if capacity is not None and part > capacity:
+                    raise ValueError(f"{entity.name}无法完整承担{cost_type}{part}（可支付{capacity}）")
+            return payer, 0, None, 0
+        pact_targets = self.blood_pact_targets(payer)
         if cost_share_target_ref:
             if not self._has_active_blood_pact(payer):
                 raise ValueError("只有持有且未被封印【血契】的轮回者才能提交cost_share_target_ref")
             ally = self.blood_pact_targets(payer).get(cost_share_target_ref)
             if ally is None:
-                raise ValueError("cost_share_target_ref必须指向一名存活朋友/员工")
+                raise ValueError("cost_share_target_ref必须指向血契指定的存活目标")
             # 血契：数值型代价可与一名存活的朋友或员工平分；无法整除时余数按随机数分配。
             owner_amount, ally_amount = self._divide_flat(amount, 2)
         for entity, part in ((payer, owner_amount), (ally, ally_amount)):
@@ -388,16 +426,16 @@ class CostPaymentMixin:
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
             if entity is caster or not entity.is_alive:
                 continue
-            if any(s.name == "波及" and s.source == caster.name and not s.is_expired
-                   for s in entity.status_effects):
+            if any(s.name == "波及" and s.source in (caster.name, str(caster.runtime_id))
+                   and not s.is_expired for s in entity.status_effects):
                 out.append(entity)
         return out
 
     def _toggle_wave_mark(self, entity: Entity, caster: Entity, *, activation_x: int = 0) -> bool:
-        """建立/解除波及效果；建立时记录这次道纹发动 X。"""
-        for s in list(entity.status_effects):
-            if s.name == "波及" and s.source == caster.name:
-                entity.status_effects.remove(s)
+        """建立/解除无限期波及标记；返回是否建立。"""
+        for st in list(entity.status_effects):
+            if st.name == "波及" and st.source in (caster.name, str(caster.runtime_id)):
+                entity.status_effects.remove(st)
                 return False
         entity.add_status(StatusEffect(name="波及", value=1, remaining_rounds=-1,
                                        source=caster.name, activation_x=activation_x))
@@ -473,8 +511,6 @@ class CostPaymentMixin:
             if heart is not None:
                 offset = min(dragon_heart_use, heart.current_uses, amount)
         remaining = amount - offset
-        _, owner_amount, ally, ally_amount = self.validate_numeric_cost(
-            payer, cost_type, remaining, cost_share_target_ref, forced=forced)
         if heart is not None and offset > 0:
             heart.current_uses -= offset
         normalized_ctx = normalize_context(ctx if ctx is not None else cost_context)
@@ -486,6 +522,30 @@ class CostPaymentMixin:
                 mechanic="cost", subtype=self._cost_context_subtype(cost_type), amount=remaining,
                 tags=normalized_ctx.tags, event_id=normalized_ctx.event_id,
                 parent_event_id=normalized_ctx.parent_event_id)
+        pact_group = self._blood_pact_group(payer)
+        if pact_group:
+            parts = self._divide_flat(remaining, len(pact_group))
+            if not forced:
+                for entity, part in zip(pact_group, parts):
+                    if part <= 0:
+                        continue
+                    capacity = (None if cost_type == "衰老" and self.state.side_has(entity, "不朽之躯")
+                                else self._cost_capacity(entity, cost_type))
+                    if capacity is not None and part > capacity:
+                        raise ValueError(f"{entity.name}无法完整承担{cost_type}{part}（可支付{capacity}）")
+            shared_details = [self._apply_numeric_cost_part(entity, cost_type, part, normalized_ctx)
+                              for entity, part in zip(pact_group, parts) if part > 0]
+            return {
+                "cost_type": cost_type, "requested": amount,
+                "dragon_heart_offset": offset, "remaining": remaining,
+                "owner": {"payer": payer.name, "cost_type": cost_type, "paid": 0},
+                "shared_with": shared_details,
+                "cost_share_target_ref": None,
+                "actual_paid": sum(int(detail.get("paid", 0) or 0) for detail in shared_details),
+                "ctx": normalized_ctx.to_dict() if normalized_ctx is not None else None,
+            }
+        _, owner_amount, ally, ally_amount = self.validate_numeric_cost(
+            payer, cost_type, remaining, cost_share_target_ref, forced=forced)
         owner_detail = self._apply_numeric_cost_part(payer, cost_type, owner_amount, normalized_ctx)
         ally_detail = (self._apply_numeric_cost_part(ally, cost_type, ally_amount, normalized_ctx)
                        if ally is not None else None)
