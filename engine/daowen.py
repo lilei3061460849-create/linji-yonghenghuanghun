@@ -212,7 +212,7 @@ class DaoWenEngine:
     
     @staticmethod
     def calculate_boba(x: int) -> dict:
-        """波及X：支付：法力2X。选择X个目标，目标之间平分道纹效果，持续∞。"""
+        """波及X：支付：法力2X。选择X个目标，目标组彼此平分道纹效果，持续∞。"""
         return {
             "dao_wen": "波及",
             "x": x,
@@ -220,20 +220,20 @@ class DaoWenEngine:
             "cost": 2 * x,
             "mark_targets": x,
             "duration": -1,
-            "summary": f"支付：{2 * x}法力，选择{x}个目标建立/解除波及效果（目标之间平分道纹效果，持续∞）"
+            "summary": f"支付：{2 * x}法力。选择{x}个目标，目标组彼此平分道纹效果，持续∞。"
         }
     
     # ---- 杀伐11节点闭环后半（增殖至封印）----
     
     @staticmethod
     def calculate_xueqi(x: int, target: Entity = None) -> dict:
-        """血契X：支付法力10X；选择X个目标，目标之间平分数值型代价，持续∞。"""
+        """血契X：支付：法力10X。选择X个目标，目标组彼此平分数值型代价，持续∞。"""
         cost = 10 * x
         return {
             "dao_wen": "血契", "x": x,
             "cost_type": CostType.MANA.value, "cost": cost,
             "mark_targets": x, "duration": -1,
-            "summary": f"支付：法力{cost}，选择{x}个目标建立血契分担组（目标之间平分数值型代价，持续∞）",
+            "summary": f"支付：法力{cost}。选择{x}个目标，目标组彼此平分数值型代价，持续∞。",
         }
 
     @staticmethod
