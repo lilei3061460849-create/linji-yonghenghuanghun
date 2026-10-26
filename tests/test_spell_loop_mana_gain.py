@@ -44,7 +44,7 @@ def _engine_with_loop_spell(suffix, *, hp, mana, spells=None):
     _start_with_enemy(engine)
     # 2026-10-25：法术阶数＝重数。周天自持 = 失去生命后 + 再生 + 透支 = 3 阶 = 3 次出手；
     # 条件分支的两臂各算一重，本文件的「血溅」分支写法到 6 阶。基础出手只 2 次，
-    # 先用【蓄锐·增】把预算补到 11（9 阶上限 + 基础 2）再定义。
+    # 先用【蓄锐·增】把出手预算补到 11 再定义（阶数＝重数，不设上限）。
     grant_extra_actions(engine.state.player, 9)  # 战斗开始时可能替换 player 对象，取最新引用
     _define_spells(engine, spells if spells is not None else (SPELL,))
     foe = engine.state.enemies[0]

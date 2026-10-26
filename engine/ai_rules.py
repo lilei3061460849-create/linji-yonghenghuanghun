@@ -222,13 +222,11 @@ def try_use_crime_vault(engine, commit: bool = True) -> Optional[dict]:
 def try_fire_godfather_revolver(engine, commit: bool = True) -> Optional[dict]:
     """教父左轮：对[目标]打出 30%自身血限×本场使用次数 的【必中】伤害。
 
-    耐久6/6，永不消耗（每场回满），不占用出手。能打死就打血最少，否则打血最多。
+    每场 6 发（[战始]回满），不占用出手。能打死就打血最少，否则打血最多。
     """
     if "教父左轮" not in engine.state.artifacts_owned:
         return None
-    gun = next((c for c in engine.state.consumables
-                if c.name == "教父左轮" and c.kind == "artifact_weapon"), None)
-    if gun is None or gun.current_uses <= 0:
+    if engine.state.godfather_revolver_uses >= engine.GODFATHER_REVOLVER_AMMO:
         return None
     enemies = [e for e in engine.state.enemies if e.is_alive]
     if not enemies:

@@ -80,11 +80,13 @@ def test_monster_transform_branch_is_reversible():
 
     2026-10-11 用户令删除【借力】→【全力】的（转换）出边**留空不补**
     （用户口径：整体大改前不新增道路）；【全力】仍有（反转）→弱化、（曲解）→再生。
+    2026-10-26 用户令：那条（转换）接给【全速】——攻击力⇄攻击次数。
     """
     assert R.find_transformation("弱化", "反转") == "全力"
     assert R.find_transformation("再生", "曲解", target_daowen="全力") == "全力"
     assert R.find_transformation("寄生", "曲解") is None  # 自愈删除后不补新路径
     assert R.get_available_resonance("全力") == [
+        {"resonance_type": "转换", "target_daowen": "全速", "direction": "正向", "loop": "怪物原始道纹"},
         {"resonance_type": "反转", "target_daowen": "弱化", "direction": "正向", "loop": "怪物原始道纹"},
         {"resonance_type": "曲解", "target_daowen": "再生", "direction": "正向", "loop": "怪物原始道纹"},
     ]

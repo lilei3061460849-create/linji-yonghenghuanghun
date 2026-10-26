@@ -241,7 +241,7 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `list_resources` | 列出已注册的自定义资源 |
 | `use_black_card` | 黑金名片(罪孽都市终音)：敌方血限减半，等量碎片(允许负债≤50) |
 | `use_crime_vault` | 罪业金库(罪孽都市终音)：消耗X碎片(≤2%当前碎片)换2X格挡 |
-| `fire_godfather_revolver` | 教父左轮(罪孽都市终音)：对target打出30%血限×本场使用次数的必中伤害 |
+| `fire_godfather_revolver` | 教父左轮(罪孽都市终音)：对target打出30%血限×本场使用次数的必中伤害（每场6发，[战始]回满） |
 | `select_shared_dragon_heart` | 共心环(龙心谷终音)：选定本场共享的龙心类型 |
 | `declare_fuyuebei_toll` | 负岳碑(龙心谷终音)：预声明保护某[朋友]/[员工]下次撤退 |
 | `unlock_dragon_trait` | 真龙之心：代价累积满12点解锁1种龙族遗物(trait)；trait=烬翼 时改发消耗品【烬翼】5/5。震岳龙躯为常驻被动，无独立 action |

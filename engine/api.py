@@ -3834,6 +3834,8 @@ class GameEngine:
     # 保证「有流程」与「有所需道纹」永不脱节）。此处只做别名，避免两处维护。
     # 法术不再需要【学习】：持全部所需道纹即可直接使用（见 spell_definition）。
     SPELL_REGISTRY = CombatEngine.BUILTIN_SPELL_DAOWEN
+    # 教父左轮：每场弹药数（[战始]回满＝把本场使用次数清零，见 _action_fire_godfather_revolver）
+    GODFATHER_REVOLVER_AMMO = 6
     # 三副本终音法器（死斗胜利后按current_region发放，见resolve_final_duel/choose_terminal_artifact）
     TERMINAL_ARTIFACTS = {
         "扭曲都市": [
@@ -3845,7 +3847,7 @@ class GameEngine:
         "罪孽都市": [
             ("黑金名片", "[战始]，可使场上所有敌方[目标][血限]减半后，付出等量[碎片]（允许负债，负债≤50）"),
             ("罪业金库", "[回始]，可消耗X点[碎片]，获得2X点格挡（X≤2%当前碎片）"),
-            ("教父左轮", "（耐久6/6，永不消耗，[战终]耐久回满）。对[目标]打出30%自身[血限]×使用次数的【必中】伤害"),
+            ("教父左轮", "对[目标]打出30%自身[血限]×本场使用次数的【必中】伤害（每场6发，[战始]自动回满）"),
         ],
         "龙心谷": [
             ("共心环", "[战始]，选择自身拥有的一枚【××龙心】；本场战斗中，自身、[朋友]与[员工]均可消耗该龙心耐久，抵消同类型代价"),
@@ -3909,7 +3911,7 @@ class GameEngine:
                      "超出复制体生命上限的回复量改为回复创造者"),
         # 2026-10-25 用户令：两条原始怪物道纹遗物化，进通用遗物池。
         ("疯狂", "所有角色每回合出手次数+1"),
-        ("减速", "［战始］所有敌人的当前速度减半，[战终]复原"),
+        ("减速", "［战始］所有敌人的当前速度减半"),
     ]
 
     def _init_relic_pool(self):
@@ -7563,10 +7565,7 @@ class GameEngine:
         self.state.current_round = 0
         self.combat.reset_monster_activation()
         self.state.shared_dragon_heart_type = ""  # 共心环：每场需重新选定
-        self.state.godfather_revolver_uses = 0
-        gun = next((c for c in self.state.consumables if c.name == "教父左轮" and c.kind == "artifact_weapon"), None)
-        if gun is not None:
-            gun.current_uses = gun.max_uses  # 教父左轮：[战终]耐久回满(此处按下一场[战始]起效实现，效果等价)
+        self.state.godfather_revolver_uses = 0  # 教父左轮：每场6发，[战始]回满即计数归零
 
         region = self.state.current_region
         pool = self._monster_pool_for_battle()
@@ -8252,9 +8251,6 @@ class GameEngine:
 
         if name == "红头绳":
             self.state.has_sacrifice_action = True
-        if name == "教父左轮":
-            self.state.consumables.append(Consumable(
-                name="教父左轮", effect=effect, current_uses=6, max_uses=6, kind="artifact_weapon"))
         if name == "猩红尖牙":
             self.state.pending_first_embrace = True
             self.state.seal_pending_after_embrace = True
@@ -8683,18 +8679,21 @@ class GameEngine:
                 "result": {"spent": x, "shield_gained": 2 * x, "shards": self.state.shards, "shield": player.shield}}
 
     def _action_fire_godfather_revolver(self, params: dict) -> dict:
-        """教父左轮(罪孽都市终音)：耐久6/6永不消耗(仅按场次回满)，对[目标]打出30%自身[血限]×本场使用次数的必中伤害"""
+        """教父左轮(罪孽都市终音)：每场 6 发，[战始]回满；
+        对[目标]打出 30%自身[血限]×本场使用次数 的【必中】伤害。
+
+        2026-10-26 用户令：它是法器，不再借消耗品的耐久记账——回满属于[战始]重置，
+        发射次数由 `state.godfather_revolver_uses` 单点计数。
+        """
         if "教父左轮" not in self.state.artifacts_owned:
             return {"success": False, "error": "没有教父左轮"}
-        gun = next((c for c in self.state.consumables if c.name == "教父左轮" and c.kind == "artifact_weapon"), None)
-        if gun is None or gun.current_uses <= 0:
-            return {"success": False, "error": "教父左轮本场弹药已耗尽，需等待下一场[战终]回满"}
+        if self.state.godfather_revolver_uses >= self.GODFATHER_REVOLVER_AMMO:
+            return {"success": False, "error": "教父左轮本场弹药已打空，下一场[战始]回满"}
         player = self.state.player
         target = self.combat._combat_entity_refs().get(params.get("target_ref", ""))
         if not player or target is None:
             return {"success": False, "error": "target_ref不是当前合法目标"}
         self.state.godfather_revolver_uses += 1
-        gun.current_uses -= 1
         damage = math.ceil(player.blood_limit * 0.3) * self.state.godfather_revolver_uses
         dmg = self.combat._apply_hostile_damage(target, damage, "必中", player, ctx={
             "timing": self.state.combat_subphase or self.state.phase, "source": "教父左轮", "source_type": "artifact",
@@ -8704,7 +8703,8 @@ class GameEngine:
         return {"success": True, "action": "教父左轮",
                 "result": {"target": target.name, "damage": damage,
                            "uses_this_battle": self.state.godfather_revolver_uses,
-                           "ammo_remaining": gun.current_uses, **dmg}}
+                           "ammo_remaining": self.GODFATHER_REVOLVER_AMMO - self.state.godfather_revolver_uses,
+                           **dmg}}
 
     def _action_select_shared_dragon_heart(self, params: dict) -> dict:
         """共心环(龙心谷终音)：[战始]选定自身拥有的一枚【××龙心】类型，本场自身/朋友/员工均可用它抵消同类型代价"""

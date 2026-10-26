@@ -833,7 +833,7 @@ def spell_tier(trigger, steps) -> int:
     - 循环标记不另计重——它是「终点回到起点」，不产生新环节。
 
     不带触发时机的瞬发法术只按步骤计，所以「直接发动杀伐X」是 1 阶。
-    界面上限仍是 9 阶，越界由调用方拦。
+    阶数不设上限（2026-10-26 用户令）：阶数本身就是成本，重数越多要付的出手越多。
     """
     raw = getattr(trigger, "value", trigger)
     n = _count_tier_slots(steps)

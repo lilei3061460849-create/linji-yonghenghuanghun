@@ -101,9 +101,7 @@ def test_crime_vault_gives_shield(engine):
 
 def test_godfather_revolver_deals_must_hit_damage(engine):
     """教父左轮：战斗内可发动，造成30%血限×次数必中伤害。"""
-    engine.state.artifacts_owned.append("教父左轮")
-    engine.state.consumables.append(Consumable(
-        name="教父左轮", effect="", current_uses=6, max_uses=6, kind="artifact_weapon"))
+    engine.state.artifacts_owned.append("教父左轮")  # 纯法器，不再借消耗品记耐久
     engine.state.energy = 0
     bs, _ = start_battle(engine)
     assert bs.get("success"), bs
