@@ -709,7 +709,7 @@ class DaowenEffectMixin:
                 result["effects"].append({"type": "speed_boost", "target": target.name,
                                           "speed": target.current_speed, "gained": gained})
         if "speed_halved" in calc:
-            # 减速X：速度减半为状态类效果（非数值平分），对波及目标原样生效。
+            # 速度减半类效果（原【减速】，2026-10-25 遗物化）：对波及目标原样生效。
             for wt in wave_status_targets:
                 lost = wt.current_speed - math.ceil(wt.current_speed / 2)
                 self._lose_current_speed(wt, lost, ctx={
@@ -1053,18 +1053,7 @@ class DaowenEffectMixin:
             # 2026-09-17 用户令：【变形】改为可自由选择目标（不指定时默认自身），
             # 故移出"自身作用型"名单，状态随之挂到目标身上（到期还原也落在目标）。
             self_targeted = name in ("飞行", "必中", "固执", "贯穿")
-            if name == "疯狂":
-                # 2026-08-17 用户裁定：疯狂X改为【所有角色出手+X】（全局，变相平衡）。
-                # 状态盖到双方全部存活角色；出手口径各自读取自身疯狂状态：
-                # 轮回者/朋友/员工走 Entity.action_count，怪物攻击轮数走 _monster_attack_actions。
-                for et_all in self.state.get_all_player_side() + self.state.get_all_enemy_side():
-                    if not et_all.is_alive:
-                        continue
-                    et_all.add_status(self._daowen_status(daowen_order=daowen_order, name="疯狂", remaining_rounds=duration,
-                                                   value=x, source=caster.name))
-                    result["effects"].append({"type": "status_added", "target": et_all.name,
-                                              "status": name, "duration": duration, "value": x})
-            elif self_targeted:
+            if self_targeted:
                 et = caster
                 et.add_status(self._daowen_status(daowen_order=daowen_order, name=name, remaining_rounds=duration, value=x, source=caster.name))
                 result["effects"].append({"type": "status_added", "target": et.name,

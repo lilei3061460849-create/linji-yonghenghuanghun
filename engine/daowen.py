@@ -356,19 +356,6 @@ class DaoWenEngine:
         }
     
     @staticmethod
-    def calculate_huoli(x: int) -> dict:
-        """疯狂X：支付：异变5X。所有角色出手次数+X，持续∞"""
-        return {
-            "dao_wen": "疯狂",
-            "x": x,
-            "cost_type": CostType.MUTATION.value,
-            "cost_mutation": 5 * x,
-            "action_boost": x,
-            "duration": -1,
-            "summary": f"异变+{5*x}，所有角色出手次数+{x}，永久"
-        }
-
-    @staticmethod
     def calculate_jinghua(x: int, target: Entity = None) -> dict:
         """净化X：支付：法力2X。使[目标]【异变】-X层"""
         target_name = target.name if target is not None else "未选定目标"
@@ -379,20 +366,6 @@ class DaoWenEngine:
             "cost": 2 * x,
             "mutation_reduction": x,
             "summary": f"支付：{2 * x}法力，使{target_name}【异变】-{x}层",
-        }
-    
-    @staticmethod
-    def calculate_jiansu(x: int, target: Entity = None) -> dict:
-        """减速X：支付：异变5X。使[目标]速度减半，持续X"""
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "减速",
-            "x": x,
-            "cost_type": CostType.MUTATION.value,
-            "cost_mutation": 5 * x,
-            "speed_halved": True,
-            "duration": x,
-            "summary": f"异变+{5*x}，使{target_name}速度减半，持续{x}回合"
         }
     
     @staticmethod
@@ -858,11 +831,9 @@ class DaoWenEngine:
             "透支": cls.calculate_touzhi,
             "贯穿": cls.calculate_guanchuan,
             "封印": cls.calculate_fengyin,
-            # 怪物原始
+            # 怪物原始（2026-10-25 用户令：【疯狂】【减速】遗物化，退出道纹体系）
             "全力": cls.calculate_quanli,
-            "疯狂": cls.calculate_huoli,
             "净化": cls.calculate_jinghua,
-            "减速": cls.calculate_jiansu,
             "必中": cls.calculate_bizhong,
             # 怪物转化（2026-10-11 A14：无神/借力/衰败 已删）
             "愤怒": cls.calculate_fennu,
@@ -1076,11 +1047,8 @@ class ResonanceEngine:
             #   【全力】保留 反转→弱化；曲解原通向【自食】，现并入【再生】。
             ("全力", "反转", "弱化"),
             ("全力", "曲解", "再生"),
-            # 2026-10-03 删除（用户令）：("疯狂", "转换", "兴奋"),
-            ("疯狂", "反转", RELICIZED_DAOWEN_SLOTS["无力"]),
-            ("疯狂", "曲解", "全速"),
-            ("减速", "转换", RELICIZED_DAOWEN_SLOTS["急速"]),
-            ("减速", "反转", RELICIZED_DAOWEN_SLOTS["加速"]),
+            # 2026-10-25 用户令：【疯狂】【减速】遗物化，退出道纹体系，
+            # 各自的残韵边随节点一并撤销（【全速】因此暂时没有入边）。
             ("必中", "转换", RELICIZED_DAOWEN_SLOTS["洞察"]),
             ("必中", "反转", "蒙蔽"),
             # 2026-10-03 删除（用户令）：("飞行", "转换", "滑翔"),

@@ -31,7 +31,9 @@ from engine.combat import CombatEngine                 # noqa: E402
 from engine.dice import DiceEngine                      # noqa: E402
 from engine.models import DaoWen, DaoWenInstance, Entity, GameState, Relic  # noqa: E402
 from engine import battle_report as BR                  # noqa: E402
-from tests.setup_support import begin_battle, begin_round, finish_initial_daowen  # noqa: E402
+from tests.setup_support import (  # noqa: E402
+    begin_battle, begin_round, finish_initial_daowen, strip_monster_relics,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -163,6 +165,7 @@ def test_layered_trigger_chain_settles_each_layer_once(tmp_path):
     """
     e = _battle_engine(tmp_path, "layers")
     p, foe = e.state.player, e.state.enemies[0]
+    strip_monster_relics(e)  # 怪物随机遗物（活血衣等）会额外回血，破坏总账等式
     _give(foe, "再生", "杀伐")
     foe.mana_limit = 40
     foe.current_mana = 40

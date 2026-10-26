@@ -172,7 +172,7 @@ SYSTEM_PROMPT = """你是第四宇宙游戏的AI玩家。你的任务是根据�
 
 决策粒度（动作槽位）：
 - 每个**动作槽位**提交**一条**决策；槽位数量由引擎的当前出手预算决定（基础2次，叠加【疯狂】+X、
-  【无力】-X、【蓄锐·增】+1等修正；怪物侧另有自己的预算）。不要假定任何固定的每回合次数，
+  遗物 +1、【蓄锐·增】+1 等修正；怪物侧另有自己的预算）。不要假定任何固定的每回合次数，
   更不要把多次独立行动打包进同一条提交
 - 槽位用完、或不想再出手时，提交 prepare_monster_phase 结束己方行动阶段
 - 他人回合的闪避/招架/反应法术，由你在 resolve_attack / resolve_monster_phase 里逐项显式提交，
@@ -600,7 +600,6 @@ class PlaceholderBackend(AIBackend):
                         if option["dodge_submission"] == "per_target":
                             # 波及X：必须恰好提交X个目标（候选全量提交会在候选>X时被拒）。
                             dao["dodge_targets"] = pick_wave_dodge_targets(option)
-                        if option["resolves_as"] == "疯狂": action_count += option["x"]
                     target = (actor["attack_target_options"][0]
                               if actor["attack_target_options"] else None)
                     if target is None:
@@ -716,7 +715,7 @@ class AIPlayer:
     * 开局、选区、事件、局外行动、轮回者自己的战斗行动、他人回合的闪避/招架/
       反应法术，全部由 ``backend``（LLM）根据 ``get_state()`` 与
       ``available_actions`` 决策；**每个动作槽位提交一条决策**，槽位数由引擎的
-      当前出手预算决定（基础 2 次，受【疯狂】/【无力】/【蓄锐·增】修正），
+      当前出手预算决定（基础 2 次，受遗物与【无力】/【蓄锐·增】修正），
       不写死「每回合固定 2 次」；
     * LLM 只决定「提交什么」，引擎决定「如何执行」：If/Loop 由执行器按结算时的
       真实状态逐步求值，LLM 不展开循环、不预演引擎；

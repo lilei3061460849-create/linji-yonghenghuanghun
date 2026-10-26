@@ -137,7 +137,9 @@ def test_diandang_x2_forgets_4_and_pends_2_groups_with_capacity_gate():
     assert len(engine.state.pending_diandang_discoveries) == 1
 
     # 第二组：承载已满 → 拒收且本组保留
-    second = engine.state.pending_diandang_discoveries[0][0]
+    # 取本组里仍然可学的一员（池子随道纹增减而变，不能假定固定下标就是合法项）
+    second = next(n for n in engine.state.pending_diandang_discoveries[0]
+                  if n not in player.dao_wen)
     r3 = engine.execute_action("choose_diandang_daowen", {"daowen_name": second})
     assert r3["success"] is False
     assert "承载" in r3["error"]

@@ -93,7 +93,9 @@ def test_body_outside_heart_doubles_and_reverts():
     for enemy in engine.state.enemies:
         enemy.current_hp = 0
         enemy.is_alive = False
-    engine.execute_action("battle_end", {})
+    engine.state.monster_reinforcements.clear()   # 夹具只打这一波
+    ended = engine.execute_action("battle_end", {})
+    assert ended["success"], ended
     assert player.blood_limit == base_bl
     assert player.current_hp == base_hp
 
@@ -137,12 +139,14 @@ def test_crimson_fang_triggers_first_embrace_then_seals():
     engine = _new_engine("扭曲都市", name="种子候选", dbsuffix="fang_seed", sealed=sealed)
     engine.state.current_battle = 7
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     engine.state.phase = "in_combat"
     engine.execute_action("battle_end", {})  # 无候选，直接封存
 
     challenger = _new_engine("扭曲都市", name="挑战者", speed=12, dbsuffix="fang_challenger", sealed=sealed)  # 速点必须偶数
     challenger.state.current_battle = 7
     challenger.state.enemies.clear()
+    challenger.state.monster_reinforcements.clear()
     challenger.state.phase = "in_combat"
     challenger.execute_action("battle_end", {})
     assert challenger.state.in_final_duel
@@ -177,6 +181,7 @@ def test_black_gold_card_debt_limit_rejects_before_mutating_state():
     engine.state.shards = 10
     _start_battle(engine, start_round=False)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     big = Entity(name="大怪", entity_type="怪物", blood_limit=200, current_hp=200)
     engine.state.enemies.append(big)
 
@@ -193,6 +198,7 @@ def test_black_gold_card_success_path():
     engine.state.shards = 200
     _start_battle(engine, start_round=False)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     big = Entity(name="大怪", entity_type="怪物", blood_limit=200, current_hp=200)
     engine.state.enemies.append(big)
     r = engine.execute_action("use_black_card", {})
@@ -227,6 +233,7 @@ def test_godfather_revolver_escalates_and_refills_next_battle():
     player = engine.state.player
     _start_battle(engine)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     foe = Entity(name="靶子", entity_type="怪物", blood_limit=100000, current_hp=100000)
     engine.state.enemies.append(foe)
 

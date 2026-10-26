@@ -55,7 +55,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     }
     
     # 原始怪物道纹（道纹归属规则：各组起点）——【原初X】可借用范围
-    ORIGINAL_MONSTER_DAOWEN = ("全力", "疯狂", "减速", "必中")  # 【飞行】是状态、不是道纹
+    ORIGINAL_MONSTER_DAOWEN = ("全力", "必中")  # 2026-10-25 用户令：【疯狂】【减速】遗物化
     # 原始怪物道纹每次实际发动时支付异变5X（X 恒为面板/借用时写定的值；
     # 2026-09-16 用户令：道纹递增机制已废止）；效果持续期间（未再次发动）不再重复计费。
     # 必中为次数型（下X次选择[目标]无法闪避），余数记在 entity._bizhong_left。
@@ -611,15 +611,21 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             return 0
         if entity.entity_type == "怪物":
             n = 2
-            act = self._monster_activated.get(id(entity), set())
-            # 疯狂(2026-08-17全局裁定)：状态盖到所有角色，怪物从自身状态读+X。
-            # 不再走激活集合分支，避免与全局状态双重计数。
+            # 状态通道照旧：怪物读自身【疯狂】/【无力】层数。
+            # 2026-10-25 用户令：【疯狂】遗物化——遗物效果见下方全场判定，不是道纹。
             n += entity.get_status_value("疯狂")
             n -= entity.get_status_value("无力")
+            if self._relic_active(entity, "癫狂之脑"):
+                n += 1
+            if self._any_active_relic("疯狂"):
+                n += 1
             return max(0, n)
         n = DaoWenEngine.single_round_action_count(entity)
         # 癫狂之脑（通用遗物池，2026-10-03 新增）：你每回合的出手次数+1。
         if self._relic_active(entity, "癫狂之脑"):
+            n += 1
+        # 【疯狂】（2026-10-25 遗物化）：所有角色每回合出手次数+1。
+        if self._any_active_relic("疯狂"):
             n += 1
         return n
 
@@ -1416,6 +1422,20 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 target = refs[choices["负岳索"]["target_ref"]]
                 target.add_status(StatusEffect("负岳索", -1, 1, "负岳索"))
                 logs.append(f"负岳索：保护{target.name}首次受伤")
+            if "减速" in relics:
+                # 【减速】（2026-10-25 遗物化）：战始所有敌人当前速度减半，
+                # 走唯一失速入口，速度类遗物照常收到真实信号。
+                for foe in self.state.get_all_enemy_side():
+                    lost = foe.current_speed - math.ceil(foe.current_speed / 2)
+                    if lost <= 0:
+                        continue
+                    self._lose_current_speed(foe, lost, ctx={
+                        "timing": "battle_start", "source": "减速", "source_type": "relic",
+                        "actor": player, "target": foe, "owner": player,
+                        "mechanic": "speed_change", "subtype": "current_speed",
+                        "amount": -lost, "tags": {"relic", "battle_start"},
+                    })
+                    logs.append(f"减速：{foe.name}当前速度-{lost}")
             if "炉心坠" in relics:
                 heart = next(item for item in self.state.consumables
                              if item.name == choices["炉心坠"]["heart_name"] and item.kind == "dragon_heart")

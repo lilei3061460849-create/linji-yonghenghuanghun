@@ -141,11 +141,13 @@ def test_no_bizhong_auto_dodge_still_works():
     engine = _engine()
     player = engine.state.player
     player.current_speed = 4
-    m = _monster(engine, hits=1, atk=8, daowen={"疯狂": 1})   # 2026-10-03：【狂暴】删除 →【疯狂】
+    # 2026-10-25：【疯狂】遗物化，本用例只需要「怪物发动一条道纹后攻击」，
+    # 改用仍在册的【全力】。
+    m = _monster(engine, hits=1, atk=8, daowen={"全力": 1})
     engine.combat.reset_monster_activation()
     engine.state.current_round = 0
     engine.combat.round_start()
-    results = resolve_monster_phase(engine.combat, {m.name: "疯狂"}, dodge=True)
+    results = resolve_monster_phase(engine.combat, {m.name: "全力"}, dodge=True)
     hits = [d for d in results if d.get("attacker") == m.name]
     assert hits and hits[0].get("dodge_success") is True
 

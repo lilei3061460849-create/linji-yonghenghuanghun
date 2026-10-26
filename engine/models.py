@@ -616,7 +616,8 @@ class Entity:
 
         不再由速限/攻击次数推导——速限已改作攻击次数的来源，再拿它算出手会重复记账；
         微光者旧的「攻击次数/3」口径同步废止（该式会让高攻次微光者白拿第3、4次出手）。
-        在基础值之上叠加：遗物、【疯狂】+X、【无力】-X、【蓄锐·增】+1（持续1回合）。
+        在基础值之上叠加：遗物（含【疯狂】的全体 +1，由战斗层统一查询）、
+        状态【疯狂】/【无力】层数、【蓄锐·增】+1（持续1回合）。
         LLM 侧按「每个动作槽位一条决策」描述，不得写死每回合固定 2 次。
         怪物行动仍由CombatEngine的prepare/resolve两阶段接口独立计算。"""
         base = 2
@@ -1655,7 +1656,9 @@ class GameState:
                     or name in self.opponent_first_embrace_traits
                     or name in self.opponent_artifacts_owned
                     or any(r.name == name for r in self.opponent_relics))
-        return False
+        # 2026-10-25 用户令：怪物也能持有随机遗物——队友与怪物按各自 relics 判定。
+        # （此前这里对所有非「玩家／敌方轮回者」直接返回 False，怪物抽到的遗物一律读不到。）
+        return any(r.name == name for r in getattr(entity, "relics", []))
 
     def side_body_shield(self, entity: Entity) -> int:
         if entity is self.player:

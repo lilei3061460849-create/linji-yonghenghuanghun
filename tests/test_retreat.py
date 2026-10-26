@@ -57,6 +57,7 @@ def test_lethal_attack_on_friend_triggers_retreat_instead_of_death():
     monster = Entity(name="测试怪", entity_type="怪物", blood_limit=100, current_hp=100,
                       attack_count=1, attack_power=50)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     engine.state.enemies.append(monster)
     engine.execute_action("round_start", {})
 
@@ -76,6 +77,7 @@ def test_retreated_ally_removed_from_active_combat_but_stays_on_roster():
     monster = Entity(name="测试怪", entity_type="怪物", blood_limit=100, current_hp=100,
                       attack_count=1, attack_power=99)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     engine.state.enemies.append(monster)
     engine.execute_action("round_start", {})
 
@@ -91,6 +93,7 @@ def test_employee_debt_bound_immediate_participation_can_also_retreat():
     monster_enemy = Entity(name="毒枭", entity_type="怪物", blood_limit=100, current_hp=100,
                             attack_count=2, attack_power=10, shards=-15)
     state_engine.state.enemies.clear()
+    state_engine.state.monster_reinforcements.clear()
     state_engine.state.enemies.append(monster_enemy)
     debt_result = state_engine.combat._debt_bind_monster(monster_enemy)
     emp = next(e for e in state_engine.state.employees if e.name == "毒枭")
@@ -111,6 +114,7 @@ def test_battle_end_resets_retreat_flag_for_next_battle():
     monster = Entity(name="测试怪", entity_type="怪物", blood_limit=100, current_hp=100,
                       attack_count=1, attack_power=99)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     engine.state.enemies.append(monster)
     engine.execute_action("round_start", {})
     engine.combat.resolve_attack(monster, friend, dodge=False)
@@ -124,6 +128,7 @@ def test_battle_end_resets_retreat_flag_for_next_battle():
 
     engine.execute_action("battle_start", {})
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     engine.execute_action("round_start", {})
     assert friend in engine.state.get_all_player_side(), "下一场应可正常参战"
 
@@ -157,6 +162,7 @@ def test_shield_fully_absorbing_lethal_hit_does_not_trigger_retreat():
     monster = Entity(name="测试怪", entity_type="怪物", blood_limit=100, current_hp=100,
                       attack_count=1, attack_power=50)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     engine.state.enemies.append(monster)
     engine.execute_action("round_start", {})
 
@@ -174,6 +180,7 @@ def test_player_and_monster_never_trigger_retreat():
     monster = Entity(name="测试怪", entity_type="怪物", blood_limit=100, current_hp=5,
                       attack_count=1, attack_power=99)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     engine.state.enemies.append(monster)
     engine.execute_action("round_start", {})
 
@@ -222,6 +229,7 @@ def test_retreated_employee_cannot_be_redeployed_this_battle():
     monster = Entity(name="测试怪", entity_type="怪物", blood_limit=100, current_hp=100,
                       attack_count=1, attack_power=99)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     engine.state.enemies.append(monster)
     engine.execute_action("round_start", {})
     engine.execute_action("deploy_employee", {"name": "老张"})
@@ -242,6 +250,7 @@ def test_retreated_ally_cannot_be_commanded_via_use_daowen():
     engine.state.friends.append(friend)
     monster = Entity(name="测试怪", entity_type="怪物", blood_limit=100, current_hp=100)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     engine.state.enemies.append(monster)
     r = engine.execute_action("use_daowen", {"actor": "被击退者", "daowen_name": "杀伐", "x": 1, "target": "测试怪"})
     assert r["success"] is False

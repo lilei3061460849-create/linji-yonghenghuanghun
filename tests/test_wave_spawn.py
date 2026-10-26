@@ -53,13 +53,16 @@ def _start_battle_with_reinforcements(engine: GameEngine, tries: int = 10) -> di
         if engine.state.monster_reinforcements:
             return r
         _kill_all_spawned(engine)
+        # 全灭后战斗可能已自动结算，怪物阶段不再有 token：能走就走，不能走直接重来。
         prep = engine.execute_action("prepare_monster_phase", {})
-        engine.execute_action("resolve_monster_phase",
-                              {"token": prep["result"]["token"], "choices": []})
-        engine.state.player.damage_dealt_this_round = 1
-        engine.state.player.actions_used_this_round = 1
-        engine.execute_action("round_end", {})
-        engine.execute_action("battle_end", {})
+        if prep.get("success") and "result" in prep:
+            engine.execute_action("resolve_monster_phase",
+                                  {"token": prep["result"]["token"], "choices": []})
+        if engine.state.phase == "in_combat":
+            engine.state.player.damage_dealt_this_round = 1
+            engine.state.player.actions_used_this_round = 1
+            engine.execute_action("round_end", {})
+            engine.execute_action("battle_end", {})
     raise AssertionError(f"连续 {tries} 场第7战都没出现增援队列，配方式出怪可能失效")
 
 

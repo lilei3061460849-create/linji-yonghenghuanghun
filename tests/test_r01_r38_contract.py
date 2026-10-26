@@ -565,9 +565,10 @@ def test_r32_r38_normal_deform_robbery_and_transform_restore(tmp_path):
     # R33：定型只锁攻击力/攻击次数；速度变化仍合法，且被挡的变形不挂空状态。
     player.add_status(StatusEffect("定型", 2, 1))
     speed_before = player.current_speed
-    slow = DaoWenEngine.resolve("减速", 1, target=player, caster=monster)
-    engine.combat.apply_daowen_effect("减速", slow, monster, player)
-    assert player.current_speed == (speed_before + 1) // 2
+    # 2026-10-25：【减速】遗物化，改用同样改当前速度的【超频】（此处只验证速度变化合法）
+    boost = DaoWenEngine.resolve("超频", 1, target=player, caster=monster)
+    engine.combat.apply_daowen_effect("超频", boost, monster, player)
+    assert player.current_speed == speed_before + 1
     # 被【定型】挡下的变形：不再改写任何面板（旧断言查的是遗留字段 attack_power/attack_count）
     speed_after_slow, mana_after_slow = player.current_speed, player.current_mana
     engine.combat.apply_daowen_effect("变形", transformed, player, player)

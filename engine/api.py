@@ -3906,6 +3906,9 @@ class GameEngine:
         ("窥隙法匣", "每次成功闪避后，下回合获得10点法力"),
         ("逐影胫骨", "每累计成功闪避两次，速度+1"),
         ("万魂幡", "持有者可在乱葬岗以外发动造生；造生仍只培养其唯一造物"),
+        # 2026-10-25 用户令：两条原始怪物道纹遗物化，进通用遗物池。
+        ("疯狂", "所有角色每回合出手次数+1"),
+        ("减速", "［战始］所有敌人的当前速度减半，[战终]复原"),
     ]
 
     def _init_relic_pool(self):
@@ -4746,7 +4749,7 @@ class GameEngine:
 
         怪物读正文「每回合 1 次攻击 + 1 种道纹」（single_round_action_count）——
         Entity.action_count 对怪物按速限推导，而怪物面板不含[速限]，恒为 0。
-        其余角色读 Entity.action_count（全体基础 2 次，再受【疯狂】/【无力】/【蓄锐·增】修正），
+        其余角色读 Entity.action_count（全体基础 2 次，再受遗物与【无力】/【蓄锐·增】修正），
         并叠加遗物【癫狂之脑】的 +1（统一走 combat.single_round_action_count，避免口径分叉）。
         """
         if entity is None:
@@ -5186,7 +5189,7 @@ class GameEngine:
         # 兜底，属「同一条规则两处实现」。现统一调用共享实现。
         # 等价性已验证：遍历全部 63 个道纹 × X∈{1,3}，凡 cost_type=="消耗" 的
         # calc 都带 `cost` 键；缺 `cost` 只有 `cost_mutation` 的 6 个道纹
-        # （全力/减速/封印/必中/疯狂/自愈）全部是「异变」类型，不进法力分支，
+        # （全力/封印/必中/自愈）全部是「异变」类型，不进法力分支，
         # 故该兜底是死代码，删除后数值逐字节不变。
         _cost_paid, mana_error = self.combat.pay_daowen_mana(actor, calc, target)
         if mana_error:

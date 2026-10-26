@@ -24,7 +24,7 @@ import pytest  # noqa: E402
 from engine.ai_tactics import TacticalAI  # noqa: E402
 from engine.api import GameEngine  # noqa: E402
 from tests.setup_support import (  # noqa: E402
-    begin_battle, begin_round, finish_initial_daowen,
+    begin_battle, begin_round, finish_initial_daowen, strip_monster_relics,
 )
 
 FLAG = "LJ_AI_BASIC_ATTACK"
@@ -78,6 +78,7 @@ def test_preview_sequence_sees_real_attack_damage(engine, monkeypatch):
     monkeypatch.setenv(FLAG, "1")
     ai = TacticalAI(engine)
     foe = ai.alive_enemies()[0]
+    strip_monster_relics(engine)          # 活血衣等回血遗物会改写 hp 差值
     foe.current_speed = 0                 # 速度0 → 不能闪避 → 伤害确定
     pv = ai.previewer.preview_sequence(ai._attack_steps(foe.name))
     assert all(r.get("success") for r in pv["results"]), pv["results"]

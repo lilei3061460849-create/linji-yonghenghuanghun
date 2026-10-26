@@ -95,3 +95,14 @@ def begin_round(engine, relic_choices=None):
         if name in active and name not in choices:
             choices[name] = {"use": False}
     return engine.execute_action("round_start", {"relic_choices": choices})
+
+
+def strip_monster_relics(engine) -> None:
+    """清掉场上怪物自带的随机遗物。
+
+    2026-10-25 起 X 阶怪物出厂自带 X 种随机遗物（活血衣、回锋刀等会改变
+    伤害/回血数值）。凡断言精确数值的用例先调用本函数隔离掉这层，避免
+    随机遗物把断言改写成另一套机制。
+    """
+    for foe in getattr(engine.state, "enemies", []) or []:
+        foe.relics.clear()

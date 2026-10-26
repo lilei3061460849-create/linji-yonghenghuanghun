@@ -451,6 +451,7 @@ def test_option5_cooldown_blocks_reuse_and_decrements_per_battle_end():
     assert r_again["success"] is False, "冷却期内应拒绝"
 
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()   # 夹具只打这一场
     engine.execute_action("battle_end", {})
     assert engine.state.player.dao_wen["真理"].cooldown_remaining == 1
     engine.state.phase = "in_combat"  # 构造下一场已结束的合法战终状态

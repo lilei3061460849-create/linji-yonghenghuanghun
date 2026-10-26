@@ -8,7 +8,9 @@ from __future__ import annotations
 import os
 import sys
 
-from tests.setup_support import begin_battle, begin_round, finish_initial_daowen
+from tests.setup_support import (
+    begin_battle, begin_round, finish_initial_daowen, strip_monster_relics,
+)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
@@ -112,6 +114,7 @@ def test_xijie_steals_from_huifeng_damage(tmp_path):
     """正常路径：洗劫听敌对伤害入口；回锋刀失速伤也夺碎片。"""
     e = _engine(tmp_path, "xijie_hf")
     begin_battle(e)
+    strip_monster_relics(e)  # 活血衣会回血，断言精确掉血前先隔离随机遗物
     p, m = e.state.player, e.state.enemies[0]
     e.state.relics.append(Relic("回锋刀", ""))
     p.add_status(StatusEffect(name="洗劫", value=1, remaining_rounds=2, source=p.name))

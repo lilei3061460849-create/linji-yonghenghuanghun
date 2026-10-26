@@ -220,6 +220,47 @@ MONSTER_PREFERENCE_POOL = (
 )
 
 
+# 怪物随机遗物池（2026-10-25 用户令：X阶怪物 = X种随机偏爱 + X种随机遗物）。
+# 只收「效果由逐实体判定结算」的遗物：这些判定读持有者自身的 relics，
+# 换到怪物身上照样成立。依赖局外／事件／玩家专属入口的遗物（同魂笔、血契、
+# 无所求、忘忧香、灾厄轮盘、蚀命刻尺、失速冥灯、衰变沙漏、蚀界残钟、万魂幡）
+# 不在池内——怪物抽到也不会结算，等于空遗物。
+MONSTER_RELIC_POOL = (
+    "疯狂", "减速", "癫狂之脑", "千荆甲", "活血衣", "增生药剂", "承露盏",
+    "守夜灯", "避风铃", "回锋刀", "窥隙法匣", "逐影胫骨", "逆血龙鳞",
+    "噬伤血囊", "倍速齿轮", "寂灭面具", "沉重枷锁",
+)
+
+
+def assign_monster_relics(entity, tier: int, dice) -> list[str]:
+    """2026-10-25 用户令：X阶怪物额外获得 X 种随机遗物（与偏爱各自独立抽取）。
+
+    随机流单独一条：种子取「引擎种子 + 怪物 runtime_id + 标签」，
+    不再从共享骰子流里取数——否则每多抽一件遗物都会把后续出怪、
+    事件与增援的随机结果整体推移，等于悄悄改掉所有既有随机契约。
+    同种子同怪物重放结果一致。
+    """
+    import random as _random
+    from .api import GameEngine
+    from .models import Relic
+    effects = dict(GameEngine.RELIC_DEFS)
+    count = min(len(MONSTER_RELIC_POOL), max(0, int(tier)))
+    remaining = [name for name in MONSTER_RELIC_POOL
+                 if not any(relic.name == name for relic in entity.relics)]
+    selected: list[str] = []
+    # 种子用「引擎种子 + 阶位 + 怪物名」：runtime_id 是 uuid，拿它当种子会让
+    # 同种子两次运行抽出不同遗物，直接破坏「同种子可复现」这条契约。
+    rng = _random.Random(f"{getattr(dice, '_seed', 0)}:{int(tier)}:{entity.name}:monster_relic")
+    for _ in range(count):
+        if not remaining:
+            break
+        choice = remaining.pop(rng.randrange(len(remaining)))
+        selected.append(choice)
+        entity.relics.append(Relic(name=choice, effect=effects.get(choice, ""),
+                                   tags=["怪物随机遗物"]))
+    return selected
+
+
 def assign_monster_preferences(entity, tier: int, dice) -> list[str]:
     """为怪物配置与副本阶位相同数量的不同偏爱。"""
     count = min(len(MONSTER_PREFERENCE_POOL), max(1, int(tier)))
@@ -246,6 +287,7 @@ def assign_monster_preferences(entity, tier: int, dice) -> list[str]:
     else:
         entity.relics = [relic for relic in entity.relics
                          if relic.name != MONSTER_MANA_RELIC]
+    assign_monster_relics(entity, tier, dice)
     return selected
 
 

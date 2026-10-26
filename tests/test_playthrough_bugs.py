@@ -57,6 +57,7 @@ def _give_daowen(entity: Entity, name: str, x: int = 1, tags=None) -> None:
 
 def _put_enemy(engine: GameEngine, monster: Entity) -> None:
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     engine.state.enemies.append(monster)
 
 

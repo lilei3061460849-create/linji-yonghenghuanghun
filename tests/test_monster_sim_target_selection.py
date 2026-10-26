@@ -74,12 +74,12 @@ def test_zengzhi_defaults_to_self(tmp_path):
 
 
 def test_hostile_defaults_to_player(tmp_path):
-    """HOSTILE（杀伐/勾魂/减速）默认攻击/削弱玩家。"""
+    """HOSTILE（杀伐/勾魂/弱化）默认攻击/削弱玩家。"""
     e = _engine(tmp_path)
-    # 2026-10-11 用户令：【衰败】已删除，HOSTILE 样本改用仍存的 减速
-    m = _monster_with("攻击怪", {"杀伐": 2, "勾魂": 2, "减速": 2})
+    # 2026-10-25：【减速】遗物化，HOSTILE 样本改用【弱化】
+    m = _monster_with("攻击怪", {"杀伐": 2, "勾魂": 2, "弱化": 2})
     e.state.enemies.append(m)
-    for name in ("杀伐", "勾魂", "减速"):
+    for name in ("杀伐", "勾魂", "弱化"):
         opt, actor = _prepared_option(e, name)
         assert pick_monster_daowen_target(e, actor["actor_ref"], opt) == "player:0", name
 
