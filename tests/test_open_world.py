@@ -2127,7 +2127,7 @@ def test_world_vision_range_expands_with_manhattan_distance_and_respects_walls()
     assert (1, 3) in visible
 """Deterministic end-to-end proof for the canonical open-world loop."""
 
-from sim.run_open_world_replay import SEED, run_playthrough
+from sim.run_open_world_replay import run_playthrough
 
 
 def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():

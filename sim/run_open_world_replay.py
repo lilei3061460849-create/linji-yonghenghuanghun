@@ -29,6 +29,11 @@ from sim.produce_real_winners import (
 )
 
 SEED = 1
+# 录像用的固定加点：原始怪物道纹收敛为 {全力, 必中} 后，1 号种子在默认面板
+# (9/8/8) 下连一场普通遭遇都碰不上（另一名最终候选先被世界威胁淘汰，终局走
+# sole survivor），回放校验因此不过。13/6/6 是同一颗种子里仍能打到普通遭遇、
+# 且通过全部终局校验的那套面板。
+CANONICAL_BUILD = {"blood_points": 13, "speed_points": 6, "mana_points": 6}
 MAX_WORLD_TURNS = 120  # Safety ceiling only; hitting it is an incomplete run, never a win.
 OUT = ROOT / "data" / "open_world_replay"
 PLAYER_NAME = "测试轮回者"
@@ -590,7 +595,7 @@ def validate_complete_playthrough(payload: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    payload = run_playthrough()
+    payload = run_playthrough(SEED, **CANONICAL_BUILD)
     validate_complete_playthrough(payload)
     json_path, markdown_path = write_replay(payload)
     print(json.dumps({
