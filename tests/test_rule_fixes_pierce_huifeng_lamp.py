@@ -2,7 +2,7 @@
 
 1. 贯穿：你造成的伤害（道纹/遗物/雕塑等）一律无视格挡，不只普攻。
 2. 回锋刀：每失去1点当前速度后对显式[目标]造成3点伤害；折速疲惫必须提交目标。
-3. 守夜灯：[回始]加[法限]10%的法力，不再清空（2026-09-13 用户改版）。
+3. 守夜灯：[回终]加等同于当前回合数的法力，不清空（2026-10-25 用户令）。
 
 每条覆盖正常路径 / 边界 / 非法输入。
 """
@@ -191,54 +191,50 @@ def test_round_start_huifeng_fizzles_when_no_enemy_alive(tmp_path):
 # ---------- 守夜灯 ----------
 
 def test_lamp_grants_at_round_start_and_keeps_it(tmp_path):
-    """正常路径（2026-09-13 新口径）：[回始]授予 ceil(法限*50%)，怪物阶段不再授予也不清空。"""
+    """正常路径（2026-10-25 用户令）：[回终]授予等同当前回合数的法力，怪物阶段不授予也不清空。"""
     e = _engine(tmp_path, "lamp_ok")
     e.state.relics.append(Relic("守夜灯", ""))
     begin_battle(e)
     p = e.state.player
-    # 满池时授予会被上限全额吃掉，先花干净再看[回始]授予。
+    # 满池时授予会被上限全额吃掉，先花干净再看[回终]授予。
     p.current_mana = 0
-    p._shouyedeng_granted = 0
-    half = math.ceil(p.mana_limit * 0.5)
     begin_round(e)
-    assert p.current_mana == half, f"[回始]应授予{half}，实{p.current_mana}"
-    before = p.current_mana
+    round_no = e.state.current_round
+    assert p.current_mana == 0, "[回始]不再授予（守夜灯已改到[回终]）"
     phase = _monster_phase_no_attack(e)
     assert phase["success"], phase
-    # 怪物阶段既不授予也不清空。本局可能随机持有【承露盏】(每失去10生命得1法力)，
-    # 故按净变化断言：只允许承露盏那份回充。
-    toll = p.hp_lost_this_battle // 10 if e.state.side_has(p, "承露盏") else 0
-    assert p.current_mana == min(p.mana_limit, before + toll), \
-        f"守夜灯法力应留存（承露盏回充{toll}）"
     assert not [d for d in phase["result"]["details"] if d.get("type") == "shouyedeng_grant"]
     assert not [d for d in phase["result"]["details"] if d.get("type") == "shouyedeng_clear"]
+    # 回终才授予：金额＝当前回合数（受[法限]截断）。
+    granted = e.combat._grant_shouyedeng(p)
+    assert granted and granted["gained"] == min(p.mana_limit, round_no), granted
+    assert p.current_mana == min(p.mana_limit, round_no)
 
 
 def test_lamp_grant_is_capped_by_mana_limit(tmp_path):
-    """边界：授予量向上取整，且落地后不得超过[法限]。"""
+    """边界：授予量＝当前回合数，落地后不得超过[法限]。"""
     e = _engine(tmp_path, "lamp_bound")
     e.state.relics.append(Relic("守夜灯", ""))
     p = e.state.player
     p.mana_limit = 21
     p.current_mana = 0
+    e.state.current_round = 11
     e.combat._grant_shouyedeng(p)
-    assert p.current_mana == math.ceil(21 * 0.5)  # ceil(10.5)=11
+    assert p.current_mana == 11
     # 贴着上限时溢出丢弃
     p.current_mana = 20
+    e.state.current_round = 21
     e.combat._grant_shouyedeng(p)
     assert p.current_mana == 21
 
 
-def test_lamp_does_not_grant_without_enemy_turn(tmp_path):
-    """非法/对照：空场没有敌回，回始不加守夜灯，resolve 也不授予。"""
+def test_lamp_does_not_grant_without_the_relic(tmp_path):
+    """非法/对照：没有守夜灯时[回终]不授予任何法力。"""
     e = _engine(tmp_path, "lamp_empty")
-    e.state.relics.append(Relic("守夜灯", ""))
     begin_battle(e)
     e.state.enemies.clear()
     begin_round(e)
     p = e.state.player
-    assert p.current_mana == p.mana_limit
-    phase = _monster_phase_no_attack(e)
-    assert phase["success"], phase
-    assert p.current_mana == p.mana_limit
-    assert not any(d.get("type") == "shouyedeng_grant" for d in phase["result"]["details"])
+    p.current_mana = 0
+    assert e.combat._grant_shouyedeng(p) is None
+    assert p.current_mana == 0

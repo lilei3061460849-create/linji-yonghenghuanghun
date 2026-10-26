@@ -579,17 +579,21 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             target.add_status(StatusEffect(
                 name="无力", value=new_stacks, remaining_rounds=1, source="寒冰法力"))
 
-    def _shouyedeng_pending_grant(self, entity: Optional[Entity]) -> int:
-        """守夜灯：每次[回始]获得等同于[法限]50%的法力。"""
+    def _shouyedeng_grant_amount(self, entity: Optional[Entity]) -> int:
+        """守夜灯：[回终]获得等同于当前回合数的法力（2026-10-25 用户令）。
+
+        回合数取 `state.current_round`（回始里 +1，回终时就是本回合的序号），
+        所以第 1 回合回终得 1 点、第 5 回合得 5 点：越拖越补给，前期近乎没有。
+        """
         if entity is None or not entity.is_alive or entity.entity_type != "轮回者":
             return 0
         if not self._relic_active(entity, "守夜灯"):
             return 0
-        return math.ceil(entity.mana_limit * 0.5)
+        return max(0, int(getattr(self.state, "current_round", 0) or 0))
 
     def _grant_shouyedeng(self, entity: Optional[Entity]) -> Optional[dict]:
-        """守夜灯：[回始]获得等同于[法限]50%的法力。"""
-        gained = self._shouyedeng_pending_grant(entity)
+        """守夜灯：[回终]按当前回合数授予法力。"""
+        gained = self._shouyedeng_grant_amount(entity)
         if gained <= 0:
             return None
         before = entity.current_mana
@@ -1038,13 +1042,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         # 遗物：回始触发（回锋刀按速限缺口造伤）。
         relic_logs = self.process_relics(TriggerTiming.ROUND_START, {"relic_choices": relic_choices or {}})
         effects.extend({"type": "relic", "log": l} for l in relic_logs)
-        # 守夜灯：[回始]获得[法限]50%的法力，不设每回合触发次数上限。
-        # 玩家与死斗对手（同为轮回者）同口径，在回始遗物之后结算。
-        for entity in ([self.state.player] if self.state.player else []) + list(self.state.enemies):
-            granted = self._grant_shouyedeng(entity) if entity.entity_type == "轮回者" else None
-            if granted:
-                effects.append(granted)
-        
+        # 【守夜灯】2026-10-25 用户令改到[回终]结算（见 round_end），[回始]不再授予。
+
         # 结算回始效果
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
             # 蓄锐（2026-09-28）：上回合施放蓄锐积攒的 pending 转成【蓄锐·增】1回 buff（+1出手）。
@@ -1151,6 +1150,11 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                     )
                     effects.append({"type": "relic", "relic": "蚀界残钟", "entity": entity.name,
                                     "blood_limit_loss": erosion, **change})
+            # 守夜灯：[回终]获得等同于当前回合数的法力（2026-10-25 用户令）。
+            # 位置在蚀界残钟之后：残钟读到的仍是授予前的法力，不与新效果互相干扰。
+            granted = self._grant_shouyedeng(entity)
+            if granted:
+                effects.append(granted)
             # 机制系统：ROUND_END 相位分发。锚定语义：回终第一循环顶部、凡庸 tick 之前
             # （原畸变·结算位置）。凡庸之后的回终机制禁止注册到 ROUND_END
             # （会改变既有顺序），详见机制迁移台账。

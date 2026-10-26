@@ -138,17 +138,18 @@ def test_battle_start_active_relics_over_capacity_fails_atomically():
 # ==================== 3. 停用即不生效 ====================
 
 def test_disabled_relic_does_not_trigger_its_effect():
-    """正常路径：守夜灯停用时[回始]法力结算入口读到 0，启用后恢复。"""
+    """正常路径：守夜灯停用时[回终]法力结算入口读到 0，启用后恢复。"""
     e = _engine()
     player = e.state.player
     e.state.relics = [Relic("守夜灯", "", enabled=False)]
 
     assert e.combat._relic_active(player, "守夜灯") is False
-    assert e.combat._shouyedeng_pending_grant(player) == 0, "停用遗物不得结算效果"
+    assert e.combat._shouyedeng_grant_amount(player) == 0, "停用遗物不得结算效果"
 
+    e.state.current_round = 3
     e.state.relics[0].enabled = True
     assert e.combat._relic_active(player, "守夜灯") is True
-    assert e.combat._shouyedeng_pending_grant(player) > 0
+    assert e.combat._shouyedeng_grant_amount(player) == 3, "启用后按当前回合数授予"
 
 
 def test_disabled_stacks_with_sealed_not_replacing_it():

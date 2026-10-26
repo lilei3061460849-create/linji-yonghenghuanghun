@@ -71,14 +71,15 @@ def test_step1_mana_payment_and_rejection(tmp_path):
 # ==================== 2. 反应法术与守夜灯测试 ====================
 
 def test_step2_night_watchman_lamp_reactive_mana(tmp_path):
-    """正常路径：守夜灯[回始]提供10%法限的法力（2026-09-13 起不再清空）"""
+    """正常路径：守夜灯[回终]获得等同于当前回合数的法力（2026-10-25 用户令）。"""
     e = _setup_engine(tmp_path, relic="守夜灯")
     p = e.state.player
     p.mana_limit = 50
     p.current_mana = 0
+    e.state.current_round = 3
 
-    e.combat.hook_manager.apply_round_start(p, is_enemy_turn=False, state=e.state)
-    assert p.current_mana == 5, "10%法限 = 5点法力"
+    granted = e.combat._grant_shouyedeng(p)
+    assert granted["gained"] == 3, "第3回合回终 = 3点法力"
 
 
 # ==================== 3. 闪避与避风铃测试 ====================
