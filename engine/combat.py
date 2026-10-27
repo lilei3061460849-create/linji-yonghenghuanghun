@@ -1109,9 +1109,13 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         凡庸计数和目标自身限时状态；不替其他角色执行行动或递减其状态。"""
         effects: list[dict] = []
         rounds = max(0, int(rounds))
+        global_round = self.state.current_round
         for index in range(rounds):
             if not target.is_alive or self.state.battle_over():
                 break
+            # 当前回合号只在本次目标局部结算期间临时前进，以便回增类机制读取正确序号；
+            # 额外回合结束后恢复全局回合号，避免推进封印、增援及其他全局倒计时。
+            self.state.current_round = global_round + index
             # 额外回合从目标自己的回始开始；只分发给目标，避免其他角色也被推进。
             target.actions_used_this_round = 0
             target.damage_dealt_this_round = 0
@@ -1120,7 +1124,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             effects.extend(self._dispatch_phase(Phase.ROUND_START_PREPARE, target=target))
             effects.extend(self._dispatch_phase(Phase.ROUND_START, target=target))
             effects.extend(self._dispatch_phase(Phase.ROUND_START_SETTLE, target=target))
-            self.state.current_round += 1
+            self.state.current_round = global_round + index + 1
             effects.extend(self._dispatch_phase(Phase.ROUND_INCREASE, target=target))
             effects.extend(self._dispatch_phase(Phase.ROUND_END, target=target))
             why = self._tick_mediocrity_counters(target) if target.is_alive else None
@@ -1154,6 +1158,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=target))
             effects.append({"type": "extra_target_round", "source": source, "target": target.name,
                             "round": self.state.current_round, "index": index + 1, "total": rounds})
+            self.state.current_round = global_round
         return effects
     def round_end(self, blood_lineage_cost_share_target_ref: str = "") -> dict:
         """
