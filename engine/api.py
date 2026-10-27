@@ -1767,11 +1767,7 @@ class GameEngine:
             return False
         if entity.entity_type == "鲛族" or entity.has_status("鲛族"):
             return True
-        relics = list(getattr(entity, "relics", []) or [])
-        if entity is self.state.player:
-            relics += list(getattr(self.state, "relics", []) or [])
-        return any(getattr(relic, "name", "") == "鲛族血脉"
-                   and getattr(relic, "enabled", True) for relic in relics)
+        return bool(self.combat._relic_active(entity, "鲛族血脉"))
 
     def _world_from_state(self) -> WorldState:
         if not self.state.world_state:
@@ -5101,8 +5097,8 @@ class GameEngine:
 
     def _action_tidecall(self, params: dict, actor: Entity) -> dict:
         """开放地图道纹：选择自身周围X个可用格改为水流；仅鲛族可通行。"""
-        if not self.state.world_state:
-            return {"success": False, "error": "唤潮只能在开放地图中发动"}
+        if not self.state.world_state or self.state.phase == GamePhase.IN_COMBAT.value:
+            return {"success": False, "error": "唤潮只能在没有进行战斗遭遇的开放地图中发动"}
         if actor is not self.state.player:
             return {"success": False, "error": "唤潮只能由轮回者在开放地图中发动"}
         if "唤潮" not in actor.dao_wen:
