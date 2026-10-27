@@ -804,7 +804,7 @@ class DaowenEffectMixin:
             else:
                 caster.fake_shards = getattr(caster, "fake_shards", 0) + calc["fake_shards"]
             result["effects"].append({"type": "fake_shards", "gained": calc["fake_shards"]})
-        if "cost_shards" in calc and name != "消灾":  # 消灾的付费在专属分支统一处理
+        if "cost_shards" in calc:
             spent = self._lose_shards_of(self.state.player, calc["cost_shards"]) if caster is self.state.player else 0
             result["effects"].append({"type": "cost_shards", "spent": spent})
 
@@ -1127,17 +1127,13 @@ class DaowenEffectMixin:
             for st_target in wave_status_targets:
                 result["effects"].append({"type": "shanghen", "target": st_target.name, "x": x})
 
-        # ---- F2 全量：罪孽都市（清算/消灾/抵扣）的注册与即时结算 ----
+        # ---- F2 全量：罪孽都市（清算/抵扣）的注册与即时结算 ----
         # （2026-10-13 用户令删【逼债】：此处原挂账块与【逼债·结算/对账】机制一并移除）
         # 清算X：[回始]使[目标]失去你[碎片]点格挡，持续X。此处仅挂账。
         if name == "清算":
             for st_target in wave_status_targets:
                 ledger_of(st_target, "清算").append({"x": x, "caster": caster})
                 result["effects"].append({"type": "qingsuan_register", "target": st_target.name, "x": x})
-        # 消灾X：玩家侧在_action_use_daowen预检付费；怪物侧由两阶段决策结算器付费；此处登记重投次数。
-        elif name == "消灾":
-            self.dice.set_rerolls(self.dice.rerolls_pending + x)
-            result["effects"].append({"type": "xiaozai_rerolls", "added": x, "total": self.dice.rerolls_pending})
         # 抵扣X（旧名）：封印[目标]拥有的一件遗物，持续X
         elif name == "抵扣":
             for st_target in wave_status_targets:
