@@ -727,10 +727,10 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_shenjing(x: int) -> dict:
-        """蜃景X：支付法力10X，在自身周围创造X个仅有1点生命的幻象单位。"""
+        """蜃景X：支付法力10X，在开放地图自身周围创造X个伪装目标。"""
         return {"dao_wen": "蜃景", "x": x, "cost_type": CostType.MANA.value,
-                "cost": 10 * x, "create_illusions": x, "illusion_hp": 1,
-                "summary": f"支付：{10*x}法力，创造{x}个1生命幻象"}
+                "cost": 10 * x, "map_illusions": x,
+                "summary": f"支付：{10*x}法力，在开放地图创造{x}个地图幻象"}
 
     @staticmethod
     def calculate_ningzhi(x: int, target: Entity = None, status_name: str = "") -> dict:
