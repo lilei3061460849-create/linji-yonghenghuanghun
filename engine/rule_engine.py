@@ -375,9 +375,6 @@ class DaoWenRuleDefinition:
         if rule.daowen_name == "固执":
             cap = _format_number(operator.operand if operator.operand is not None else 0)
             return f"{subject}每次失去的生命不会超过{cap}，{self.duration.describe(x)}"
-        if rule.daowen_name == "加害":
-            # 2026-10-11 用户令简化：正文口径「[目标]每次受到伤害+X，永久」
-            return f"{subject}每次受到伤害+{x}，{self.duration.describe(x)}"
         if rule.daowen_name == "龙鳞":
             bound = _format_number(operator.lower_bound) if operator.lower_bound is not None else "0"
             return f"{subject}每次受到伤害-{x}（最低为{bound}），{self.duration.describe(x)}"
