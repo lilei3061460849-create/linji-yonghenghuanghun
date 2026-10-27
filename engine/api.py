@@ -6495,7 +6495,7 @@ class GameEngine:
             return self._consume_twisted_tool(item, params)
 
         # 翼类消耗品（2026-10-23 用户令）：每次使用选一个模式，耗 1 点耐久。
-        #   血翼：噬血（本回合你造成的伤害给予等量回复）／飞行1／立刻逃跑
+        #   血翼：噬血（本回合你失去的生命改为回复）／飞行1／立刻逃跑
         #   烬翼：熄事（本回合不触发任何特殊事件）／飞行1／立刻逃跑
         if item.kind == "wing" or item.name in WING_MODES:
             player = self.state.player

@@ -19,8 +19,8 @@ NAMED_COMBAT_ITEMS = frozenset({"定命丸", "灼罪钉", "怒火针", "破障�
 def consume_tool(combat, item, params, actor, opponents):
     name = item.name
     player = actor
-    if not player:
-        return {"success": False, "error": "没有玩家"}
+    if not player or not player.is_alive:
+        return {"success": False, "error": "没有存活的使用者"}
     def selected_enemy():
         target = combat._combat_entity_refs().get(params.get("target_ref", ""))
         if target in opponents:
@@ -247,7 +247,7 @@ def consume_ordinary(combat, item, actor):
             "lost": mut.get("lost", False),
         }
         if mut["collapsed"]:
-            # 怪物（理论上玩家不会走到这里）：异变爆体命零
+            # 怪物持有者：异变爆体命零
             combat._on_entity_death(
                 actor,
                 ctx=combat._lost_context(actor, {

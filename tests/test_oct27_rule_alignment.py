@@ -21,3 +21,17 @@ def test_old_gouhun_drain_description_is_removed():
     text = Path("副本/乱葬岗.md").read_text()
     assert "失去2X点当前法力" not in text
     assert "勾魂X：支付：法力X。使[目标]无法获得[法力]，持续X。" in text
+
+
+def test_drafts_are_not_runtime_implementations():
+    import pytest
+    from engine.gamedata import UNIMPLEMENTED_DAOWEN, learnable_daowen_pool
+    DaoWenEngine.register_all()
+    for name in ("流动", "遗忘", "回响", "出土", "篡改"):
+        assert name not in DaoWenEngine._registry
+        with pytest.raises(ValueError, match="未知道纹"):
+            DaoWenEngine.resolve(name, 1)
+    # A caller accidentally including draft names in 'known' must not enable learning.
+    pool = learnable_daowen_pool(owned={"沉溺"}, region="沉沦海",
+                                known=set(DaoWenEngine._registry) | set(UNIMPLEMENTED_DAOWEN))
+    assert not set(UNIMPLEMENTED_DAOWEN).intersection(pool)

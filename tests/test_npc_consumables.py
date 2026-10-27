@@ -133,3 +133,90 @@ def test_world_consumable_status_clock_ticks_once_and_survives_copy():
     state = copy.deepcopy(combat.state)
     tick_world_item_statuses(state, state.enemies, 2)
     assert not state.enemies[0].has_status("固执")
+
+
+def monster_submission():
+    from tests.test_monster_phase_transaction import _arena, _actors, _legal_hits
+    e, npc, prep = _arena()
+    npc.current_hp = 10
+    npc.blood_limit = 100
+    npc.consumables = [item("备用血泵")]
+    ref = next(iter(_actors(prep)))
+    choice = {"actor_ref": ref,
+              "daowen": {"name": "抢劫", "dodge": False, "blood_shadow": False,
+                         "trigger_spell_choices": {}, "target_ref": "player:0"},
+              "attack_actions": _legal_hits(e, prep, ref)}
+    return e, prep, choice
+
+
+def test_monster_prepare_does_not_use_items_then_resolve_does():
+    e, prep, choice = monster_submission()
+    before = copy.deepcopy(e.state.to_dict())
+    e.combat.prepare_monster_phase()
+    assert e.state.to_dict() == before
+    result = e.execute_action("resolve_monster_phase", {"token": prep["result"]["token"], "choices": [choice]})
+    assert result["success"], result
+    assert e.state.enemies[0].current_hp == 30
+    assert e.state.enemies[0].consumables[0].current_uses == 1
+    assert any(log.get("type") == "npc_consumable" for log in result["result"]["details"])
+
+
+def test_monster_item_failure_rolls_back_item_damage_and_resources(monkeypatch):
+    import engine.npc_consumables as module
+    e, prep, choice = monster_submission()
+    before = copy.deepcopy(e.state.to_dict())
+    real = module.consume_tool
+
+    def failing(*args, **kwargs):
+        real(*args, **kwargs)
+        raise ValueError("模拟物品执行后异常")
+
+    monkeypatch.setattr(module, "consume_tool", failing)
+    result = e.execute_action("resolve_monster_phase", {"token": prep["result"]["token"], "choices": [choice]})
+    assert not result["success"] and result["recoverable"]
+    assert e.state.to_dict() == before
+    monkeypatch.setattr(module, "consume_tool", real)
+    result = e.execute_action("resolve_monster_phase", {"token": prep["result"]["token"], "choices": [choice]})
+    assert result["success"], result
+
+
+def test_map_npc_vs_npc_uses_actual_world_hostility(tmp_path):
+    from engine.api import GameEngine
+    from engine.world import WorldState, WorldClock, WorldActorState
+    from tests.test_open_world import _open_map
+    e = GameEngine(db_path=str(tmp_path / "npc-world.db"), save_dir=str(tmp_path), autosave=False)
+    e.state.phase = "pre_battle"
+    e.state.player = Entity("P", "轮回者", blood_limit=100, current_hp=100)
+    a = Entity("A", "轮回者", blood_limit=100, current_hp=100)
+    b = Entity("B", "怪物", blood_limit=20, current_hp=20)
+    a.consumables = [item("反怪物电击枪")]
+    e.state.enemies = [a, b]  # same combat-side list, but hostile *world* factions
+    world = WorldState(clock=WorldClock(), map=_open_map())
+    for entity, kind, faction, pos in [(e.state.player, "player", "player", (1, 1)),
+                                       (a, "enemy", "enemy", (3, 3)), (b, "enemy", "monster", (4, 3))]:
+        world.add_actor(WorldActorState(entity.runtime_id, entity.name, kind, *pos, faction=faction))
+    encounter = world.start_encounter([a.runtime_id, b.runtime_id], (4, 3))
+    e._resolve_world_npc_encounters(world)
+    assert not b.is_alive and not encounter.active
+    assert a.consumables[0].current_uses == 1 and e.state.player.current_hp == 100
+    assert any(log["type"] == "npc_consumable_used" for log in world.event_log)
+
+
+def test_npc_consumption_survives_entity_save_encoding(tmp_path):
+    from engine.api import GameEngine
+    combat, npc = arena()
+    npc.consumables = [item("备用血泵")]
+    auto_use_consumables(combat, npc)
+    # Same entity codec used by normal save/load, not a bespoke NPC representation.
+    e = GameEngine(db_path=str(tmp_path / "npc-codec.db"), save_dir=str(tmp_path), autosave=False)
+    encoded = e._serialize_entity_full(npc)
+    restored = e._deserialize_entity_full(encoded)
+    assert restored.current_hp == 50
+    assert restored.consumables[0].current_uses == 1
+    e.state = combat.state
+    e.combat = combat
+    assert e.save_game("npc-items")["success"]
+    npc.consumables[0].current_uses = 0
+    assert e.load_game("npc-items")["success"]
+    assert e.state.enemies[0].runtime_id == npc.runtime_id
+    assert e.state.enemies[0].consumables[0].current_uses == 1

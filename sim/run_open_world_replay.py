@@ -314,6 +314,12 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
         stop_reason = ""
 
         while engine.state.player.is_alive:
+            # Autonomous map fights now use items too and may queue redemption.
+            # Apply the same explicit replay policy as fight(), before any world
+            # movement/wait; never bypass the engine's mandatory pending choice.
+            if engine.state.pending_redemption:
+                redemption = call(engine, "resolve_redemption", {"option": "终结"})
+                timeline.append({"type": "redemption", "result": redemption})
             world = WorldState.from_dict(engine.state.world_state)
             if world.final_duel_complete:
                 stop_reason = "final duel completed"
