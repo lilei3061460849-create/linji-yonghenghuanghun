@@ -69,7 +69,6 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         "target_heal", "heal_percent", "mutation_reduction",
         "target_shield", "shield_drain",
         "blood_limit_reduction", "hp_reduction", "blood_limit_increase", "blood_limit_penalty",
-        "zengzhi_battle_end",  # 2026-10-14：【增殖】重做，战终血限增长参与波及平分
         "attack_boost", "attack_reduction",
         "speed_boost", "speed_penalty",
         "self_attack_count", "invalid_damage_hits",

@@ -999,7 +999,7 @@ except ValueError as e:
     raise
 ```
 
-**本轮靠它抓到的现场**（`monster_phase.py:194`，代价类型探测调用）：
+**已废止的历史案例（2026-10-09 已移除 X_MIN，下列日志及诊断代码不可作为现行约束）**（`monster_phase.py:194`，代价类型探测调用）：
 
 ```
 道纹: 波及 | 传入 x = 2 | X_MIN: 2

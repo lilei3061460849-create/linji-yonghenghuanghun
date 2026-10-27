@@ -182,7 +182,7 @@ def validate_spec(spec: dict) -> dict:
         cost_amount = cost.get("amount", "X")
         evaluate(cost_amount, 1)
         # 必有 X，且 X 必须真的改变点什么（强度或持续时间）。
-        scales = declares_x(cost_amount) or any(
+        scales = any(
             declares_x(effect.get("amount")) or declares_x(effect.get("duration"))
             for effect in effects
         )

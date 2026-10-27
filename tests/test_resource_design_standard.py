@@ -126,10 +126,15 @@ def test_every_registered_daowen_name_is_exactly_two_chars():
 def test_daowen_x_scales_strength_or_duration():
     """X 必须至少改变一个效果字段；固定 X 等于没有 X，与条文冲突。"""
     DaoWenEngine.register_all()
-    ignore = {"x", "y", "summary", "dao_wen", "cost_type"}
+    ignore = {"x", "y", "summary", "dao_wen", "cost_type", "cost", "cost_hp",
+              "cost_blood_limit", "cost_mana_limit", "cost_speed_limit", "cost_speed",
+              "cost_attack", "forget_daowen", "cost_choices"}
     flat = []
     for name in sorted(DaoWenEngine._registry):
         kwargs = {"cost_choices": [{"type": "异变"}]} if name == "净化" else {}
+        if name == "沉溺":
+            from engine.models import Entity
+            kwargs["target"] = Entity("审查靶", "怪物", blood_limit=100, current_hp=100)
         low, high = DaoWenEngine.resolve(name, 1, **kwargs), DaoWenEngine.resolve(name, 3, **kwargs)
         if all(low.get(k) == high.get(k) for k in low if k not in ignore):
             flat.append(name)

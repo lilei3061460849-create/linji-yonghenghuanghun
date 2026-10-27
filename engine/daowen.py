@@ -362,7 +362,7 @@ class DaoWenEngine:
     
     @staticmethod
     def calculate_jinghua(x: int, target: Entity = None, cost_choices: list[dict] | None = None) -> dict:
-        """净化X：支付法力2X。选择目标拥有的一种代价，使其层数-X。"""
+        """净化X：支付：法力2X。选择目标拥有的一种代价，使其层数-X。"""
         target_name = target.name if target is not None else "未选定目标"
         allowed = {"衰老", "枯竭", "萎缩", "疲惫", "异变"}
         if not isinstance(cost_choices, list) or len(cost_choices) != 1:
@@ -688,7 +688,7 @@ class DaoWenEngine:
     def calculate_chao(x: int) -> dict:
         """唤潮X：支付：法力X。在开放地图中，以自身所在格为中心选择周围X个可用地图格，将其改为【水流】地形；只有鲛族可以进入或穿越【水流】格。"""
         return {"dao_wen": "唤潮", "x": x, "cost_type": CostType.MANA.value,
-                "cost": x, "map_terrain": "water_current",
+                "cost": x, "map_terrain": "water_current", "map_terrain_count": x,
                 "summary": f"支付：{x}法力，在开放地图周围设置{x}格水流地形"}
 
     @staticmethod
@@ -1038,9 +1038,7 @@ class ResonanceEngine:
         "沉沦海闭环": [
             ("流动", "转换", "波及"),
             ("波及", "反转", "遗忘"),
-            ("遗忘", "曲解", "唤潮"),
-            ("唤潮", "反转", "蜃景"),
-            ("蜃景", "曲解", "沉溺"),
+            ("遗忘", "曲解", "沉溺"),
             ("沉溺", "曲解", "回响"),
             ("回响", "转换", "流动"),
         ],

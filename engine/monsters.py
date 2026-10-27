@@ -72,6 +72,7 @@ def parse_monster_pool(index_path: str | Path) -> dict:
                     # 兼容旧键：攻次=速限、攻力=法限（统一换算后二者不再是独立面板）
                     "attack_count": speed_limit, "attack_power": mana_limit,
                     "dao_wen": dao_wen, "region": region,
+                    "relics": re.findall(r"遗物【([^】]+)】", dw_str),
                 })
                 if len(monsters) >= 12:
                     break
@@ -295,7 +296,7 @@ def assign_monster_preferences(entity, tier: int, dice) -> list[str]:
 
 def make_monster_entity(monster_def: dict):
     """按怪物定义构造Entity（延迟导入避免循环依赖）"""
-    from .models import Entity, DaoWen, DaoWenInstance
+    from .models import Entity, DaoWen, DaoWenInstance, Relic
     # 2026-09-16 用户令：怪物与轮回者同口径，持有[速限]/[法限]；[攻击次数]=[当前速度]、[攻击力]=[当前法力]。
     # 战始当前值给满，[回始]由 combat.round_start 再次回满（怪物专属；微光者不回满）。
     _speed_limit = monster_def.get("speed_limit", monster_def.get("attack_count", 0))
@@ -307,8 +308,18 @@ def make_monster_entity(monster_def: dict):
     m.current_speed = _speed_limit
     m.current_mana = _mana_limit
     # 遗物【痛苦的偏爱】由 Entity.__post_init__ 统一授予，此处不再重复挂载。
+    from .api import GameEngine
+    relic_defs = dict(GameEngine.RELIC_DEFS)
+    panel_relics = list(monster_def.get("relics", []))
+    # Compatibility for old saved panels: retype, do not silently drop abilities.
+    panel_relics += [n for n in monster_def["dao_wen"] if n in {"疯狂", "减速"}]
+    for relic_name in dict.fromkeys(panel_relics):
+        if not any(r.name == relic_name for r in m.relics):
+            m.relics.append(Relic(relic_name, relic_defs.get(relic_name, "")))
     from .daowen import normalize_daowen_name
     for dw_name, x in monster_def["dao_wen"].items():
+        if dw_name in {"疯狂", "减速"}:
+            continue
         dw_name = normalize_daowen_name(dw_name)  # 旧面板【血债】读入即映射【连击】
         # x 为 None → 面板未写死 X，标记 x_free 由发动方自选（2026-09-16 用户令）；
         # x 为整数 → 旧面板的固定 X，原样保留。

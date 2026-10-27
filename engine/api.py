@@ -6264,7 +6264,6 @@ class GameEngine:
         self.state.enemies.clear()
         self.state.temp_friends.clear()
         # 2026-10-14：逃跑不走战终结算，【增殖】战终待决随脱战作废（不得带入下场）。
-        self.state.event_modifiers.pop("zengzhi_pending", None)
         for emp in self.state.employees:
             if emp.is_alive and not emp.is_debt_bound:
                 emp.is_deployed = False
@@ -7828,7 +7827,6 @@ class GameEngine:
             entity.no_damage_rounds = 0
         self.state.scoped_effect_ledger = []
         # 2026-10-14：【增殖】战终待决按场重置（逃跑/重开等未结算路径不得带入下场）。
-        self.state.event_modifiers.pop("zengzhi_pending", None)
         # 事件流按场重置：只在本场战斗内可观测，避免长模拟无界增长。
         self.state.combat_events = []
         self.state.current_round = 0
