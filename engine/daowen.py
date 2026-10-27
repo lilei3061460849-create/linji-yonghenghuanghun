@@ -742,7 +742,7 @@ class DaoWenEngine:
                 "summary": f"支付：{10*x}法力，在开放地图创造{x}个地图幻象"}
 
     @staticmethod
-    def calculate_ningzhi(x: int, target: Entity = None, status_name: str = "") -> dict:
+    def calculate_ningzhi(x: int, target: Entity = None) -> dict:
         """凝滞X：支付：法力5X。使[目标]真实额外经历X回合；推进其限时状态、凡庸计数及目标相关回合事件。"""
         if target is None:
             raise ValueError("凝滞必须显式选择目标")
