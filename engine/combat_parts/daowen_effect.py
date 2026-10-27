@@ -1083,7 +1083,7 @@ class DaowenEffectMixin:
                     result["effects"].append({"type": "status_added", "target": et.name,
                                               "status": status_name, "duration": duration, "value": x})
 
-        if name == "凝滞" and calc.get("extra_target_rounds"):
+        if name == "沉溺" and calc.get("extra_target_rounds"):
             # 凝滞：目标真实经历额外回合，推进目标回增/回终事件、凡庸与自身限时状态。
             for st_target in wave_status_targets:
                 if not st_target.is_alive:
