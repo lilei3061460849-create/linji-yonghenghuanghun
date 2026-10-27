@@ -5107,7 +5107,10 @@ class GameEngine:
         if "唤潮" not in actor.dao_wen:
             return {"success": False, "error": "尚未掌握唤潮"}
         x = params.get("x", 1)
-        if not isinstance(x, int) or isinstance(x, bool) or x == 0:
+        if isinstance(x, int) and not isinstance(x, bool) and x == 0:
+            return {"success": True, "action": "use_daowen", "skipped": True,
+                    "result": {"daowen": "唤潮", "x": 0, "skipped": True, "actor": actor.name}}
+        if not isinstance(x, int) or isinstance(x, bool):
             return {"success": False, "error": "唤潮X必须为1至8的整数"}
         if x < 0 or x > 8:
             return {"success": False, "error": "唤潮X必须为1至8的整数"}
