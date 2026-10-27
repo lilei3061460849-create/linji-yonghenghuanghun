@@ -5216,6 +5216,8 @@ class GameEngine:
             daowen_y = 1
         try:
             resolve_kw = {"target": target, "caster": actor}
+            if name == "凝滞":
+                resolve_kw["status_name"] = params.get("status_name", "")
             resolve_kw["y"] = daowen_y
             # 2026-10-14：【透支】多代价通道（缺省流血；resolve 按签名分发，其余道纹无感）。
             if name == "透支":
