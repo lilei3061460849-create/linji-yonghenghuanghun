@@ -320,6 +320,32 @@ def test_chengni_advances_target_rounds_without_advancing_world_time():
     assert any(e.get("type") == "extra_target_round" for e in result["execution"]["effects"])
 
 
+def test_chengni_triggers_nightwatch_per_extra_round_using_world_round():
+    """沉溺每让角色经历一个回合就触发守夜灯，但收益始终按世界回合数计算。"""
+    engine = _engine("chengni_nightwatch")
+    target = Entity(
+        name="持灯轮回者", entity_type="轮回者",
+        blood_limit=100, current_hp=100,
+        mana_limit=100, current_mana=0,
+        speed_limit=3, current_speed=3,
+        relics=[Relic("守夜灯", "每经历一个回合获得当前世界回合数的法力")],
+    )
+    engine.state.enemies.append(target)
+    engine.state.current_round = 10
+    target.add_status(StatusEffect(name="测试减益", value=1, remaining_rounds=3, source="test"))
+    engine.state.player.add_status(
+        StatusEffect(name="玩家状态", value=1, remaining_rounds=3, source="test"))
+
+    effects = engine.combat.advance_target_rounds(target, 3, source="沉溺")
+
+    assert engine.state.current_round == 10
+    assert target.current_mana == 30
+    assert not target.has_status("测试减益")
+    assert engine.state.player.get_status_effects("玩家状态")[0].remaining_rounds == 3
+    assert target.actions_used_this_round == 0
+    assert len([e for e in effects if e.get("type") == "extra_target_round"]) == 3
+
+
 def test_jinghua_allows_caster_selected_reversible_cost_layers():
     """净化由施法者自选可逆数值型代价，层数总和不能超过X。"""
     engine = _engine("jinghua_cost_choices")
