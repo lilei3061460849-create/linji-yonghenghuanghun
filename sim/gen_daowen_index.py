@@ -350,6 +350,8 @@ section(f"怪物转化道纹（{len(MONSTER_TRANSFORM_DAOWEN)}）", sorted(MONST
         note_lines=["转化道纹与原始怪物道纹互为残韵双向路径：对持有原始道纹的角色发动残韵，"
                     "该道纹永久变为转化道纹，施法者同时永久获得；对持有转化道纹的角色发动同种残韵，"
                     "亦可把它反向变回原始道纹。转化道纹不可由局外【学习】直接习得，只能经此路径取得。"])
+A("> 原转化道纹【愤怒】已转换为消耗品【怒火针】，固定使指定目标法力消耗减半，持续2回合；详见[物品索引](物品索引.md#怒火针)。")
+A("")
 
 for region in REGION_EXCLUSIVE_DAOWEN:
     ns = region_daowen_order(region)
