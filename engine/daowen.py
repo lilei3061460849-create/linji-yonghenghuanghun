@@ -493,16 +493,16 @@ class DaoWenEngine:
     
     @staticmethod
     def calculate_huaisi(x: int, target: Entity = None) -> dict:
-        """坏死X：支付：法力2X。使[目标]无法获得回复，持续X"""
+        """坏死X：支付：法力5X。使[目标]无法获得回复，持续X"""
         target_name = target.name if target is not None else "未选定目标"
         return {
             "dao_wen": "坏死",
             "x": x,
             "cost_type": CostType.MANA.value,
-            "cost": 2 * x,
+            "cost": 5 * x,
             "duration": x,
             "effect": "无法获得回复",
-            "summary": f"支付：{2 * x}法力，使{target_name}无法获得回复，持续{x}回合"
+            "summary": f"支付：{5 * x}法力，使{target_name}无法获得回复，持续{x}回合"
         }
     
 

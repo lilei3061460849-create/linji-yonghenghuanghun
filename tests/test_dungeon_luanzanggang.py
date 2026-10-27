@@ -1,3 +1,4 @@
+import pytest
 """乱葬岗（二阶副本）实现契约测试。
 
 覆盖：4条幸存的乱葬岗专属道纹、遗物化空位的闭环保留、区域可选、怪物池解析、附煞行动与幸存道纹效果。
@@ -18,12 +19,12 @@ from engine.combat import CombatEngine
 # ---------- 道纹注册与闭环 ----------
 
 def test_dungeon_daowen_registered():
-    """正常路径：4个幸存的乱葬岗专属道纹已注册并可解析。
+    """正常路径：3个幸存的乱葬岗专属道纹已注册并可解析。
 
     2026-10-03 删【尸爆】；2026-10-08 删【镇尸】（与【坏死】硬重复）。
     """
     DaoWenEngine.register_all()
-    for name in ("分裂", "瓦解", "勾魂", "招魂"):
+    for name in ("分裂", "勾魂", "招魂"):
         assert name in DaoWenEngine._registry, f"{name} 未注册"
         r = DaoWenEngine.resolve(name, 2, target=Entity("T", "怪物", blood_limit=100, current_hp=100),
                                  caster=Entity("C", "轮回者", blood_limit=60, current_hp=60))
@@ -41,8 +42,8 @@ def test_dungeon_resonance_loop_complete():
     slots = RELICIZED_DAOWEN_SLOTS
     expected_edges = [
         ("分裂", "转换", slots["缄默"]),
-        (slots["缄默"], "曲解", "瓦解"),
-        ("瓦解", "转换", slots["冥气"]),
+        (slots["缄默"], "曲解", slots["瓦解"]),
+        (slots["瓦解"], "转换", slots["冥气"]),
         (slots["冥气"], "反转", "勾魂"),
         ("勾魂", "曲解", RESERVED_SLOT),
         (RESERVED_SLOT, "曲解", "招魂"),
@@ -130,24 +131,15 @@ def test_fusha_action_is_removed_in_favor_of_creation_system():
 
 # ---------- 专属道纹效果 ----------
 
-def test_wajie_reduces_blood_limit_pct():
-    """正常路径：瓦解X使目标血限-10X%。"""
-    st = GameState()
-    st.player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
-    st.enemies.append(Entity("怪", "怪物", blood_limit=200, current_hp=200))
-    c = CombatEngine(st, DiceEngine(seed=1))
-    c.reset_monster_activation()
-    target = st.enemies[0]
-    calc = DaoWenEngine.resolve("瓦解", 2, target=target, caster=st.player)
-    r = c.apply_daowen_effect("瓦解", calc, st.player, target)
-    assert target.blood_limit == 160, f"200-20%=160，实{target.blood_limit}"
-    assert any(e["type"] == "wajie" for e in r["effects"])
+def test_wajie_is_removed_instead_of_reducing_blood_limit():
+    with pytest.raises(ValueError, match="未知道纹"):
+        DaoWenEngine.resolve("瓦解", 2)
 
 
 def test_huaisi_is_the_only_heal_block():
     """正常路径：禁疗只剩【坏死】一个实现（2026-10-08 删【镇尸】）。
 
-    坏死X：消耗2X。使[目标]无法获得回复，持续X。
+    坏死X：消耗5X。使[目标]无法获得回复，持续X。
     """
     DaoWenEngine.register_all()
     st = GameState()
