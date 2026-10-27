@@ -211,7 +211,8 @@ def test_artifact_section_exists_and_entries_are_unique():
 def test_four_resource_type_definitions_live_in_rules_text():
     """四类资源的类型定义统一以《规则正文》为事实源，知识库只保留跨类型设计原则。"""
     rules = RULES_TEXT.read_text(encoding="utf-8")
-    assert "**道纹：**" in rules and "必有 X 变量" in rules and "无触发时机" in rules
+    assert ("**道纹：**" in rules and "必有 X 变量" in rules
+            and "效果强度、持续时间或目标数量" in rules and "无触发时机" in rules)
     assert "**遗物：**" in rules and "不得自带第二种货币" in rules
     assert "**法器：**" in rules and "明确且独特的效果" in rules
     assert "**消耗品：**" in rules and "主动与被动均可生效" in rules
