@@ -296,7 +296,11 @@ class DamageDeathMixin:
         record = None
         if logs:
             record = self._write_hp_loss_record(entity, old - new, ctx, "fallback_hp_loss", logs)
-        conversion = self._convert_blood_wing_loss(entity, old - new, ctx)
+        fallback_loss = old - new
+        wing_logs = note_blood_wing_hp_loss(self.state, entity, fallback_loss)
+        if wing_logs and record is not None:
+            record["wing_recharge"] = wing_logs
+        conversion = self._convert_blood_wing_loss(entity, fallback_loss, ctx)
         if conversion and record is not None:
             record["blood_wing_conversion"] = conversion
 
