@@ -1104,6 +1104,48 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             "state": self._get_combat_state()
         }
     
+    def advance_target_rounds(self, target: Entity, rounds: int, source: str = "凝滞") -> list[dict]:
+        """令单一目标真实经历额外回合：逐回推进全局回合号、目标的回增/回终事件、
+        凡庸计数和目标自身限时状态；不替其他角色执行行动或递减其状态。"""
+        effects: list[dict] = []
+        rounds = max(0, int(rounds))
+        for index in range(rounds):
+            if not target.is_alive or self.state.battle_over():
+                break
+            self.state.current_round += 1
+            effects.extend(self._dispatch_phase(Phase.ROUND_INCREASE, target=target))
+            effects.extend(self._dispatch_phase(Phase.ROUND_END, target=target))
+            why = self._tick_mediocrity_counters(target) if target.is_alive else None
+            if why:
+                effects.extend(self._apply_mediocrity(target, why))
+            expired = target.tick_status_effects()
+            if expired:
+                if "无限血限" in expired and not self.state.hp_overflow_exempt(target):
+                    before_hp = target.current_hp
+                    target.current_hp = min(target.current_hp, target.blood_limit)
+                    if target.current_hp <= 0 and target.is_alive:
+                        self._check_hp_zero_death(target)
+                    effects.append({"type": "infinite_blood_limit_expired", "entity": target.name,
+                                    "blood_limit": target.blood_limit, "hp_before": before_hp,
+                                    "hp_after": target.current_hp})
+                panel_modifier_sources = {"全力", "弱化"}
+                rolled_back = self.state.rollback_scoped_sources(target, set(expired) & panel_modifier_sources)
+                effects.append({"type": "status_expired", "entity": target.name,
+                                "expired_effects": expired, "rolled_back_deltas": rolled_back})
+                if "逆鳞" in expired and hasattr(target, "_nilin"):
+                    target._nilin = 0
+                if "飞行" in expired and not self._is_flying(target):
+                    target.is_flying = False
+                if "变形" in expired and hasattr(target, "_bianxing_original"):
+                    target.current_speed, target.current_mana = target._bianxing_original
+                    delattr(target, "_bianxing_original")
+                    self.clamp_immortal_body(target)
+                    effects.append({"type": "bianxing_restore", "entity": target.name,
+                                    "current_speed": target.current_speed, "current_mana": target.current_mana})
+            effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=target))
+            effects.append({"type": "extra_target_round", "source": source, "target": target.name,
+                            "round": self.state.current_round, "index": index + 1, "total": rounds})
+        return effects
     def round_end(self, blood_lineage_cost_share_target_ref: str = "") -> dict:
         """
         回终结算
