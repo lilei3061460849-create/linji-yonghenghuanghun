@@ -213,7 +213,9 @@ class CostPaymentMixin:
                 payer.reversible_cost_layers = ledger = {}
             immune = cost_type == "衰老" and self.state.side_has(payer, "不朽之躯")
             if not immune:
-                ledger[cost_type] = ledger.get(cost_type, 0) + amount
+                capacity = {"衰老": payer.blood_limit, "枯竭": payer.mana_limit,
+                            "萎缩": payer.speed_limit, "疲惫": payer.current_speed}[cost_type]
+                ledger[cost_type] = ledger.get(cost_type, 0) + min(amount, max(0, capacity))
         if cost_type == "衰老":
             if self.state.side_has(payer, "不朽之躯"):
                 return {"payer": payer.name, "cost_type": cost_type, "paid": 0, "immune": True}

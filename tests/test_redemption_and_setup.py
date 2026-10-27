@@ -207,14 +207,14 @@ def test_jinghua_reduces_mutation():
     engine.state.enemies[:] = [monster]
     r = engine.execute_action("use_daowen", {
         "daowen_name": "净化", "x": 5, "target_ref": "enemy:0",
-        "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
+        "cost_choices": [{"type": "异变"}], "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
     })
     assert r["success"]
     assert monster.mutation_count == 7
     assert r["calculation"]["cost"] == 10  # 净化消耗5X→2X（2026-09-16），X=5
 
 
-def test_jinghua_can_go_negative_without_redemption():
+def test_jinghua_rejects_unowned_mutation():
     engine = _ready_combat(_engine("jh_neg"))
     player = engine.state.player
     _give(player, "净化")
@@ -227,10 +227,10 @@ def test_jinghua_can_go_negative_without_redemption():
     engine.state.enemies[:] = [monster]
     r = engine.execute_action("use_daowen", {
         "daowen_name": "净化", "x": 30, "target_ref": "enemy:0",
-        "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
+        "cost_choices": [{"type": "异变"}], "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
     })
-    assert r["success"]
-    assert monster.mutation_count == -30
+    assert not r["success"]
+    assert monster.mutation_count == 0
     assert not engine.state.pending_redemption
     assert monster.is_alive
 

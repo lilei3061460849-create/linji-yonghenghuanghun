@@ -129,7 +129,8 @@ def test_daowen_x_scales_strength_or_duration():
     ignore = {"x", "y", "summary", "dao_wen", "cost_type"}
     flat = []
     for name in sorted(DaoWenEngine._registry):
-        low, high = DaoWenEngine.resolve(name, 1), DaoWenEngine.resolve(name, 3)
+        kwargs = {"cost_choices": [{"type": "异变"}]} if name == "净化" else {}
+        low, high = DaoWenEngine.resolve(name, 1, **kwargs), DaoWenEngine.resolve(name, 3, **kwargs)
         if all(low.get(k) == high.get(k) for k in low if k not in ignore):
             flat.append(name)
     assert set(flat) == X_DOES_NOT_SCALE, (

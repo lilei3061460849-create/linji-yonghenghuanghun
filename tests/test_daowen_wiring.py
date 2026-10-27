@@ -332,7 +332,7 @@ def test_flight_rule_line_matches_the_engine():
 
 
 def test_zengzhi_grants_temporary_infinite_blood_limit_and_bypasses_cancer():
-    """增殖X：支付流血10X，目标血限暂时视为无限；有限回复不触发癌变。"""
+    """增殖X：支付衰老X，目标血限暂时视为无限；有限回复不触发癌变。"""
     engine = _engine("zengzhi_infinite_blood")
     p = engine.state.player
     _give(p, "增殖")
@@ -409,7 +409,7 @@ def test_chengni_triggers_nightwatch_per_extra_round_using_world_round():
     assert len([e for e in effects if isinstance(e, dict) and e.get("type") == "extra_target_round"]) == 3
 
 
-def test_jinghua_allows_caster_selected_reversible_cost_layers():
+def test_jinghua_rejects_mixed_cost_layers():
     """净化由施法者自选可逆数值型代价，层数总和不能超过X。"""
     engine = _engine("jinghua_cost_choices")
     _give(engine.state.player, "净化")
@@ -422,7 +422,7 @@ def test_jinghua_allows_caster_selected_reversible_cost_layers():
         "cost_choices": [{"type": "衰老", "layers": 1}, {"type": "异变", "layers": 2}],
         "dodge": False, "blood_shadow": False,
     })
-    assert result["success"], result
-    assert target.blood_limit == 101
-    assert target.mutation_count == 2
+    assert not result["success"], result
+    assert target.blood_limit == 100
+    assert target.mutation_count == 4
 

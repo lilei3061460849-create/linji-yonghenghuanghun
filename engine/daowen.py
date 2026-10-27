@@ -245,7 +245,7 @@ class DaoWenEngine:
             "dao_wen": "增殖",
             "x": x,
             "cost_type": CostType.AGING.value,
-            "cost": x,
+            "cost_blood_limit": x,
             "duration": x,
             "infinite_blood_limit": True,
             "summary": f"衰老{x}，使{target_name}的血限变为∞，持续{x}回合"

@@ -1,7 +1,7 @@
 """F 裁定执行守护（2026-10-14，见 `三类物品审计.md` F1/F2/F4）。
 
 - F1：【猩红果实】重做为纯被动（生命可超血限），旧效果移交道纹【增殖】
-  （增殖X = 流血10X → 战终目标血限+2X）。
+  （增殖X = 衰老X → 目标无限血限持续X）。
 - F2：【余火印】删除（extra 整段删，不并入）；【搏命】删除，疲惫换法力并入【透支】
   四通道（流血4X/衰老2X/枯竭X/疲惫X 四选一 → X法力，touzhi_cost 指定，缺省流血）；
   龙心谷事件「逆行者·接过余火」改授【透支】道纹。
@@ -43,7 +43,7 @@ def _add_monster(engine, hp=100):
 
 # ==================== F1：增殖 ====================
 
-def test_zengzhi_cast_pays_bleed_and_registers_pending():
+def test_zengzhi_cast_pays_aging_without_pending():
     engine = _setup()
     player = engine.state.player
     _grant(engine, ["增殖"])
@@ -51,10 +51,10 @@ def test_zengzhi_cast_pays_bleed_and_registers_pending():
     hp0 = player.current_hp
     r = engine.execute_action("use_daowen", {"daowen_name": "增殖", "x": 2, "target_ref": "enemy:0"})
     assert r["success"], r
-    assert player.current_hp == hp0 - 20  # 流血10X 即付
+    assert player.blood_limit == hp0 - 2  # 衰老X 即付
     assert m.blood_limit == 100  # 战终前不涨
-    assert engine.state.event_modifiers["zengzhi_pending"] == [
-        {"target_ref": "enemy:0", "amount": 4}]
+    assert "zengzhi_pending" not in engine.state.event_modifiers
+    assert m.has_status("无限血限")
 
 
 def test_zengzhi_settles_at_battle_end_and_stacks():
@@ -72,9 +72,9 @@ def test_zengzhi_settles_at_battle_end_and_stacks():
     engine.state.enemies = []
     end = engine.execute_action("battle_end", {})
     assert end["success"], end
-    assert end["result"]["zengzhi_settled"] == [{"target": "友", "increase": 6}] or \
-        sorted((e["target"], e["increase"]) for e in end["result"]["zengzhi_settled"]) == [("友", 2), ("友", 4)]
-    assert f.blood_limit == 36  # 多次发动累加
+    assert end["result"]["zengzhi_settled"] == []
+    assert f.blood_limit == 30
+    assert not f.has_status("无限血限")
 
 
 def test_zengzhi_settle_fizzles_on_dead_target_and_immortal_body():
@@ -100,8 +100,8 @@ def test_zengzhi_settle_fizzles_on_dead_target_and_immortal_body():
     m2.is_alive = False
     engine2.state.enemies = []
     end2 = engine2.execute_action("battle_end", {})
-    assert end2["result"]["zengzhi_settled"] == [
-        {"target": p2.name, "increase": 0, "blocked_by": "不朽之躯"}]
+    assert end2["result"]["zengzhi_settled"] == []
+    assert not p2.has_status("无限血限")
 
 
 def test_zengzhi_pending_void_on_escape():
@@ -110,7 +110,7 @@ def test_zengzhi_pending_void_on_escape():
     _add_monster(engine)
     assert engine.execute_action(
         "use_daowen", {"daowen_name": "增殖", "x": 1, "target_ref": "enemy:0"})["success"]
-    assert "zengzhi_pending" in engine.state.event_modifiers
+    assert "zengzhi_pending" not in engine.state.event_modifiers
     from engine.models import StatusEffect
     engine.state.player.add_status(StatusEffect(name="疯狂", value=4, remaining_rounds=-1, source="test"))
     engine.state.player.actions_used_this_round = 0
