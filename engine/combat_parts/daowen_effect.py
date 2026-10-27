@@ -1034,35 +1034,6 @@ class DaowenEffectMixin:
                 "type": "bizhong_target" if target is not None else "bizhong_self",
                 "target": bearer.name, "rounds": rounds})
 
-        # 蒙蔽X：使[目标]下X次造成的伤害无效。次数型，不走 duration 挂状态。
-        # 此前只算出 invalid_damage_hits，apply 不消费，轮回者 use_daowen 等于白扣 5X 法力。
-        # 怪物侧走 _apply_control_to_player，探照灯走 add_status，所以旧测试都绿。
-        if "invalid_damage_hits" in calc:
-            if "invalid_damage_hits" in wave_pieces:
-                pieces = self._divide_flat(calc["invalid_damage_hits"], len(wave_status_targets))
-                wave_pieces["invalid_damage_hits"] = pieces
-                for wt, piece in zip(wave_status_targets, pieces):
-                    if piece > 0:
-                        wt.add_status(self._daowen_status(daowen_order=daowen_order,
-                            name="蒙蔽", remaining_rounds=-1, value=piece, source=caster.name))
-                        result["effects"].append({
-                            "type": "mengbi",
-                            "target": wt.name,
-                            "count": piece,
-                            "remaining": wt.get_status_value("蒙蔽"),
-                        })
-            else:
-                hits = int(calc["invalid_damage_hits"])
-                if hits > 0:
-                    target.add_status(self._daowen_status(daowen_order=daowen_order,
-                        name="蒙蔽", remaining_rounds=-1, value=hits, source=caster.name))
-                    result["effects"].append({
-                        "type": "mengbi",
-                        "target": target.name,
-                        "count": hits,
-                        "remaining": target.get_status_value("蒙蔽"),
-                    })
-
         if ("duration" in calc and calc.get("duration") is not None
               and not (name == "变形" and bianxing_blocked)
               # 波及标记由 use_daowen/怪物结算逐目标处理，不走通用状态块

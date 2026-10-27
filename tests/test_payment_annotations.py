@@ -7,7 +7,7 @@ from engine.daowen import DaoWenEngine, ResonanceEngine
 ROOT = Path(__file__).resolve().parent.parent
 MANA_DAOWEN = (
     "杀伐", "庇护", "波及",
-    "弱化", "蒙蔽",
+    "弱化",
     "变形", "定型", "超频", "坏死",
     "清算", "抢劫", "勒索", "假钞",
     "瓦解", "勾魂", "招魂", "净化",

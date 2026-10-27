@@ -21,7 +21,7 @@ RELICIZED_SLOT = "？？"
 PLACEHOLDER_SLOTS = frozenset({RESERVED_SLOT, RELICIZED_SLOT})
 RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变", "背负",
+    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变", "背负", "蒙蔽",
 )}
 
 
@@ -53,7 +53,7 @@ class DaoWenEngine:
     # 用于"雇佣"后"发现并选择一种转化道纹"等需要从此类别中随机抽取的场景
     # 2026-10-08 清理：原孤儿转化道纹已移除（曾挂在【狂暴】的反转分支下）。
     TRANSFORMED_DAOWEN = [
-        "愤怒", "弱化", "全速", "蒙蔽",
+        "愤怒", "弱化", "全速",
         # 2026-10-11 用户令（A14）：【无神】【借力】【衰败】整条删除，不补位。
     ]
 
@@ -424,19 +424,6 @@ class DaoWenEngine:
 
 
     @staticmethod
-    def calculate_mengbi(x: int, target: Entity = None) -> dict:
-        """蒙蔽X：支付：法力2X。使[目标]下X次造成的伤害无效"""
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "蒙蔽",
-            "x": x,
-            "cost_type": CostType.MANA.value,
-            "cost": 2 * x,
-            "invalid_damage_hits": x,
-            "summary": f"支付：{2 * x}法力，使{target_name}下{x}次造成的伤害无效"
-        }
-    
-    @staticmethod
     # 2026-10-11 用户令（A14）：【shuaibai】整条删除——不做闭环补位、不设计替换道纹。
 
     
@@ -777,7 +764,6 @@ class DaoWenEngine:
             # 怪物转化（2026-10-11 A14：无神/借力/衰败 已删）
             "弱化": cls.calculate_ruhua,
             "全速": cls.calculate_quansu,
-            "蒙蔽": cls.calculate_mengbi,
             # 扭曲都市
             "变形": cls.calculate_bianxing,
             "定型": cls.calculate_dingxing,
@@ -995,7 +981,7 @@ class ResonanceEngine:
             # 2026-10-25 用户令：【疯狂】【减速】遗物化，退出道纹体系，
             # 各自的残韵边随节点一并撤销。
             ("必中", "转换", RELICIZED_DAOWEN_SLOTS["洞察"]),
-            ("必中", "反转", "蒙蔽"),
+            ("必中", "反转", RELICIZED_DAOWEN_SLOTS["蒙蔽"]),
             # 2026-10-03 删除（用户令）：("飞行", "转换", "滑翔"),
             # 2026-10-03 删除（用户令）：("飞行", "反转", "坠落"),
         ],

@@ -8153,7 +8153,7 @@ class GameEngine:
         e.mutation_count = d.get("mutation_count", 0)   # ④修复：旧档无此键回退0
         from .daowen import normalize_daowen_name as _norm_dw
         for name, x in d.get("dao_wen", {}).items():
-            if name == "背负":
+            if name in {"背负", "蒙蔽"}:
                 continue  # 已删除道纹不从旧封存复活；护卫内部标记单独保留。
             name = _norm_dw(name)  # 旧封存【血债】读入即映射【连击】
             cooldowns = d.get("daowen_cooldowns", {}).get(name, {})
@@ -9903,6 +9903,7 @@ class GameEngine:
                 unique_entities.append(entity)
         for entity in unique_entities:
             entity.dao_wen.pop("背负", None)  # 不清理护卫状态/_beifu_*，也不让已删除道纹占页。
+            entity.dao_wen.pop("蒙蔽", None)  # 消耗品施加的同名状态不受影响。
         # 状态可能挂在目标身上，但其排序锚点来自施加该状态的角色。
         # 例如【清算】的状态在目标身上，位置却属于施法者的道纹序列。
         entity_by_name = {entity.name: entity for entity in unique_entities}
