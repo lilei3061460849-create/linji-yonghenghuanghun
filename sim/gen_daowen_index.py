@@ -114,7 +114,7 @@ for region, text in sorted(dungeon_documents.items()):
 
 # 残韵边（双向：2026-10-07 用户令——同一条边正反两向都走，同一种残韵、同样消耗一次）
 out_edges = defaultdict(list)
-for _name in DaoWenEngine._registry:
+for _name in (list(DaoWenEngine._registry) + list(DRAFT_DAOWEN)):
     for _p in ResonanceEngine.get_available_resonance(_name):
         out_edges[_name].append(
             f"（{_p['resonance_type']}）→{_p['target_daowen']}"
@@ -124,6 +124,12 @@ in_edges = defaultdict(list)
 # 目标需求
 def target_label(name):
     p = params_of[name]
+    if name in ("波及", "血契"):
+        return "X个（显式提交）"
+    if name == "唤潮":
+        return "自身周围X个可用地图格"
+    if name == "蜃景":
+        return "自身所在格"
     if "target" in p:
         return "需显式选定"
     # 【必中】的结算函数签名是 calculate_bizhong(x)，没有 target 形参，会被下面的
@@ -131,8 +137,6 @@ def target_label(name):
     # 它是「你选中的[目标]无法进行回合外行动」，按规则文必须显式选定目标。
     if name == "必中":
         return "需显式选定"
-    if name in ("波及", "血契"):
-        return "X个（显式提交）"
     if name == "封印":
         return "X个怪物（引擎自动选定）"
     doc = effects[name]
@@ -232,8 +236,9 @@ A("## 数值规则迁移状态")
 A("")
 migrated_names = [name for name in DAOWEN_RULES if name in DaoWenEngine._registry]
 legacy_names = sorted(set(DaoWenEngine._registry) - set(migrated_names))
+legacy_display = ["波及（旧结算路径仍保留）" if n == "波及" else n for n in legacy_names]
 A(f"- **统一数值规则执行器**：{ '、'.join(migrated_names) }。这些道纹的数值、触发条件、当前值传递与摘要共用 `engine/rule_engine.py`。")
-A(f"- **保留旧路径（未迁移）**：{ '、'.join(legacy_names) }。{UNMIGRATED_REASON}")
+A(f"- **保留旧路径（未迁移）**：{ '、'.join(legacy_display) }。{UNMIGRATED_REASON}")
 A("")
 A("## 目录")
 A("")
@@ -276,6 +281,8 @@ order = (list(SHAFA_LOOP_DAOWEN) + ["血契"] + sorted(ORIGINAL_MONSTER_DAOWEN)
          + list(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN))
 for name in order:
     out = "、".join(out_edges[name]) if out_edges[name] else "—"
+    if name == "血契":
+        out = "—（不属于残韵闭环）"
     c = carriers.get(name, [])
     cstr = "、".join(c[:6]) + (f"…+{len(c)-6}" if len(c) > 6 else "") or "—"
     A(f"| {name} | {CAT_LABEL[CATEGORY[name]]} | {costs[name]} | {target_label(name)} | {out} | {cstr} |")
@@ -298,7 +305,9 @@ def section(title, names, note_lines=(), loop=None, loop_title=None):
         A(f"### {name}")
         A(f"X：{costs[name]}。{effects[name]}" if effects[name] else f"X：{costs[name]}。")
         meta = [f"[目标]：{target_label(name)}"]
-        if out_edges[name]:
+        if name == "血契":
+            meta.append("残韵路径：—（不属于残韵闭环）")
+        elif out_edges[name]:
             meta.append("残韵路径（双向）：" + "、".join(out_edges[name]))
         c = carriers.get(name, [])
         meta.append("承载：" + ("、".join(c) if c else "—（无怪物承载）"))
