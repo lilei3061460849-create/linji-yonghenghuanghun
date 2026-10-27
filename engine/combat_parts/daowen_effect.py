@@ -1088,7 +1088,7 @@ class DaowenEffectMixin:
             for st_target in wave_status_targets:
                 if not st_target.is_alive:
                     continue
-                advanced = self.advance_target_rounds(st_target, int(calc["extra_target_rounds"]), source="凝滞")
+                advanced = self.advance_target_rounds(st_target, int(calc["extra_target_rounds"]), source="沉溺")
                 result["effects"].extend(advanced)
 
         if name == "血契":
