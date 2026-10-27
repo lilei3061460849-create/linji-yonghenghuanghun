@@ -223,7 +223,7 @@ class DaoWenEngine:
             "summary": f"支付：{2 * x}法力。选择{x}个目标，目标组彼此平分道纹效果，持续∞。"
         }
     
-    # ---- 杀伐11节点闭环后半（增殖至封印）----
+    # ---- 杀伐10节点闭环后半（增殖至封印）----
     
     @staticmethod
     def calculate_xueqi(x: int, target: Entity = None) -> dict:
