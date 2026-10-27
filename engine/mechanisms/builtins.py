@@ -42,7 +42,7 @@ from .triggers import Phase, Trigger, TriggerContext
 from .verbs import apply_verb
 
 def _shouyedeng_effect(ctx: TriggerContext, targets: list) -> str:
-    """守夜灯：回增时获得等同于增加后当前回合数的法力。"""
+    """守夜灯：每当持有者经历一个回合，获得等同于当前世界回合数的法力。"""
     entity = ctx.target
     amount = max(0, int(getattr(ctx.state, "current_round", 0) or 0))
     if entity is None or not entity.is_alive or entity.entity_type != "轮回者" or amount <= 0:
