@@ -150,6 +150,9 @@ class MonsterPhaseMixin:
                         continue
                     rewritten_as = (self._resonance_rewrites.get(id(monster)) or {}).get(name)
                     effective_name = rewritten_as or name
+                    # 唤潮与蜃景是开放地图专用道纹，不能作为战斗阶段的怪物行动。
+                    if effective_name in {"唤潮", "蜃景"}:
+                        continue
                     requires_target = self._daowen_requires_target(effective_name)
                     legal_targets = (
                         (list(ffa_rivals) if ffa_rivals else

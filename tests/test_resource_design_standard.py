@@ -143,8 +143,8 @@ def test_daowen_x_scales_strength_or_duration():
 # ==================== 道纹：局外发动须明示 ====================
 
 def test_out_of_combat_daowen_whitelist_is_explicit():
-    """默认局内；局外白名单只能由条文明示项构成：消灾、真理（2026-10-23 裁定）。"""
-    assert OUT_OF_COMBAT_DAOWEN == frozenset({"消灾", "真理"})
+    """默认局内；局外白名单只能由条文明示项构成：消灾、真理、唤潮、蜃景。"""
+    assert OUT_OF_COMBAT_DAOWEN == frozenset({"消灾", "真理", "唤潮", "蜃景"})
 
 
 def test_unlisted_daowen_rejected_out_of_combat_and_listed_one_allowed(engine):

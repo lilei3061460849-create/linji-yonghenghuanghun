@@ -1,7 +1,7 @@
 """已迁移到声明层的机制（当前注册表共22项，以下为原16项历史说明：加害、龙鳞、帮派令、畸变·结算、
 焦黑发丝、洞察·结算、狂暴·标记、畸变·标记、洗劫·夺碎片、缄默面具、龙爪、
 清算·结算、灾厄轮盘·结算（遗物被动）、清算·对账；2026-10-13 用户令删【逼债】，
-【逼债·结算/对账】与【三相残韵盘·战终】随道纹/遗物删除一并移除）。
+【逼债·结算/对账】与【三相残韵盘·战终】随道纹/遗物删除一并移除；缄默面具现为法限增量翻倍）。
 
 迁移协议（迁移前后必须同时满足）：
   1. 规则语义与旧实现完全一致（加害：amount+状态值；龙鳞：max(0, amount-状态值)；
@@ -40,6 +40,28 @@ from .ledger import clear_ledger, ledger_of
 from .targets import RANDOM_ALL, SELF, TARGET, roll_pick
 from .triggers import Phase, Trigger, TriggerContext
 from .verbs import apply_verb
+
+def _shouyedeng_effect(ctx: TriggerContext, targets: list) -> str:
+    """守夜灯：回增时获得等同于增加后当前回合数的法力。"""
+    entity = ctx.target
+    amount = max(0, int(getattr(ctx.state, "current_round", 0) or 0))
+    if entity is None or not entity.is_alive or entity.entity_type != "轮回者" or amount <= 0:
+        return ""
+    before = entity.current_mana
+    apply_verb(ctx.combat, "mana", {"target": entity, "delta": amount}, {
+        "timing": "round_increase", "source": "守夜灯", "source_type": "relic",
+        "actor": entity, "target": entity, "owner": entity,
+        "mechanic": "mana", "subtype": "shouyedeng", "amount": amount,
+        "tags": {"relic", "round_increase"},
+    })
+    actual = entity.current_mana - before
+    return f"守夜灯：{entity.name}获得{actual}点法力（声明{amount}）"
+
+
+SHOUYEDENG = Mechanism(
+    name="守夜灯", when=Trigger.phase(Phase.ROUND_INCREASE), target=SELF,
+    condition=relic_active("守夜灯", of="target"), effect=_shouyedeng_effect, priority=10)
+
 
 
 def _rule_context(rule, ctx: TriggerContext) -> DamageResolutionContext:
@@ -242,42 +264,19 @@ XIJIE_PASSIVE = Mechanism(
 )
 
 def _silent_mask_effect(ctx: TriggerContext, targets: list) -> str:
-    """【缄默面具】2026-09-17 用户令改版：[战终][法限]+X。
-
-    旧效果为「[战始]获得 20×X 点法力」（X=event_modifiers.silent_mask_x，
-    来自事件「献出声音：失忆X」）。属性模型统一后法力=攻击力，[战始]一次性
-    给 20X 法力等于同时白送攻击力，强度跳变；且法力每场都会回满，[战始]给蓝
-    的边际价值很低。故改为**战终永久成长**：[战终][法限]+X。
-
-    注意：缄默面具的【无法发动附带代价的道纹】是 api.py 的静态校验规则
-    （另一字面规则），不在本机制范围，保持不变。
-
-    X=0（未登记 silent_mask_x）时不发放，保持与旧块一致的无操作语义。
-    2026-10-23 起固定 +2，不再读 silent_mask_x（遗物无 X 变量）。
-    """
-    # 2026-10-23 用户令：遗物不得有 X 变量，改为固定 +2。
-    # 事件「献出声音」里的失忆X 仍然计入玩家当场支付的代价，但不再驱动本遗物数值。
-    x = 2
+    """缄默面具：今后每次获得[法限]时，实际增加量翻倍。"""
     player = ctx.target
-    if x > 0:
-        player.mana_limit += x
-    # X=0 时旧块仍会执行钳制（+=0 后无条件 clamp），此处保持逐字等价：
-    # 法限提高不连带回血/回蓝，但当前法力不得超过（新）上限——全局钳制规则。
-    ctx.combat.clamp_immortal_body(player)
-    if x <= 0:
-        return "缄默面具：+0法限"
-    return f"缄默面具：[法限]+{x}（现为{player.mana_limit}）"
+    object.__setattr__(player, "_silent_mask_active", True)
+    return "缄默面具：后续法限增加量翻倍"
 
 
 SILENT_MASK = Mechanism(
     name="缄默面具",
-    when=Trigger.phase(Phase.BATTLE_END),
+    when=Trigger.phase(Phase.BATTLE_START),
     effect=_silent_mask_effect,
     target=SELF,
     condition=relic_active("缄默面具", of="target"),
-    # 2026-09-17 改版：由 BATTLE_START(priority=5) 移到 BATTLE_END；
-    # 新相位首个注册者，取 10 留出入位空间
-    priority=10,
+    priority=5,
 )
 
 
@@ -596,5 +595,5 @@ DRAGON_BLOODLINE = Mechanism(
 # 2026-10-13 用户令：【三相残韵盘】遗物删除，SANXIANG_END（【三相残韵盘·战终】）一并移除。
 
 for _mechanism in (BLOOD_LINEAGE, RED_CURSE, FIRST_ROUND_SHIELD, LEATHER_SHIELD,
-                   LEATHER_RECORD, ROUND_TRACKING_RESET, BULLETPROOF, DRAGON_BLOODLINE):
+                   LEATHER_RECORD, ROUND_TRACKING_RESET, BULLETPROOF, DRAGON_BLOODLINE, SHOUYEDENG):
     MECHANISMS.register(_mechanism)

@@ -22,6 +22,7 @@ from ..mechanisms import MECHANISMS, Phase, TriggerBus, TriggerContext
 from ..personality import remove_personality
 from ..resolution import KIND_EFFECT, resolution_frame
 from ..models import MONSTER_MANA_RELIC
+from ..mechanisms.verbs import apply_verb
 
 
 class DaowenEffectMixin:
@@ -764,7 +765,6 @@ class DaowenEffectMixin:
             # 2026-10-14【勒索】：与抢劫同价同量形状不同——碎片是销毁（谁都不获得），
             # 不足部分记负债（真碎片扣负，可触发【还债】）。走 shards 动词统一口径
             # （= 旧逼债块字面约定：够则扣，不够则假碎片优先+差额扣负）。
-            from ..mechanisms.verbs import apply_verb
             need = calc["shard_debt"]
             paid = apply_verb(self, "shards", {
                 "target": target, "delta": -need,
@@ -1068,6 +1068,16 @@ class DaowenEffectMixin:
                     et.add_status(self._daowen_status(daowen_order=daowen_order, name=name, remaining_rounds=duration, value=x, source=caster.name))
                     result["effects"].append({"type": "status_added", "target": et.name,
                                               "status": name, "duration": duration, "value": x})
+
+        if name == "凝滞" and calc.get("rounds_delta"):
+            # 凝滞重做：使用统一 rounds 动词延长目标指定状态的剩余回合数。
+            status_name = calc["status_name"]
+            for st_target in wave_status_targets:
+                applied = apply_verb(self, "rounds", {
+                    "target": st_target, "status_name": status_name,
+                    "delta": calc["rounds_delta"],
+                }, daowen_ctx.to_dict())
+                result["effects"].append({"type": "rounds_extended", **applied})
 
         if name == "血契":
             # 重新发动时以新目标组替换旧组；目标ID写入状态，随战斗快照保存。

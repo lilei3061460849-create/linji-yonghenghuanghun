@@ -579,31 +579,6 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             target.add_status(StatusEffect(
                 name="无力", value=new_stacks, remaining_rounds=1, source="寒冰法力"))
 
-    def _shouyedeng_grant_amount(self, entity: Optional[Entity]) -> int:
-        """守夜灯：[回终]获得等同于当前回合数的法力（2026-10-25 用户令）。
-
-        回合数取 `state.current_round`（回始里 +1，回终时就是本回合的序号），
-        所以第 1 回合回终得 1 点、第 5 回合得 5 点：越拖越补给，前期近乎没有。
-        """
-        if entity is None or not entity.is_alive or entity.entity_type != "轮回者":
-            return 0
-        if not self._relic_active(entity, "守夜灯"):
-            return 0
-        return max(0, int(getattr(self.state, "current_round", 0) or 0))
-
-    def _grant_shouyedeng(self, entity: Optional[Entity]) -> Optional[dict]:
-        """守夜灯：[回终]按当前回合数授予法力。"""
-        gained = self._shouyedeng_grant_amount(entity)
-        if gained <= 0:
-            return None
-        before = entity.current_mana
-        # 走统一入口，【勾魂】期间不生效
-        entity.gain_mana(gained)
-        self.clamp_immortal_body(entity)
-        actual = entity.current_mana - before
-        return {"type": "shouyedeng_grant", "entity": entity.name,
-                "gained": actual, "declared": gained}
-
     def _find_named(self, name: str) -> Optional[Entity]:
         for e in self.state.get_all_player_side() + self.state.get_all_enemy_side():
             if e.name == name:
@@ -1074,6 +1049,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             self.state.get_all_player_side() + self.state.get_all_enemy_side()))
 
         self.state.current_round += 1
+        # 【回增】统一相位：回合序号增加后触发，守夜灯等效果走声明机制层。
+        effects.extend(self._dispatch_phase_all(
+            Phase.ROUND_INCREASE,
+            self.state.get_all_player_side() + self.state.get_all_enemy_side()))
 
         # 【封印X】延迟回场：在第 R+X 回合始把原实体放回它脱场前所在的阵营。
         # 2026-10-08 用户令：封印的目标已不限于怪物，home/index 记录原址
@@ -1150,11 +1129,6 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                     )
                     effects.append({"type": "relic", "relic": "蚀界残钟", "entity": entity.name,
                                     "blood_limit_loss": erosion, **change})
-            # 守夜灯：[回终]获得等同于当前回合数的法力（2026-10-25 用户令）。
-            # 位置在蚀界残钟之后：残钟读到的仍是授予前的法力，不与新效果互相干扰。
-            granted = self._grant_shouyedeng(entity)
-            if granted:
-                effects.append(granted)
             # 机制系统：ROUND_END 相位分发。锚定语义：回终第一循环顶部、凡庸 tick 之前
             # （原畸变·结算位置）。凡庸之后的回终机制禁止注册到 ROUND_END
             # （会改变既有顺序），详见机制迁移台账。

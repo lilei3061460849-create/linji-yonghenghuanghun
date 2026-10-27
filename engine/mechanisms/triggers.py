@@ -32,6 +32,7 @@ class Phase:
     BATTLE_END = "battle_end"                        # 战终——已接线（process_relics 战终遗物段，
                                                      # 2026-09-17 为【缄默面具】改版新增）
     ROUND_START = "round_start"                      # 回始——已接线（combat.round_start 回始效果循环顶部）
+    ROUND_INCREASE = "round_increase"                  # 回增：current_round 增加后、该回合正式开始前
     ROUND_START_SETTLE = "round_start_settle"        # 回始·全场结算（2026-10-03 接线）。
                                                      # 锚点：回始效果循环之后、current_round+=1 之前
                                                      # （原F2账本结算位置；原道纹【赌命】转为遗物【灾厄轮盘】后仍在此触发）。

@@ -184,7 +184,28 @@ class DamageDeathMixin:
         wing_logs = note_blood_wing_hp_loss(self.state, entity, amount)
         if wing_logs:
             record["wing_recharge"] = wing_logs
+        conversion = self._convert_blood_wing_loss(entity, amount, parent_ctx)
+        if conversion:
+            record["blood_wing_conversion"] = conversion
         return record
+
+    def _convert_blood_wing_loss(self, entity: Entity, amount: int,
+                                 parent_ctx: Optional[EffectContext | dict] = None) -> Optional[dict]:
+        """血翼噬血模式：本回合实际失去的生命按等量回复结算。"""
+        if (entity is None or amount <= 0 or entity is not self.state.player
+                or not entity.has_status("噬血")):
+            return None
+        before = entity.current_hp
+        heal_ctx = make_context(
+            timing=self._current_context_timing(), source="血翼", source_type="consumable",
+            actor=entity, target=entity, owner=entity, mechanic="heal",
+            subtype="blood_wing_life_loss_conversion", amount=amount,
+            parent_event_id=(parent_ctx.event_id if hasattr(parent_ctx, "event_id") else None),
+            tags={"consumable", "blood_wing", "life_loss_conversion"})
+        healed = self.state.apply_heal(entity, amount, ctx=heal_ctx)
+        return {"lost": amount, "healing_requested": amount,
+                "healing_actual": healed.get("actual_heal", entity.current_hp - before),
+                "hp_after": entity.current_hp}
 
     def _settle_chenglu(self, entity: Entity, amount: int,
                            parent_ctx: Optional[EffectContext | dict] = None) -> Optional[dict]:
@@ -272,8 +293,16 @@ class DamageDeathMixin:
         # 使血限压顶/衰老/道纹直减等“由兜底钩子接管”的降血也可见、可追踪，
         # 与 ctx-rich 路径（_record_hp_loss_event）保持一致。
         logs = self._fire_after_life_lost(entity, ctx)
+        record = None
         if logs:
-            self._write_hp_loss_record(entity, old - new, ctx, "fallback_hp_loss", logs)
+            record = self._write_hp_loss_record(entity, old - new, ctx, "fallback_hp_loss", logs)
+        fallback_loss = old - new
+        wing_logs = note_blood_wing_hp_loss(self.state, entity, fallback_loss)
+        if wing_logs and record is not None:
+            record["wing_recharge"] = wing_logs
+        conversion = self._convert_blood_wing_loss(entity, fallback_loss, ctx)
+        if conversion and record is not None:
+            record["blood_wing_conversion"] = conversion
 
     # ========== 统一死亡判定 / 统一血限变化 ==========
 
@@ -481,10 +510,9 @@ class DamageDeathMixin:
                 and self._relic_active(target, "癫狂之脑")):
             amount = validate_damage_amount(
                 amount * 2, "CombatEngine.狂脑伤害倍率.result")
-        # 震岳龙躯（龙族遗物，2026-10-23 重做为常驻被动）：单次超出15点的伤害无效。
-        # 与【固执】的「每次失去生命≤1」不同层级：本条只封顶伤害数值，不碰失血倍率。
-        if self._relic_active(target, "震岳龙躯") and amount > 15:
-            amount = 15
+        # 震岳龙躯：单次伤害超过10点的部分免疫；在伤害减免/格挡前将该次伤害封顶为10。
+        if self._relic_active(target, "震岳龙躯") and amount > 10:
+            amount = 10
 
         # 1. 伤害重定向 (背负；【嫁祸】2026-10-11 已删除)
         redirected_target = self.hook_manager.apply_redirection(target, damage_type, self.state)

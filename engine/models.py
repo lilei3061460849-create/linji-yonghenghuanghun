@@ -495,6 +495,10 @@ class Entity:
     # _hp_engine_ref 为可选弱引用（非字段，不参与序列化/深拷贝判定）。
     def __setattr__(self, name, value):
         old = self.__dict__.get(name, None)
+        # 缄默面具：已有实体获得法限时实际增量翻倍；初始化/读档时旧值为None，不重复放大。
+        if (name == "mana_limit" and isinstance(old, int) and isinstance(value, int)
+                and value > old and self.__dict__.get("_silent_mask_active", False)):
+            value = old + (value - old) * 2
         # 只在最终真实余额变化时更新历史峰值；该逻辑必须位于实际生效的
         # __setattr__ 中，不能被后续生命/面板同步钩子覆盖。
         if name == "shards_peak" and old is not None:

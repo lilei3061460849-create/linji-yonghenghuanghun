@@ -78,12 +78,12 @@ WING_EMBER = "烬翼"
 WING_ITEM_SPECS: dict[str, dict] = {
     WING_BLOOD: {
         "max_uses": 3,
-        "effect": ("主动使用（选一）：①本回合你造成的伤害给予你等量回复；②获得【飞行】1回合；"
-                   "③立刻逃跑。你每累计失去100%[血限]的生命，耐久+1"),
+        "effect": ("主动使用（选一）：①本回合中你失去的生命改为回复；②获得【飞行】1回合；"
+                   "③立刻逃跑。你每累计失去等同于[血限]的生命，耐久+1"),
     },
     WING_EMBER: {
-        "max_uses": 5,
-        "effect": ("主动使用（选一）：①本回合你不会触发任何特殊事件（凡庸/雕塑/癌变/迷失/还债）；"
+        "max_uses": 3,
+        "effect": ("主动使用（选一）：①本回合你不会触发任何特殊事件；"
                    "②获得【飞行】1回合；③立刻逃跑。任意怪物［命零］时，耐久+1"),
     },
 }
@@ -95,7 +95,7 @@ WING_MODE_LIFESTEAL = "lifesteal"   # 血翼专属
 WING_MODE_SUPPRESS = "suppress"     # 烬翼专属
 WING_MODES: dict[str, dict[str, str]] = {
     WING_BLOOD: {
-        WING_MODE_LIFESTEAL: "本回合你造成的伤害给予你等量回复",
+        WING_MODE_LIFESTEAL: "本回合中你失去的生命改为回复",
         WING_MODE_FLY: "获得【飞行】1回合",
         WING_MODE_FLEE: "立刻逃跑",
     },

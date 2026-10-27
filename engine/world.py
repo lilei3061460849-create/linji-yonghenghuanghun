@@ -173,15 +173,19 @@ class WorldMap:
             return "void"
         return self.terrain.get(self.key(pos), "void")
 
-    def is_passable(self, pos: Coord) -> bool:
-        return self.in_bounds(pos) and self.terrain_at(pos) not in {"wall", "building", "void"}
+    def is_passable(self, pos: Coord, actor: "WorldActorState | None" = None) -> bool:
+        if not self.in_bounds(pos) or self.terrain_at(pos) in {"wall", "building", "void"}:
+            return False
+        if self.terrain_at(pos) == "water_current":
+            return actor is not None and actor.species == "鲛族"
+        return True
 
-    def neighbors(self, pos: Coord) -> list[Coord]:
-        return [q for dx, dy in DIRECTIONS if self.is_passable(q := (pos[0] + dx, pos[1] + dy))]
+    def neighbors(self, pos: Coord, actor: "WorldActorState | None" = None) -> list[Coord]:
+        return [q for dx, dy in DIRECTIONS if self.is_passable(q := (pos[0] + dx, pos[1] + dy), actor)]
 
-    def find_path(self, start: Coord, goal: Coord) -> list[Coord] | None:
-        """返回包含起点、不包含起点外绕行信息的最短路径；不可达时返回None。"""
-        if not self.is_passable(start) or not self.is_passable(goal):
+    def find_path(self, start: Coord, goal: Coord, actor: "WorldActorState | None" = None) -> list[Coord] | None:
+        """返回最短路径；水流地形仅对鲛族可通行。"""
+        if not self.is_passable(start, actor) or not self.is_passable(goal, actor):
             return None
         if start == goal:
             return [start]
@@ -189,7 +193,7 @@ class WorldMap:
         parent: dict[Coord, Coord | None] = {start: None}
         while queue:
             cur = queue.popleft()
-            for nxt in self.neighbors(cur):
+            for nxt in self.neighbors(cur, actor):
                 if nxt in parent:
                     continue
                 parent[nxt] = cur
@@ -285,6 +289,8 @@ class WorldActorState:
     known_cells: set[str] = field(default_factory=set)
     visited_cells: set[str] = field(default_factory=set)
     memory: list[dict[str, Any]] = field(default_factory=list)
+    species: str = ""  # 地形通行种族标记；鲛族可进入【水流】格
+    is_illusion: bool = False  # 地图伪装目标；对观察者呈现为普通角色
 
     @property
     def position(self) -> Coord:
@@ -306,6 +312,8 @@ class WorldActorState:
         values["guard_position"] = tuple(guard_position) if guard_position is not None else None
         last_position = values.get("last_position")
         values["last_position"] = tuple(last_position) if last_position is not None else None
+        values.setdefault("species", "")
+        values.setdefault("is_illusion", False)
         values.setdefault("behavior", "explore")
         values.setdefault("owner_actor_id", "")
         values.setdefault("vision_range", 1)
@@ -364,11 +372,14 @@ class WorldState:
     def add_actor(self, actor: WorldActorState) -> None:
         if not actor.actor_id or actor.actor_id in self.actors:
             raise ValueError("单位ID必须非空且唯一")
-        if not self.map.is_passable(actor.position):
+        if not self.map.is_passable(actor.position, actor):
             raise ValueError("单位出生位置必须在可通行格")
         # 同格占位合法；敌对单位是否开战由遭遇检测统一处理。
         actor.visited_cells.add(self.map.key(actor.position))
         self.actors[actor.actor_id] = actor
+        if not actor.is_illusion:
+            self._dispel_illusions_at(actor.position, by_actor_id=actor.actor_id,
+                                      reason="touched_by_character")
         self.record("actor_spawned", actor.actor_id, name=actor.name, kind=actor.kind,
                     position=list(actor.position))
 
@@ -459,11 +470,11 @@ class WorldState:
             # 2026-10-24：若该格四邻全是墙/已被圈层吞掉，它已经无处可撤——
             # 此时必须给一条生路，否则单位会被永久封死在 void 里，
             # 跟随的同伴也就永远跟不上玩家（实跑发现）。
-            if any(self.map.is_passable(neighbor) for neighbor in (
+            if any(self.map.is_passable(neighbor, actor) for neighbor in (
                     (actor.x + 1, actor.y), (actor.x - 1, actor.y),
                     (actor.x, actor.y + 1), (actor.x, actor.y - 1))):
                 continue
-            destination = self._nearest_passable_cell(actor.position)
+            destination = self._nearest_passable_cell(actor.position, actor)
             if destination is None or destination == actor.position:
                 continue
             origin = actor.position
@@ -479,12 +490,12 @@ class WorldState:
                 "caught_actor_ids": [actor.actor_id for actor in caught],
                 "next_shrink_turn": next_turn}
 
-    def _nearest_passable_cell(self, origin: Coord) -> Coord | None:
+    def _nearest_passable_cell(self, origin: Coord, actor: "WorldActorState | None" = None) -> Coord | None:
         """从 origin 向外找最近的可通行格（同距离时取 y、x 较小的）。"""
         width, height = self.map.width, self.map.height
         candidates = [
             (x, y) for y in range(height) for x in range(width)
-            if self.map.is_passable((x, y))
+            if self.map.is_passable((x, y), actor)
         ]
         if not candidates:
             return None
@@ -500,13 +511,22 @@ class WorldState:
         dy = abs(destination[1] - actor.y)
         if dx + dy != 1:
             raise ValueError("每次移动只能到上下左右相邻一格")
-        if not self.map.is_passable(destination):
+        if not self.map.is_passable(destination, actor):
+            if self.map.terrain_at(destination) == "water_current":
+                raise ValueError("【水流】地形仅鲛族可以进入或穿越")
             raise ValueError("目标格不可通行")
         # 世界规则允许多个单位占据同一格；进入同格后立即检查敌对遭遇。
         origin = actor.position
         actor.last_position = origin
         actor.x, actor.y = destination
         actor.visited_cells.add(self.map.key(destination))
+        # 任何真实角色接触地图幻象都会使其消散；施术者离开原格不算接触。
+        if not actor.is_illusion:
+            self._dispel_illusions_at(destination, by_actor_id=actor_id, reason="touched_by_character")
+        else:
+            if any(other.alive and not other.is_illusion and other.actor_id != actor_id
+                   and other.position == destination for other in self.actors.values()):
+                self._dispel_illusions_at(destination, by_actor_id=actor_id, reason="illusion_touched_character")
         self.clock.advance(1)
         shrink = self._shrink_boundary_if_due()
         self.record("actor_moved", actor_id, origin=list(origin), destination=list(destination))
@@ -548,7 +568,7 @@ class WorldState:
         known.add(start)
         for cell in extra_cells or ():
             known.add(cell)
-        if goal not in known or not self.map.is_passable(goal):
+        if goal not in known or not self.map.is_passable(goal, actor):
             return None
         queue = deque([start])
         previous: dict[Coord, Coord | None] = {start: None}
@@ -559,7 +579,7 @@ class WorldState:
             x, y = current
             for nxt in ((x, y - 1), (x, y + 1), (x - 1, y), (x + 1, y)):
                 if (nxt in known and nxt not in previous
-                        and self.map.is_passable(nxt)):
+                        and self.map.is_passable(nxt, actor)):
                     previous[nxt] = current
                     queue.append(nxt)
         if goal not in previous:
@@ -572,9 +592,43 @@ class WorldState:
         path.reverse()
         return path
 
+    def _move_mirage_illusions(self) -> None:
+        """每次世界行动先让蜃景分流，即使施术者此刻进入遭遇也不取消这次移动。"""
+        for actor_id in sorted(self.actors):
+            actor = self.actors[actor_id]
+            if not actor.alive or not actor.is_illusion:
+                continue
+            directions = [(actor.x, actor.y - 1), (actor.x + 1, actor.y),
+                          (actor.x, actor.y + 1), (actor.x - 1, actor.y)]
+            directions = [pos for pos in directions if self.map.is_passable(pos, actor)]
+            # 优先朝空格分流，避免幻象刚生成就与施术者重合并立即消散。
+            unoccupied = [pos for pos in directions
+                          if not any(other.alive and not other.is_illusion
+                                     and other.position == pos for other in self.actors.values())]
+            if unoccupied:
+                directions = unoccupied
+            if not directions:
+                continue
+            route = next((entry for entry in actor.memory
+                          if entry.get("kind") == "mirage_route"), None)
+            direction_index = int(route.get("direction_index", 0)) if route else 0
+            preferred_index = (direction_index + self.clock.turn) % len(directions)
+            ordered = directions[preferred_index:] + directions[:preferred_index]
+            non_backtracking = [pos for pos in ordered if pos != actor.last_position]
+            destination = (non_backtracking or ordered)[0]
+            origin = actor.position
+            actor.last_position = origin
+            actor.x, actor.y = destination
+            actor.visited_cells.add(self.map.key(destination))
+            self.record("actor_moved", actor_id, origin=list(origin),
+                        destination=list(destination), autonomous=True, mirage=True)
+            self._dispel_illusions_at(destination, by_actor_id=actor_id,
+                                      reason="illusion_touched_character")
+
     def _run_autonomous_units(self) -> list[dict[str, Any]]:
         """推进当前世界回合的NPC行动；每个单位只使用自己的可见信息。"""
         generated: list[dict[str, Any]] = []
+        self._move_mirage_illusions()
         # 临时同盟按世界回合到期；即使一次等待跨过多个回合，也不会额外多持续。
         for actor in self.actors.values():
             alliance = next((item for item in actor.memory
@@ -606,7 +660,11 @@ class WorldState:
                 key=lambda aid: (self.actors[aid].y, self.actors[aid].x,
                                 self.actors[aid].name, aid)):
             actor = self.actors[actor_id]
-            if not actor.alive or actor.kind == "player" or actor.mode != "autonomous":
+            if not actor.alive:
+                continue
+            if actor.is_illusion:
+                continue
+            if actor.kind == "player" or actor.mode != "autonomous":
                 continue
             if any(e.active and actor_id in e.participants for e in self.encounters.values()):
                 continue
@@ -647,7 +705,7 @@ class WorldState:
                 if any(e.active and actor_id in e.participants for e in self.encounters.values()):
                     continue
             occupied = {other.position for other in self.actors.values()
-                        if other.alive and other.actor_id != actor_id}
+                        if other.alive and not other.is_illusion and other.actor_id != actor_id}
             candidates = [p for p in self.map.neighbors(actor.position)
                           if p not in occupied]
             if not candidates:
@@ -673,7 +731,7 @@ class WorldState:
             for target_id, entry in latest_sightings.items():
                 goal_pos = (int(entry["position"][0]), int(entry["position"][1]))
                 if (goal_pos == actor.position or not self.map.in_bounds(goal_pos)
-                        or not self.map.is_passable(goal_pos)):
+                        or not self.map.is_passable(goal_pos, actor)):
                     continue
                 remembered_target = WorldActorState(
                     actor_id=target_id, name=str(entry.get("name", "")),
@@ -841,7 +899,7 @@ class WorldState:
                 if destination is None:
                     known_unvisited = sorted(
                         (self.map.parse(key) for key in actor.known_cells
-                         if key not in actor.visited_cells and self.map.is_passable(self.map.parse(key))),
+                         if key not in actor.visited_cells and self.map.is_passable(self.map.parse(key), actor)),
                         key=lambda pos: (abs(pos[0] - actor.x) + abs(pos[1] - actor.y), pos[1], pos[0]))
                     for goal in known_unvisited:
                         path = self._find_known_path(actor_id, actor.position, goal)
@@ -864,7 +922,12 @@ class WorldState:
             actor.visited_cells.add(self.map.key(destination))
             self.record("actor_moved", actor_id, origin=list(origin),
                         destination=list(destination), autonomous=True)
+            # NPC接触幻象同样会使其消散，不限于敌对阵营或玩家手动移动。
+            self._dispel_illusions_at(destination, by_actor_id=actor_id,
+                                      reason="touched_by_character")
             self._append_trail(actor_id, destination)
+            if actor.faction in {"monster", "enemy"}:
+                self._dispel_illusions_at(destination, by_actor_id=actor_id, reason="reached_by_hostile")
             self.visible_cells(actor_id)
             generated.append({"type": "actor_moved", "actor_id": actor_id,
                               "from": list(origin), "to": list(destination)})
@@ -895,7 +958,7 @@ class WorldState:
         创建数个互相锁死的战斗。相邻的其他敌人会在当前遭遇结束后再被登记。
         """
         created: list[str] = []
-        living = [a for a in self.actors.values() if a.alive]
+        living = [a for a in self.actors.values() if a.alive and not a.is_illusion]
         engaged_ids = {
             participant_id
             for encounter in self.encounters.values() if encounter.active
@@ -963,7 +1026,7 @@ class WorldState:
         actor = self._living_actor(actor_id)
         interactions: list[dict[str, Any]] = []
         for other in self.actors.values():
-            if not other.alive or other.actor_id == actor_id:
+            if not other.alive or other.actor_id == actor_id or other.is_illusion:
                 continue
             was_adjacent = abs(other.x - origin[0]) + abs(other.y - origin[1]) == 1
             is_adjacent = abs(other.x - actor.x) + abs(other.y - actor.y) == 1
@@ -1002,12 +1065,47 @@ class WorldState:
                 break
         return self.clock.turn
 
+    def _dispel_illusions_at(self, position: Coord, *, by_actor_id: str, reason: str) -> list[str]:
+        """敌对单位抵达幻象所在格时，幻象消散，但不会触发战斗或死亡结算。"""
+        dispelled = []
+        trigger = self.actors.get(by_actor_id)
+        # 幻象自身移动到格子上时，只有该格有真实角色才算接触。
+        if trigger is not None and trigger.is_illusion:
+            if not any(other.alive and not other.is_illusion and other.actor_id != by_actor_id
+                       and other.position == position for other in self.actors.values()):
+                return []
+        dispelled = []
+        for actor in self.actors.values():
+            if actor.alive and actor.is_illusion and actor.position == position:
+                actor.alive = False
+                dispelled.append(actor.actor_id)
+                self.record("mirage_dispersed", actor.actor_id, owner_actor_id=actor.owner_actor_id,
+                            by_actor_id=by_actor_id, position=list(position), reason=reason)
+        if dispelled:
+            self.map.version += 1
+        return dispelled
+
+    def _clear_illusions_for_owner(self, owner_actor_id: str, *, reason: str) -> list[str]:
+        """施术者死亡时清除其全部地图蜃景。"""
+        dispelled = []
+        for actor in self.actors.values():
+            if actor.alive and actor.is_illusion and actor.owner_actor_id == owner_actor_id:
+                actor.alive = False
+                dispelled.append(actor.actor_id)
+                self.record("mirage_dispersed", actor.actor_id, owner_actor_id=owner_actor_id,
+                            position=list(actor.position), reason=reason)
+        if dispelled:
+            self.map.version += 1
+        return dispelled
+
     def start_encounter(self, participant_ids: list[str], location: Coord) -> EncounterState:
         unique = list(dict.fromkeys(participant_ids))
         if len(unique) < 2:
             raise ValueError("遭遇至少需要两个不同单位")
         for actor_id in unique:
-            self._living_actor(actor_id)
+            participant = self._living_actor(actor_id)
+            if participant.is_illusion:
+                raise ValueError("地图幻象不能成为战斗参与者")
         if not self.map.in_bounds(location):
             raise ValueError("遭遇地点超出地图")
         is_final_duel = (self.final_duel_search

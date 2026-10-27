@@ -718,6 +718,38 @@ class DaoWenEngine:
         }
     
 
+    @staticmethod
+    def calculate_chao(x: int) -> dict:
+        """唤潮X：支付法力X，在开放地图中将自身周围X个可用格改为水流地形。"""
+        return {"dao_wen": "唤潮", "x": x, "cost_type": CostType.MANA.value,
+                "cost": x, "map_terrain": "water_current",
+                "summary": f"支付：{x}法力，在开放地图周围设置{x}格水流地形"}
+
+    @staticmethod
+    def calculate_shenjing(x: int) -> dict:
+        """蜃景X：支付法力10X，在开放地图施术者所在格创造X个地图幻象。"""
+        return {"dao_wen": "蜃景", "x": x, "cost_type": CostType.MANA.value,
+                "cost": 10 * x, "map_illusions": x,
+                "summary": f"支付：{10*x}法力，在开放地图创造{x}个地图幻象"}
+
+    @staticmethod
+    def calculate_ningzhi(x: int, target: Entity = None, status_name: str = "") -> dict:
+        """凝滞X：支付法力5X。使[目标]身上一种有限持续效果的剩余回合数+X。"""
+        if target is None:
+            raise ValueError("凝滞必须显式选择目标")
+        if not status_name:
+            raise ValueError("凝滞必须提交status_name，指定要延长的状态")
+        status = next((s for s in target.status_effects if s.name == status_name), None)
+        if status is None:
+            raise ValueError(f"目标{target.name}没有状态：{status_name}")
+        if status.remaining_rounds <= 0:
+            raise ValueError(f"状态{status_name}没有可延长的有限剩余回合数")
+        return {
+            "dao_wen": "凝滞", "x": x, "cost_type": CostType.MANA.value,
+            "cost": 5 * x, "rounds_delta": x, "status_name": status_name,
+            "summary": f"支付：{5*x}法力，使{target.name}的状态【{status_name}】剩余回合数+{x}",
+        }
+
     # ========== 乱葬岗（二阶）专属道纹 ==========
 
     @staticmethod
@@ -871,6 +903,10 @@ class DaoWenEngine:
             "龙鳞": cls.calculate_longlin,
             "裂变": cls.calculate_liebian,
             "背负": cls.calculate_beifu,
+            # ---- 沉沦海（二阶）----
+            "唤潮": cls.calculate_chao,
+            "蜃景": cls.calculate_shenjing,
+            "凝滞": cls.calculate_ningzhi,
             # ---- 乱葬岗（二阶）----
             "分裂": cls.calculate_fenlie,
             "瓦解": cls.calculate_wajie,
@@ -1044,6 +1080,16 @@ class ResonanceEngine:
             ("勾魂", "曲解", RESERVED_SLOT),
             (RESERVED_SLOT, "曲解", "招魂"),
             ("招魂", "转换", "分裂"),
+        ],
+        "沉沦海闭环": [
+            ("流动", "转换", "映照"),
+            ("映照", "转换", "扩散"),
+            ("扩散", "反转", "遗忘"),
+            ("遗忘", "曲解", "唤潮"),
+            ("唤潮", "反转", "蜃景"),
+            ("蜃景", "曲解", "凝滞"),
+            ("凝滞", "曲解", "回响"),
+            ("回响", "转换", "流动"),
         ],
         # ---- 原始怪物道纹 → 转化道纹（规则正文）----
         # 非闭环，是以原始道纹为根的分支树；怪物面板上的道纹多属此类，
