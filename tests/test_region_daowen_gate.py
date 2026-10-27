@@ -96,7 +96,7 @@ def test_can_learn_same_region_after_owning_one():
     e.state.player.dao_wen["裂变"] = DaoWenInstance(
         DaoWen(name="裂变", formula="", cost_type="消耗",
                cost_formula="X", effect_formula=""))
-    for dw in ("加害", "龙鳞"):
+    for dw in ("龙鳞", "背负"):
         assert _learn(e, dw)["success"], f"同副本专属道纹{dw}应可学习"
 
 
@@ -136,7 +136,7 @@ def test_rejected_monster_daowen_refunds_energy():
 def test_first_exclusive_cannot_be_learned_directly():
     """边界：未持有任何本副本专属道纹时，不能直接学习第一个"""
     e = _engine("龙心谷")
-    r = _learn(e, "加害")
+    r = _learn(e, "龙鳞")
     assert not r["success"]
     assert "残韵" in r["error"]
 
