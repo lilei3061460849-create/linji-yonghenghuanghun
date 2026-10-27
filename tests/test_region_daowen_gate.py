@@ -58,22 +58,24 @@ def test_race_exclusive_daowen_are_not_learnable_from_generic_pool():
     assert "鲛族专属道纹" in learnability_error("蜃景", owned=set(), region="龙心谷", known=known)
 
 
-def test_disaster_ward_is_bloodline_exclusive():
+def test_disaster_ward_is_retired_and_replaced_by_consumable():
+    from engine.daowen import DaoWenEngine
     from engine.gamedata import learnability_error
-
-    assert "消灾" in BLOODLINE_EXCLUSIVE_DAOWEN
-    assert all("消灾" not in pool for pool in REGION_EXCLUSIVE_DAOWEN.values())
     from pathlib import Path
-    crime_doc = Path(__file__).resolve().parents[1] / "副本" / "罪孽都市.md"
-    crime_text = crime_doc.read_text(encoding="utf-8")
+
+    DaoWenEngine.register_all()
+    assert "消灾" not in DaoWenEngine._registry
+    assert "消灾" not in BLOODLINE_EXCLUSIVE_DAOWEN
+    assert all("消灾" not in pool for pool in REGION_EXCLUSIVE_DAOWEN.values())
+    root = Path(__file__).resolve().parents[1]
+    crime_text = (root / "副本" / "罪孽都市.md").read_text(encoding="utf-8")
     loop = next(line for line in crime_text.splitlines() if "⇄" in line)
     assert "消灾" not in loop
     assert "通缉犯（66/4/3，假钞）" in crime_text
-    known = {"消灾"}
-    error = learnability_error("消灾", owned=set(), region="罪孽都市", known=known)
-    assert "血族专属道纹" in error
-    other_error = learnability_error("消灾", owned=set(), region="龙心谷", known=known)
-    assert "血族专属道纹" in other_error
+    item_index = (root / "物品索引.md").read_text(encoding="utf-8")
+    assert "### 逆命筹" in item_index
+    error = learnability_error("消灾", owned=set(), region="罪孽都市", known=set(DaoWenEngine._registry))
+    assert "未知道纹" in error
 
 
 def test_wave_is_sunken_sea_exclusive():
