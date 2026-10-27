@@ -172,6 +172,7 @@ def test_jiahai_guzhi_and_anger_consumable():
     2026-10-11 用户令：【借力】已删除，原「借力2 → _jieli_boost +20%」段落一并移除。
     """
     engine = _engine("hooks")
+    assert "愤怒" not in DaoWenEngine._registry
     p = engine.state.player
     for n in ("加害", "固执"):
         _give(p, n)
