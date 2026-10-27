@@ -321,7 +321,8 @@ for race, pool in RACE_EXCLUSIVE_DAOWEN.items():
             note_lines=[f"仅通过{race}专属机制获得；不计入任何副本专属学习池。"])
 
 section(f"血族专属（{len(BLOODLINE_EXCLUSIVE_DAOWEN)}）", sorted(BLOODLINE_EXCLUSIVE_DAOWEN),
-        note_lines=["仅通过血族专属机制获得；不计入任何副本专属学习池。"])
+        note_lines=["仅通过血族专属机制获得；不计入任何副本专属学习池。",
+                    "血族专属获取机制尚未接入；当前不可通过局外学习、【典当】发现或残韵获得。"])
 
 section(f"初拥专属（{len(FIRST_EMBRACE_DAOWEN)}）", sorted(FIRST_EMBRACE_DAOWEN),
         note_lines=["初拥之夜专属道纹：仅由对应初拥选项授予，不可通过局外学习、【典当】发现或残韵获得。"])
