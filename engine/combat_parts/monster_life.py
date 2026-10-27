@@ -236,6 +236,9 @@ class MonsterLifeMixin:
         """救赎：通常要求残血且没有原始怪物道纹（全力／疯狂／减速／必中）；自由结晶可强制触发。"""
         if monster is None or monster.entity_type != "怪物" or not monster.is_alive:
             return None
+        # 烬翼【熄事】本回合抑制所有落在该角色身上的特殊事件，救赎（含自由结晶强制救赎）也不例外。
+        if self.state.suppresses_special_events(monster):
+            return None
         if monster.is_sculptured or monster.is_proliferated or monster.is_debt_bound:
             return None
         if getattr(monster, "removed_without_kill", False):
