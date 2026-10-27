@@ -1,6 +1,6 @@
 """资源设计标准的机械护栏（2026-10-23 用户裁定落地）。
 
-四类资源的资格与结构写在《AI知识库》「【二、资源设计标准】」：
+四类资源的类型定义与结构写在《规则正文》「基础定义」；《AI_EXPERIENCE.md》只保留新增资源资格与资源转换标准：
 
 - 新增资格（道纹／遗物／法器）：现有任何资源都无法实现的效果，才有资格新增资源。消耗品不受此限制。
 - 道纹：名称仅二字；默认局内发动，局外须条文**明示**；必有 X，X 只能提升强度或持续时间。
@@ -211,15 +211,24 @@ def test_artifact_section_exists_and_entries_are_unique():
 
 # ==================== 消耗品：不耗出手 / 主被动均可 ====================
 
-def test_consumable_rules_text_keeps_no_action_and_passive_capability():
-    """消耗品口径：不消耗出手（正文）＋主／被动均可当场设计（知识库）。"""
+def test_four_resource_type_definitions_live_in_rules_text():
+    """四类资源的类型定义统一以《规则正文》为事实源，知识库只保留跨类型设计原则。"""
     rules = RULES_TEXT.read_text(encoding="utf-8")
+    assert "**道纹：**" in rules and "必有 X 变量" in rules and "无触发时机" in rules
+    assert "**遗物：**" in rules and "不得自带第二种货币" in rules
+    assert "**法器：**" in rules and "明确且独特的效果" in rules
+    assert "**消耗品：**" in rules and "主动与被动均可生效" in rules
     assert "使用时不消耗出手" in rules
     assert "消耗品（X/Y）" in rules
+
     knowledge = KNOWLEDGE.read_text(encoding="utf-8")
-    assert "主动与被动均可生效" in knowledge
-    assert "不消耗出手" in knowledge
-    assert "当场设计" in knowledge
+    assert "现有资源无论如何组合都无法实现的效果" in knowledge
+    assert "资源转换标准" in knowledge
+    # 类型定义不得在知识库重复维护。
+    assert "- **道纹：" not in knowledge
+    assert "- **遗物：" not in knowledge
+    assert "- **法器：" not in knowledge
+    assert "- **消耗品：" not in knowledge
 
 
 def test_consumable_without_registered_handler_is_rejected(engine):
