@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
 from engine.daowen import DaoWenEngine
-from engine.models import DaoWen, DaoWenInstance, Entity, Relic, StatusEffect
+from engine.models import Consumable, DaoWen, DaoWenInstance, Entity, Relic, StatusEffect
 
 
 def _engine(suffix):
@@ -166,14 +166,14 @@ def test_boba_boundary_and_invalid_submissions():
 
 
 
-def test_jiahai_guzhi_fennu():
-    """加害挂目标加伤；固执单次掉 1；愤怒法力减半。
+def test_jiahai_guzhi_and_anger_consumable():
+    """加害挂目标加伤；固执单次掉 1；怒火针固定持续2回合并使法力消耗减半。
 
     2026-10-11 用户令：【借力】已删除，原「借力2 → _jieli_boost +20%」段落一并移除。
     """
     engine = _engine("hooks")
     p = engine.state.player
-    for n in ("加害", "固执", "愤怒"):
+    for n in ("加害", "固执"):
         _give(p, n)
     m = _monster(engine, ap=10)
     engine.execute_action("round_start", {})
@@ -196,11 +196,23 @@ def test_jiahai_guzhi_fennu():
     assert d3["actual_damage"] == 1
     assert p.current_hp == 48
 
-    engine.execute_action("use_daowen", {"daowen_name": "愤怒", "x": 2, "target": p.name})
-    assert p.has_status("愤怒")
-    mana = p.current_mana
-    assert p.spend_mana(10) is True
-    assert p.current_mana == mana - 5
+    item = Consumable(name="怒火针", effect="使目标法力消耗减半，持续2回合",
+                       current_uses=1, max_uses=1)
+    engine.state.consumables.append(item)
+    player_ref = next(ref for ref, entity in engine.combat._combat_entity_refs().items()
+                      if entity is p)
+    try:
+        used = engine.execute_action("consume_item", {
+            "name": "怒火针", "target_ref": player_ref,
+        })
+        assert used["success"], used
+        assert item.current_uses == 0
+        assert p.has_status("愤怒")
+        mana = p.current_mana
+        assert p.spend_mana(10) is True
+        assert p.current_mana == mana - 5
+    finally:
+        engine.state.consumables.remove(item)
 
 
 
