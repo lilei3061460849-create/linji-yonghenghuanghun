@@ -224,6 +224,9 @@ class GameEngine:
             key: actor for key, actor in world_payload.get("actors", {}).items()
             if key in visible_actor_ids
         }
+        # 地图幻象必须在观察数据中与施术者保持同样的可见身份，不暴露内部标记。
+        for actor_payload in world_payload["actors"].values():
+            actor_payload.pop("is_illusion", None)
         world_payload["encounters"] = {
             key: encounter for key, encounter in world_payload.get("encounters", {}).items()
             if player.actor_id in encounter.get("participants", [])
@@ -611,6 +614,11 @@ class GameEngine:
                                 "params_schema": {"daowen_name": "唤潮", "x": "1..8",
                                                   "terrain_cells": "恰好X个周围坐标，每项{x,y}或[x,y]"},
                                 "note": "仅在开放地图发动；支付X法力，将自身周围X个可用格改为水流地形，只有鲛族可通行"})
+            if player is not None and "蜃景" in player.dao_wen:
+                actions.append({"action_type": "use_daowen", "available": True,
+                                "params_schema": {"daowen_name": "蜃景", "x": "1..8",
+                                                  "illusion_cells": "恰好X个自身周围可用坐标，每项{x,y}或[x,y]"},
+                                "note": "仅在开放地图发动；支付10X法力，创造X个外观与自身相同的地图幻象；进入战斗时自动消散"})
             actions.extend([
                 {"action_type": "world_status", "params_schema": {}},
                 {"action_type": "world_vision", "params_schema": {"actor_id": "optional; defaults to player"}},
@@ -5230,7 +5238,7 @@ class GameEngine:
             created = []
             for idx, pos in enumerate(parsed, start=1):
                 illusion = WorldActorState(
-                    actor_id=f"mirage-{player_actor.actor_id}-{world.clock.turn}-{world.next_event_id}-{idx}",
+                    actor_id=f"world-{uuid.uuid4().hex}",
                     name=player_actor.name, kind=player_actor.kind, x=pos[0], y=pos[1],
                     alive=True, faction=player_actor.faction, mode="passive",
                     owner_actor_id=player_actor.actor_id,
