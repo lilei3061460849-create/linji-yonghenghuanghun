@@ -28,6 +28,14 @@ def bind_resources(state):
             "relics": state.relics, "consumables": state.consumables,
             "artifacts": list(state.artifacts_owned) + list(state.artifacts)}
 
+    if getattr(state, "in_final_duel", False):
+        leader = next((e for e in state.enemies if e.entity_type == "轮回者"), None)
+        if leader is not None:
+            leader._page_resources = {
+                "relics": list(leader.relics) + list(state.opponent_relics),
+                "consumables": leader.consumables,
+                "artifacts": list(leader.artifacts) + list(state.opponent_artifacts_owned)}
+
 
 def can_accept(entity, kind, name):
     keys = resource_keys(entity)

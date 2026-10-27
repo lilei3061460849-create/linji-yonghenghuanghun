@@ -104,3 +104,26 @@ def test_legacy_overload_is_not_confiscated_but_cannot_grow(tmp_path):
     assert growth_error(e.state, before) is None
     grant_dw(p, "13")
     assert growth_error(e.state, before)
+
+
+def test_player_map_full_pages_does_not_roll_back_movement(tmp_path):
+    e = engine(tmp_path)
+    world, npc = pickup_world(e)
+    p = e.state.player
+    for i in range(10): grant_dw(p, str(i))
+    world.actors[npc.runtime_id].x, world.actors[npc.runtime_id].y = 6, 6
+    world.actors[p.runtime_id].x = 2
+    e.state.world_state = world.to_dict()
+    result = e.execute_action("world_move", {"x": 3, "y": 1})
+    assert result["success"], result
+    assert not e.state.consumables
+    assert e.state.world_state["clock"]["turn"] == 1
+    assert e.state.world_state["map"]["locations"]["consumable_1"]["active"]
+
+
+def test_full_player_consumables_are_not_lost_in_character_snapshot(tmp_path):
+    e = engine(tmp_path)
+    e.state.consumables = [Consumable("破障晶", "", 1, 2)]
+    p = e._deserialize_entity_full(e._serialize_entity_full(e.state.player))
+    assert p.consumables[0].name == "破障晶" and p.consumables[0].current_uses == 1
+    assert p.pages_used == 1

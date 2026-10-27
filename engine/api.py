@@ -4448,7 +4448,7 @@ class GameEngine:
                 self.state.energy += 1
                 return {"success": False, "error": "碎片不足15"}
             # 2026-10-27：获得由事务层统一按死者之页校验，
-            # 自选照常扣费拿取，启用与否由 note_relic_gained 按当前生效数归类。
+            # 页数不足时整个行动回滚；合法获得默认启用。
             self.state.shards -= 15
             self.state.energy -= 1
             relic = self.state.relics_pool.pop(idx)
@@ -8093,7 +8093,9 @@ class GameEngine:
             "death_page_count": e.load_capacity,
             "artifacts": list(getattr(e, "artifacts", [])),
             "relics": [r.to_dict() for r in e.relics],
-            "consumables": [dataclasses.asdict(item) for item in getattr(e, "consumables", [])],
+            "consumables": [dataclasses.asdict(item) for item in
+                            (self.state.consumables if e is self.state.player
+                             else getattr(e, "consumables", []))],
             "status_effects": [{"name": s.name, "value": s.value,
                                  "remaining_rounds": s.remaining_rounds, "source": s.source,
                                  "scope": s.scope, "polarity": s.polarity,
