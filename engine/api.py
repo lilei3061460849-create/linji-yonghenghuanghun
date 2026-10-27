@@ -616,8 +616,8 @@ class GameEngine:
                                 "note": "仅在开放地图发动；支付X法力，将自身周围X个可用格改为水流地形，只有鲛族可通行"})
             if player is not None and "蜃景" in player.dao_wen:
                 actions.append({"action_type": "use_daowen", "available": True,
-                                "params_schema": {"daowen_name": "蜃景", "x": "1..8",
-                                                  "note": "不需要提交幻象坐标"},
+                                "params_schema": {"daowen_name": "蜃景",
+                                                  "x": "1..8；幻象自动在施术者当前格生成"},
                                 "note": "仅在开放地图发动；支付10X法力，在自身所在格创造X个外观相同的地图幻象；幻象自主分流，被其他角色接触或施术者死亡时消散"})
             actions.extend([
                 {"action_type": "world_status", "params_schema": {}},
@@ -1846,6 +1846,10 @@ class GameEngine:
             entity.is_neutral = actor.faction == "neutral"
             # 实体命零/永久离场必须同步到地图单位，否则死者会继续移动或触发遭遇。
             actor.alive = bool(entity.is_alive and not entity.is_departed)
+        # 蜃景只在施术者死亡时整体清除；进入战斗不影响幻象存续。
+        for actor in world.actors.values():
+            if actor.kind == "player" and not actor.alive:
+                world._clear_illusions_for_owner(actor.actor_id, reason="caster_died")
         self._record_world_entity_outcomes(world)
 
     def _open_adjacent_merchant_session(self, world: WorldState) -> bool:
