@@ -313,8 +313,10 @@ def test_chengni_advances_target_rounds_without_advancing_world_time():
         "dodge": False, "blood_shadow": False,
     })
     assert result["success"], result
-    assert engine.state.current_round == before_round + 1
+    assert engine.state.current_round == before_round
     assert target.get_status_effects("测试增益")[0].remaining_rounds == 1
+    assert target.no_action_rounds == 1
+    assert target.no_damage_rounds == 1
     assert any(e.get("type") == "extra_target_round" for e in result["execution"]["effects"])
 
 
