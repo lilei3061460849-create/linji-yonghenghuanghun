@@ -1178,6 +1178,19 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
             expired = entity.tick_status_effects()
             if expired:
+                # 【增殖】到期后恢复基础血限；若当前生命超出基础血限，按恢复后的血限封顶。
+                if "无限血限" in expired and not self.state.hp_overflow_exempt(entity):
+                    before_hp = entity.current_hp
+                    entity.current_hp = min(entity.current_hp, entity.blood_limit)
+                    if entity.current_hp <= 0 and entity.is_alive:
+                        self._check_hp_zero_death(entity)
+                    effects.append({
+                        "type": "infinite_blood_limit_expired",
+                        "entity": entity.name,
+                        "blood_limit": entity.blood_limit,
+                        "hp_before": before_hp,
+                        "hp_after": entity.current_hp,
+                    })
                 # 只有“持续期间直接改写面板”的效果到期即还原；畸变/伤痕等
                 # 已经产生的累计局内后果保留到战终，再由battle作用域统一回滚。
                 panel_modifier_sources = {"全力", "弱化"}
