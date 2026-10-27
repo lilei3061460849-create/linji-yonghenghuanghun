@@ -50,6 +50,14 @@ def test_common_daowen_always_learnable():
         assert _learn(e, dw)["success"], f"通用道纹{dw}应可学习"
 
 
+def test_race_exclusive_daowen_are_not_learnable_from_generic_pool():
+    from engine.gamedata import learnability_error
+
+    known = {"唤潮", "蜃景"}
+    assert "鲛族专属道纹" in learnability_error("唤潮", owned=set(), region="沉沦海", known=known)
+    assert "鲛族专属道纹" in learnability_error("蜃景", owned=set(), region="龙心谷", known=known)
+
+
 def test_wave_is_sunken_sea_exclusive():
     """【波及】已迁入沉沦海：其它副本拒绝，持有沉沦海道纹后可学习。"""
     other = _engine("龙心谷")
