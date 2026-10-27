@@ -29,7 +29,7 @@ import math
 from ..combat_events import CombatEventType
 from ..models import StatusEffect
 from ..rule_engine import (
-    DAOWEN_RULES, DamageResolutionContext, RULE_EXECUTOR, rule_matches,
+    DAOWEN_RULES, STATUS_DAMAGE_RULES, DamageResolutionContext, RULE_EXECUTOR, rule_matches,
 )
 from .conditions import (
     all_, any_, damage_type_not, entity_type, has_status, is_alive,
@@ -97,8 +97,12 @@ def _rule_effect(rule):
 
 
 def _numeric_rule_mechanism(name: str) -> Mechanism:
-    definition = DAOWEN_RULES[name]
-    rule = definition.rules[0]
+    if name == "加害":
+        # 【加害】不再是道纹；只保留由消耗品【灼罪钉】施加的状态结算。
+        rule = next(rule for rule in STATUS_DAMAGE_RULES if rule.status_name == name)
+    else:
+        definition = DAOWEN_RULES[name]
+        rule = definition.rules[0]
     return Mechanism(
         name=name,
         when=Trigger.phase(Phase.INCOMING_ADJUST),
@@ -112,8 +116,8 @@ def _numeric_rule_mechanism(name: str) -> Mechanism:
 
 
 
-# 数值事实与运行时摘要共用 engine.rule_engine.DAOWEN_RULES；这里仅保留
-# MechanismHookAdapter 兼容壳，不另写条件、运算或组合配方。
+# 道纹数值事实共用 engine.rule_engine.DAOWEN_RULES；【加害】只桥接消耗品施加的同名状态。
+# 这里仅保留 MechanismHookAdapter 兼容壳，不另写条件、运算或组合配方。
 JIAHAI = _numeric_rule_mechanism("加害")
 LONGLIN = _numeric_rule_mechanism("龙鳞")
 GUZHI = _numeric_rule_mechanism("固执")
