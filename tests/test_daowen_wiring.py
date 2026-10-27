@@ -268,3 +268,31 @@ def test_flight_rule_line_matches_the_engine():
     p.is_flying = True
     assert engine.combat.is_targetable(p, m) is True, "飞行者可以选地面目标"
     assert engine.combat.is_targetable(m, p) is False, "非飞行者不能选飞行目标"
+
+
+def test_zengzhi_grants_temporary_infinite_blood_limit_and_bypasses_cancer():
+    """增殖X：支付流血10X，目标血限暂时视为无限；有限回复不触发癌变。"""
+    engine = _engine("zengzhi_infinite_blood")
+    p = engine.state.player
+    _give(p, "增殖")
+    target = _monster(engine, "增殖靶怪", hp=100)
+    engine.execute_action("round_start", {})
+
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "增殖", "x": 1, "target": target.name,
+    })
+    assert result["success"], result
+    assert target.has_status("无限血限")
+    assert target.to_dict()["blood_limit"] == "∞"
+    assert engine.combat.cancer_threshold_of(target) == 0
+
+    heal = engine.state.apply_heal(target, 300)
+    assert heal["hp_after"] == 400
+    assert target.total_healed == 300
+    assert engine.combat.check_cancer(target) is None
+    assert "癌变（300/∞）" in target.lethal_progress()
+
+    # 增殖到期时撤销无限血限，超出基础血限的生命同步封顶。
+    target.tick_status_effects()
+    assert not target.has_status("无限血限")
+    assert target.current_hp == 400  # 到期钳位由战斗回合结算器执行
