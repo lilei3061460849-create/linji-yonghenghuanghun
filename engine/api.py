@@ -735,6 +735,9 @@ class GameEngine:
             "note": "结束本场战斗，恢复到战始前状态，并按当前规则重新开始本场战斗；不保留本场战斗结果",
         }]
         for name, instance in player.dao_wen.items():
+            # 【唤潮】是开放地图地形道纹，不在战斗行动列表里显示。
+            if name == "唤潮":
+                continue
             # 已定义【镇魔印】后，【封印】由法术流程自动发动，
             # 不再作为主动道纹候选；仅持有【封印】时仍照常显示。
             if (name == "封印" and player.entity_type == "轮回者"
