@@ -617,8 +617,8 @@ class GameEngine:
             if player is not None and "蜃景" in player.dao_wen:
                 actions.append({"action_type": "use_daowen", "available": True,
                                 "params_schema": {"daowen_name": "蜃景", "x": "1..8",
-                                                  "illusion_cells": "恰好X个自身周围可用坐标，每项{x,y}或[x,y]"},
-                                "note": "仅在开放地图发动；支付10X法力，创造X个外观与自身相同的地图幻象；进入战斗时自动消散"})
+                                                  "note": "不需要提交幻象坐标"},
+                                "note": "仅在开放地图发动；支付10X法力，在自身所在格创造X个外观相同的地图幻象；幻象自主分流，被其他角色接触或施术者死亡时消散"})
             actions.extend([
                 {"action_type": "world_status", "params_schema": {}},
                 {"action_type": "world_vision", "params_schema": {"actor_id": "optional; defaults to player"}},
@@ -5180,7 +5180,7 @@ class GameEngine:
             return {"success": False, "error": str(exc)}
 
     def _action_shenjing(self, params: dict, actor: Entity) -> dict:
-        """蜃景X：在开放地图放置X个玩家伪装目标；进入战斗时自动消散。"""
+        """蜃景X：在施术者所在格创造X个地图幻象；幻象自主分流，接触或施术者死亡时消散。"""
         if not self.state.world_state or self.state.phase == GamePhase.IN_COMBAT.value:
             return {"success": False, "error": "蜃景只能在没有进行战斗遭遇的开放地图中发动"}
         if actor is not self.state.player:
@@ -5205,30 +5205,8 @@ class GameEngine:
             if player_actor is None:
                 return {"success": False, "error": "开放地图中找不到轮回者位置"}
             player_actor.species = "鲛族" if self._entity_is_merfolk(actor) else ""
-            cells = params.get("illusion_cells")
-            if not isinstance(cells, list) or len(cells) != x:
-                return {"success": False, "error": f"蜃景X={x}必须提交恰好{x}个illusion_cells坐标"}
-            parsed = []
-            for cell in cells:
-                if isinstance(cell, dict):
-                    cx, cy = cell.get("x"), cell.get("y")
-                elif isinstance(cell, (list, tuple)) and len(cell) == 2:
-                    cx, cy = cell
-                else:
-                    return {"success": False, "error": "illusion_cells每项必须是{x,y}或[x,y]"}
-                if (not isinstance(cx, int) or isinstance(cx, bool)
-                        or not isinstance(cy, int) or isinstance(cy, bool)):
-                    return {"success": False, "error": "蜃景坐标必须为整数"}
-                pos = (cx, cy)
-                if pos in parsed:
-                    return {"success": False, "error": "illusion_cells不能包含重复坐标"}
-                if abs(cx - player_actor.x) > 1 or abs(cy - player_actor.y) > 1 or pos == player_actor.position:
-                    return {"success": False, "error": "蜃景只能放置在自身周围八格"}
-                if not world.map.is_passable(pos, player_actor):
-                    return {"success": False, "error": f"坐标{pos}不是可用地图格"}
-                if any(a.alive and a.position == pos for a in world.actors.values()):
-                    return {"success": False, "error": f"坐标{pos}已有单位，不能放置幻象"}
-                parsed.append(pos)
+            # 所有幻象都与施术者重叠生成，随后各自朝不同方向自主移动。
+            parsed = [player_actor.position] * x
             try:
                 calc = DaoWenEngine.resolve("蜃景", x, target=actor, caster=actor)
             except Exception as exc:
@@ -5241,9 +5219,10 @@ class GameEngine:
                 illusion = WorldActorState(
                     actor_id=f"world-{uuid.uuid4().hex}",
                     name=player_actor.name, kind=player_actor.kind, x=pos[0], y=pos[1],
-                    alive=True, faction=player_actor.faction, mode="passive",
+                    alive=True, faction=player_actor.faction, mode="autonomous",
                     owner_actor_id=player_actor.actor_id,
                     vision_range=player_actor.vision_range, species=player_actor.species,
+                    memory=[{"kind": "mirage_route", "direction_index": idx - 1}],
                     is_illusion=True)
                 world.add_actor(illusion)
                 created.append({"actor_id": illusion.actor_id, "position": list(pos)})
@@ -5254,7 +5233,7 @@ class GameEngine:
             return {"success": True, "action": f"发动道纹【蜃景X={x}】",
                     "result": {"illusions": created, "count": len(created),
                                "mana_cost": 10 * x, "current_mana": actor.current_mana,
-                               "behavior": "地图伪装目标；施术者进入战斗时消散"}}
+                               "behavior": "同格生成后自主分流；被其他角色接触或施术者死亡时消散"}}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
