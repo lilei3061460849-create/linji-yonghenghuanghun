@@ -21,7 +21,7 @@ RELICIZED_SLOT = "？？"
 PLACEHOLDER_SLOTS = frozenset({RESERVED_SLOT, RELICIZED_SLOT})
 RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-    "冥气", "退化", "畸变", "缄默", "加害",
+    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞",
 )}
 
 
@@ -650,19 +650,6 @@ class DaoWenEngine:
     # ---- 龙心谷专属道纹 ----
     
     @staticmethod
-    def calculate_longlin(x: int, target: Entity = None) -> dict:
-        """龙鳞X：支付：法力2X。数值规则见 engine.rule_engine.DAOWEN_RULES。"""
-        definition = get_daowen_rule("龙鳞")
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "龙鳞", "x": x, "cost_type": definition.cost_type,
-            "cost": definition.cost(x),
-            "damage_reduction": x, "duration": definition.duration.value(x),
-            "summary": definition.summary(x, target_name=target_name),
-        }
-
-
-    @staticmethod
     def calculate_liebian(x: int, target: Entity = None) -> dict:
         """裂变X：支付：法力2X。使目标受到伤害改为分X次结算，持续∞"""
         target_name = target.name if target is not None else "未选定目标"
@@ -859,7 +846,6 @@ class DaoWenEngine:
             "勒索": cls.calculate_lesuo,
             "假钞": cls.calculate_jiachao,
             # 龙心谷
-            "龙鳞": cls.calculate_longlin,
             "裂变": cls.calculate_liebian,
             "背负": cls.calculate_beifu,
             # ---- 沉沦海（二阶）----
@@ -1017,8 +1003,8 @@ class ResonanceEngine:
             ("点金", "反转", "勒索"),
         ],
         "龙心谷闭环": [
-            (RELICIZED_DAOWEN_SLOTS["加害"], "反转", "龙鳞"),
-            ("龙鳞", "曲解", RELICIZED_DAOWEN_SLOTS["逆鳞"]),
+            (RELICIZED_DAOWEN_SLOTS["加害"], "反转", RELICIZED_DAOWEN_SLOTS["龙鳞"]),
+            (RELICIZED_DAOWEN_SLOTS["龙鳞"], "曲解", RELICIZED_DAOWEN_SLOTS["逆鳞"]),
             (RELICIZED_DAOWEN_SLOTS["逆鳞"], "转换", "裂变"),
             # 2026-10-11 用户令（A13）：【嫁祸】整条删除（效果与遗物【贪婪契约】重复）
             #   → 沿用活血/尸爆的删除先例：断边**重连**为 裂变—转换→背负，环长 7→6。

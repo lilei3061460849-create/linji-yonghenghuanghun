@@ -119,7 +119,14 @@ def _numeric_rule_mechanism(name: str) -> Mechanism:
 # 道纹数值事实共用 engine.rule_engine.DAOWEN_RULES；【加害】只桥接消耗品施加的同名状态。
 # 这里仅保留 MechanismHookAdapter 兼容壳，不另写条件、运算或组合配方。
 JIAHAI = _numeric_rule_mechanism("加害")
-LONGLIN = _numeric_rule_mechanism("龙鳞")
+# 【龙鳞】已转为固定遗物。旧同名状态不再提供可叠加的X点减伤。
+LONGLIN = Mechanism(
+    name="龙鳞", when=Trigger.phase(Phase.INCOMING_ADJUST), target=TARGET,
+    condition=lambda ctx: (ctx.target is not None and ctx.damage_type != "代价"
+                           and getattr(ctx.state, "_relic_active", lambda *_: False)(ctx.target, "龙鳞")),
+    effect=lambda ctx, targets: {"amount": max(0, ctx.amount - 1) if ctx.amount > 0 else ctx.amount},
+    priority=30, before_status_rules=True,
+)
 GUZHI = _numeric_rule_mechanism("固执")
 
 def _gangpailing_effect(ctx: TriggerContext, targets: list) -> str:

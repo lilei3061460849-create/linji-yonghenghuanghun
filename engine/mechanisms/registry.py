@@ -28,6 +28,7 @@ class Mechanism:
     # 机制由某个持续状态发动/维持时，显式写其状态名。空串表示遗物或纯事件机制，
     # 仍按 priority；不再从展示名猜测，避免「畸变·结算」等名字歧义。
     status_name: str = ""
+    before_status_rules: bool = False  # 固定遗物减伤先于道纹状态链，不受道纹排序重排。
     status_owner: str = "target"   # target | source；事件机制可由施放者身上的状态驱动
     # 数值规则迁移期适配器：定义是数值/条件/文案的唯一事实源；该字段不改变
     # 非数值 Mechanism 的既有声明与生命周期。
@@ -148,6 +149,8 @@ class MechanismHookAdapter:
     def incoming_order_key(self, target) -> tuple:
         """活跃持续状态按发动 X 降序、同 X 按施加先后；静态 priority 仅为后备。"""
         status = self.incoming_status(target)
+        if self.mechanism.before_status_rules:
+            return (-1, self.priority, self.mechanism.name)
         rule_definition = self.mechanism.rule_definition
         if rule_definition is not None:
             return rule_definition.ordering_key(status)

@@ -312,13 +312,13 @@ def make_monster_entity(monster_def: dict):
     relic_defs = dict(GameEngine.RELIC_DEFS)
     panel_relics = list(monster_def.get("relics", []))
     # Compatibility for old saved panels: retype, do not silently drop abilities.
-    panel_relics += [n for n in monster_def["dao_wen"] if n in {"疯狂", "减速"}]
+    panel_relics += [n for n in monster_def["dao_wen"] if n in {"疯狂", "减速", "龙鳞"}]
     for relic_name in dict.fromkeys(panel_relics):
         if not any(r.name == relic_name for r in m.relics):
             m.relics.append(Relic(relic_name, relic_defs.get(relic_name, "")))
     from .daowen import normalize_daowen_name
     for dw_name, x in monster_def["dao_wen"].items():
-        if dw_name in {"疯狂", "减速"}:
+        if dw_name in {"疯狂", "减速", "龙鳞"}:
             continue
         dw_name = normalize_daowen_name(dw_name)  # 旧面板【血债】读入即映射【连击】
         # x 为 None → 面板未写死 X，标记 x_free 由发动方自选（2026-09-16 用户令）；

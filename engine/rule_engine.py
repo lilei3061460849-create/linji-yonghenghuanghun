@@ -1085,6 +1085,7 @@ JIAHAI_RULE = _damage_rule(
     OperatorSpec(RuleOperator.ADD), OperandSource.STATUS_VALUE, 20,
 )
 STATUS_DAMAGE_RULES = (JIAHAI_RULE,)
+# 旧减法规则仅保留给独立规则执行器的兼容/代数测试；不注册、不授予、不参与龙鳞遗物结算。
 LONG_LIN_RULE = _damage_rule(
     "daowen.longlin.incoming_damage.subtract", "daowen.longlin", "龙鳞", "龙鳞",
     OperatorSpec(RuleOperator.SUBTRACT, lower_bound=0), OperandSource.STATUS_VALUE, 30,
@@ -1096,10 +1097,6 @@ GUZHI_RULE = _damage_rule(
 )
 
 DAOWEN_RULES: dict[str, DaoWenRuleDefinition] = {
-    "龙鳞": DaoWenRuleDefinition(
-        daowen_id="daowen.longlin", name="龙鳞", cost_type="消耗",
-        cost_multiplier=Fraction(2), duration=DurationSpec(DurationKind.PERMANENT),
-        rules=(LONG_LIN_RULE,), default_subject="目标"),
     "固执": DaoWenRuleDefinition(
         daowen_id="daowen.guzhi", name="固执", cost_type="冷却",
         cost_multiplier=Fraction(1), duration=DurationSpec(DurationKind.FINITE_X_ROUNDS),

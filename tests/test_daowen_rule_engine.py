@@ -85,14 +85,12 @@ def test_three_rules_have_stable_ids_and_complete_metadata():
             assert rule.reads == rule.writes == ValueRef.CURRENT_DAMAGE
             assert rule.read_semantics.value == "latest_value"
             assert rule.conditions is not None
-    assert len(rule_ids) == len(set(rule_ids)) == 3
+    assert len(rule_ids) == len(set(rule_ids)) == 1
 
 
 def test_calculation_summaries_are_rendered_from_the_runtime_rule_definitions():
     DaoWenEngine.register_all()
     for name, x, kwargs in (
-        ("加害", 2, {"target": Entity("目标", "怪物")} ),
-        ("龙鳞", 2, {"target": Entity("目标", "怪物")} ),
         ("固执", 2, {}),
     ):
         result = DaoWenEngine._registry[name](x, **kwargs)
@@ -106,8 +104,8 @@ def test_calculation_summaries_are_rendered_from_the_runtime_rule_definitions():
     # 兼容键代表最终实际失血上限；新键代表倍率前的当前受击伤害上限。
     assert guzhi["max_life_loss_per_hit"] == 1
     assert guzhi["max_current_damage_per_hit"] == 1
-    assert DaoWenEngine.calculate_jiahai(2)["cost"] == 4
-    assert DaoWenEngine.calculate_longlin(2)["cost"] == 4
+    assert "龙鳞" not in DaoWenEngine.list_all()
+    assert "加害" not in DaoWenEngine.list_all()
 
 
 def test_zaisheng_merges_self_feeding_as_an_alternate_attack_cost():
@@ -129,7 +127,7 @@ def test_zaisheng_merges_self_feeding_as_an_alternate_attack_cost():
 
 def test_migration_status_keeps_unmigrated_daowen_on_the_legacy_path():
     DaoWenEngine.register_all()
-    assert set(DAOWEN_RULES) == {"加害", "龙鳞", "固执"}
+    assert set(DAOWEN_RULES) == {"固执"}
     assert daowen_migration_status("杀伐") == {
         "status": "legacy", "reason": UNMIGRATED_REASON,
     }
@@ -142,15 +140,11 @@ def test_generated_rule_descriptions_match_the_authoritative_documents():
     index = (ROOT / "全道纹索引.md").read_text(encoding="utf-8")
 
     guzhi = render_rule_description("固执", "X")
-    jiahai = render_rule_description("加害", "X", "[目标]")
-    longlin = render_rule_description("龙鳞", "X", "[目标]")
     assert guzhi in common_rules
-    assert jiahai in dungeon
-    assert longlin in dungeon
-    for text in (guzhi, jiahai, longlin):
-        assert text in index
-    assert "加害X（起点/终点）：支付：法力2X。" in dungeon
-    assert "龙鳞X：支付：法力2X。" in dungeon
+    assert guzhi in index
+    assert "### 龙鳞" in (ROOT / "物品索引.md").read_text(encoding="utf-8")
+    assert "龙鳞X：支付：法力2X" not in dungeon
+    assert "| 龙鳞 |" not in index
 
 
 def test_generic_numeric_operators_are_composable_and_explainable():
@@ -375,35 +369,16 @@ def test_status_parameter_preserves_legacy_aggregation_for_duplicate_saved_statu
         target, 4, "普通", None, _State()) == 9
 
 
-def test_zero_is_a_valid_intermediate_value_and_jiahai_can_add_after_longlin():
+def test_zero_is_a_valid_intermediate_value_and_add_reads_latest_value():
     target = _target(("加害", 2), ("龙鳞", 8))
-    manager = CombatHookManager()
-    result = manager.apply_incoming_adjust(target, 8, "普通", None, _State())
-    assert result == 2
-
-    # 发动X排序令龙鳞先将当前值削到0；随后 ADD 读取的是0，而不是初始8，且不中断。
-    event_target = Entity("受击者", "轮回者", blood_limit=100, current_hp=100)
-    event_target.add_status(StatusEffect(
-        "加害", value=2, remaining_rounds=-1, source="test", daowen_order=1))
-    event_target.add_status(StatusEffect(
-        "龙鳞", value=8, remaining_rounds=-1, source="test", daowen_order=0))
-    event_context = DamageResolutionContext(
-        event_id="zero-then-add", attacker=None, recipient=event_target,
-        damage_type="普通", original_damage=8, incoming_damage=8, current_damage=8,
-    )
-    for adapter in sorted(
-        (h for h in manager.hooks() if getattr(h, "mechanism", None)
-         and h.mechanism.rule_definition is not None),
-        key=lambda hook: hook.incoming_order_key(event_target),
-    ):
-        adapter.on_incoming_adjust(
-            event_target, event_context.current_damage, "普通", None, _State(),
-            rule_context=event_context,
-        )
-    applied = [step for step in event_context.trace if step["status"] == "applied"]
-    assert [(step["daowen"], step["before"], step["after"])
-            for step in applied] == [("龙鳞", 8, 0), ("加害", 0, 2)]
-    assert event_context.trace[-1]["status"] == "skipped"  # 无【固执】
+    context = DamageResolutionContext(
+        event_id="zero-then-add", attacker=None, recipient=target,
+        damage_type="普通", original_damage=8, incoming_damage=8, current_damage=8)
+    # 旧减法定义只作为规则执行器的独立代数测试，不再注册成龙鳞道纹。
+    RULE_EXECUTOR.execute(LONG_LIN_RULE, context, target.status_effects[1])
+    assert context.current_damage == 0
+    RULE_EXECUTOR.execute(JIAHAI_RULE, context, target.status_effects[0])
+    assert context.current_damage == 2
 
 
 def test_reusing_rule_id_in_one_context_is_rejected_but_preview_commit_are_distinct():
@@ -533,7 +508,7 @@ def test_arbitrary_precision_damage_remains_accepted_and_trace_json_is_safe():
     assert detail["actual_damage"] == huge
     assert detail["actual_life_loss"] == 100
 
-    rule_target = _target(("龙鳞", 1))
+    rule_target = _target(("加害", 1))
     context = DamageResolutionContext(
         event_id="huge-trace", attacker=None, recipient=rule_target,
         damage_type="普通", original_damage=huge, incoming_damage=huge,
@@ -541,7 +516,7 @@ def test_arbitrary_precision_damage_remains_accepted_and_trace_json_is_safe():
     )
     manager = CombatHookManager()
     assert manager.apply_incoming_adjust(
-        rule_target, huge, "普通", None, _State(), resolution_context=context) == huge - 1
+        rule_target, huge, "普通", None, _State(), resolution_context=context) == huge + 1
     encoded = json.dumps(context.to_dict(), ensure_ascii=False, allow_nan=False)
     trace_value = context.to_dict()["original_damage"]
     assert isinstance(trace_value, str) and len(trace_value) == 5_001

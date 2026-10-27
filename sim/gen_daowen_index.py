@@ -358,7 +358,7 @@ for region in REGION_EXCLUSIVE_DAOWEN:
     tier = REGION_TIERS[region]
     notes = [f"副本阶级：{'一二三四'[tier-1]}阶。学习门禁：先经残韵从本副本怪物处转化获得至少一种本副本道纹，此后才可学习本副本其它专属道纹；其它副本专属道纹不可学习。"]
     if region == "沉沦海":
-        notes.append("闭环网络另含【唤潮】【蜃景】两个鲛族专属节点；归属迁移不删除怪物面板上的既有配置。")
+        notes.append("【唤潮】【蜃景】不属于闭环，由鲛渊陵墓的两个独立选项获得；怪物面板既有配置保留。")
         notes.append("【流动】【遗忘】【回响】尚未接入运行时；当前不可通过学习或残韵获得，也不能发动。")
     section(f"{region}专属（{len(ns)}）", list(ns), note_lines=notes,
             loop=f"{region}闭环", loop_title=region)
