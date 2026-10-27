@@ -178,7 +178,6 @@ def test_jiahai_status_consumable_guzhi_and_anger_consumable():
     assert "加害" not in DAOWEN_RULES
     assert any(rule.status_name == "加害" for rule in STATUS_DAMAGE_RULES)
     p = engine.state.player
-    _give(p, "固执")
     m = _monster(engine, ap=10)
     engine.execute_action("round_start", {})
 
@@ -200,7 +199,10 @@ def test_jiahai_status_consumable_guzhi_and_anger_consumable():
         engine.state.consumables.remove(item)
 
     p.current_hp = 50
-    engine.execute_action("use_daowen", {"daowen_name": "固执", "x": 2})
+    pill = Consumable("定命丸", "每次失去生命最多1，持续1回合", 2, 2)
+    engine.state.consumables.append(pill)
+    assert engine.execute_action("consume_item", {"name": "定命丸"})["success"]
+    assert pill.current_uses == 1
     assert p.has_status("固执")
     d2 = p.take_damage(20)
     assert d2["actual_damage"] == 1

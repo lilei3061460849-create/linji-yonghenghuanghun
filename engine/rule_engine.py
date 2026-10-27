@@ -600,7 +600,7 @@ def validate_damage_amount(value: Any, field_name: str = "damage",
 def apply_final_life_loss_cap(amount: int, recipient: Any, damage_type: str) -> int:
     """应用位于所有失血倍率之后的最终生命损失边界。
 
-    2026-10-11 用户令：【固执】简化为「你每次失去的生命不会超过1，持续X」，
+    当前【固执】是消耗品【定命丸】施加的1回合状态：「你每次失去的生命不会超过1」，
     因此**代价路径与直接失血一并封顶**。旧口径（`damage_type != "代价"` 的排除，
     以及「格挡后仍有伤害待结算的非代价受击」这一触发前提）已废止。
     `damage_type` 参数保留是为了兼容既有调用点，本函数不再据它分流。
