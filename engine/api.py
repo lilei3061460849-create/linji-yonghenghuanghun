@@ -3965,6 +3965,7 @@ class GameEngine:
     # 2026-10-13 用户令：【买路财】改制为轮回者【逃跑】行动，【三相残韵盘】删除
     # （发现侧由道纹【典当】承接），两件均移出遗物池。
     RELIC_DEFS = [
+        ("缓厄沙漏", "你受到的一半伤害转移到下回合承受。"),
         ("叠鳞甲", "你受到的所有伤害-1，最低为0。"),
         ("血誓戒", "[回始]首次主动支付流血代价时，获得等同于本次流血的格挡；若支付后生命≤30%，改为获得等量生命"),
         ("同魂笔", "当你对[目标]发动残韵时，可以选择另一个[目标]，使其拥有的一种道纹受到同种残韵影响。"),
@@ -8090,6 +8091,7 @@ class GameEngine:
                                       "rounds": getattr(v, "cooldown_rounds_remaining", 0)}
                                   for k, v in e.dao_wen.items()},
             "spells": [s.to_dict() for s in e.spells],
+            "deferred_damage": [dict(entry) for entry in getattr(e, "deferred_damage", [])],
             "death_page_count": e.load_capacity,
             "artifacts": list(getattr(e, "artifacts", [])),
             "relics": [r.to_dict() for r in e.relics],
@@ -8117,6 +8119,7 @@ class GameEngine:
                    is_alive=d.get("is_alive", True), shards=d.get("shards", 0),
                    shards_peak=d.get("shards_peak", max(0, int(d.get("shards", 0)))),
                    is_debt_bound=d.get("is_debt_bound", False))
+        e.deferred_damage = [dict(entry) for entry in d.get("deferred_damage", [])]
         e.death_page_count = d.get("death_page_count", 10)
         e.artifacts = list(d.get("artifacts", []))
         e.consumables = [Consumable(**item) for item in d.get("consumables", [])]

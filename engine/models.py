@@ -314,6 +314,7 @@ class Entity:
     attack_count: int = 0        # 攻击次数
     attack_power: int = 0        # 攻击力
     
+    deferred_damage: list[dict] = field(default_factory=list)  # 缓厄沙漏：已处理防御的延期伤害，下次回始逐笔偿还。
     death_page_count: int = 10  # 四类资源共用，一页承载一种；与血限无关。
     artifacts: list[str] = field(default_factory=list)
 
@@ -656,7 +657,8 @@ class Entity:
     
     def take_damage(self, amount: int, damage_type: str = "普通", *,
                     life_loss_multiplier: int = 1,
-                    status_adjuster: Optional[Callable[[int], int]] = None) -> dict:
+                    status_adjuster: Optional[Callable[[int], int]] = None,
+                    damage_deferrer: Optional[Callable[[int], int]] = None) -> dict:
         """
         受到伤害，返回结算详情。
 
@@ -721,6 +723,12 @@ class Entity:
                     "Entity.take_damage.after_life_loss_multiplier")
                 detail["life_loss_multiplier"] = life_loss_multiplier
             detail["damage_after_life_loss_multiplier"] = remaining
+
+            # 缓厄沙漏只改变承受时间；先应用本次防御/倍率，再拆分，最终封顶仍各自生效。
+            if remaining > 0 and damage_type != "代价" and damage_deferrer is not None:
+                before_defer = remaining
+                remaining = damage_deferrer(remaining)
+                detail["deferred_damage"] = before_defer - remaining
 
             # 【固执】是最终失血边界，位于所有倍率之后。
             before_final_cap = remaining
@@ -1033,6 +1041,7 @@ class Entity:
             "dao_wen": {k: v.dao_wen.name for k, v in self.dao_wen.items()},
             "reversible_cost_layers": dict(getattr(self, "reversible_cost_layers", {})),
             "death_page_count": self.load_capacity, "pages_used": self.pages_used,
+            "deferred_damage": [dict(entry) for entry in getattr(self, "deferred_damage", [])],
             "consumables": [item.to_dict() for item in getattr(self, "consumables", [])],
             "amnesia_refundable": [inst.dao_wen.name for inst in self.refundable_daowen()],
             "daowen_cooldowns": {

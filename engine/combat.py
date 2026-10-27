@@ -51,7 +51,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     REGION_EXCLUSIVE_DAOWEN = {
         "扭曲都市": {"变形","定型","超频","坏死"},  # 【畸变】【退化】已遗物化
         "罪孽都市": {"点金","典当","豪夺","清算","抢劫","假钞","消灾","勒索"},   # 2026-10-13 删【逼债】【典当】顶替；2026-10-14 +【勒索】
-        "龙心谷":   {"裂变","背负"},  # 【逆鳞】【伤痕】已遗物化
+        "龙心谷":   {"背负"},  # 【逆鳞】【伤痕】已遗物化
     }
     
     # 原始怪物道纹（道纹归属规则：各组起点）——【原初X】可借用范围
@@ -879,32 +879,11 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 result.setdefault("spell_logs", []).extend(slogs_life_before)
             if not attacker.is_alive:
                 damage = 0
-        # 裂变：受到伤害分X次结算；依全局整数规则，每次除法向上取整。
-        if target.has_status("裂变") and damage > 0:
-            xv = target.get_status_value("裂变") or 1
-            if xv > 1:
-                per = math.ceil(damage / xv)
-                ta = ts = 0; died = False
-                for _ in range(xv):
-                    dr = self._apply_hostile_damage(
-                        target, per, "普通" if not ignore_shield else "无视格挡", attacker,
-                        ctx={"timing": self._current_context_timing(), "source": "普通攻击", "source_type": "attack",
-                             "actor": attacker, "target": target, "mechanic": "damage", "subtype": "attack",
-                             "amount": per, "tags": {"attack", "split_hit"}})
-                    ta += dr["actual_damage"]; ts += dr["shield_absorbed"]; died = died or dr["died"]
-                damage_result = {"actual_damage": ta, "shield_absorbed": ts, "hp_after": target.current_hp, "died": died, "split": xv}
-            else:
-                damage_result = self._apply_hostile_damage(
-                    target, damage, "普通" if not ignore_shield else "无视格挡", attacker,
-                    ctx={"timing": self._current_context_timing(), "source": "普通攻击", "source_type": "attack",
-                         "actor": attacker, "target": target, "mechanic": "damage", "subtype": "attack",
-                         "amount": damage, "tags": {"attack"}})
-        else:
-            damage_result = self._apply_hostile_damage(
-                target, damage, "普通" if not ignore_shield else "无视格挡", attacker,
-                ctx={"timing": self._current_context_timing(), "source": "普通攻击", "source_type": "attack",
-                     "actor": attacker, "target": target, "mechanic": "damage", "subtype": "attack",
-                     "amount": damage, "tags": {"attack"}})
+        damage_result = self._apply_hostile_damage(
+            target, damage, "普通" if not ignore_shield else "无视格挡", attacker,
+            ctx={"timing": self._current_context_timing(), "source": "普通攻击", "source_type": "attack",
+                 "actor": attacker, "target": target, "mechanic": "damage", "subtype": "attack",
+                 "amount": damage, "tags": {"attack"}})
         result["damage_dealt"] = damage_result["actual_damage"]
         result["shield_absorbed"] = damage_result["shield_absorbed"]
         result["hp_lost"] = damage_result["actual_damage"]
@@ -950,6 +929,14 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         3. 返回需要决策的信息
         """
         effects = []
+        # 先冻结所有角色上回合欠账。回始新触发的伤害只能到下次回始偿还。
+        deferred_due = []
+        seen_due = set()
+        for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
+            if id(entity) not in seen_due:
+                seen_due.add(id(entity))
+                deferred_due.append((entity, list(getattr(entity, "deferred_damage", []))))
+                entity.deferred_damage = []
         player = self.state.player
         if player is not None:
             effects.extend(self._dispatch_phase(Phase.ROUND_START_PREPARE, target=player))
@@ -1012,6 +999,20 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         # 改为消耗法力翻倍；2026-10-08 用户令恢复「无法获得[法力]」原意——
         # 战斗内已有多个法力来源（聚能/储能电池/守夜灯/承露盏/
         # 透支/法术），效果重新有对象。判定位见 models.py::gain_mana。
+
+        # 已处理过防御/倍率的伤害偿还，不再格挡、减伤、倍率或再次延期。
+        # 债务不依赖此时是否仍持有/启用遗物；最终失血封顶与致死保护仍保留。
+        for entity, entries in deferred_due:
+            for entry in entries:
+                if not entity.is_alive:
+                    break
+                detail = self._apply_hostile_damage(entity, entry["amount"], "无视格挡", ctx={
+                    "timing": "round_start", "source": "缓厄沙漏", "source_type": "relic",
+                    "actor": None, "owner": entity, "target": entity, "mechanic": "damage",
+                    "subtype": "deferred_damage", "amount": entry["amount"],
+                    "tags": {"relic", "deferred_damage_payment"}})
+                effects.append({"type": "deferred_damage", "relic": "缓厄沙漏",
+                                "entity": entity.name, "detail": detail})
 
         # 遗物：回始触发（回锋刀按速限缺口造伤）。
         relic_logs = self.process_relics(TriggerTiming.ROUND_START, {"relic_choices": relic_choices or {}})

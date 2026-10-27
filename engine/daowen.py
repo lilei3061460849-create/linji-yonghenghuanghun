@@ -21,7 +21,7 @@ RELICIZED_SLOT = "？？"
 PLACEHOLDER_SLOTS = frozenset({RESERVED_SLOT, RELICIZED_SLOT})
 RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿",
+    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变",
 )}
 
 
@@ -621,16 +621,6 @@ class DaoWenEngine:
     # ---- 龙心谷专属道纹 ----
     
     @staticmethod
-    def calculate_liebian(x: int, target: Entity = None) -> dict:
-        """裂变X：支付：法力2X。使目标受到伤害改为分X次结算，持续∞"""
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "裂变", "x": x, "cost_type": CostType.MANA.value, "cost": 2 * x,
-            "split_count": x, "duration": -1,
-            "summary": f"支付：{2 * x}法力，{target_name}受伤分{x}次结算，永久"
-        }
-    
-    @staticmethod
     # 2026-10-11 用户令（A13）：【嫁祸】整条删除——效果与遗物【贪婪契约】重复。
 
     
@@ -815,7 +805,6 @@ class DaoWenEngine:
             "勒索": cls.calculate_lesuo,
             "假钞": cls.calculate_jiachao,
             # 龙心谷
-            "裂变": cls.calculate_liebian,
             "背负": cls.calculate_beifu,
             # ---- 沉沦海（二阶）----
             "唤潮": cls.calculate_chao,
@@ -974,10 +963,10 @@ class ResonanceEngine:
         "龙心谷闭环": [
             (RELICIZED_DAOWEN_SLOTS["加害"], "反转", RELICIZED_DAOWEN_SLOTS["龙鳞"]),
             (RELICIZED_DAOWEN_SLOTS["龙鳞"], "曲解", RELICIZED_DAOWEN_SLOTS["逆鳞"]),
-            (RELICIZED_DAOWEN_SLOTS["逆鳞"], "转换", "裂变"),
+            (RELICIZED_DAOWEN_SLOTS["逆鳞"], "转换", RELICIZED_DAOWEN_SLOTS["裂变"]),
             # 2026-10-11 用户令（A13）：【嫁祸】整条删除（效果与遗物【贪婪契约】重复）
             #   → 沿用活血/尸爆的删除先例：断边**重连**为 裂变—转换→背负，环长 7→6。
-            ("裂变", "转换", "背负"),
+            (RELICIZED_DAOWEN_SLOTS["裂变"], "转换", "背负"),
             ("背负", "曲解", RELICIZED_DAOWEN_SLOTS["伤痕"]),
             (RELICIZED_DAOWEN_SLOTS["伤痕"], "转换", RELICIZED_DAOWEN_SLOTS["加害"]),
         ],
