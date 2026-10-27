@@ -5231,10 +5231,11 @@ class GameEngine:
             for idx, pos in enumerate(parsed, start=1):
                 illusion = WorldActorState(
                     actor_id=f"mirage-{player_actor.actor_id}-{world.clock.turn}-{world.next_event_id}-{idx}",
-                    name=player_actor.name, kind="illusion", x=pos[0], y=pos[1],
+                    name=player_actor.name, kind=player_actor.kind, x=pos[0], y=pos[1],
                     alive=True, faction=player_actor.faction, mode="passive",
                     owner_actor_id=player_actor.actor_id,
-                    vision_range=player_actor.vision_range, species=player_actor.species)
+                    vision_range=player_actor.vision_range, species=player_actor.species,
+                    is_illusion=True)
                 world.add_actor(illusion)
                 created.append({"actor_id": illusion.actor_id, "position": list(pos)})
             world.map.version += 1
