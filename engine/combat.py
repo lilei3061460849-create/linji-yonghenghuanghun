@@ -1142,6 +1142,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                     self.clamp_immortal_body(target)
                     effects.append({"type": "bianxing_restore", "entity": target.name,
                                     "current_speed": target.current_speed, "current_mana": target.current_mana})
+            effects.extend(self._dispatch_phase(Phase.ROUND_END_POST_MEDIOCRITY, target=target))
             effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=target))
             effects.append({"type": "extra_target_round", "source": source, "target": target.name,
                             "round": self.state.current_round, "index": index + 1, "total": rounds})
