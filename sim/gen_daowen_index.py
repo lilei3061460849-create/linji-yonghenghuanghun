@@ -33,6 +33,26 @@ from engine.dungeons import load_dungeon_documents  # noqa: E402
 
 DaoWenEngine.register_all()
 
+# 沉沦海闭环中已有规则定义、但尚未注册运行时的三个草案节点。
+# 继续出现在闭环与索引中，但不得当作可运行道纹授予或发动。
+DRAFT_DAOWEN = {
+    "流动": {
+        "cost": "支付：法力10X",
+        "effect": "将[目标]身上的X个“持续Y”转移至另一名[目标]。",
+        "params": ["target"],
+    },
+    "遗忘": {
+        "cost": "支付：法力20X",
+        "effect": "移除[目标]身上的X种“持续Y”。",
+        "params": ["target"],
+    },
+    "回响": {
+        "cost": "支付：法力5X",
+        "effect": "使[目标]身上的一种“持续Y”结束时，立刻在原[目标]身上再次生效，持续X。",
+        "params": ["target"],
+    },
+}
+
 # 面板行两种历史格式都要认：旧 `名字（血限×法限/速限，道纹…）`、新 `名字（血限/法限/速限，道纹…）`。
 # （2026-10-03 修：旧正则只认旧的 × 格式，导致「承载怪物」整列被清空。）
 PANEL = re.compile(r'^([\u4e00-\u9fff\w·]+)[（(](\d+)(?:[×x](\d+)|/(\d+))/(\d+)(?:[，,]([^)）\n]*))?[）)]')
@@ -64,6 +84,11 @@ for name, fn in DaoWenEngine._registry.items():
         effects[name] = (eff + "。") if eff and not eff.endswith("。") else eff
     params_of[name] = list(inspect.signature(fn).parameters)
 
+for name, draft in DRAFT_DAOWEN.items():
+    costs[name] = draft["cost"]
+    effects[name] = draft["effect"]
+    params_of[name] = draft["params"]
+
 # 承载怪物：扫描已实现副本 + 本阶段纳入道纹索引的沉沦海草案面板。
 # 其它未实现草案仍不计入当前可用道纹的承载怪物列。
 carriers = defaultdict(list)
@@ -80,7 +105,7 @@ for region, text in sorted(dungeon_documents.items()):
             for token in re.split(r'[，,、]', m.group(6)):
                 token = token.strip()
                 mm = re.match(r'^([\u4e00-\u9fff·]+?)(\d+)?$', token)
-                if not mm or mm.group(1) not in DaoWenEngine._registry:
+                if not mm or mm.group(1) not in (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)):
                     continue
                 entry = f"{m.group(1)}{mm.group(2) or ''}"
                 if entry not in carriers[mm.group(1)]:
@@ -151,8 +176,8 @@ for n in FIRST_EMBRACE_DAOWEN:
 for n, region in UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.items():
     CATEGORY[n] = "unimpl"
 
-assert set(CATEGORY) == set(DaoWenEngine._registry), (
-    set(CATEGORY) ^ set(DaoWenEngine._registry))
+assert set(CATEGORY) == (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)), (
+    set(CATEGORY) ^ (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)))
 
 # 特殊注记（引擎机制，非数值）
 NOTES = {
@@ -318,6 +343,7 @@ for region in REGION_EXCLUSIVE_DAOWEN:
     notes = [f"副本阶级：{'一二三四'[tier-1]}阶。学习门禁：先经残韵从本副本怪物处转化获得至少一种本副本道纹，此后才可学习本副本其它专属道纹；其它副本专属道纹不可学习。"]
     if region == "沉沦海":
         notes.append("闭环网络另含【唤潮】【蜃景】两个鲛族专属节点；归属迁移不删除怪物面板上的既有配置。")
+        notes.append("【流动】【遗忘】【回响】尚未接入运行时；当前不可通过学习或残韵获得，也不能发动。")
     section(f"{region}专属（{len(ns)}）", list(ns), note_lines=notes,
             loop=f"{region}闭环", loop_title=region)
 
