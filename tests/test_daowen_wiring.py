@@ -251,6 +251,23 @@ def test_huaxiang_dingxing_wushen():
 
 
 
+def test_damage_needle_is_forged_from_dragon_valley_event():
+    """熔炉余火真实支付流血10并发放灼罪钉。"""
+    engine = _engine("damage_needle_forge")
+    engine.state.phase = "pre_battle"
+    engine.state.current_region = "龙心谷"
+    engine.event_pool.current = "熔炉余火"
+    hp_before = engine.state.player.current_hp
+
+    result = engine.execute_action("resolve_event", {
+        "event": "熔炉余火", "option_id": 3,
+    })
+    assert result["success"], result
+    assert engine.state.player.current_hp == hp_before - 10
+    item = next(c for c in engine.state.consumables if c.name == "灼罪钉")
+    assert item.current_uses == item.max_uses == 1
+
+
 def test_anger_needle_is_purchased_from_black_market_event():
     """黑市事件真实扣除12碎片并发放固定耐久的怒火针。"""
     engine = _engine("anger_needle_purchase")
