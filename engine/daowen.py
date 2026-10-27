@@ -21,7 +21,7 @@ RELICIZED_SLOT = "？？"
 PLACEHOLDER_SLOTS = frozenset({RESERVED_SLOT, RELICIZED_SLOT})
 RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变", "背负", "蒙蔽",
+    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变", "背负", "蒙蔽", "清算",
 )}
 
 
@@ -562,16 +562,6 @@ class DaoWenEngine:
     # 旧名 calculate_dikou 不再保留（避免注册时与"豪夺"双注册）。
     
     @staticmethod
-    def calculate_qingsuan(x: int, target: Entity = None, caster_shards: int = 0) -> dict:
-        """清算X：支付：法力2X。[回始]使目标失去你碎片点格挡，持续X"""
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "清算", "x": x, "cost_type": CostType.MANA.value, "cost": 2 * x,
-            "qingsuan_register": True, "duration": x,
-            "summary": f"支付：{2 * x}法力，[回始]使{target_name}失去{caster_shards}格挡，持续{x}回合"
-        }
-    
-    @staticmethod
     def calculate_qiangjie(x: int, target: Entity = None) -> dict:
         """抢劫X：支付：法力3X。夺取目标10X碎片；若无碎片则失去X点速度"""
         target_name = target.name if target is not None else "未选定目标"
@@ -774,7 +764,6 @@ class DaoWenEngine:
             # 2026-10-13 用户令：【逼债】删除，【典当】顶替其闭环格（点金—转换—典当—反转—豪夺）。
             "典当": cls.calculate_diandang,
             "豪夺": cls.calculate_haoduo,
-            "清算": cls.calculate_qingsuan,
             "抢劫": cls.calculate_qiangjie,
             # 2026-10-14 用户令：补点金反转分叉，还债新生产者。
             "勒索": cls.calculate_lesuo,
@@ -917,8 +906,8 @@ class ResonanceEngine:
         "罪孽都市闭环": [
             ("点金", "转换", "典当"),
             ("典当", "反转", "豪夺"),
-            ("豪夺", "曲解", "清算"),
-            ("清算", "反转", "抢劫"),
+            ("豪夺", "曲解", RELICIZED_DAOWEN_SLOTS["清算"]),
+            (RELICIZED_DAOWEN_SLOTS["清算"], "反转", "抢劫"),
             ("抢劫", "转换", "假钞"),
             # 原遗物化节点以「？？」占位；移除【消灾】后，按用户要求将该占位直接接向【点金】。
             ("假钞", "曲解", RELICIZED_SLOT),

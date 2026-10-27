@@ -367,10 +367,6 @@ class Entity:
     is_proliferated: bool = False  # 已被癌变吸收进死者之书（旧名 增生，已统一为 癌变；保留字段名兼容）
     is_debt_bound: bool = False  # 已因还债成为员工
 
-    # ---- 罪孽都市专属道纹的回始记账（F2 全量） ----
-    # 清算：目标侧挂账 [{x, caster}]，[回始]逐条结算，状态消失即清账
-    # （2026-10-13 用户令删【逼债】：_bizhai 字段与【逼债·结算/对账】机制一并移除）
-    _qingsuan: list = field(default_factory=list)
     # 抵扣（旧）：被封印的遗物 {遗物名: 剩余回合}，[回终]-1，归零解封
     sealed_relics: dict = field(default_factory=dict)
     # 豪夺：从他人处夺取的遗物临时持有

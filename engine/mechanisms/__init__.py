@@ -10,10 +10,9 @@ priority 10/20/30/40/50/60——回始循环已全部声明化；洞察/勾魂�
 孤儿诊断字段 xijie_stolen 已正式废弃）、【帮派令】（BATTLE_START 相位 +
 relic_active 条件——证明 Relic 可以成为普通 Mechanism 声明）、【缄默面具】
 （BATTLE_START 相位 priority 5，经统一 mana 动词；其【禁代价】静态校验规则
-保留在 api.py，属另一字面规则）、【清算·结算】【灾厄轮盘·结算（遗物被动）】
-（ROUND_START_SETTLE 相位；清算账本按来源道纹序列排序，灾厄轮盘由 relic_active 门控、作为常驻遗物触发，
-使用 RNG 目标 roll_pick；清算经 shards 动词与 ledger 模块；2026-10-13 用户令删【逼债】）、
-【清算·对账】（ROUND_END_RECONCILE 相位，状态消失即清账）。
+保留在 api.py，属另一字面规则）、【灾厄轮盘·结算（遗物被动）】
+（ROUND_START_SETTLE 相位，relic_active 门控，使用 RNG 目标 roll_pick）。
+原逼债、清算结算与对账机制已随道纹删除。
 
 刻意边界（不要做成框架）：无 DSL、无 JSON 配置、无脚本系统、无 Action Queue、
 无通用推理引擎、无冲突自动解决、无反射。机制声明就是 Python 数据结构。

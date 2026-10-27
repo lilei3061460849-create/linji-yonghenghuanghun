@@ -319,7 +319,7 @@ def make_monster_entity(monster_def: dict):
             m.relics.append(Relic(relic_name, relic_defs.get(relic_name, "")))
     from .daowen import normalize_daowen_name
     for dw_name, x in monster_def["dao_wen"].items():
-        if dw_name in {"疯狂", "减速", "龙鳞", "固执", "贯穿", "裂变", "背负", "蒙蔽"}:
+        if dw_name in {"疯狂", "减速", "龙鳞", "固执", "贯穿", "裂变", "背负", "蒙蔽", "清算"}:
             continue
         dw_name = normalize_daowen_name(dw_name)  # 旧面板【血债】读入即映射【连击】
         # x 为 None → 面板未写死 X，标记 x_free 由发动方自选（2026-09-16 用户令）；

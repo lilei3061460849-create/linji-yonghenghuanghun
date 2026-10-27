@@ -8153,7 +8153,7 @@ class GameEngine:
         e.mutation_count = d.get("mutation_count", 0)   # ④修复：旧档无此键回退0
         from .daowen import normalize_daowen_name as _norm_dw
         for name, x in d.get("dao_wen", {}).items():
-            if name in {"背负", "蒙蔽"}:
+            if name in {"背负", "蒙蔽", "清算"}:
                 continue  # 已删除道纹不从旧封存复活；护卫内部标记单独保留。
             name = _norm_dw(name)  # 旧封存【血债】读入即映射【连击】
             cooldowns = d.get("daowen_cooldowns", {}).get(name, {})
@@ -8187,6 +8187,8 @@ class GameEngine:
                                   tags=list(relic.get("tags") or []),
                                   enabled=bool(relic.get("enabled", True))))
         for st in d.get("status_effects", []):
+            if st["name"] == "清算":
+                continue
             e.status_effects.append(StatusEffect(name=st["name"], value=st.get("value", 0),
                                                   remaining_rounds=st.get("remaining_rounds", -1),
                                                   source=st.get("source", ""),
@@ -9413,8 +9415,6 @@ class GameEngine:
             entity.status_effects = [s for s in entity.status_effects
                                      if s.scope in persistent_scopes]
             # 账本清空一律走唯一入口（引擎/机制两层的口径都从 ledger 模块取）
-            from .mechanisms.ledger import clear_ledger
-            clear_ledger(entity, "清算")   # 2026-10-13 删【逼债】，仅剩清算账本
             entity.current_speed = entity.speed_limit
             # DM裁定 2026-09-09：法力与速度同口径——只在[战终]复原（[回始]不再回填）。
             if entity.entity_type == "轮回者":
@@ -9904,8 +9904,11 @@ class GameEngine:
         for entity in unique_entities:
             entity.dao_wen.pop("背负", None)  # 不清理护卫状态/_beifu_*，也不让已删除道纹占页。
             entity.dao_wen.pop("蒙蔽", None)  # 消耗品施加的同名状态不受影响。
+            entity.dao_wen.pop("清算", None)
+            entity.status_effects[:] = [st for st in entity.status_effects if st.name != "清算"]
+            entity.__dict__.pop("_qingsuan", None)
         # 状态可能挂在目标身上，但其排序锚点来自施加该状态的角色。
-        # 例如【清算】的状态在目标身上，位置却属于施法者的道纹序列。
+        # 需按状态来源角色而非状态持有者恢复序列位置。
         entity_by_name = {entity.name: entity for entity in unique_entities}
         order_by_entity = {
             id(entity): {name: index for index, name in enumerate(entity.dao_wen)}

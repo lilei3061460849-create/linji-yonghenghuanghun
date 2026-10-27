@@ -5,7 +5,6 @@ CombatEngine 仍是唯一入口（门面类继承本 Mixin）。
 """
 from __future__ import annotations
 
-from ..mechanisms.ledger import ledger_of
 import math
 import weakref
 from typing import Optional, Any
@@ -554,7 +553,7 @@ class DaowenEffectMixin:
             else:
                 s = calc["target_shield"]; target.gain_shield(s)
                 result["effects"].append({"type": "shield", "target": target.name, "amount": s})
-        if "shield_drain" in calc:  # 清算：目标失格挡
+        if "shield_drain" in calc:  # 通用格挡扣减
             lost = min(target.shield, calc["shield_drain"]); target.shield -= lost
             result["effects"].append({"type": "shield_drain", "target": target.name, "lost": lost})
         if "blood_limit_reduction" in calc:
@@ -1099,15 +1098,8 @@ class DaowenEffectMixin:
             for st_target in wave_status_targets:
                 result["effects"].append({"type": "shanghen", "target": st_target.name, "x": x})
 
-        # ---- F2 全量：罪孽都市（清算/抵扣）的注册与即时结算 ----
-        # （2026-10-13 用户令删【逼债】：此处原挂账块与【逼债·结算/对账】机制一并移除）
-        # 清算X：[回始]使[目标]失去你[碎片]点格挡，持续X。此处仅挂账。
-        if name == "清算":
-            for st_target in wave_status_targets:
-                ledger_of(st_target, "清算").append({"x": x, "caster": caster})
-                result["effects"].append({"type": "qingsuan_register", "target": st_target.name, "x": x})
         # 抵扣X（旧名）：封印[目标]拥有的一件遗物，持续X
-        elif name == "抵扣":
+        if name == "抵扣":
             for st_target in wave_status_targets:
                 sealed = self._seal_one_relic(st_target, x)
                 result["effects"].append({"type": "dikou", "target": st_target.name,
