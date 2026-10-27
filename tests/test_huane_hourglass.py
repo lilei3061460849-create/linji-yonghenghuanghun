@@ -1,4 +1,4 @@
-"""裂变改遗物：伤害延期，不分段，不无限延期或重复减伤。"""
+"""裂变改遗物：延后部分按普通伤害处理，可以反复触发沙漏。"""
 import pickle
 import pytest
 from pathlib import Path
@@ -16,19 +16,20 @@ def ready():
 
 
 @pytest.mark.parametrize("amount,immediate,deferred", [(0, 0, 0), (1, 0, 1), (2, 1, 1), (7, 3, 4), (20, 10, 10)])
-def test_half_moves_to_next_round_once(amount, immediate, deferred):
+def test_half_moves_to_next_round_and_can_defer_again(amount, immediate, deferred):
     state, c, p, m = ready()
     r = c._apply_hostile_damage(p, amount, source=m)
     assert p.current_hp == 100 - immediate
     assert sum(e["amount"] for e in p.deferred_damage) == deferred
     c.round_start()
-    assert p.current_hp == 100 - amount
-    assert not p.deferred_damage
+    assert p.current_hp == 100 - immediate - deferred // 2
+    assert sum(e["amount"] for e in p.deferred_damage) == (deferred + 1) // 2
+    previous_hp = p.current_hp
     c.round_start()
-    assert p.current_hp == 100 - amount
+    assert p.current_hp == previous_hp - ((deferred + 1) // 2) // 2
 
 
-def test_shield_and_reduction_only_apply_once():
+def test_delayed_damage_normally_uses_shield_and_reduction():
     state, c, p, m = ready()
     state.relics.append(Relic("叠鳞甲", ""))
     p.shield = 3
@@ -38,17 +39,18 @@ def test_shield_and_reduction_only_apply_once():
     assert p.deferred_damage[0]["amount"] == 4
     p.shield = 50
     c.round_start()
-    assert p.current_hp == 92 and p.shield == 50
+    assert p.current_hp == 96 and p.shield == 46
     assert not p.deferred_damage
 
 
-def test_first_cup_multiplier_is_not_reapplied():
+def test_delayed_damage_normally_uses_life_loss_multiplier():
     state, c, p, m = ready()
     state.relics.append(Relic("第一杯", ""))
     c._apply_hostile_damage(p, 10, source=m)
     assert p.current_hp == 90 and p.deferred_damage[0]["amount"] == 10
     c.round_start()
     assert p.current_hp == 80
+    assert p.deferred_damage[0]["amount"] == 10
 
 
 def test_sealed_or_disabled_does_not_defer_new_damage_but_debt_persists():
@@ -80,6 +82,7 @@ def test_cost_is_not_damage_and_final_cap_is_kept():
     c._apply_numeric_cost_part(p, "流血", 8)
     assert p.current_hp == 92 and not p.deferred_damage
     c._apply_hostile_damage(p, 10, source=m)
+    state.relics.clear()  # 停用后不再延后，但普通伤害仍遵守最终封顶。
     p.add_status(StatusEffect("固执", 2, value=1))
     c.round_start()
     assert p.current_hp == 86  # 当下5 + 延期5由最终封顶压为1。
@@ -97,7 +100,7 @@ def test_pending_survives_pickle_and_character_snapshot_and_round_number_reset(t
     assert restored.deferred_damage == p.deferred_damage
     state.current_round = 0  # 模拟战终后下一场战斗，不能靠重置回合数洗掉欠账。
     c.round_start()
-    assert p.current_hp == 90 and not p.deferred_damage
+    assert p.current_hp == 93 and p.deferred_damage[0]["amount"] == 3
 
 
 def test_deferred_damage_can_kill_and_old_status_cannot_split_attacks():
@@ -106,7 +109,7 @@ def test_deferred_damage_can_kill_and_old_status_cannot_split_attacks():
     assert p.current_hp == 20
     c.round_start()
     assert p.current_hp == 0 and not p.is_alive
-    assert not p.deferred_damage
+    assert p.deferred_damage[0]["amount"] == 40
 
 
 def test_preview_does_not_treat_the_delayed_half_as_immediate_lethal_damage():
@@ -131,3 +134,55 @@ def test_retires_daowen_and_retypes_monster_panels():
     legacy = make_monster_entity({"name": "旧鸮", "attack_count": 1, "attack_power": 2,
         "blood_limit": 30, "dao_wen": {"裂变": 2}})
     assert "裂变" not in legacy.dao_wen and any(r.name == "缓厄沙漏" for r in legacy.relics)
+
+
+def test_map_npc_debt_is_paid_next_world_turn_even_after_encounter_ends(tmp_path):
+    from engine.api import GameEngine
+    from engine.world import WorldState, WorldClock, WorldActorState
+    from tests.test_open_world import _open_map
+    e = GameEngine(db_path=str(tmp_path / "map_debt.db"), autosave=False)
+    e.state.phase = "pre_battle"
+    p = Entity("P", "轮回者", blood_limit=100, current_hp=100)
+    npc = Entity("持沙漏的怪物", "怪物", blood_limit=100, current_hp=100)
+    npc.relics = [Relic("缓厄沙漏", "")]
+    e.state.player = p
+    e.state.enemies = [npc]
+    world = WorldState(clock=WorldClock(turn=3), map=_open_map())
+    world.add_actor(WorldActorState(p.runtime_id, p.name, "player", 1, 1, mode="manual"))
+    world.add_actor(WorldActorState(npc.runtime_id, npc.name, "怪物", 6, 6, mode="manual"))
+    e.combat._apply_hostile_damage(npc, 10, source=p)
+    assert npc.current_hp == 95
+    e._resolve_world_npc_encounters(world)
+    assert npc.current_hp == 95 and npc.deferred_damage[0]["due_world_turn"] == 4
+    e._resolve_world_npc_encounters(world)  # 同回合重入不能提前偿还。
+    assert npc.current_hp == 95
+    world.clock.advance(1)
+    e._resolve_world_npc_encounters(world)
+    assert npc.current_hp == 93 and npc.deferred_damage[0]["amount"] == 3
+    e._resolve_world_npc_encounters(world)
+    assert npc.current_hp == 93
+    world.clock.advance(1)
+    e._resolve_world_npc_encounters(world)
+    assert npc.current_hp == 92 and npc.deferred_damage[0]["amount"] == 2
+
+
+def test_one_point_can_be_deferred_indefinitely_without_forced_settlement():
+    state, c, p, m = ready()
+    c._apply_hostile_damage(p, 1, source=m)
+    for _ in range(12):
+        c.round_start()
+        assert p.current_hp == 100
+        assert len(p.deferred_damage) == 1 and p.deferred_damage[0]["amount"] == 1
+
+
+def test_delayed_damage_can_be_reduced_again_and_then_defer_remainder():
+    state, c, p, m = ready()
+    state.relics.append(Relic("叠鳞甲", ""))
+    c._apply_hostile_damage(p, 10, source=m)  # 9伤，当下4，延后5。
+    assert p.current_hp == 96
+    c.round_start()  # 延后5是普通伤害，减为4，当下2，延后2。
+    assert p.current_hp == 94 and p.deferred_damage[0]["amount"] == 2
+    c.round_start()  # 2减为1，继续延后1。
+    assert p.current_hp == 94 and p.deferred_damage[0]["amount"] == 1
+    c.round_start()  # 1减为0。
+    assert p.current_hp == 94 and not p.deferred_damage

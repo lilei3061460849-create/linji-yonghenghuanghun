@@ -314,7 +314,7 @@ class Entity:
     attack_count: int = 0        # 攻击次数
     attack_power: int = 0        # 攻击力
     
-    deferred_damage: list[dict] = field(default_factory=list)  # 缓厄沙漏：已处理防御的延期伤害，下次回始逐笔偿还。
+    deferred_damage: list[dict] = field(default_factory=list)  # 缓厄沙漏：下回合要造成的普通伤害；没有禁止再次延期的特殊结算。
     death_page_count: int = 10  # 四类资源共用，一页承载一种；与血限无关。
     artifacts: list[str] = field(default_factory=list)
 

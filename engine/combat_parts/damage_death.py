@@ -488,14 +488,13 @@ class DamageDeathMixin:
         source: Optional[Entity], damage_ctx: EffectContext, legacy_ctx: bool,
     ) -> dict:
         original_damage = amount
-        deferred_payment = "deferred_damage_payment" in damage_ctx.tags
-        defer_active = (not deferred_payment and damage_type != "代价"
+        defer_active = (damage_type != "代价"
                         and self._relic_active(target, "缓厄沙漏"))
         # 逆血龙鳞：本回合实际失血累计转为本次造成伤害的固定加值。
-        if not deferred_payment and source is not None and self._relic_active(source, "逆血龙鳞"):
+        if source is not None and self._relic_active(source, "逆血龙鳞"):
             amount += max(0, int(getattr(source, "hp_lost_this_round", 0) or 0))
         amount = validate_damage_amount(
-            (amount if deferred_payment else self.hook_manager.apply_multiplier_adjust(target, amount, damage_type, source, self.state)),
+            self.hook_manager.apply_multiplier_adjust(target, amount, damage_type, source, self.state),
             "CombatEngine.apply_multiplier_adjust.result")
         if amount < 0:
             return self._damage_noop_result(
@@ -509,16 +508,16 @@ class DamageDeathMixin:
         # 只翻攻击行动造成的伤害（subtype=attack；含被万钧印改道的自攻）；
         # 道纹/代价/直接失血不受影响。倍率发生在格挡/护盾之前，故本次伤害的
         # "攻击伤害数值"整体翻倍，千荆甲反噬也按翻倍后的数值等量反射。
-        if (not deferred_payment and damage_ctx.subtype == "attack"
+        if (damage_ctx.subtype == "attack"
                 and self._relic_active(target, "癫狂之脑")):
             amount = validate_damage_amount(
                 amount * 2, "CombatEngine.狂脑伤害倍率.result")
         # 震岳龙躯：单次伤害超过10点的部分免疫；在伤害减免/格挡前将该次伤害封顶为10。
-        if not deferred_payment and self._relic_active(target, "震岳龙躯") and amount > 10:
+        if self._relic_active(target, "震岳龙躯") and amount > 10:
             amount = 10
 
         # 1. 伤害重定向 (背负；【嫁祸】2026-10-11 已删除)
-        redirected_target = (None if deferred_payment else self.hook_manager.apply_redirection(target, damage_type, self.state))
+        redirected_target = self.hook_manager.apply_redirection(target, damage_type, self.state)
         if redirected_target is not None:
             redirected_ctx = make_context(
                 timing=damage_ctx.timing, source=damage_ctx.source,
@@ -531,7 +530,7 @@ class DamageDeathMixin:
             return self._apply_hostile_damage(redirected_target, amount, damage_type, source, ctx=redirected_ctx)
 
         # 2. 受到伤害前反噬 (千荆甲遗物：受到攻击伤害前，攻击者受等量伤害)
-        before_res = (None if deferred_payment else self.hook_manager.apply_before_damage(target, amount, damage_type, source, self.state))
+        before_res = self.hook_manager.apply_before_damage(target, amount, damage_type, source, self.state)
         # 千荆甲（通用遗物池，2026-10-03 出自被删【爆裂】道纹）：你受到攻击伤害**前**，
         # 攻击者受到等量伤害。只对攻击行动（subtype=attack）生效，非攻击伤害不触发；
         # 反噬本身是"直接失血"，不视为"受到攻击造成的伤害"，因此不会连环触发千荆甲/活血衣。
@@ -588,7 +587,7 @@ class DamageDeathMixin:
             self.hook_manager.apply_incoming_adjust(
                 target, preview_after_shield, apply_type, source, self.state,
                 resolution_context=preview_rule_context)
-            if preview_after_shield > 0 and damage_type != "代价" and not deferred_payment
+            if preview_after_shield > 0 and damage_type != "代价"
             else preview_after_shield
         )
         if defer_active:
@@ -691,8 +690,6 @@ class DamageDeathMixin:
                 tags=frozenset(damage_ctx.tags),
             )
             committed_rule_contexts.append(committed_context)
-            if deferred_payment:
-                return remaining
             return self.hook_manager.apply_incoming_adjust(
                 target, remaining, apply_type, source, self.state,
                 resolution_context=committed_context)
@@ -707,7 +704,7 @@ class DamageDeathMixin:
 
         detail = target.take_damage(
             amount, apply_type,
-            life_loss_multiplier=(1 if deferred_payment else self.state.life_loss_multiplier(target)),
+            life_loss_multiplier=self.state.life_loss_multiplier(target),
             status_adjuster=_commit_incoming_rules,
             damage_deferrer=_defer_damage if defer_active else None)
         self._attach_damage_context(detail, damage_ctx, legacy_ctx)

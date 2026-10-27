@@ -1999,6 +1999,24 @@ class GameEngine:
         for group_name in ("friends", "employees", "temp_friends", "enemies"):
             entities.extend(getattr(self.state, group_name, []) or [])
         entity_by_id = {entity.runtime_id: entity for entity in entities if entity is not None}
+        # 地图互战以世界回合为轮次；延后的部分在下一世界回合造成普通伤害，
+        # 也可再被沙漏延后。先取出本回合的伤害，避免把下一回合提前到当场。
+        deferred_due = []
+        for entity in entity_by_id.values():
+            if entity is self.state.player:
+                continue
+            owed = getattr(entity, "deferred_damage", [])
+            due = [entry for entry in owed if entry.get("due_world_turn", float("inf")) <= world.clock.turn]
+            if due:
+                entity.deferred_damage = [entry for entry in owed if entry not in due]
+                deferred_due.append((entity, due))
+        for entity, entries in deferred_due:
+            self.combat.settle_deferred_damage(entity, entries)
+            actor = world.actors.get(entity.runtime_id)
+            if actor is not None:
+                actor.alive = bool(entity.is_alive and not entity.is_departed)
+            world.record("npc_hourglass_damage", entity.runtime_id,
+                         amount=sum(entry["amount"] for entry in entries), alive=entity.is_alive)
         resolved = []
         for encounter in list(world.encounters.values()):
             if not encounter.active or player_id in encounter.participants:
@@ -2057,6 +2075,11 @@ class GameEngine:
                 resolved.append({"encounter_id": encounter.encounter_id,
                                  "status": "resolved",
                                  "survivors": [actor.actor_id for actor in survivors]})
+        for entity in entity_by_id.values():
+            if entity is self.state.player:
+                continue
+            for entry in getattr(entity, "deferred_damage", []):
+                entry.setdefault("due_world_turn", world.clock.turn + 1)
         return resolved
 
     def _advance_world_turns(self, world: WorldState, player_id: str, turns: int) -> int:

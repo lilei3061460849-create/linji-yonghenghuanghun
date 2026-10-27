@@ -921,6 +921,21 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
     # ========== 回合管理 ==========
 
+    def settle_deferred_damage(self, entity: Entity, entries: list[dict]) -> list[dict]:
+        """将上回合延后的数值作为普通伤害结算，允许再次触发沙漏。"""
+        effects = []
+        for entry in entries:
+            if not entity.is_alive:
+                break
+            detail = self._apply_hostile_damage(entity, entry["amount"], "普通", ctx={
+                "timing": "round_start", "source": "缓厄沙漏", "source_type": "relic",
+                "actor": None, "owner": entity, "target": entity, "mechanic": "damage",
+                "subtype": "relic_damage", "amount": entry["amount"],
+                "tags": {"relic"}})
+            effects.append({"type": "relic", "relic": "缓厄沙漏",
+                            "entity": entity.name, "detail": detail})
+        return effects
+
     def round_start(self, relic_choices: Optional[dict] = None) -> dict:
         """
         回始结算
@@ -929,7 +944,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         3. 返回需要决策的信息
         """
         effects = []
-        # 先冻结所有角色上回合欠账。回始新触发的伤害只能到下次回始偿还。
+        # 先取出本回合应造成的伤害；本次新延后的部分留给下一回合。
         deferred_due = []
         seen_due = set()
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
@@ -1000,19 +1015,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         # 战斗内已有多个法力来源（聚能/储能电池/守夜灯/承露盏/
         # 透支/法术），效果重新有对象。判定位见 models.py::gain_mana。
 
-        # 已处理过防御/倍率的伤害偿还，不再格挡、减伤、倍率或再次延期。
-        # 债务不依赖此时是否仍持有/启用遗物；最终失血封顶与致死保护仍保留。
+        # 延后的部分就是普通伤害：正常格挡、减伤、倍率，也正常再次触发沙漏。
         for entity, entries in deferred_due:
-            for entry in entries:
-                if not entity.is_alive:
-                    break
-                detail = self._apply_hostile_damage(entity, entry["amount"], "无视格挡", ctx={
-                    "timing": "round_start", "source": "缓厄沙漏", "source_type": "relic",
-                    "actor": None, "owner": entity, "target": entity, "mechanic": "damage",
-                    "subtype": "deferred_damage", "amount": entry["amount"],
-                    "tags": {"relic", "deferred_damage_payment"}})
-                effects.append({"type": "deferred_damage", "relic": "缓厄沙漏",
-                                "entity": entity.name, "detail": detail})
+            effects.extend(self.settle_deferred_damage(entity, entries))
 
         # 遗物：回始触发（回锋刀按速限缺口造伤）。
         relic_logs = self.process_relics(TriggerTiming.ROUND_START, {"relic_choices": relic_choices or {}})
