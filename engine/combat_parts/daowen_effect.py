@@ -1069,28 +1069,6 @@ class DaowenEffectMixin:
                     result["effects"].append({"type": "status_added", "target": et.name,
                                               "status": name, "duration": duration, "value": x})
 
-        if name == "蜃景" and calc.get("create_illusions"):
-            # 幻象是独立可选中的单位，只有1生命；加入施法者所在阵营并沿用正常死亡/目标引用流程。
-            from ..models import Entity
-            count = int(calc["create_illusions"])
-            player_side = self.state.on_player_side(caster)
-            created = []
-            for idx in range(count):
-                illusion = Entity(
-                    name=f"{caster.name}的蜃景{idx + 1}", entity_type="幻象",
-                    blood_limit=1, current_hp=1, mana_limit=0, current_mana=0,
-                    speed_limit=0, current_speed=0, attack_count=0, attack_power=0)
-                illusion.is_alive = True
-                if player_side:
-                    self.state.temp_friends.append(illusion)
-                else:
-                    self.state.enemies.append(illusion)
-                self._bind_hp_hook(illusion)
-                created.append(illusion.name)
-            result["effects"].append({"type": "illusions_created", "count": len(created),
-                                      "names": created, "hp_each": 1,
-                                      "side": "player" if player_side else "enemy"})
-
         if name == "凝滞" and calc.get("rounds_delta"):
             # 凝滞重做：使用统一 rounds 动词延长目标指定状态的剩余回合数。
             status_name = calc["status_name"]
