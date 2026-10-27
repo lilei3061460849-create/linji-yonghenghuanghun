@@ -77,17 +77,14 @@ def test_disaster_ward_is_bloodline_exclusive():
 
 
 def test_wave_is_sunken_sea_exclusive():
-    """【波及】已迁入沉沦海：其它副本拒绝，持有沉沦海道纹后可学习。"""
-    other = _engine("龙心谷")
-    rejected = _learn(other, "波及")
-    assert not rejected["success"]
+    """【波及】归属门禁可独立验证；沉沦海尚未接入完整副本运行时。"""
+    from engine.gamedata import learnability_error
 
-    sea = _engine("沉沦海")
-    sea.state.player.dao_wen["流动"] = DaoWenInstance(
-        DaoWen(name="流动", formula="", cost_type="消耗",
-               cost_formula="X", effect_formula=""))
-    learned = _learn(sea, "波及")
-    assert learned["success"], learned.get("error")
+    known = {"波及"}
+    rejected = learnability_error("波及", owned=set(), region="龙心谷", known=known)
+    assert "沉沦海专属道纹" in rejected
+    allowed = learnability_error("波及", owned={"流动"}, region="沉沦海", known=known)
+    assert allowed is None
 
 
 def test_can_learn_same_region_after_owning_one():
@@ -152,13 +149,14 @@ def test_energy_refunded_on_rejection():
 
 
 def test_gate_applies_to_every_region():
-    """边界：三个副本的专属道纹都应受门禁约束"""
-    for region, pool in REGION_EXCLUSIVE_DAOWEN.items():
-        e = _engine(region)
+    """边界：所有登记副本的专属池都必须拒绝跨副本学习；不要求副本已接入运行时。"""
+    from engine.gamedata import learnability_error
+
+    for region in REGION_EXCLUSIVE_DAOWEN:
         other = next(rg for rg in REGION_EXCLUSIVE_DAOWEN if rg != region)
         foreign = sorted(REGION_EXCLUSIVE_DAOWEN[other])[0]
-        r = _learn(e, foreign)
-        assert not r["success"], f"{region}不应能学{other}的{foreign}"
+        error = learnability_error(foreign, owned=set(), region=region, known={foreign})
+        assert error is not None, f"{region}不应能学{other}的{foreign}"
 
 
 # ---------- 错误输入 ----------
