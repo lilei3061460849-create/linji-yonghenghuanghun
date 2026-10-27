@@ -20,8 +20,8 @@ RACE_EXCLUSIVE_DAOWEN = {
     "鲛族": {"唤潮", "蜃景"},
 }
 
-# 血族专属道纹：不计入任何副本的专属学习池；不再配置给罪孽都市怪物。
-BLOODLINE_EXCLUSIVE_DAOWEN = frozenset({"消灾"})
+# 血族专属道纹集合当前为空；原【消灾】已转换为消耗品【逆命筹】。
+BLOODLINE_EXCLUSIVE_DAOWEN = frozenset()
 
 ORIGINAL_MONSTER_DAOWEN = {"全力", "必中"}  # 2026-10-25 用户令：【疯狂】【减速】遗物化；【飞行】是状态
 
