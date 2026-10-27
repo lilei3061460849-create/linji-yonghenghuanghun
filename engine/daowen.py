@@ -718,6 +718,24 @@ class DaoWenEngine:
         }
     
 
+    @staticmethod
+    def calculate_ningzhi(x: int, target: Entity = None, status_name: str = "") -> dict:
+        """凝滞X：支付法力5X。使[目标]身上一种有限持续效果的剩余回合数+X。"""
+        if target is None:
+            raise ValueError("凝滞必须显式选择目标")
+        if not status_name:
+            raise ValueError("凝滞必须提交status_name，指定要延长的状态")
+        status = next((s for s in target.status_effects if s.name == status_name), None)
+        if status is None:
+            raise ValueError(f"目标{target.name}没有状态：{status_name}")
+        if status.remaining_rounds <= 0:
+            raise ValueError(f"状态{status_name}没有可延长的有限剩余回合数")
+        return {
+            "dao_wen": "凝滞", "x": x, "cost_type": CostType.MANA.value,
+            "cost": 5 * x, "rounds_delta": x, "status_name": status_name,
+            "summary": f"支付：{5*x}法力，使{target.name}的状态【{status_name}】剩余回合数+{x}",
+        }
+
     # ========== 乱葬岗（二阶）专属道纹 ==========
 
     @staticmethod
@@ -871,6 +889,8 @@ class DaoWenEngine:
             "龙鳞": cls.calculate_longlin,
             "裂变": cls.calculate_liebian,
             "背负": cls.calculate_beifu,
+            # ---- 沉沦海（二阶）----
+            "凝滞": cls.calculate_ningzhi,
             # ---- 乱葬岗（二阶）----
             "分裂": cls.calculate_fenlie,
             "瓦解": cls.calculate_wajie,
