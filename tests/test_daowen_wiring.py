@@ -296,3 +296,24 @@ def test_zengzhi_grants_temporary_infinite_blood_limit_and_bypasses_cancer():
     engine.combat.round_end()
     assert not target.has_status("无限血限")
     assert target.current_hp == target.blood_limit == 100
+
+
+def test_ningzhi_advances_real_target_rounds_and_ticks_statuses():
+    """凝滞真实推进目标回合，状态到期与凡庸计数都走回合结算。"""
+    engine = _engine("ningzhi_real_round")
+    _give(engine.state.player, "凝滞")
+    target = _monster(engine, "凝滞靶怪", hp=100)
+    target.add_status(StatusEffect(name="测试增益", value=1, remaining_rounds=2, source="test"))
+    target.actions_used_this_round = 1
+    target.damage_dealt_this_round = 1
+    engine.execute_action("round_start", {})
+    before_round = engine.state.current_round
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "凝滞", "x": 1, "target": target.name,
+        "dodge": False, "blood_shadow": False,
+    })
+    assert result["success"], result
+    assert engine.state.current_round == before_round + 1
+    assert target.get_status_effects("测试增益")[0].remaining_rounds == 1
+    assert any(e.get("type") == "extra_target_round" for e in result["execution"]["effects"])
+
