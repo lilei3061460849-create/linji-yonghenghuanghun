@@ -7,7 +7,7 @@ from typing import Optional, Any
 from .models import Entity, StatusEffect, DaoWen, DaoWenInstance
 from .enums import CostType
 from .rule_engine import daowen_migration_status, get_daowen_rule
-from .gamedata import UNIMPLEMENTED_DAOWEN
+from .gamedata import UNIMPLEMENTED_DAOWEN, RACE_EXCLUSIVE_DAOWEN, BLOODLINE_EXCLUSIVE_DAOWEN
 import math
 
 
@@ -1286,13 +1286,28 @@ class ResonanceEngine:
         else:
             chosen = candidates[0]
 
-        # 闭环草案可先保留节点，但尚未接入运行时的沉沦海道纹不能被残韵授予。
-        if chosen["target_daowen"] in UNIMPLEMENTED_DAOWEN:
-            owner = UNIMPLEMENTED_DAOWEN[chosen["target_daowen"]]
+        # 闭环草案节点、种族专属与血族专属都不能通过普通残韵越过获取门禁。
+        target_name = chosen["target_daowen"]
+        if target_name in UNIMPLEMENTED_DAOWEN:
+            owner = UNIMPLEMENTED_DAOWEN[target_name]
             return {
                 "success": False,
-                "error": f"道纹【{chosen['target_daowen']}】属于{owner}草案，尚未接入运行时，不能通过残韵获得",
+                "error": f"道纹【{target_name}】属于{owner}草案，尚未接入运行时，不能通过残韵获得",
                 "unimplemented": True,
+            }
+        race_owner = next((race for race, pool in RACE_EXCLUSIVE_DAOWEN.items()
+                           if target_name in pool), None)
+        if race_owner is not None:
+            return {
+                "success": False,
+                "error": f"道纹【{target_name}】是{race_owner}专属道纹，只能通过{race_owner}专属机制获得，不能通过残韵获得",
+                "exclusive": True,
+            }
+        if target_name in BLOODLINE_EXCLUSIVE_DAOWEN:
+            return {
+                "success": False,
+                "error": f"道纹【{target_name}】是血族专属道纹，只能通过血族专属机制获得，不能通过残韵获得",
+                "exclusive": True,
             }
 
         # 检查玩家是否拥有该类型残韵
