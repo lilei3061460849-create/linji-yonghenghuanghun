@@ -606,6 +606,11 @@ class GameEngine:
                                "note": "默认副本入口：初始化开放世界地图（21×21）；地图种子由引擎骰子产生并记录。"
                                        "只有用户明确要求旧线性流程时才跳过此项，继续旧线性局外行动并在精力耗尽后使用battle_start。"})
         else:
+            if player is not None and "唤潮" in player.dao_wen:
+                actions.append({"action_type": "use_daowen", "available": True,
+                                "params_schema": {"daowen_name": "唤潮", "x": "1..8",
+                                                  "terrain_cells": "恰好X个周围坐标，每项{x,y}或[x,y]"},
+                                "note": "仅在开放地图发动；支付X法力，将自身周围X个可用格改为水流地形，只有鲛族可通行"})
             actions.extend([
                 {"action_type": "world_status", "params_schema": {}},
                 {"action_type": "world_vision", "params_schema": {"actor_id": "optional; defaults to player"}},
@@ -1748,6 +1753,17 @@ class GameEngine:
 
     # ==================== 开放世界基础行动 ====================
 
+    def _entity_is_merfolk(self, entity: Entity | None) -> bool:
+        if entity is None:
+            return False
+        if entity.entity_type == "鲛族" or entity.has_status("鲛族"):
+            return True
+        relics = list(getattr(entity, "relics", []) or [])
+        if entity is self.state.player:
+            relics += list(getattr(self.state, "relics", []) or [])
+        return any(getattr(relic, "name", "") == "鲛族血脉"
+                   and getattr(relic, "enabled", True) for relic in relics)
+
     def _world_from_state(self) -> WorldState:
         if not self.state.world_state:
             raise ValueError("开放世界尚未初始化，请先执行world_initialize")
@@ -2523,6 +2539,7 @@ class GameEngine:
                 world.add_actor(WorldActorState(actor_id=actor_id, name=entity.name, kind=kind,
                                                 x=pos[0], y=pos[1], alive=entity.is_alive,
                                                 faction=faction, mode=mode,
+                                                species=("鲛族" if self._entity_is_merfolk(entity) else ""),
                                                 behavior=("follow" if kind in ALLY_KINDS else "explore"),
                                                 owner_actor_id=owner))
                 if kind == "player":
@@ -2640,6 +2657,10 @@ class GameEngine:
             x, y = params.get("x"), params.get("y")
             if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
                 return {"success": False, "error": "目标坐标x/y必须是整数"}
+            player_entity = self.state.player
+            world_actor = world.actors.get(actor_id)
+            if world_actor is not None:
+                world_actor.species = "鲛族" if self._entity_is_merfolk(player_entity) else ""
             result = world.move_actor(actor_id, (x, y))
             if not any(encounter.active and actor_id in encounter.participants
                        for encounter in world.encounters.values()):
@@ -5069,6 +5090,76 @@ class GameEngine:
         """
         return self.combat.pay_daowen_shard_cost(actor, name, calc, x)
 
+    def _action_tidecall(self, params: dict, actor: Entity) -> dict:
+        """开放地图道纹：选择自身周围X个可用格改为水流；仅鲛族可通行。"""
+        if not self.state.world_state:
+            return {"success": False, "error": "唤潮只能在开放地图中发动"}
+        if actor is not self.state.player:
+            return {"success": False, "error": "唤潮只能由轮回者在开放地图中发动"}
+        if "唤潮" not in actor.dao_wen:
+            return {"success": False, "error": "尚未掌握唤潮"}
+        x = params.get("x", 1)
+        if not isinstance(x, int) or isinstance(x, bool) or x == 0:
+            return {"success": False, "error": "唤潮X必须为1至8的整数"}
+        if x < 0 or x > 8:
+            return {"success": False, "error": "唤潮X必须为1至8的整数"}
+        instance = actor.dao_wen["唤潮"]
+        if not instance.can_use():
+            return {"success": False, "error": "唤潮当前冷却中或被封印"}
+        try:
+            world = self._world_from_state()
+            player_actor = next((a for a in world.actors.values()
+                                 if a.kind == "player" and a.actor_id == actor.runtime_id), None)
+            if player_actor is None:
+                player_actor = next((a for a in world.actors.values() if a.kind == "player"), None)
+            if player_actor is None:
+                return {"success": False, "error": "开放地图中找不到轮回者位置"}
+            player_actor.species = "鲛族" if self._entity_is_merfolk(actor) else ""
+            cells = params.get("terrain_cells")
+            if not isinstance(cells, list) or len(cells) != x:
+                return {"success": False, "error": f"唤潮X={x}必须提交恰好{x}个terrain_cells坐标"}
+            parsed = []
+            for cell in cells:
+                if isinstance(cell, dict):
+                    cx, cy = cell.get("x"), cell.get("y")
+                elif isinstance(cell, (list, tuple)) and len(cell) == 2:
+                    cx, cy = cell
+                else:
+                    return {"success": False, "error": "terrain_cells每项必须是{x,y}或[x,y]"}
+                if (not isinstance(cx, int) or isinstance(cx, bool)
+                        or not isinstance(cy, int) or isinstance(cy, bool)):
+                    return {"success": False, "error": "水流地形坐标必须为整数"}
+                pos = (cx, cy)
+                if pos in parsed:
+                    return {"success": False, "error": "terrain_cells不能包含重复坐标"}
+                if abs(cx - player_actor.x) > 1 or abs(cy - player_actor.y) > 1 or pos == player_actor.position:
+                    return {"success": False, "error": "唤潮只能选择自身周围八格"}
+                terrain = world.map.terrain_at(pos)
+                if terrain in {"wall", "building", "void", "water_current"}:
+                    return {"success": False, "error": f"坐标{pos}不是可用地图格"}
+                if world.map.location_at(pos) is not None:
+                    return {"success": False, "error": f"坐标{pos}已有特殊地点，不能改为水流"}
+                parsed.append(pos)
+            try:
+                calc = DaoWenEngine.resolve("唤潮", x, target=actor, caster=actor)
+            except Exception as exc:
+                return {"success": False, "error": f"唤潮计算失败：{exc}"}
+            _, mana_error = self.combat.pay_daowen_mana(actor, calc, actor)
+            if mana_error:
+                return {"success": False, "error": mana_error}
+            for pos in parsed:
+                world.map.terrain[world.map.key(pos)] = "water_current"
+            world.map.version += 1
+            world.record("tidecall_terrain_created", actor.runtime_id, cells=[list(p) for p in parsed],
+                         terrain="water_current", traversable_by="鲛族")
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": f"发动道纹【唤潮X={x}】",
+                    "result": {"cells": [list(p) for p in parsed], "terrain": "水流",
+                               "traversable_by": "鲛族", "mana_cost": x,
+                               "current_mana": actor.current_mana}}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
+
     def _action_use_daowen(self, params: dict) -> dict:
         """
         发动道纹。
@@ -5110,6 +5201,8 @@ class GameEngine:
 
         name = params.get("daowen_name", "")
         x = params.get("x", 1)
+        if name == "唤潮":
+            return self._action_tidecall(params, actor)
         target_name = params.get("target", "")
         target_ref = params.get("target_ref", "")
 
