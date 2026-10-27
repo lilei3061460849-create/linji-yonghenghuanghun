@@ -22,6 +22,7 @@ from ..mechanisms import MECHANISMS, Phase, TriggerBus, TriggerContext
 from ..personality import remove_personality
 from ..resolution import KIND_EFFECT, resolution_frame
 from ..models import MONSTER_MANA_RELIC
+from ..mechanisms.verbs import apply_verb
 
 
 class DaowenEffectMixin:
