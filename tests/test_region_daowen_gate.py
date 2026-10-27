@@ -63,6 +63,12 @@ def test_disaster_ward_is_bloodline_exclusive():
 
     assert "消灾" in BLOODLINE_EXCLUSIVE_DAOWEN
     assert all("消灾" not in pool for pool in REGION_EXCLUSIVE_DAOWEN.values())
+    from pathlib import Path
+    crime_doc = Path(__file__).resolve().parents[1] / "副本" / "罪孽都市.md"
+    crime_text = crime_doc.read_text(encoding="utf-8")
+    loop = next(line for line in crime_text.splitlines() if "⇄" in line)
+    assert "消灾" not in loop
+    assert "通缉犯（66/4/3，假钞）" in crime_text
     known = {"消灾"}
     error = learnability_error("消灾", owned=set(), region="罪孽都市", known=known)
     assert "血族专属道纹" in error
