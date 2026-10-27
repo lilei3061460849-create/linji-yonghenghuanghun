@@ -21,7 +21,7 @@ RELICIZED_SLOT = "？？"
 PLACEHOLDER_SLOTS = frozenset({RESERVED_SLOT, RELICIZED_SLOT})
 RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-    "冥气", "退化", "畸变", "缄默",
+    "冥气", "退化", "畸变", "缄默", "加害",
 )}
 
 
@@ -549,124 +549,6 @@ class DaoWenEngine:
     
 
     @staticmethod
-    def calculate_jiahai(x: int, target: Entity = None) -> dict:
-        """加害X：支付：法力2X。数值规则见 engine.rule_engine.DAOWEN_RULES。"""
-        definition = get_daowen_rule("加害")
-        target_name = target.name if target is not None else "未选定目标"
-        cost = definition.cost(x)
-        return {
-            "dao_wen": "加害",
-            "x": x,
-            "cost_type": definition.cost_type,
-            "cost": cost,
-            "duration": definition.duration.value(x),
-            "status": {"name": definition.rules[0].status_name, "value": x,
-                       "duration": definition.duration.value(x)},
-            "summary": definition.summary(x, target_name=target_name),
-        }
-
-    @staticmethod
-    def calculate_dianjin(x: int) -> dict:
-        """点金X：代价失忆X；你获得80X碎片。"""
-        return {
-            "dao_wen": "点金",
-            "x": x,
-            "cost_type": CostType.AMNESIA.value,
-            "cost": x,
-            "forget_daowen": x,
-            "shard_gain": 80 * x,
-            "summary": f"失忆{x}，获得{80*x}个碎片",
-        }
-
-    # ---- 罪孽都市专属道纹 ----
-    
-    @staticmethod
-    def calculate_diandang(x: int) -> dict:
-        """典当X：代价失忆2X；发现获得X种道纹（2026-10-13 用户令顶替【逼债】的闭环格）。
-
-        发现口径 = 局外【学习】口径（见 engine/gamedata.py::learnability_error）：
-        已持有/异副本专属/未解锁门禁/怪物转化/未实装的一律不出池。
-        轮回者发动→每种 pending 一组3选1（choose_diandang_daowen 逐组领取）；
-        非轮回者发动（如怪物经【原初】借用）→即时随机授予（怪物没有发现选择界面）。
-        授予一律受【承载上限】约束，超额不授予。
-        """
-        return {
-            "dao_wen": "典当",
-            "x": x,
-            "cost_type": CostType.AMNESIA.value,
-            "cost": 2 * x,
-            "forget_daowen": 2 * x,
-            "discover_daowen": x,
-            "summary": f"失忆{2 * x}，发现获得{x}种道纹",
-        }
-    
-    @staticmethod
-    def calculate_haoduo(x: int, target: Entity = None) -> dict:
-        """豪夺X（2026-09-28 用户令，旧【抵扣】改名）：支付：5X碎片，夺取[目标]1件遗物持续X回合。
-
-        夺取=把目标的一件遗物转移到己方（施法者）临时持有，持续X回合，到期归还。
-        与旧【抵扣】（只封印）的区别：夺取期间施法者**真正持有**该遗物并能触发其被动，
-        目标在这段时间里不能触发该遗物。
-        """
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "豪夺", "x": x,
-            # 2026-09-28 用户令：支付：5X碎片（沿用现有 cost_shards 付费通道；
-            # 不写 cost_type=MANA，避免被当成法力支付）。
-            "cost_type": "代价", "cost_shards": 5 * x,
-            "relic_steal": 1, "duration": x,
-            "summary": f"支付：{5*x}碎片，夺取{target_name}一件遗物，持续{x}回合"
-        }
-
-    # 旧名 calculate_dikou 不再保留（避免注册时与"豪夺"双注册）。
-    
-    @staticmethod
-    def calculate_qingsuan(x: int, target: Entity = None, caster_shards: int = 0) -> dict:
-        """清算X：支付：法力2X。[回始]使目标失去你碎片点格挡，持续X"""
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "清算", "x": x, "cost_type": CostType.MANA.value, "cost": 2 * x,
-            "qingsuan_register": True, "duration": x,
-            "summary": f"支付：{2 * x}法力，[回始]使{target_name}失去{caster_shards}格挡，持续{x}回合"
-        }
-    
-    @staticmethod
-    def calculate_qiangjie(x: int, target: Entity = None) -> dict:
-        """抢劫X：支付：法力3X。夺取目标10X碎片；若无碎片则失去X点速度"""
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "抢劫", "x": x, "cost_type": CostType.MANA.value, "cost": 3 * x,
-            "shard_steal": 10 * x, "speed_penalty": x,
-            "summary": f"支付：{3 * x}法力，夺取{target_name} {10*x}碎片或{x}速度"
-        }
-
-    @staticmethod
-    def calculate_lesuo(x: int, target: Entity = None) -> dict:
-        """勒索X：支付：法力3X。目标失去10X碎片，不足部分记负债（真碎片扣负；2026-10-14 补点金反转分叉，还债新生产者）。
-
-        与【抢劫】同价同量（3X→10X），形状不同：抢劫是偷取（施法者获得，不足不记负债；
-        无碎片改失速），勒索是销毁+记负债（谁都不获得，不足部分真碎片扣负，可触发【还债】）。
-        单次结算，无持续（用户 2026-10-14 选单次，不 mirror 逼债的回始∞）。
-        """
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "勒索", "x": x, "cost_type": CostType.MANA.value, "cost": 3 * x,
-            "shard_debt": 10 * x,
-            "summary": f"支付：{3 * x}法力，{target_name}失去{10*x}碎片，不足记负债"
-        }
-    
-    @staticmethod
-    def calculate_jiachao(x: int) -> dict:
-        """假钞X：支付：法力X。获得10X假碎片"""
-        return {
-            "dao_wen": "假钞", "x": x, "cost_type": CostType.MANA.value, "cost": x,
-            "fake_shards": 10 * x,
-            "summary": f"支付：{x}法力，获得{10*x}假碎片"
-        }
-    
-    # ---- 龙心谷专属道纹 ----
-    
-    @staticmethod
     def calculate_longlin(x: int, target: Entity = None) -> dict:
         """龙鳞X：支付：法力2X。数值规则见 engine.rule_engine.DAOWEN_RULES。"""
         definition = get_daowen_rule("龙鳞")
@@ -866,7 +748,6 @@ class DaoWenEngine:
             "超频": cls.calculate_chaopin,
             "坏死": cls.calculate_huaisi,
             # 罪孽都市
-            "加害": cls.calculate_jiahai,
             "点金": cls.calculate_dianjin,
             # 2026-10-13 用户令：【逼债】删除，【典当】顶替其闭环格（点金—转换—典当—反转—豪夺）。
             "典当": cls.calculate_diandang,
@@ -1035,14 +916,14 @@ class ResonanceEngine:
             ("点金", "反转", "勒索"),
         ],
         "龙心谷闭环": [
-            ("加害", "反转", "龙鳞"),
+            (RELICIZED_DAOWEN_SLOTS["加害"], "反转", "龙鳞"),
             ("龙鳞", "曲解", RELICIZED_DAOWEN_SLOTS["逆鳞"]),
             (RELICIZED_DAOWEN_SLOTS["逆鳞"], "转换", "裂变"),
             # 2026-10-11 用户令（A13）：【嫁祸】整条删除（效果与遗物【贪婪契约】重复）
             #   → 沿用活血/尸爆的删除先例：断边**重连**为 裂变—转换→背负，环长 7→6。
             ("裂变", "转换", "背负"),
             ("背负", "曲解", RELICIZED_DAOWEN_SLOTS["伤痕"]),
-            (RELICIZED_DAOWEN_SLOTS["伤痕"], "转换", "加害"),
+            (RELICIZED_DAOWEN_SLOTS["伤痕"], "转换", RELICIZED_DAOWEN_SLOTS["加害"]),
         ],
         "乱葬岗闭环": [
             # 【缄默】已遗物化：该节点保留独立「？？」占位，不与相邻节点直连。
