@@ -17,7 +17,7 @@ sys.path.insert(0, ROOT)
 
 from engine.api import GameEngine
 from engine.models import DaoWen, DaoWenInstance
-from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
+from engine.gamedata import REGION_EXCLUSIVE_DAOWEN, BLOODLINE_EXCLUSIVE_DAOWEN
 
 
 def _engine(region="龙心谷"):
@@ -56,6 +56,18 @@ def test_race_exclusive_daowen_are_not_learnable_from_generic_pool():
     known = {"唤潮", "蜃景"}
     assert "鲛族专属道纹" in learnability_error("唤潮", owned=set(), region="沉沦海", known=known)
     assert "鲛族专属道纹" in learnability_error("蜃景", owned=set(), region="龙心谷", known=known)
+
+
+def test_disaster_ward_is_bloodline_exclusive():
+    from engine.gamedata import learnability_error
+
+    assert "消灾" in BLOODLINE_EXCLUSIVE_DAOWEN
+    assert all("消灾" not in pool for pool in REGION_EXCLUSIVE_DAOWEN.values())
+    known = {"消灾"}
+    error = learnability_error("消灾", owned=set(), region="罪孽都市", known=known)
+    assert "血族专属道纹" in error
+    other_error = learnability_error("消灾", owned=set(), region="龙心谷", known=known)
+    assert "血族专属道纹" in other_error
 
 
 def test_wave_is_sunken_sea_exclusive():
