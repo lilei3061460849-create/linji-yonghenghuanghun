@@ -239,16 +239,16 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_zengzhi(x: int, target: Entity = None) -> dict:
-        """增殖X：支付：流血10X。使[目标]的[血限]变为∞，持续X回合（战终清除）。"""
+        """增殖X：支付：衰老X。使[目标]的[血限]变为∞，持续X回合（战终清除）。"""
         target_name = target.name if target is not None else "未选定目标"
         return {
             "dao_wen": "增殖",
             "x": x,
-            "cost_type": CostType.BLEED.value,
-            "cost_hp": 10 * x,
+            "cost_type": CostType.AGING.value,
+            "cost": x,
             "duration": x,
             "infinite_blood_limit": True,
-            "summary": f"流血{10 * x}，使{target_name}的血限变为∞，持续{x}回合"
+            "summary": f"衰老{x}，使{target_name}的血限变为∞，持续{x}回合"
         }
     
     @staticmethod
@@ -362,30 +362,28 @@ class DaoWenEngine:
     
     @staticmethod
     def calculate_jinghua(x: int, target: Entity = None, cost_choices: list[dict] | None = None) -> dict:
-        """净化X：支付法力2X；施法者自选要消除的可逆数值型代价，层数合计不超过X。"""
+        """净化X：支付法力2X。选择目标拥有的一种代价，使其层数-X。"""
         target_name = target.name if target is not None else "未选定目标"
         allowed = {"衰老", "枯竭", "萎缩", "疲惫", "异变"}
-        choices = cost_choices if cost_choices is not None else [{"type": "异变", "layers": x}]
-        normalized = {}
-        for item in choices:
-            if not isinstance(item, dict):
-                raise ValueError("净化的 cost_choices 必须是 {type, layers} 列表")
-            kind = str(item.get("type", ""))
-            layers = item.get("layers", 0)
-            if kind not in allowed:
-                raise ValueError(f"净化暂不支持消除【{kind or '未指定'}】代价")
-            if not isinstance(layers, int) or isinstance(layers, bool) or layers < 0:
-                raise ValueError("净化每类代价层数必须是非负整数")
-            normalized[kind] = normalized.get(kind, 0) + layers
-        total = sum(normalized.values())
-        if total > x:
-            raise ValueError(f"净化选择的代价总层数{total}超过X={x}")
+        if not isinstance(cost_choices, list) or len(cost_choices) != 1:
+            raise ValueError("净化必须显式选择目标拥有的一种代价")
+        item = cost_choices[0]
+        if not isinstance(item, dict) or item.get("type") not in allowed:
+            raise ValueError("净化只支持有可逆层数的衰老/枯竭/萎缩/疲惫/异变；不可逆代价尚不支持")
+        kind = item["type"]
+        if "layers" in item and (type(item["layers"]) is not int or item["layers"] != x):
+            raise ValueError("净化所选代价固定减少X层，不能拆分层数")
+        if target is not None:
+            owned = (target.mutation_count if kind == "异变"
+                     else getattr(target, "reversible_cost_layers", {}).get(kind, 0))
+            if owned <= 0:
+                raise ValueError(f"目标未拥有可净化的【{kind}】层数")
         return {
             "dao_wen": "净化", "x": x, "cost_type": CostType.MANA.value, "cost": 2 * x,
-            "cost_reductions": normalized,
-            "summary": f"支付：{2*x}法力，使{target_name}消除代价{normalized}（共{total}/{x}层）",
+            "cost_reductions": {kind: x},
+            "summary": f"支付：法力{2*x}。使{target_name}的{kind}层数-{x}",
         }
-    
+
     @staticmethod
     def calculate_bizhong(x: int) -> dict:
         """必中X：支付：异变X。你选中的目标无法进行回合外行动，持续X。

@@ -405,6 +405,7 @@ class Entity:
         self.is_proliferated = value
 
     # 异变计数：非怪物角色达到迷失阈值时交由战斗层处理；怪物照常累计但不触发迷失。
+    reversible_cost_layers: dict[str, int] = field(default_factory=dict)
     mutation_count: int = 0
 
     # 存活

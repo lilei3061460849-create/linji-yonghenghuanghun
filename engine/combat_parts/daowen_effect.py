@@ -473,6 +473,13 @@ class DaowenEffectMixin:
             for wt in wave_status_targets:
                 if not wt.is_alive:
                     continue
+                reductions = dict(calc["cost_reductions"])
+                ledger = getattr(wt, "reversible_cost_layers", {})
+                for kind in reductions:
+                    owned = wt.mutation_count if kind == "异变" else ledger.get(kind, 0)
+                    reductions[kind] = min(reductions[kind], max(0, owned))
+                    if kind != "异变":
+                        ledger[kind] = max(0, owned - reductions[kind])
                 applied = {}
                 if reductions.get("衰老", 0) > 0:
                     amount = int(reductions["衰老"])

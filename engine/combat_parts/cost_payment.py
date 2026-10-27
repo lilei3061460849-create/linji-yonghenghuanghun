@@ -207,6 +207,13 @@ class CostPaymentMixin:
             detail = self._pay_bleed_cost(payer, amount, cost_context=cost_context)
             return {"payer": payer.name, "cost_type": cost_type,
                     "paid": detail.get("actual_damage", 0), "detail": detail}
+        if cost_type in {"衰老", "枯竭", "萎缩", "疲惫"}:
+            ledger = getattr(payer, "reversible_cost_layers", None)
+            if ledger is None:
+                payer.reversible_cost_layers = ledger = {}
+            immune = cost_type == "衰老" and self.state.side_has(payer, "不朽之躯")
+            if not immune:
+                ledger[cost_type] = ledger.get(cost_type, 0) + amount
         if cost_type == "衰老":
             if self.state.side_has(payer, "不朽之躯"):
                 return {"payer": payer.name, "cost_type": cost_type, "paid": 0, "immune": True}
