@@ -598,6 +598,12 @@ class WorldState:
             directions = [(actor.x, actor.y - 1), (actor.x + 1, actor.y),
                           (actor.x, actor.y + 1), (actor.x - 1, actor.y)]
             directions = [pos for pos in directions if self.map.is_passable(pos, actor)]
+            # 优先朝空格分流，避免幻象刚生成就与施术者重合并立即消散。
+            unoccupied = [pos for pos in directions
+                          if not any(other.alive and not other.is_illusion
+                                     and other.position == pos for other in self.actors.values())]
+            if unoccupied:
+                directions = unoccupied
             if not directions:
                 continue
             route = next((entry for entry in actor.memory
