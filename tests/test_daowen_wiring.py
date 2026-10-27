@@ -166,24 +166,35 @@ def test_boba_boundary_and_invalid_submissions():
 
 
 
-def test_jiahai_guzhi_and_anger_consumable():
-    """加害挂目标加伤；固执单次掉 1；怒火针固定持续2回合并使法力消耗减半。
+def test_jiahai_status_consumable_guzhi_and_anger_consumable():
+    """灼罪钉施加固定加害状态；固执单次掉1；怒火针使法力消耗减半。
 
     2026-10-11 用户令：【借力】已删除，原「借力2 → _jieli_boost +20%」段落一并移除。
     """
     engine = _engine("hooks")
+    assert "加害" not in DaoWenEngine._registry
     assert "愤怒" not in DaoWenEngine._registry
     p = engine.state.player
-    for n in ("加害", "固执"):
-        _give(p, n)
+    _give(p, "固执")
     m = _monster(engine, ap=10)
     engine.execute_action("round_start", {})
 
-    r = engine.execute_action("use_daowen", {"daowen_name": "加害", "x": 4, "target": m.name})
-    assert r["success"]
-    assert m.has_status("加害")
-    d = engine.combat._apply_hostile_damage(m, 10)
-    assert d["actual_damage"] == 14
+    item = Consumable(name="灼罪钉", effect="使目标每次受到伤害+1，持续2回合",
+                       current_uses=1, max_uses=1)
+    engine.state.consumables.append(item)
+    enemy_ref = next(ref for ref, entity in engine.combat._combat_entity_refs().items()
+                     if entity is m)
+    try:
+        used = engine.execute_action("consume_item", {
+            "name": "灼罪钉", "target_ref": enemy_ref,
+        })
+        assert used["success"], used
+        assert item.current_uses == 0
+        assert m.has_status("加害")
+        d = engine.combat._apply_hostile_damage(m, 10)
+        assert d["actual_damage"] == 11
+    finally:
+        engine.state.consumables.remove(item)
 
     p.current_hp = 50
     engine.execute_action("use_daowen", {"daowen_name": "固执", "x": 2})
