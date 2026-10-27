@@ -408,20 +408,6 @@ class DaoWenEngine:
     
 
     @staticmethod
-    def calculate_fennu(x: int, target: Entity = None) -> dict:
-        """愤怒X：支付：法力2X。使[目标]法力消耗减半，持续X"""
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "愤怒",
-            "x": x,
-            "cost_type": CostType.MANA.value,
-            "cost": 2 * x,
-            "mana_cost_halved": True,
-            "duration": x,
-            "summary": f"支付：{2 * x}法力，使{target_name}法力消耗减半，持续{x}回合"
-        }
-    
-    @staticmethod
     def calculate_ruhua(x: int, target: Entity = None) -> dict:
         """弱化X：支付：法力2X。使[目标]攻击力-X，持续∞"""
         target_name = target.name if target is not None else "未选定目标"
@@ -870,7 +856,6 @@ class DaoWenEngine:
             "净化": cls.calculate_jinghua,
             "必中": cls.calculate_bizhong,
             # 怪物转化（2026-10-11 A14：无神/借力/衰败 已删）
-            "愤怒": cls.calculate_fennu,
             "弱化": cls.calculate_ruhua,
             "全速": cls.calculate_quansu,
             "蒙蔽": cls.calculate_mengbi,
