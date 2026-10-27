@@ -161,7 +161,7 @@ class DaoWenEngine:
 
     # 连击六通道价格（2026-10-22 用户令：与【透支】同类多代价道纹，价格与效果全表同乘五）：
     # 流血5X／法力5X／衰老X／枯竭X／碎片5X／假碎片50X；效果 选择[目标]5X次、每次1点伤害。
-    # 比率锚现有体系：【消灾】1单位=5碎片/50假碎片、【假钞】1法力=10假碎片、
+    # 比率锚现有体系：消耗品【逆命筹】承接重投效果；【假钞】1法力=10假碎片、
     # 【透支】上限类按整X计价；全乘五后衰老/枯竭回到整数X计价，不留⌈X/5⌉零头，
     # 流血也回到旧【血债】「1点生命换1点伤害」的老比率（只是以5为一段）。
     # 各通道效果完全相同，只有倍率不同，不带任何通道专属机制
@@ -677,16 +677,6 @@ class DaoWenEngine:
             "summary": f"支付：{x}法力，获得{10*x}假碎片"
         }
     
-    @staticmethod
-    def calculate_xiaozai(x: int) -> dict:
-        """消灾X：支付：50X假碎片/5X碎片（局外发动支付：×2）。重置随机数X次以改变结果"""
-        return {
-            "dao_wen": "消灾", "x": x, "cost_type": "碎片",
-            "fake_cost": 50 * x, "real_cost": 5 * x,
-            "rerolls": x,
-            "summary": f"支付：{50*x}假碎片或{5*x}碎片（局外×2），重置随机数{x}次"
-        }
-    
     # ---- 龙心谷专属道纹 ----
     
     @staticmethod
@@ -900,7 +890,6 @@ class DaoWenEngine:
             # 2026-10-14 用户令：补点金反转分叉，还债新生产者。
             "勒索": cls.calculate_lesuo,
             "假钞": cls.calculate_jiachao,
-            "消灾": cls.calculate_xiaozai,
             # 龙心谷
             "龙鳞": cls.calculate_longlin,
             "裂变": cls.calculate_liebian,
