@@ -8,6 +8,7 @@
 - 承载怪物：已实现副本文档及沉沦海专属网络草案的全部面板行（怪物池 + 事件/雇佣面板）
 """
 import inspect
+import difflib
 import re
 import sys
 from collections import defaultdict
@@ -388,9 +389,17 @@ if "--check" in sys.argv:
         raise SystemExit(1)
     if out.read_text(encoding="utf-8") != wanted:
         print("DRIFT: 全道纹索引.md 与引擎/事实源不一致，请跑 python3 sim/gen_daowen_index.py")
+        diff = difflib.unified_diff(
+            out.read_text(encoding="utf-8").splitlines(),
+            wanted.splitlines(),
+            fromfile="全道纹索引.md",
+            tofile="sim/gen_daowen_index.py",
+            lineterm="",
+        )
+        print("\n".join(diff))
         raise SystemExit(1)
-    print(f"OK: 全道纹索引.md 与引擎一致（{len(L)} lines, {len(DaoWenEngine._registry)} daowen）")
+    print(f"OK: 全道纹索引.md 与引擎一致（{len(L)} lines, {len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)} indexed daowen; {len(DaoWenEngine._registry)} runtime）")
     raise SystemExit(0)
 
 out.write_text(wanted, encoding="utf-8")
-print(f"written {out}: {len(L)} lines, {len(DaoWenEngine._registry)} daowen")
+print(f"written {out}: {len(L)} lines, {len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)} indexed daowen; {len(DaoWenEngine._registry)} runtime")
