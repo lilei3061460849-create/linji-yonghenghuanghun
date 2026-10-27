@@ -66,3 +66,29 @@ class SupplyOutputAuditTests(unittest.TestCase):
         cast_paid(c, '连击', 1, p, cost_channel='流血')
         self.assertEqual(p.current_hp - start, 40)
         self.assertIsNone(c.check_cancer(p))
+
+
+class CancerBoundaryTests(unittest.TestCase):
+    """仅验证现行增殖与有限回复；永生尚无可调用实现。"""
+    def test_finite_healing_under_proliferation_does_not_trigger_cancer(self):
+        c = arena();p = c.state.player
+        p.add_status(StatusEffect('无限血限', 1, value=1, source='增殖'))
+        c.state.apply_heal(p, 300, ctx={
+            'timing': 'test', 'source': '有限回复探针', 'source_type': 'test',
+            'actor': p, 'target': p, 'mechanic': 'heal', 'amount': 300})
+        self.assertEqual(p.total_healed, 300)
+        self.assertEqual(p.current_hp, 390)
+        self.assertIsNone(c.check_cancer(p))
+        self.assertTrue(p.is_alive)
+
+    def test_cancer_progress_is_not_erased_when_proliferation_expires(self):
+        c = arena();p = c.state.player
+        p.add_status(StatusEffect('无限血限', 1, value=1, source='增殖'))
+        c.state.apply_heal(p, 300, ctx={
+            'timing': 'test', 'source': '有限回复探针', 'source_type': 'test',
+            'actor': p, 'target': p, 'mechanic': 'heal', 'amount': 300})
+        p.tick_status_effects()  # 单独检查状态到期后的癌变判定，不冒充完整回终。
+        self.assertFalse(p.has_status('无限血限'))
+        self.assertEqual(p.total_healed, 300)
+        self.assertIsNotNone(c.check_cancer(p))
+        self.assertFalse(p.is_alive)
