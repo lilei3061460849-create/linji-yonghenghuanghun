@@ -1385,6 +1385,15 @@ class GameEngine:
         if params is None:
             params = {}
 
+        # 被动遗物状态在每次行动入口刷新，获得/封印/解封缄默面具后，后续法限变化
+        # 都使用当前真实持有状态；预演路径也走同一核心入口。
+        entities = ([self.state.player] if self.state.player is not None else [])
+        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+            entities.extend(getattr(self.state, group_name, []) or [])
+        for entity in entities:
+            object.__setattr__(entity, "_silent_mask_active",
+                               bool(self.combat._relic_active(entity, "缄默面具")))
+
         if (self.state.pending_initial_daowen_choices
                 and action_type != "setup_choose_initial_daowen"):
             return {
