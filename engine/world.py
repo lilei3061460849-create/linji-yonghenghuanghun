@@ -377,6 +377,9 @@ class WorldState:
         # 同格占位合法；敌对单位是否开战由遭遇检测统一处理。
         actor.visited_cells.add(self.map.key(actor.position))
         self.actors[actor.actor_id] = actor
+        if not actor.is_illusion:
+            self._dispel_illusions_at(actor.position, by_actor_id=actor.actor_id,
+                                      reason="touched_by_character")
         self.record("actor_spawned", actor.actor_id, name=actor.name, kind=actor.kind,
                     position=list(actor.position))
 
