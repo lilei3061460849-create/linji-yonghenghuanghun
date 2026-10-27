@@ -2,7 +2,7 @@ name: Regenerate derived documentation
 
 on:
   push:
-    branches: [main, chore/github-native-backlog, dedupe-sunken-sea-daowen]
+    branches: [main, chore/github-native-backlog]
     paths:
       - .github/workflows/regenerate-derived-docs.yml
       - AI_EXPERIENCE.md
