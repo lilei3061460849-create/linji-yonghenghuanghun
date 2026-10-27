@@ -223,7 +223,7 @@ A(f"杀伐闭环（通用核心）{len(SHAFA_LOOP_DAOWEN)} ｜ 其他通用道�
   f"血族专属 {len(BLOODLINE_EXCLUSIVE_DAOWEN)} ｜ 初拥专属 {len(FIRST_EMBRACE_DAOWEN)} ｜ "
   f"未实现 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。")
 A("")
-A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余道纹取 `engine/daowen.py` `calculate_*` docstring。公式以实际引擎结算为准。")
+A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余已注册道纹取 `engine/daowen.py` `calculate_*` docstring；沉沦海3个未接入运行时节点取 `DRAFT_DAOWEN`。公式以实际引擎结算为准。")
 A("- **归属与残韵闭环**：`engine/gamedata.py` + `engine/daowen.py`（`CLOSED_LOOPS`）；与规则正文的闭环图一致。\n"
   "  `CLOSED_LOOPS` 里的每条边为**无向边**（2026-10-07 用户令：残韵路径双向）——登记 `(a,类型,b)` 表示 a、b 互为相邻节点，\n"
   "  正反两向都走同一种残韵、同样消耗一次；双向由 `ResonanceEngine.find_transformations` 在查询时展开，边表不重复登记反向边。\n"
