@@ -6537,7 +6537,7 @@ class GameEngine:
         # 正文具名消耗品：全部在扣耐久前完成参数校验；未实现项不得“成功但只扣耐久”。
         # 2026-10-14 审计F4：镇魂铁钉处理器补齐（此前发而无用）；替死鬼/赶尸铃/黄符见下。
         if item.name in {"绝息淤泥", "活性土壤", "假钞贴", "穿甲弹", "洗劫面具", "赤泉囊", "龙血瓶",
-                          "镇魂铁钉", "赶尸铃", "黄符", "逆命筹"}:
+                          "镇魂铁钉", "赶尸铃", "黄符", "逆命筹", "怒火针"}:
             return self._consume_named_event_item(item, params)
 
         # 自定义消耗品（2026-10-23）：声明里的 effects 由 verbs 执行，不占出手。
@@ -6667,7 +6667,14 @@ class GameEngine:
             return {"success": False, "error": "没有玩家"}
         name = item.name
         result: dict[str, Any] = {"item": name}
-        if name == "逆命筹":
+        if name == "怒火针":
+            target = refs.get(params.get("target_ref", ""))
+            if target is None or not target.is_alive:
+                return {"success": False, "error": "怒火针必须显式指定合法存活target_ref"}
+            item.use()
+            target.add_status(StatusEffect(name="愤怒", value=1, remaining_rounds=2, source=name))
+            result.update({"target": target.name, "duration": 2, "mana_cost_halved": True})
+        elif name == "逆命筹":
             item.use()
             self.dice.set_rerolls(self.dice.rerolls_pending + 1)
             result.update({"rerolls_added": 1, "rerolls_pending": self.dice.rerolls_pending})
