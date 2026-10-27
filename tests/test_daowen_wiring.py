@@ -345,7 +345,7 @@ def test_chengni_triggers_nightwatch_per_extra_round_using_world_round():
     assert not target.has_status("测试减益")
     assert engine.state.player.get_status_effects("玩家状态")[0].remaining_rounds == 3
     assert target.actions_used_this_round == 0
-    assert len([e for e in effects if e.get("type") == "extra_target_round"]) == 3
+    assert len([e for e in effects if isinstance(e, dict) and e.get("type") == "extra_target_round"]) == 3
 
 
 def test_jinghua_allows_caster_selected_reversible_cost_layers():
