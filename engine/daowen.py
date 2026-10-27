@@ -361,16 +361,29 @@ class DaoWenEngine:
         }
     
     @staticmethod
-    def calculate_jinghua(x: int, target: Entity = None) -> dict:
-        """净化X：支付：法力2X。使[目标]【异变】-X层"""
+    def calculate_jinghua(x: int, target: Entity = None, cost_choices: list[dict] | None = None) -> dict:
+        """净化X：支付法力2X；施法者自选要消除的可逆数值型代价，层数合计不超过X。"""
         target_name = target.name if target is not None else "未选定目标"
+        allowed = {"衰老", "枯竭", "萎缩", "疲惫", "异变"}
+        choices = cost_choices if cost_choices is not None else [{"type": "异变", "layers": x}]
+        normalized = {}
+        for item in choices:
+            if not isinstance(item, dict):
+                raise ValueError("净化的 cost_choices 必须是 {type, layers} 列表")
+            kind = str(item.get("type", ""))
+            layers = item.get("layers", 0)
+            if kind not in allowed:
+                raise ValueError(f"净化暂不支持消除【{kind or '未指定'}】代价")
+            if not isinstance(layers, int) or isinstance(layers, bool) or layers < 0:
+                raise ValueError("净化每类代价层数必须是非负整数")
+            normalized[kind] = normalized.get(kind, 0) + layers
+        total = sum(normalized.values())
+        if total > x:
+            raise ValueError(f"净化选择的代价总层数{total}超过X={x}")
         return {
-            "dao_wen": "净化",
-            "x": x,
-            "cost_type": CostType.MANA.value,
-            "cost": 2 * x,
-            "mutation_reduction": x,
-            "summary": f"支付：{2 * x}法力，使{target_name}【异变】-{x}层",
+            "dao_wen": "净化", "x": x, "cost_type": CostType.MANA.value, "cost": 2 * x,
+            "cost_reductions": normalized,
+            "summary": f"支付：{2*x}法力，使{target_name}消除代价{normalized}（共{total}/{x}层）",
         }
     
     @staticmethod
