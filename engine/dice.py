@@ -20,7 +20,7 @@ class DiceEngine:
     def __init__(self, seed: Optional[int] = None):
         self._pools: dict[str, list] = {}  # 命名池
         self._history: list[dict] = []     # 历史记录（可追溯）
-        self.rerolls_pending: int = 0      # 消灾X：剩余可重投次数（下次 auto_roll 起逐次消耗）
+        self.rerolls_pending: int = 0      # 逆命筹：剩余可重投次数（下次 auto_roll 起逐次消耗）
         self._rng = random.Random(seed)    # 引擎自身的随机源；传入seed可复现
         self._seed = seed
     
@@ -91,14 +91,14 @@ class DiceEngine:
         return self._rng.randrange(n)
 
     def set_rerolls(self, count: int) -> None:
-        """消灾X：登记剩余可重投次数（可叠加）。"""
+        """登记剩余可重投次数（可叠加）。"""
         self.rerolls_pending = max(0, count)
 
     def auto_roll(self, pool_name: str, options: list[Any], context: str = "") -> dict:
         """
         自动结算入口（默认规则）：统计范围→引擎自身生成随机数→直接结算，全程记录种子与序号。
         返回结构与 resolve_pool 一致，额外附带 auto=True、context、rolled_number、seed。
-        消灾X（裁定口径 2026-08-11）：若 rerolls_pending>0，本次随机多投一次、
+        逆命筹：若 rerolls_pending>0，本次随机多投一次、
         以第二次结果为准（改变结果），并消耗 1 次重投。
         """
         if not options:
