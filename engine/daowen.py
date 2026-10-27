@@ -7,6 +7,7 @@ from typing import Optional, Any
 from .models import Entity, StatusEffect, DaoWen, DaoWenInstance
 from .enums import CostType
 from .rule_engine import daowen_migration_status, get_daowen_rule
+from .gamedata import UNIMPLEMENTED_DAOWEN
 import math
 
 
@@ -1285,11 +1286,12 @@ class ResonanceEngine:
         else:
             chosen = candidates[0]
 
-        # 闭环草案可先保留节点，但没有运行时注册的道纹不能被残韵授予。
-        if chosen["target_daowen"] not in DaoWenEngine._registry:
+        # 闭环草案可先保留节点，但尚未接入运行时的沉沦海道纹不能被残韵授予。
+        if chosen["target_daowen"] in UNIMPLEMENTED_DAOWEN:
+            owner = UNIMPLEMENTED_DAOWEN[chosen["target_daowen"]]
             return {
                 "success": False,
-                "error": f"道纹【{chosen['target_daowen']}】尚未接入运行时，不能通过残韵获得",
+                "error": f"道纹【{chosen['target_daowen']}】属于{owner}草案，尚未接入运行时，不能通过残韵获得",
                 "unimplemented": True,
             }
 
