@@ -203,10 +203,16 @@ def test_ambiguous_path_requires_explicit_target():
         assert R.find_transformation(s, t) is None
         res = R.apply_resonance(s, t, True, True, resonance_stock={t: 1})
         assert res["success"] is False and res.get("ambiguous") is True, (s, t, res)
+        from engine.gamedata import UNIMPLEMENTED_DAOWEN, RACE_EXCLUSIVE_DAOWEN, BLOODLINE_EXCLUSIVE_DAOWEN
+        exclusive = set(BLOODLINE_EXCLUSIVE_DAOWEN) | set(UNIMPLEMENTED_DAOWEN)
+        exclusive |= {name for pool in RACE_EXCLUSIVE_DAOWEN.values() for name in pool}
         for dst in candidates:
             assert R.find_transformation(s, t, dst) == dst
             ok = R.apply_resonance(s, t, True, True, resonance_stock={t: 1}, target_daowen=dst)
-            assert ok["success"] is True and ok["target"] == dst, (s, t, dst, ok)
+            if dst in exclusive:
+                assert ok["success"] is False, (s, t, dst, ok)
+            else:
+                assert ok["success"] is True and ok["target"] == dst, (s, t, dst, ok)
         bad = R.apply_resonance(s, t, True, True, resonance_stock={t: 1}, target_daowen="不存在的道纹")
         assert bad["success"] is False
     assert checked > 0, "仍应存在至少一个具有多个真实出口的歧义路径"
