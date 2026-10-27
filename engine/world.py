@@ -173,15 +173,19 @@ class WorldMap:
             return "void"
         return self.terrain.get(self.key(pos), "void")
 
-    def is_passable(self, pos: Coord) -> bool:
-        return self.in_bounds(pos) and self.terrain_at(pos) not in {"wall", "building", "void"}
+    def is_passable(self, pos: Coord, actor: "WorldActorState | None" = None) -> bool:
+        if not self.in_bounds(pos) or self.terrain_at(pos) in {"wall", "building", "void"}:
+            return False
+        if self.terrain_at(pos) == "water_current":
+            return actor is not None and actor.species == "鲛族"
+        return True
 
-    def neighbors(self, pos: Coord) -> list[Coord]:
-        return [q for dx, dy in DIRECTIONS if self.is_passable(q := (pos[0] + dx, pos[1] + dy))]
+    def neighbors(self, pos: Coord, actor: "WorldActorState | None" = None) -> list[Coord]:
+        return [q for dx, dy in DIRECTIONS if self.is_passable(q := (pos[0] + dx, pos[1] + dy), actor)]
 
-    def find_path(self, start: Coord, goal: Coord) -> list[Coord] | None:
-        """返回包含起点、不包含起点外绕行信息的最短路径；不可达时返回None。"""
-        if not self.is_passable(start) or not self.is_passable(goal):
+    def find_path(self, start: Coord, goal: Coord, actor: "WorldActorState | None" = None) -> list[Coord] | None:
+        """返回最短路径；水流地形仅对鲛族可通行。"""
+        if not self.is_passable(start, actor) or not self.is_passable(goal, actor):
             return None
         if start == goal:
             return [start]
@@ -189,7 +193,7 @@ class WorldMap:
         parent: dict[Coord, Coord | None] = {start: None}
         while queue:
             cur = queue.popleft()
-            for nxt in self.neighbors(cur):
+            for nxt in self.neighbors(cur, actor):
                 if nxt in parent:
                     continue
                 parent[nxt] = cur
@@ -274,6 +278,7 @@ class WorldActorState:
     alive: bool = True
     faction: str = "neutral"
     mode: str = "autonomous"
+    species: str = ""  # 地形通行种族标记；鲛族可进入【水流】格
     # 造物行为模式：explore=自主探索，follow=跟随主人，guard=守卫指定格。
     behavior: str = "explore"
     owner_actor_id: str = ""
@@ -306,6 +311,7 @@ class WorldActorState:
         values["guard_position"] = tuple(guard_position) if guard_position is not None else None
         last_position = values.get("last_position")
         values["last_position"] = tuple(last_position) if last_position is not None else None
+        values.setdefault("species", "")
         values.setdefault("behavior", "explore")
         values.setdefault("owner_actor_id", "")
         values.setdefault("vision_range", 1)
@@ -364,7 +370,7 @@ class WorldState:
     def add_actor(self, actor: WorldActorState) -> None:
         if not actor.actor_id or actor.actor_id in self.actors:
             raise ValueError("单位ID必须非空且唯一")
-        if not self.map.is_passable(actor.position):
+        if not self.map.is_passable(actor.position, actor):
             raise ValueError("单位出生位置必须在可通行格")
         # 同格占位合法；敌对单位是否开战由遭遇检测统一处理。
         actor.visited_cells.add(self.map.key(actor.position))
@@ -463,7 +469,7 @@ class WorldState:
                     (actor.x + 1, actor.y), (actor.x - 1, actor.y),
                     (actor.x, actor.y + 1), (actor.x, actor.y - 1))):
                 continue
-            destination = self._nearest_passable_cell(actor.position)
+            destination = self._nearest_passable_cell(actor.position, actor)
             if destination is None or destination == actor.position:
                 continue
             origin = actor.position
@@ -479,12 +485,12 @@ class WorldState:
                 "caught_actor_ids": [actor.actor_id for actor in caught],
                 "next_shrink_turn": next_turn}
 
-    def _nearest_passable_cell(self, origin: Coord) -> Coord | None:
+    def _nearest_passable_cell(self, origin: Coord, actor: "WorldActorState | None" = None) -> Coord | None:
         """从 origin 向外找最近的可通行格（同距离时取 y、x 较小的）。"""
         width, height = self.map.width, self.map.height
         candidates = [
             (x, y) for y in range(height) for x in range(width)
-            if self.map.is_passable((x, y))
+            if self.map.is_passable((x, y), actor)
         ]
         if not candidates:
             return None
@@ -500,7 +506,9 @@ class WorldState:
         dy = abs(destination[1] - actor.y)
         if dx + dy != 1:
             raise ValueError("每次移动只能到上下左右相邻一格")
-        if not self.map.is_passable(destination):
+        if not self.map.is_passable(destination, actor):
+            if self.map.terrain_at(destination) == "water_current":
+                raise ValueError("【水流】地形仅鲛族可以进入或穿越")
             raise ValueError("目标格不可通行")
         # 世界规则允许多个单位占据同一格；进入同格后立即检查敌对遭遇。
         origin = actor.position
@@ -548,7 +556,7 @@ class WorldState:
         known.add(start)
         for cell in extra_cells or ():
             known.add(cell)
-        if goal not in known or not self.map.is_passable(goal):
+        if goal not in known or not self.map.is_passable(goal, actor):
             return None
         queue = deque([start])
         previous: dict[Coord, Coord | None] = {start: None}
@@ -559,7 +567,7 @@ class WorldState:
             x, y = current
             for nxt in ((x, y - 1), (x, y + 1), (x - 1, y), (x + 1, y)):
                 if (nxt in known and nxt not in previous
-                        and self.map.is_passable(nxt)):
+                        and self.map.is_passable(nxt, actor)):
                     previous[nxt] = current
                     queue.append(nxt)
         if goal not in previous:
@@ -673,7 +681,7 @@ class WorldState:
             for target_id, entry in latest_sightings.items():
                 goal_pos = (int(entry["position"][0]), int(entry["position"][1]))
                 if (goal_pos == actor.position or not self.map.in_bounds(goal_pos)
-                        or not self.map.is_passable(goal_pos)):
+                        or not self.map.is_passable(goal_pos, actor)):
                     continue
                 remembered_target = WorldActorState(
                     actor_id=target_id, name=str(entry.get("name", "")),
@@ -841,7 +849,7 @@ class WorldState:
                 if destination is None:
                     known_unvisited = sorted(
                         (self.map.parse(key) for key in actor.known_cells
-                         if key not in actor.visited_cells and self.map.is_passable(self.map.parse(key))),
+                         if key not in actor.visited_cells and self.map.is_passable(self.map.parse(key), actor)),
                         key=lambda pos: (abs(pos[0] - actor.x) + abs(pos[1] - actor.y), pos[1], pos[0]))
                     for goal in known_unvisited:
                         path = self._find_known_path(actor_id, actor.position, goal)
