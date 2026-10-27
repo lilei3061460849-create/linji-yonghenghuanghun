@@ -765,7 +765,6 @@ class DaowenEffectMixin:
             # 2026-10-14【勒索】：与抢劫同价同量形状不同——碎片是销毁（谁都不获得），
             # 不足部分记负债（真碎片扣负，可触发【还债】）。走 shards 动词统一口径
             # （= 旧逼债块字面约定：够则扣，不够则假碎片优先+差额扣负）。
-            from ..mechanisms.verbs import apply_verb
             need = calc["shard_debt"]
             paid = apply_verb(self, "shards", {
                 "target": target, "delta": -need,
