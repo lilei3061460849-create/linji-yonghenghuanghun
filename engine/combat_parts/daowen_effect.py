@@ -467,6 +467,39 @@ class DaowenEffectMixin:
                     "owner": caster, "mechanic": "heal", "subtype": "daowen_pct", "amount": h,
                     "tags": {"daowen"},
                 })})
+        if name == "净化" and calc.get("cost_reductions"):
+            # 净化只逆转可逆的数值型代价；流血/失忆/冷却等不可直接按层恢复的事件不纳入。
+            reductions = calc["cost_reductions"]
+            for wt in wave_status_targets:
+                if not wt.is_alive:
+                    continue
+                applied = {}
+                if reductions.get("衰老", 0) > 0:
+                    amount = int(reductions["衰老"])
+                    wt.blood_limit += amount
+                    applied["衰老"] = amount
+                if reductions.get("枯竭", 0) > 0:
+                    amount = int(reductions["枯竭"])
+                    wt.mana_limit += amount
+                    applied["枯竭"] = amount
+                if reductions.get("萎缩", 0) > 0:
+                    amount = int(reductions["萎缩"])
+                    wt.speed_limit += amount
+                    applied["萎缩"] = amount
+                if reductions.get("疲惫", 0) > 0:
+                    amount = int(reductions["疲惫"])
+                    wt.current_speed = min(wt.speed_limit, wt.current_speed + amount)
+                    applied["疲惫"] = amount
+                if reductions.get("异变", 0) > 0:
+                    amount = int(reductions["异变"])
+                    pay = wt.add_mutation(-amount)
+                    applied["异变"] = {"requested": amount, "mutation_total": pay["mutation_total"]}
+                    if wt.entity_type == "怪物":
+                        redemption = self.check_redemption(wt)
+                        if redemption:
+                            result["effects"].append(redemption)
+                result["effects"].append({"type": "cost_purified", "target": wt.name,
+                                          "requested": reductions, "applied": applied})
         if "mutation_reduction" in calc:
             if "mutation_reduction" in wave_pieces:
                 pieces = self._divide_flat(calc["mutation_reduction"], len(wave_status_targets))
