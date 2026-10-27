@@ -1081,7 +1081,7 @@ def _damage_rule(rule_id: str, daowen_id: str, name: str, status_name: str,
 
 # 【加害】已转为消耗品【灼罪钉】。此规则仅结算消耗品施加的「加害」状态，不再代表可发动道纹。
 JIAHAI_RULE = _damage_rule(
-    "item.jiazuoding.incoming_damage.add", "item.jiazuoding", "灼罪钉", "加害",
+    "item.jiazuoding.incoming_damage.add", "item.jiazuoding", "加害", "加害",
     OperatorSpec(RuleOperator.ADD), OperandSource.STATUS_VALUE, 20,
 )
 STATUS_DAMAGE_RULES = (JIAHAI_RULE,)
