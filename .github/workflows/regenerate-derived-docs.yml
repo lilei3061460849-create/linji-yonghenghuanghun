@@ -2,7 +2,7 @@ name: Regenerate derived documentation
 
 on:
   push:
-    branches: [main, chore/github-native-backlog]
+    branches: [main, chore/github-native-backlog, dedupe-sunken-sea-daowen]
     paths:
       - .github/workflows/regenerate-derived-docs.yml
       - AI_EXPERIENCE.md
@@ -17,6 +17,10 @@ on:
       - 故事文档.md
       - sim/gen_rules.py
       - sim/gen_ai_context.py
+      - sim/gen_daowen_index.py
+      - engine/daowen.py
+      - engine/gamedata.py
+      - 副本/*.md
 
 concurrency:
   group: regenerate-derived-docs-${{ github.ref }}
@@ -43,9 +47,10 @@ jobs:
         run: |
           python sim/gen_rules.py
           python sim/gen_ai_context.py
+          python sim/gen_daowen_index.py
       - name: Commit generated documents when changed
         run: |
-          git add -- "死者之书.md" "AI_CONTEXT.md"
+          git add -- "死者之书.md" "AI_CONTEXT.md" "全道纹索引.md"
           if git diff --cached --quiet; then
             echo "Generated documents already match their sources."
             exit 0
