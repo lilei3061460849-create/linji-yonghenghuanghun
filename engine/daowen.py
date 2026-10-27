@@ -21,7 +21,7 @@ RELICIZED_SLOT = "？？"
 PLACEHOLDER_SLOTS = frozenset({RESERVED_SLOT, RELICIZED_SLOT})
 RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变", "背负", "蒙蔽", "清算",
+    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变", "背负", "蒙蔽", "清算", "瓦解",
 )}
 
 
@@ -657,18 +657,6 @@ class DaoWenEngine:
 
 
     @staticmethod
-    def calculate_wajie(x: int, target: Entity = None) -> dict:
-        """瓦解X：支付：法力3X。使一个[目标]的[血限]减少10X%。"""
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "瓦解", "x": x,
-            "cost_type": CostType.MANA.value, "cost": 3 * x,
-            "blood_limit_pct": 10 * x,
-            "summary": f"支付：{3 * x}法力，{target_name}血限-{10*x}%"
-        }
-
-
-    @staticmethod
     def calculate_gouhun(x: int, target: Entity = None) -> dict:
         """勾魂X：支付：法力X。使[目标]无法获得[法力]，持续X。
 
@@ -775,7 +763,6 @@ class DaoWenEngine:
             "沉溺": cls.calculate_chengni,
             # ---- 乱葬岗（二阶）----
             "分裂": cls.calculate_fenlie,
-            "瓦解": cls.calculate_wajie,
             "勾魂": cls.calculate_gouhun,
             "招魂": cls.calculate_zhaohun,
             # 初拥之夜专属道纹；只允许事件授予，不进入常规学习/残韵池。
@@ -936,8 +923,8 @@ class ResonanceEngine:
         "乱葬岗闭环": [
             # 【缄默】已遗物化：该节点保留独立「？？」占位，不与相邻节点直连。
             ("分裂", "转换", RELICIZED_DAOWEN_SLOTS["缄默"]),
-            (RELICIZED_DAOWEN_SLOTS["缄默"], "曲解", "瓦解"),
-            ("瓦解", "转换", RELICIZED_DAOWEN_SLOTS["冥气"]),
+            (RELICIZED_DAOWEN_SLOTS["缄默"], "曲解", RELICIZED_DAOWEN_SLOTS["瓦解"]),
+            (RELICIZED_DAOWEN_SLOTS["瓦解"], "转换", RELICIZED_DAOWEN_SLOTS["冥气"]),
             (RELICIZED_DAOWEN_SLOTS["冥气"], "反转", "勾魂"),
             # 2026-10-08 用户令删除【镇尸】（与【坏死】硬重复）→ 该格留成空占位符，
             # 不直连【勾魂】与【招魂】，也不拿别的道纹顶替；环仍为 7 条边。

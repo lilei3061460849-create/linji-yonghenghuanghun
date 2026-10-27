@@ -859,32 +859,6 @@ class DaowenEffectMixin:
                                       "mana_declared": calc["mana_gain"]})
 
         # ---- 乱葬岗（二阶）专属道纹效果 ----
-        if name == "瓦解" and calc.get("blood_limit_pct"):
-            pct = calc["blood_limit_pct"]
-            # 2026-10-09：单标记同样走"总和再平分"分路（has_wave_targets 即有效目标
-            # 非空），1 个目标时总和=该目标血限×百分比、全值落于该目标；不再用
-            # 「>1」门槛让单标记回退到主目标特判。
-            if has_wave_targets:
-                # 波及：总数值=各目标血限×百分比之和，再平分。
-                total = sum(math.ceil(wt.blood_limit * pct / 100) for wt in wave_status_targets)
-                pieces = self._divide_flat(total, len(wave_status_targets))
-                for wt, piece in zip(wave_status_targets, pieces):
-                    self._apply_blood_limit_change(
-                        wt, -piece, "瓦解", EffectPolarity.DEBUFF.value,
-                        ctx=daowen_ctx, source_type="daowen", subtype="disintegrate",
-                        actor=caster, owner=caster)
-                    result["effects"].append({"type": "wajie", "target": wt.name,
-                                              "blood_limit_pct": pct, "blood_limit_cut": piece,
-                                              "blood_limit_after": wt.blood_limit})
-            else:
-                cut = math.ceil(target.blood_limit * pct / 100)
-                self._apply_blood_limit_change(
-                    target, -cut, "瓦解", EffectPolarity.DEBUFF.value,
-                    ctx=daowen_ctx, source_type="daowen", subtype="disintegrate",
-                    actor=caster, owner=caster)
-                result["effects"].append({"type": "wajie", "target": target.name,
-                                          "blood_limit_pct": pct, "blood_limit_cut": cut,
-                                          "blood_limit_after": target.blood_limit})
         # 2026-10-08 用户令删除【镇尸】：与【坏死】是同一效果的两套实现，
         # 保留【坏死】为「无法获得[回复]」的唯一入口。
         if name == "勾魂" and calc.get("no_mana_gain"):
@@ -1037,7 +1011,7 @@ class DaowenEffectMixin:
               and not (name == "变形" and bianxing_blocked)
               # 波及标记由 use_daowen/怪物结算逐目标处理，不走通用状态块
               # 乱葬岗道纹已在上方乱葬岗段自行 add_status，跳过通用状态处理避免重复叠加
-              and name not in ("勾魂", "冥气", "缄默", "瓦解", "波及", "血契")):
+              and name not in ("勾魂", "冥气", "缄默", "波及", "血契")):
             duration = calc["duration"] if calc["duration"] != 0 else -1
             effect_target = target if target else caster
             # 自身作用型道纹（变形/超频等）作用于施法者
