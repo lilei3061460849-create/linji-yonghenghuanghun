@@ -239,21 +239,16 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_zengzhi(x: int, target: Entity = None) -> dict:
-        """增殖X：支付：流血10X。［战终］［目标］［血限］+2X
-
-        2026-10-14 用户令重做：承接遗物【猩红果实】旧效果
-        （战始可选流血10 → 战终血限+2），按 X 等比放大为流血10X → 战终+2X；
-        原「支付：X、即时血限+X」废止。发动即付流血代价（走代价管线，
-        触发【血誓戒】/【烙痕钉】等），血限增长记入战终待决、战终统一结算。
-        """
+        """增殖X：支付：流血10X。使[目标]的[血限]变为∞，持续X回合（战终清除）。"""
         target_name = target.name if target is not None else "未选定目标"
         return {
             "dao_wen": "增殖",
             "x": x,
             "cost_type": CostType.BLEED.value,
             "cost_hp": 10 * x,
-            "zengzhi_battle_end": 2 * x,
-            "summary": f"流血{10 * x}，战终{target_name}血限+{2 * x}"
+            "duration": x,
+            "infinite_blood_limit": True,
+            "summary": f"流血{10 * x}，使{target_name}的血限变为∞，持续{x}回合"
         }
     
     @staticmethod
