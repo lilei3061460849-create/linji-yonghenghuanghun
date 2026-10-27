@@ -317,3 +317,21 @@ def test_ningzhi_advances_real_target_rounds_and_ticks_statuses():
     assert target.get_status_effects("测试增益")[0].remaining_rounds == 1
     assert any(e.get("type") == "extra_target_round" for e in result["execution"]["effects"])
 
+
+def test_jinghua_allows_caster_selected_reversible_cost_layers():
+    """净化由施法者自选可逆数值型代价，层数总和不能超过X。"""
+    engine = _engine("jinghua_cost_choices")
+    _give(engine.state.player, "净化")
+    target = _monster(engine, "净化靶怪", hp=100)
+    target.blood_limit = 100
+    target.mutation_count = 4
+    engine.execute_action("round_start", {})
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "净化", "x": 3, "target": target.name,
+        "cost_choices": [{"type": "衰老", "layers": 1}, {"type": "异变", "layers": 2}],
+        "dodge": False, "blood_shadow": False,
+    })
+    assert result["success"], result
+    assert target.blood_limit == 101
+    assert target.mutation_count == 2
+
