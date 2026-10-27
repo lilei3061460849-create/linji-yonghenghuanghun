@@ -320,7 +320,7 @@ def run_battle(engine, battle_idx, ai, rng):
             rrec["death"] = "died_on_player_action"
             rec["outcome"] = "defeat_player_dead"
             report(ctx, "round %d player died on own action" % rnd)
-            resolve_all_pending(engine, ctx)   # 清理死之传承等中断，避免流程卡死
+            resolve_all_pending(engine, ctx)   # 清理死者之页等中断，避免流程卡死
             break
         if not [e for e in engine.state.enemies if e.is_alive]:
             won = True

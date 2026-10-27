@@ -17,6 +17,7 @@ pytest 风格测试 - 里程碑：三副本终音法器
 """
 import os
 import sys
+from pathlib import Path
 
 from tests.setup_support import finish_initial_daowen
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -93,7 +94,9 @@ def test_body_outside_heart_doubles_and_reverts():
     for enemy in engine.state.enemies:
         enemy.current_hp = 0
         enemy.is_alive = False
-    engine.execute_action("battle_end", {})
+    engine.state.monster_reinforcements.clear()   # 夹具只打这一波
+    ended = engine.execute_action("battle_end", {})
+    assert ended["success"], ended
     assert player.blood_limit == base_bl
     assert player.current_hp == base_hp
 
@@ -137,12 +140,14 @@ def test_crimson_fang_triggers_first_embrace_then_seals():
     engine = _new_engine("扭曲都市", name="种子候选", dbsuffix="fang_seed", sealed=sealed)
     engine.state.current_battle = 7
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     engine.state.phase = "in_combat"
     engine.execute_action("battle_end", {})  # 无候选，直接封存
 
     challenger = _new_engine("扭曲都市", name="挑战者", speed=12, dbsuffix="fang_challenger", sealed=sealed)  # 速点必须偶数
     challenger.state.current_battle = 7
     challenger.state.enemies.clear()
+    challenger.state.monster_reinforcements.clear()
     challenger.state.phase = "in_combat"
     challenger.execute_action("battle_end", {})
     assert challenger.state.in_final_duel
@@ -177,6 +182,7 @@ def test_black_gold_card_debt_limit_rejects_before_mutating_state():
     engine.state.shards = 10
     _start_battle(engine, start_round=False)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     big = Entity(name="大怪", entity_type="怪物", blood_limit=200, current_hp=200)
     engine.state.enemies.append(big)
 
@@ -193,6 +199,7 @@ def test_black_gold_card_success_path():
     engine.state.shards = 200
     _start_battle(engine, start_round=False)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     big = Entity(name="大怪", entity_type="怪物", blood_limit=200, current_hp=200)
     engine.state.enemies.append(big)
     r = engine.execute_action("use_black_card", {})
@@ -221,12 +228,11 @@ def test_crime_vault_boundary_2_percent_cap():
 def test_godfather_revolver_escalates_and_refills_next_battle():
     """正常路径：教父左轮伤害随本场使用次数递增；弹药耗尽后拒绝；下一场[战始]回满"""
     engine = _new_engine("罪孽都市", dbsuffix="gun")
-    engine.state.artifacts_owned.append("教父左轮")
-    engine.state.consumables.append(
-        Consumable(name="教父左轮", effect="", current_uses=6, max_uses=6, kind="artifact_weapon"))
+    engine.state.artifacts_owned.append("教父左轮")  # 纯法器：弹药由本场使用次数单点计数
     player = engine.state.player
     _start_battle(engine)
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     foe = Entity(name="靶子", entity_type="怪物", blood_limit=100000, current_hp=100000)
     engine.state.enemies.append(foe)
 
@@ -240,13 +246,33 @@ def test_godfather_revolver_escalates_and_refills_next_battle():
     r_out = engine.execute_action("fire_godfather_revolver", {"target_ref": "enemy:0"})
     assert r_out["success"] is False, "6发耗尽后应拒绝"
 
+    assert "打空" in r_out.get("error", ""), r_out
+
     foe.current_hp = 0
     foe.is_alive = False
     engine.execute_action("battle_end", {})
     _start_battle(engine)
-    gun = next(c for c in engine.state.consumables if c.name == "教父左轮")
-    assert gun.current_uses == 6
-    assert engine.state.godfather_revolver_uses == 0
+    assert engine.state.godfather_revolver_uses == 0, "下一场[战始]弹药回满"
+    assert not [c for c in engine.state.consumables if c.name == "教父左轮"], \
+        "教父左轮是法器，不该再以消耗品身份留在背包里"
+    assert engine.state.enemies, "新一场应有敌人"
+    engine.state.enemies[0].current_hp = 100000
+    engine.state.enemies[0].blood_limit = 100000
+    r_refill = engine.execute_action("fire_godfather_revolver", {"target_ref": "enemy:0"})
+    assert r_refill["success"] is True, r_refill
+    assert r_refill["result"]["ammo_remaining"] == 5, r_refill
+
+
+def test_godfather_revolver_is_artifact_only():
+    """静态守护：教父左轮只是法器，不得再以消耗品身份重复记账。
+
+    2026-10-26 用户令：早期消耗品没有自动回满耐久的机制，才借了「消耗品+法器」
+    双重身份；现在回满就是[战始]重置，弹药由 `godfather_revolver_uses` 单点计数。
+    """
+    src = (Path(__file__).resolve().parents[1] / "engine" / "api.py").read_text(encoding="utf-8")
+    assert 'kind="artifact_weapon"' not in src, "教父左轮不该再建 artifact_weapon 消耗品"
+    assert 'name="教父左轮", effect=effect' not in src
+    assert "GODFATHER_REVOLVER_AMMO" in src, "弹药数应有单点常量"
 
 
 # ========================================================================

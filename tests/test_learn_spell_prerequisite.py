@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
-from tests.setup_support import finish_initial_daowen
+from tests.setup_support import finish_initial_daowen, grant_extra_actions
 
 
 def _engine(tmp_path):
@@ -16,6 +16,7 @@ def _engine(tmp_path):
     finish_initial_daowen(e)
     e.state.phase = "in_combat"
     e.state.combat_subphase = "player_actions"
+    grant_extra_actions(e.state.player, 7)  # 阶数＝重数后，2 阶法术要 2 次出手
     return e
 
 
@@ -46,7 +47,7 @@ def test_undefine_removes_definition_without_action_cost(tmp_path):
     assert e.execute_action("define_spell", {"spell_name": "先发制人"})["success"]
     assert e.execute_action("undefine_spell", {"spell_name": "先发制人"})["success"]
     assert p.spells == []
-    assert p.actions_used_this_round == used + 1
+    assert p.actions_used_this_round == used + 2, "先发制人（受到伤害前＋杀伐）是 2 阶"
     assert not e.execute_action("undefine_spell", {"spell_name": "先发制人"})["success"]
 
 

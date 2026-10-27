@@ -14,11 +14,11 @@
 的页面一律署名 `？？？`（条目形如 `### ？？？·特殊事件·迷失`），与署人名的个人
 遗言区分开。
 
-## 为什么单独一节、不写进「## 遗言」
+## 为什么单独一节、不写进「## 死者之页」
 
 `engine/death_book.py` 的遗言有**单句 20 字上限**（DEFAULT_CAPACITY=20），
 规则条文塞不进去（光「封印X：代价：异变X，使一个[目标]延后X回合再入场」就 20+ 字）。
-规则因此进并列的「## 规则」节，不受 20 字约束。death_book 只读写「## 遗言」节，
+规则因此进并列的「## 规则」节，不受 20 字约束。death_book 只读写「## 死者之页」节，
 新增本节不会影响运行时。
 
 ## 用法
@@ -49,19 +49,14 @@ def render_section() -> str:
     lines.append(SECTION_HEADER)
     lines.append("")
     lines.append(
-        "> 本节由 `data/rules/*.toml` 生成，运行 `python3 sim/gen_rules.py` 重新生成；"
-        "**禁止手改**（手改会在生成器下次运行时丢失，且过不了一致性测试）。"
+        "> 本节由 `data/rules/*.toml` 生成（`python3 sim/gen_rules.py`），**禁止手改**；"
+        f"署名统一为 `{SIGNATURE}`——遗言署人名、可能有假，规则不会。"
     )
     lines.append(">")
     lines.append(
-        f"> 署名统一为 `{SIGNATURE}`：遗言署真人姓名、可能有真假；规则不会，"
-        "所有人看到的规则都一样。"
-    )
-    lines.append(">")
-    lines.append(
-        "> 「核心规则」章只收从始至终不会改变的底层逻辑的压缩讲述——同一条"
-        "逻辑更短的说法，不改任何结算；可调数值与机制细则不进本章，完整正文"
-        "以规则文档为准。"
+        "> 「核心规则」章只收不会变的底层逻辑的压缩讲述，可调数值与机制细则以规则文档为准；"
+        "「特殊事件」章是事件正文的唯一正本（不参与事件池、不耗精力、满足条件自动触发），"
+        "规则文档只留指针。"
     )
     lines.append("")
 
@@ -79,7 +74,7 @@ def render_section() -> str:
     all_events.sort(key=lambda pair: pair[1].get("order", 0))
     for kind, entry in all_events:
         name = entry["name"]
-        # 条目可自带 chapter 覆盖（2026-10-24：【背叛】不再是特殊事件，
+        # 条目可自带 chapter 覆盖（2026-10-24：【夺书】不再是特殊事件，
         # 以 chapter="同伴规则" 单独成章；其余事件仍渲染进「特殊事件」章）。
         chapter = entry.get("chapter") or CHAPTER
         lines.append(f"### {SIGNATURE}·{chapter}·{name}")

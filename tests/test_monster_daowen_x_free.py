@@ -220,12 +220,16 @@ def test_negative_and_zero_x_rejected(tmp_path):
 # ---------------- 预演评分选 X（选案 C） ----------------
 
 def _preview_scenario(tmp_path, dw, *, monster_hp=300, monster_mana=40,
-                      monster_speed=3, player_mana=10, player_speed=3,
+                      monster_speed=2, player_mana=10, player_speed=3,
                       seed=20260822):
-    """构造一个可预演的怪物阶段，返回 (engine, monster, actor, prep)。"""
+    """构造一个可预演的怪物阶段，返回 (engine, monster, actor, prep)。
+
+    2026-10-25：怪物攻击并入玩家同一套机制后，击数＝[攻击次数]＝当前速度，
+    故 attack_count 必须与 speed_limit 同值（旧面板两者可以各写一个数）。
+    """
     e = _engine(tmp_path, seed)
     m = Entity("测试怪", "怪物", blood_limit=monster_hp, current_hp=monster_hp,
-               attack_count=2, attack_power=monster_mana,
+               attack_count=monster_speed, attack_power=monster_mana,
                mana_limit=monster_mana, current_mana=monster_mana,
                speed_limit=monster_speed, current_speed=monster_speed)
     m.dao_wen[dw] = DaoWenInstance(
@@ -282,18 +286,18 @@ def test_heal_x_scales_with_missing_hp(tmp_path):
 
 
 def test_persistent_duration_buff_scales_with_expected_rounds(tmp_path):
-    """边界：持续X类道纹（此处用【减速】代替已删的【狂暴】）duration=X，
+    """边界：持续X类道纹（此处用【全力】代替已删的【狂暴】【减速】）duration=X，
     效果下回合才兑现——单步预演看不到收益。
 
     补上跨回合期望收益后，X 应随"预期还能打几回合"缩放：
     预期够长时取满上限，朝不保夕时买那么久没有意义。
     """
     # 敌方每回合仅 6 伤 → 预期能打很久，值得买更长持续时间
-    e, m, actor, prep = _preview_scenario(tmp_path, "减速", player_mana=2)
-    long_x = _chosen_x(e, m, actor, prep, "减速")
+    e, m, actor, prep = _preview_scenario(tmp_path, "全力", player_mana=2)
+    long_x = _chosen_x(e, m, actor, prep, "全力")
     assert long_x > 1, f"预期剩余回合很长时不应只买 X=1，实际 {long_x}"
 
     # 敌方每回合 90 伤 → 怪物朝不保夕，买满时长是浪费
-    e, m, actor, prep = _preview_scenario(tmp_path, "减速", player_mana=30)
-    short_x = _chosen_x(e, m, actor, prep, "减速")
+    e, m, actor, prep = _preview_scenario(tmp_path, "全力", player_mana=30)
+    short_x = _chosen_x(e, m, actor, prep, "全力")
     assert short_x <= long_x, f"濒死时不应买比长局更久的时长：{short_x} > {long_x}"

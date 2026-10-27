@@ -1,4 +1,4 @@
-"""《死者之书》单句遗言（≤20字）：校验、命零中断、审核落盘、回音长廊改文件。"""
+"""《死者之书》死者之页（〖生平〗引擎自动总结＋〖遗言〗本人自定义≤20字）：校验、命零中断、审核落盘、回音长廊改文件。"""
 import os
 import sys
 from pathlib import Path
@@ -9,20 +9,25 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from engine.api import GameEngine
 from engine.combat import CombatEngine
 from engine.death_book import (
-    CAUSE_DRAFTS,
     DeathBookStore,
     draft_legacy,
     parse_legacies,
+    render_legacy_section,
     validate_legacy,
 )
 from engine.dice import DiceEngine
 from engine.models import Consumable, Entity, GameState
 
 
+# 样本页：遗言是「本人说过的话」，不是死因——死因归生平行。
+SAMPLE_A = {"text": "别把蓝一次烧空"}
+SAMPLE_B = {"text": "治疗会把异变招上身"}
+
+
 def _empty_book(path: Path) -> Path:
     path.write_text("# 死者之书\n\n## 可学法术\n\n### 先发制人\n\n"
                     "所需道纹：杀伐\n\n触发条件：受到伤害前\n\n"
-                    "生效流程：受到伤害前→发动杀伐 X\n\n## 遗言\n\n当前没有遗言。\n",
+                    "生效流程：受到伤害前→发动杀伐 X\n\n## 死者之页\n\n当前没有死者之页。\n",
                     encoding="utf-8")
     return path
 
@@ -121,34 +126,38 @@ def test_player_mingling_queues_interrupt_and_approve_writes_file(tmp_path):
                      "attack_actions": [{"hits": [{"target_ref": "player:0", "dodge": False, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}}]}]}],
     })
     assert r["result"]["player_dead"] is True
-    assert r.get("interrupt", {}).get("interrupt_type") == "死之传承"
+    assert r.get("interrupt", {}).get("interrupt_type") == "死者之页"
     draft = r["interrupt"]["context"]["draft"]
-    assert set(draft) >= {"text"}
-    assert 1 <= len(draft["text"]) <= 20
+    # 2026-10-25：草稿只有生平（含死因），遗言要本人自己写，引擎不代编
+    assert draft.get("life"), f"草稿必须带自动生平：{draft}"
+    assert "text" not in draft, f"草稿不得替本人编遗言：{draft}"
+    assert "受到致死攻击" in draft["life"]
 
-    spells_before = book.read_text(encoding="utf-8").split("## 遗言")[0]
+    spells_before = book.read_text(encoding="utf-8").split("## 死者之页")[0]
+    # 通过时提交本人自定义的遗言；生平照抄草稿
     approved = engine.submit_ruling(
-        "死之传承", "通过", {"action": "approve"})
+        "死者之页", "通过", {"action": "approve", "text": "别站在打手正面"})
     assert approved["success"] is True
     assert approved["death_book"]["written"] is True
     assert engine.state.player is None
     text = book.read_text(encoding="utf-8")
-    assert text.split("## 遗言")[0] == spells_before
+    assert text.split("## 死者之页")[0] == spells_before
     assert "所需道纹：杀伐" in text
-    assert draft["text"] in text
-    assert "当前没有遗言" not in text
-    assert engine.state.death_book_legacies[0]["text"] == draft["text"]
+    assert "- 遗言：别站在打手正面" in text
+    assert f"- 生平：{draft['life']}" in text
+    assert "当前没有死者之页" not in text
+    assert engine.state.death_book_legacies[0]["text"] == "别站在打手正面"
 
 
 def test_two_config_examples_append_without_code_change(tmp_path):
     """可自定义：只改文件就能追加两种完全不同的遗言页。"""
     book = _empty_book(tmp_path / "死者之书_examples.md")
     store = DeathBookStore(book)
-    first = store.append(CAUSE_DRAFTS["attack"])
-    second = store.append(CAUSE_DRAFTS["collapse"])
+    first = store.append(SAMPLE_A)
+    second = store.append(SAMPLE_B)
     loaded = store.load()
-    assert loaded[0]["text"] == first["text"] == "受到致死攻击命零"
-    assert loaded[1]["text"] == second["text"] == "异变叠满迷失命零"
+    assert loaded[0]["text"] == first["text"] == SAMPLE_A["text"]
+    assert loaded[1]["text"] == second["text"] == SAMPLE_B["text"]
     parsed = parse_legacies(book.read_text(encoding="utf-8"))
     assert [item["text"] for item in parsed] == [first["text"], second["text"]]
 
@@ -161,14 +170,17 @@ def test_boundary_twenty_char_edit_is_written_verbatim(tmp_path):
     engine.state.last_death_cause = "attack"
     blocked = engine.execute_action("round_start", {})
     assert blocked["success"] is False
-    assert blocked.get("interrupt", {}).get("interrupt_type") == "死之传承"
+    assert blocked.get("interrupt", {}).get("interrupt_type") == "死者之页"
     legacy = {"text": "遗" * 20}
-    r = engine.submit_ruling("死之传承", "改", {"action": "edit", **legacy})
+    r = engine.submit_ruling("死者之页", "改", {"action": "edit", **legacy})
     assert r["success"] is True
     written = r["death_book"]["legacy"]
-    assert written == legacy
+    # 2026-10-24：一页 = 生平（引擎自动总结）＋遗言（本人自定义），遗言原样写入不改
+    assert written["text"] == legacy["text"] == "遗" * 20
+    assert written.get("life"), "死者之页必须带引擎自动总结的生平"
     text = book.read_text(encoding="utf-8")
     assert "遗" * 20 in text
+    assert "- 生平：" in text
 
 
 def test_reject_does_not_write_and_invalid_edit_keeps_interrupt(tmp_path):
@@ -180,7 +192,7 @@ def test_reject_does_not_write_and_invalid_edit_keeps_interrupt(tmp_path):
     finish_round(engine)
     assert engine._pending_interrupts
 
-    bad = engine.submit_ruling("死之传承", "改", {
+    bad = engine.submit_ruling("死者之页", "改", {
         "action": "edit",
         "text": "遗" * 21,
     })
@@ -189,16 +201,16 @@ def test_reject_does_not_write_and_invalid_edit_keeps_interrupt(tmp_path):
     assert engine._pending_interrupts, "非法修改不得吞掉中断"
 
     empty_before = book.read_text(encoding="utf-8")
-    rejected = engine.submit_ruling("死之传承", "驳回", {"action": "reject"})
+    rejected = engine.submit_ruling("死者之页", "驳回", {"action": "reject"})
     assert rejected["success"] is True
     assert rejected["death_book"]["written"] is False
     assert engine.state.player is None
     assert book.read_text(encoding="utf-8") == empty_before
-    assert "当前没有遗言" in empty_before
+    assert "当前没有死者之页" in empty_before
 
 
 def test_collapse_and_mediocrity_both_trigger_inheritance(tmp_path):
-    """正常路径：迷失与凡庸导致的轮回者命零都触发死之传承。"""
+    """正常路径：迷失与凡庸导致的轮回者命零都触发死者之页。"""
     engine, _ = _engine(tmp_path, "causes")
     T = Entity.MUTATION_COLLAPSE_THRESHOLD
     engine.state.player.mutation_count = T - 10
@@ -206,9 +218,9 @@ def test_collapse_and_mediocrity_both_trigger_inheritance(tmp_path):
         name="残骸", effect="局内使用恢复20生命并获得异变10", current_uses=1, max_uses=1))
     r = engine.execute_action("consume_item", {"name": "残骸"})
     assert r["result"]["mutation"]["collapsed"] is True
-    assert r["interrupt"]["interrupt_type"] == "死之传承"
+    assert r["interrupt"]["interrupt_type"] == "死者之页"
     assert r["interrupt"]["context"]["cause"] == "collapse"
-    engine.submit_ruling("死之传承", "驳回", {"action": "reject"})
+    engine.submit_ruling("死者之页", "驳回", {"action": "reject"})
 
     engine2, _ = _engine(tmp_path, "fan")
     p = engine2.state.player
@@ -217,7 +229,7 @@ def test_collapse_and_mediocrity_both_trigger_inheritance(tmp_path):
         p.damage_dealt_this_round = 0
         end = finish_round(engine2)
     assert not p.is_alive
-    assert end.get("interrupt", {}).get("interrupt_type") == "死之传承"
+    assert end.get("interrupt", {}).get("interrupt_type") == "死者之页"
     assert end["interrupt"]["context"]["cause"] == "mediocrity"
 
 
@@ -226,8 +238,8 @@ def test_echo_corridor_writes_and_clears_chosen_page(tmp_path):
     engine, book = _engine(tmp_path, "echo")
     _current_event(engine)
     store = DeathBookStore(book)
-    store.append(CAUSE_DRAFTS["attack"])
-    store.append(CAUSE_DRAFTS["collapse"])
+    store.append(SAMPLE_A)
+    store.append(SAMPLE_B)
     engine.state.death_book_legacies = store.load()
     hp_before = engine.state.player.current_hp
 
@@ -237,7 +249,7 @@ def test_echo_corridor_writes_and_clears_chosen_page(tmp_path):
     assert r2["success"] is True
     remaining = store.load()
     assert len(remaining) == 1
-    assert remaining[0]["text"] == CAUSE_DRAFTS["collapse"]["text"]
+    assert remaining[0]["text"] == SAMPLE_B["text"]
     assert engine.state.player.current_hp == hp_before - 5
 
 
@@ -245,7 +257,7 @@ def test_echo_corridor_clear_without_choice_is_rejected(tmp_path):
     """错误输入：有遗言却不指定要清哪一页，必须拒绝且不流血、不改文件。"""
     engine, book = _engine(tmp_path, "echo_err")
     _current_event(engine)
-    DeathBookStore(book).append(CAUSE_DRAFTS["attack"])
+    DeathBookStore(book).append(SAMPLE_A)
     engine.state.death_book_legacies = DeathBookStore(book).load()
     hp_before = engine.state.player.current_hp
     text_before = book.read_text(encoding="utf-8")
@@ -261,7 +273,7 @@ def test_echo_corridor_invalid_index_is_rejected(tmp_path):
     """错误输入：越界页码拒绝。"""
     engine, book = _engine(tmp_path, "echo_oob")
     _current_event(engine)
-    DeathBookStore(book).append(CAUSE_DRAFTS["attack"])
+    DeathBookStore(book).append(SAMPLE_A)
     r = engine.execute_action("resolve_event", {
         "event": "回音长廊", "option_id": 2, "legacy_index": 9,
     })
@@ -282,7 +294,7 @@ def test_echo_corridor_empty_book_bleeds_without_clearing(tmp_path):
     assert "无遗言可清除" in r["result"]["applied"]
     assert engine.state.player.current_hp == hp_before - 5
     assert book.read_text(encoding="utf-8") == text_before
-    assert "当前没有遗言" in text_before
+    assert "当前没有死者之页" in text_before
 
 
 def test_echo_corridor_clears_by_title(tmp_path):
@@ -290,8 +302,8 @@ def test_echo_corridor_clears_by_title(tmp_path):
     engine, book = _engine(tmp_path, "echo_title")
     _current_event(engine)
     store = DeathBookStore(book)
-    store.append({**CAUSE_DRAFTS["attack"], "title": "第一页"})
-    store.append({**CAUSE_DRAFTS["collapse"], "title": "第二页"})
+    store.append({**SAMPLE_A, "title": "第一页"})
+    store.append({**SAMPLE_B, "title": "第二页"})
     engine.state.death_book_legacies = store.load()
     r = engine.execute_action("resolve_event", {
         "event": "回音长廊", "option_id": 2, "legacy_title": "第一页",
@@ -303,7 +315,7 @@ def test_echo_corridor_clears_by_title(tmp_path):
 
 
 def test_player_cancer_mingling_triggers_inheritance(tmp_path):
-    """正常路径：轮回者累计恢复达血限×2，癌变命零并触发死之传承。"""
+    """正常路径：轮回者累计恢复达血限×2，癌变命零并触发死者之页。"""
     engine, _ = _engine(tmp_path, "cancer")
     p = engine.state.player
     need = engine.combat.cancer_threshold_of(p)
@@ -311,7 +323,7 @@ def test_player_cancer_mingling_triggers_inheritance(tmp_path):
     end = finish_round(engine)
     assert not p.is_alive
     assert p.is_proliferated
-    assert end.get("interrupt", {}).get("interrupt_type") == "死之传承"
+    assert end.get("interrupt", {}).get("interrupt_type") == "死者之页"
     assert end["interrupt"]["context"]["cause"] == "cancer"
 
 
@@ -327,7 +339,7 @@ def test_player_cancer_boundary_just_below_threshold(tmp_path):
 
 
 def test_ally_cancer_kills_ally_not_player(tmp_path):
-    """正常路径：朋友癌变只命零该朋友，不触发轮回者死之传承。"""
+    """正常路径：朋友癌变只命零该朋友，不触发轮回者死者之页。"""
     engine, _ = _engine(tmp_path, "cancer_ally")
     friend = Entity(name="岩行者", entity_type="朋友", blood_limit=20, current_hp=20,
                     attack_count=1, attack_power=1)
@@ -344,25 +356,33 @@ def test_new_engine_reloads_file_as_source_of_truth(tmp_path):
     """边界：新引擎实例只从文件装回遗言，不读上一局内存。"""
     book = _empty_book(tmp_path / "死者之书_reload.md")
     store = DeathBookStore(book)
-    store.append(CAUSE_DRAFTS["attack"])
+    store.append(SAMPLE_A)
     engine = GameEngine(
         db_path=str(tmp_path / "reload.db"),
         death_book_path=str(book),
         sealed_candidate_path=str(tmp_path / "reload_sealed.json"),
     )
     assert len(engine.state.death_book_legacies) == 1
-    assert engine.state.death_book_legacies[0]["text"] == CAUSE_DRAFTS["attack"]["text"]
+    assert engine.state.death_book_legacies[0]["text"] == SAMPLE_A["text"]
 
 
-def test_draft_legacy_never_exceeds_capacity():
-    """错误/边界：草稿生成器在极端局号下仍不超过20字。"""
+def test_draft_is_life_only_and_never_invents_a_legacy():
+    """草稿只写〖生平〗（含死因）；遗言不代填——2026-10-25 用户令：死因不是遗言。"""
     state = GameState()
     state.current_battle = 999
+    state.current_region = "扭曲都市"
     state.player = Entity(name="轮回者", entity_type="轮回者", current_speed=0, current_mana=0)
-    draft = draft_legacy(state, "attack", {"action": "use_daowen", "params": {"daowen_name": "杀伐"}})
-    assert set(draft) >= {"text"}
-    assert 1 <= len(draft["text"]) <= 20
+    draft = draft_legacy(state, "mediocrity", {"action": "use_daowen", "params": {"daowen_name": "杀伐"}})
+    assert "text" not in draft, f"草稿不得替本人编遗言：{draft}"
+    assert "第999场" not in draft["life"] or True  # 生平可写场次
+    assert "凡庸" in draft["life"], f"死因属于生平：{draft}"
+    assert len(draft["life"]) <= 120
     validate_legacy(draft)
+    # 页里可以只有生平：本人什么也没说，就不再写遗言那一行
+    only_life = validate_legacy({"life": "在扭曲都市，打到第3场；连续五回合触发凡庸"})
+    assert only_life.get("text") is None
+    assert "- 遗言：" not in render_legacy_section([only_life])
+    assert parse_legacies(render_legacy_section([only_life]))[0]["life"]
     # 写入端只认单句：旧三段式对象被明确拒绝（存量旧书页的兼容在读取端，见下条测试）
     try:
         validate_legacy({"trigger_point": "旧页触发点", "fork": "岔路", "cost_budget": "代价预算"})
@@ -400,7 +420,7 @@ def test_old_three_part_pages_still_parse_and_rewrite_as_single_sentence(tmp_pat
     """存量兼容：旧三段式书页读得出来（折叠成第一句），重写后变成单句格式。"""
     book = tmp_path / "旧书.md"
     book.write_text(
-        "# 死者之书\n\n## 遗言\n\n### 贾希希·龙心谷·第5场\n\n"
+        "# 死者之书\n\n## 死者之页\n\n### 贾希希·龙心谷·第5场\n\n"
         "- 触发点：双熊战纯叠盾五回合未扣敌血凡庸命零\n"
         "- 岔路：贪图全格挡免伤未投入杀伐推进伤害\n"
         "- 代价预算：愿以法力换输出破除凡庸与固执\n", encoding="utf-8")

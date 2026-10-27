@@ -29,8 +29,10 @@ def _engine(region="罪孽都市"):
 
 
 def _monster(engine, *, name="靶怪", hp=500, atk=8, hits=1, shards=20, daowen=None):
+    # 2026-10-25：怪物攻击并入玩家同一套面板后，击数＝[攻击次数]＝当前速度，
+    # 故 speed_limit 必须与 hits 同值（旧面板两者可以各写一个数）。
     m = Entity(name=name, entity_type="怪物", blood_limit=hp, current_hp=hp,
-               speed_limit=6, current_speed=6,
+               speed_limit=hits, current_speed=hits,
                attack_count=hits, attack_power=atk, shards=shards, fake_shards=0)
     m.relics = []
     if daowen:
@@ -139,11 +141,13 @@ def test_no_bizhong_auto_dodge_still_works():
     engine = _engine()
     player = engine.state.player
     player.current_speed = 4
-    m = _monster(engine, hits=1, atk=8, daowen={"疯狂": 1})   # 2026-10-03：【狂暴】删除 →【疯狂】
+    # 2026-10-25：【疯狂】遗物化，本用例只需要「怪物发动一条道纹后攻击」，
+    # 改用仍在册的【全力】。
+    m = _monster(engine, hits=1, atk=8, daowen={"全力": 1})
     engine.combat.reset_monster_activation()
     engine.state.current_round = 0
     engine.combat.round_start()
-    results = resolve_monster_phase(engine.combat, {m.name: "疯狂"}, dodge=True)
+    results = resolve_monster_phase(engine.combat, {m.name: "全力"}, dodge=True)
     hits = [d for d in results if d.get("attacker") == m.name]
     assert hits and hits[0].get("dodge_success") is True
 

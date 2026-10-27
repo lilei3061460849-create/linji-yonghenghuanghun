@@ -35,11 +35,14 @@ def _engine(suffix: str) -> GameEngine:
 
 def _start_battle(e: GameEngine) -> None:
     e.state.enemies.clear()
+    e.state.monster_reinforcements.clear()
     e.state.enemies.append(Entity("靶怪", "怪物", blood_limit=999, current_hp=999,
                                   attack_count=1, attack_power=1))
     started = begin_battle(e)
     assert started["success"], started
     assert begin_round(e)["success"]
+    # 夹具只需要这一场「进行中的战斗」：清掉待进场增援，否则战终被判阻塞。
+    e.state.monster_reinforcements.clear()
 
 
 def _give_daowen(e: GameEngine, *names: str) -> None:

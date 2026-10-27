@@ -351,7 +351,6 @@ def test_f_hook_order_is_explicit_and_unchanged():
         "MechanismHookAdapter",  # 【固执】也接入同一伤害相位（priority 40）
         "QianjingjiaHook",
         "BifenglingHook",
-        "ShouyedengHook",
         "DamageRedirectionHook",
         "LethalMitigationHook",
         "AfterDamageEffectsHook",

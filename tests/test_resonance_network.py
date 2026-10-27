@@ -80,11 +80,13 @@ def test_monster_transform_branch_is_reversible():
 
     2026-10-11 用户令删除【借力】→【全力】的（转换）出边**留空不补**
     （用户口径：整体大改前不新增道路）；【全力】仍有（反转）→弱化、（曲解）→再生。
+    2026-10-26 用户令：那条（转换）接给【全速】——攻击力⇄攻击次数。
     """
     assert R.find_transformation("弱化", "反转") == "全力"
     assert R.find_transformation("再生", "曲解", target_daowen="全力") == "全力"
     assert R.find_transformation("寄生", "曲解") is None  # 自愈删除后不补新路径
     assert R.get_available_resonance("全力") == [
+        {"resonance_type": "转换", "target_daowen": "全速", "direction": "正向", "loop": "怪物原始道纹"},
         {"resonance_type": "反转", "target_daowen": "弱化", "direction": "正向", "loop": "怪物原始道纹"},
         {"resonance_type": "曲解", "target_daowen": "再生", "direction": "正向", "loop": "怪物原始道纹"},
     ]
@@ -116,10 +118,12 @@ def test_three_region_loops_present():
 
 
 def test_monster_daowen_now_transformable():
-    """正常路径：怪物面板常见道纹必须有可用残韵路径"""
-    # 2026-10-03：狂暴删除；飞行暂无残韵路径（原转换→滑翔、反转→坠落都随之删除，
-    # 是否给飞行补新路径待用户裁定，见 报告.md）。
-    for dw in ("必中", "全力", "疯狂", "减速"):
+    """正常路径：仍在册的原始怪物道纹必须有可用残韵路径。
+
+    2026-10-25 用户令：【疯狂】【减速】遗物化退出道纹体系，不再有残韵路径；
+    【狂暴】2026-10-03 删除、【飞行】是状态。现存原始道纹只剩【全力】【必中】。
+    """
+    for dw in ("必中", "全力"):
         paths = R.get_available_resonance(dw)
         assert paths, f"{dw} 仍无残韵路径"
 

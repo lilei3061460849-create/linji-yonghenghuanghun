@@ -1,9 +1,12 @@
-"""疯狂全局裁定回归（2026-08-17）：疯狂X → 所有角色出手次数+X。
+"""【疯狂】遗物化回归（2026-10-25 用户令）。
 
-- 正常：怪物激活疯狂后，双方全部存活角色获得疯狂状态；次回合玩家出手+X、
-  怪物攻击出手数 1+X；无目标提交（全局道纹）。
-- 边界：激活当回合的攻击出手数不变（自下回合生效）；X=0 不加成；已死角色不落状态。
-- 错误：为疯狂提交 target_ref 必须被拒绝（全局道纹不接受目标）。
+口径：原原始怪物道纹【疯狂】退出道纹体系，改为通用遗物——
+「所有角色每回合出手次数+1」。判定走全场遗物查询，不再挂状态。
+
+- 正常：任一场上角色持有【疯狂】，双方每人每回合出手 +1。
+- 边界：没有该遗物时无加成；同一件只加一次（多人持有不叠加）；
+  遗物被停用（enabled=False）时不生效。
+- 错误：遗物化后它不再是可发动道纹，道纹注册表里查不到，提交发动必须被拒。
 """
 import os
 import sys
@@ -14,13 +17,13 @@ from tests.setup_support import finish_initial_daowen
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
-from engine.models import DaoWen, DaoWenInstance, Entity
-from tests.monster_phase_support import resolve_monster_phase
+from engine.daowen import DaoWenEngine
+from engine.models import Entity, Relic
 
 
 def _engine(suffix):
     os.makedirs("/tmp/linji_tests", exist_ok=True)
-    engine = GameEngine(db_path=f"/tmp/linji_tests/test_huoli_global_{suffix}.db", rng_seed=7)
+    engine = GameEngine(db_path=f"/tmp/linji_tests/test_kuangkuang_relic_{suffix}.db", rng_seed=7)
     engine.execute_action("setup_attributes", {
         "name": "试者", "blood_points": 11, "speed_points": 8, "mana_points": 6,
     })
@@ -29,83 +32,62 @@ def _engine(suffix):
     setup = engine.execute_action("setup_choose_region", {"region": "罪孽都市"})
     engine.execute_action("choose_discovered_relic", {"relic_name": setup["result"]["relic_choices"][0]})
     engine.state.phase = "in_combat"
-    engine.state.current_round = 2  # 跳过白板回合，怪物可出道纹
+    engine.state.current_round = 2
     return engine
 
 
-def _vitality_monster(engine, x=2, hp=100):
-    m = Entity(name="疯狂怪", entity_type="怪物", blood_limit=hp, current_hp=hp,
+def _monster(engine, name="疯狂怪", hp=100):
+    m = Entity(name=name, entity_type="怪物", blood_limit=hp, current_hp=hp,
                attack_count=1, attack_power=1)
-    m.dao_wen["疯狂"] = DaoWenInstance(DaoWen(
-        name="疯狂", formula="", cost_type="异变", cost_formula="5X", effect_formula=""),
-        x_value=x)
     engine.state.enemies.append(m)
     return m
 
 
-def test_normal_vitality_global_boost():
-    """正常：激活疯狂 → 全场存活角色获状态；次回合玩家出手+X、怪物攻击轮 1+X。"""
+def _hold(engine, entity, name="疯狂", enabled=True):
+    """玩家侧遗物挂 state.relics（归属查询读那里），其余角色挂自身 relics。"""
+    target = engine.state.relics if entity.entity_type == "轮回者" else entity.relics
+    target.append(Relic(name=name, effect="所有角色每回合出手次数+1", enabled=enabled))
+
+
+def test_normal_relic_boosts_every_character():
+    """正常：玩家持有【疯狂】，双方出手预算都 +1。"""
     engine = _engine("normal")
-    p = engine.state.player
-    m = _vitality_monster(engine, x=2)
-    base_actions = p.action_count
+    player = engine.state.player
+    monster = _monster(engine)
+    base_player = engine.combat.single_round_action_count(player)
+    base_monster = engine.combat.single_round_action_count(monster)
 
-    resolved = resolve_monster_phase(engine.combat, daowen_choices={"enemy:0": "疯狂"})
+    _hold(engine, player)
 
-    dao_entry = next(d for d in resolved if "daowen_activated" in d)
-    assert dao_entry["daowen_activated"] == "疯狂"
-    stamped = {e["target"] for e in dao_entry["execution"]["effects"] if e["type"] == "status_added"}
-    assert stamped == {"试者", "疯狂怪"}, "疯狂必须盖到双方全部存活角色"
-    assert p.get_status_value("疯狂") == 2 and m.get_status_value("疯狂") == 2
-    assert p.action_count == base_actions + 2, "玩家出手次数应+X"
-
-    engine.state.current_round = 3
-    prepared = engine.combat.prepare_monster_phase()
-    actor = next(a for a in prepared["actors"] if a["actor_ref"] == "enemy:0")
-    assert actor["base_attack_actions"] == 1 + 2, "怪物攻击出手数应为 1+X"
+    assert engine.combat.single_round_action_count(player) == base_player + 1
+    assert engine.combat.single_round_action_count(monster) == base_monster + 1, \
+        "遗物写的是「所有角色」，敌方同样 +1"
 
 
-def test_boundary_activation_round_and_dead_entities():
-    """边界：激活当回合出手数不变（下回合生效）；X=0 不加成；死亡角色不落状态。"""
+def test_boundary_monster_holder_helps_player_and_disabled_does_not():
+    """边界：怪物持有同样全场 +1；遗物停用或不存在时不加；多人持有只加一次。"""
     engine = _engine("boundary")
-    p = engine.state.player
-    m = _vitality_monster(engine, x=2)
-    dead = _vitality_monster(engine, hp=50)
-    dead.name = "亡怪"
-    dead.current_hp = 0
-    dead.is_alive = False
+    player = engine.state.player
+    monster = _monster(engine)
+    base_player = engine.combat.single_round_action_count(player)
 
-    prepared = engine.combat.prepare_monster_phase()
-    actor = next(a for a in prepared["actors"] if a["actor_ref"] == "enemy:0")
-    assert actor["base_attack_actions"] == 1, "激活当回合不得提前享受疯狂"
+    _hold(engine, player, enabled=False)
+    assert engine.combat.single_round_action_count(player) == base_player, "停用的遗物不生效"
 
-    resolved = resolve_monster_phase(engine.combat, daowen_choices={"enemy:0": "疯狂"})
-    dao_entry = next(d for d in resolved if "daowen_activated" in d)
-    stamped = {e["target"] for e in dao_entry["execution"]["effects"] if e["type"] == "status_added"}
-    assert "亡怪" not in stamped, "死亡角色不落疯狂状态"
-    assert stamped == {"试者", "疯狂怪"}
+    _hold(engine, monster)
+    assert engine.combat.single_round_action_count(player) == base_player + 1, \
+        "怪物持有的【疯狂】对玩家同样生效"
+    assert engine.combat.single_round_action_count(monster) == 3
 
-    m0 = _vitality_monster(engine, x=0, hp=80)
-    m0.dao_wen["疯狂"].x_value = 0
-    engine.state.current_round = 4
-    prepared2 = engine.combat.prepare_monster_phase()
-    actor0 = next(a for a in prepared2["actors"] if a["actor_ref"] == f"enemy:{engine.state.enemies.index(m0)}")
-    assert actor0["base_attack_actions"] == 1, "疯狂X=0 不产生加成"
+    _hold(engine, player)  # 两人各持一件，仍然只 +1
+    assert engine.combat.single_round_action_count(player) == base_player + 1
 
 
-def test_error_vitality_rejects_target_ref():
-    """错误输入：为全局疯狂提交 target_ref 必须被拒绝。"""
+def test_error_relicized_daowen_cannot_be_activated():
+    """错误输入：【疯狂】已遗物化，注册表里没有它，发动必须失败。"""
+    DaoWenEngine.register_all()
+    assert "疯狂" not in DaoWenEngine._registry
     engine = _engine("error")
-    _vitality_monster(engine, x=2)
-    prepared = engine.combat.prepare_monster_phase()
-    actor = next(a for a in prepared["actors"] if a["actor_ref"] == "enemy:0")
-    option = next(o for o in actor["daowen_options"] if o["name"] == "疯狂")
-    assert option["requires_target"] is False, "疯狂不得再要求目标"
-
-    choice = {"actor_ref": "enemy:0",
-              "daowen": {"name": "疯狂", "dodge": False, "blood_shadow": False,
-                         "trigger_spell_choices": {}, "target_ref": "player:0"},
-              "attack_actions": [{"hits": [{"target_ref": "player:0", "dodge": False,
-                                            "blood_shadow": False, "spell_choices": {}}]}]}
-    with pytest.raises(ValueError, match="不接受target_ref"):
-        engine.combat.resolve_monster_phase([choice], prepared=prepared)
+    player = engine.state.player
+    with pytest.raises(Exception):
+        DaoWenEngine.resolve("疯狂", 1, target=player, caster=player)

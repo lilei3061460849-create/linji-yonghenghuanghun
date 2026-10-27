@@ -9,7 +9,8 @@ from engine.daowen import DaoWenEngine
 from engine.dice import DiceEngine
 from engine.enums import CombatSubphase, EffectPolarity, EffectScope
 from engine.events import resolve_option_effect
-from engine.models import Consumable, Entity, GameState, Relic, StatusEffect
+from engine.models import (Consumable, DaoWen, DaoWenInstance, Entity, GameState,
+                           Relic, StatusEffect)
 
 
 def _state_with_blood_pact() -> tuple[GameState, CombatEngine, Entity, Entity]:
@@ -144,16 +145,49 @@ def test_event_and_daowen_costs_use_blood_pact_bus(tmp_path):
     assert losses[0] in (19, 20) and losses[1] in (20, 21)
 
 
+def test_blood_pact_daowen_binds_x_targets_who_split_costs(tmp_path):
+    """血契X：支付10X法力；X个目标组成无限期分担组，代价只在目标间平分。"""
+    state, combat, player, first = _state_with_blood_pact()
+    state.relics.clear()  # 新能力来自道纹绑定，不靠遗物资格
+    second = Entity("第二同伴", "朋友", blood_limit=80, current_hp=80,
+                    mana_limit=20, current_mana=20, speed_limit=14, current_speed=14)
+    state.friends.append(second)
+    player.dao_wen["血契"] = DaoWenInstance(DaoWen(
+        name="血契", formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
+    before_mana = player.current_mana
+
+    engine = GameEngine(db_path=str(tmp_path / "blood-pact-daowen.db"))
+    engine.state = state
+    engine.combat.state = state
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "血契", "x": 2,
+        "dodge_targets": [
+            {"target_ref": "friend:0", "dodge": False, "blood_shadow": False},
+            {"target_ref": "friend:1", "dodge": False, "blood_shadow": False},
+        ],
+    })
+    assert result["success"] is True, result
+    assert player.current_mana == before_mana - 20
+    assert result["execution"]["effects"][0]["targets"] == [first.name, second.name]
+    assert combat._blood_pact_group(player) == [first, second]
+
+    receipt = combat.pay_numeric_cost(player, "流血", 9)
+    assert player.current_hp == 100, "代价由血契目标组承担，施法者不计入平分"
+    assert sorted([80 - first.current_hp, 80 - second.current_hp]) == [4, 5]
+    assert receipt["owner"]["paid"] == 0
+    assert receipt["actual_paid"] == 9
+
+
 def test_regeneration_is_four_x_and_old_contracts_are_removed():
-    """规则替换：再生为4X（2026-09-11 用户令 3X→4X）；遗物池只保留新血契，不再包含两件旧契约。"""
+    """再生为4X；血契属于道纹，不在遗物池。"""
     target = Entity("目标", "朋友", blood_limit=100, current_hp=10)
     assert DaoWenEngine.resolve("再生", 4, target=target)["target_heal"] == 16
     names = {name for name, _ in GameEngine.RELIC_DEFS}
-    assert "血契" in names
+    assert "血契" not in names
     assert "鲜血契约" not in names
     assert "卖身契" not in names
     assert "钱袋" not in names  # 钱袋已删除（其效果一度并入【第一杯】，2026-09-23【第一杯】重做时废止）
-    assert len(names) == 26  # 当前遗物池包含新增的忘忧香；万钧印已改为消耗品
+    assert len(names) == 27  # 血契已转为道纹
 
 
 def test_scoped_ledger_rolls_back_battle_effects_but_keeps_costs(tmp_path):

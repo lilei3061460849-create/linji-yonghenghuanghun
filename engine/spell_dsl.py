@@ -807,3 +807,36 @@ def iter_action_slots(steps):
 def count_action_steps(steps) -> int:
     """程序里全部 ActionStep 的数量（决策列表必须与之等长）。"""
     return sum(1 for _ in _walk_action_steps(steps))
+
+
+def _count_tier_slots(steps) -> int:
+    """程序的「重」数：每个效果步骤各一重（条件分支两臂各算、循环体按写出的步数算）。"""
+    n = 0
+    for step in steps or ():
+        if isinstance(step, IfStep):
+            n += _count_tier_slots(step.then_steps) + _count_tier_slots(step.else_steps)
+        elif isinstance(step, LoopStep):
+            n += _count_tier_slots(step.body)
+        elif isinstance(step, (tuple, list)) and len(step) >= 2:
+            n += 1  # 旧内置流程表的 (道纹, 身份) 写法
+        else:
+            n += 1
+    return n
+
+
+def spell_tier(trigger, steps) -> int:
+    """法术阶数 = 重数（2026-10-25 用户令）。
+
+    一重 = 生效流程里的一个环节：
+    - 触发时机算一重（「失去生命后」「受到伤害前」都是流程的第一环）；
+    - 每个效果步骤各算一重，同一种道纹重复出现照算，不再按种类去重；
+    - 循环标记不另计重——它是「终点回到起点」，不产生新环节。
+
+    不带触发时机的瞬发法术只按步骤计，所以「直接发动杀伐X」是 1 阶。
+    阶数不设上限（2026-10-26 用户令）：阶数本身就是成本，重数越多要付的出手越多。
+    """
+    raw = getattr(trigger, "value", trigger)
+    n = _count_tier_slots(steps)
+    if raw and raw != TRIGGER_INSTANT:
+        n += 1
+    return max(1, n)

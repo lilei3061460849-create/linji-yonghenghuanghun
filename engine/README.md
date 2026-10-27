@@ -18,7 +18,7 @@ AI（决策者）──→ GameEngine API ──→ 计算/随机数
 1. **AI是决策者，程序是事实源** — 所有数值计算、随机数必须通过引擎
 2. **中断机制** — 程序无法判定时（许愿/逃跑等），抛出Interrupt等待DM
 3. **先例数据库** — DM裁定存入SQLite，下次类似场景自动匹配
-4. **自由控X** — 道纹的X值由AI在合法范围内自由指定
+4. **自由规则（含自由控X）** — 道纹的X值由AI在合法范围内自由指定；「没被禁止的取值同样允许」，所以 X 不必单列一条规则
 
 ## 正文事实源
 
@@ -26,7 +26,7 @@ AI（决策者）──→ GameEngine API ──→ 计算/随机数
 - `AI_CONTEXT.md`：由 `sim/gen_ai_context.py` 生成的外部 AI 单文件聚合物；便于 raw URL 消费，**不是**规则事实源。
 - `AI_EXPERIENCE.md`：AI 知识库、协作规范、推演铁律与工程验证准则，不承载通用规则正文。
 - `法术索引.md`：法术设计原则、三大法则、法术阶级规则、法术大全与自创法术标准语法的唯一完整说明。
-- `死者之书.md`：法术大全数据的引擎事实源（`RuleSync.extract_spells_from_file` 读取此文件）与三段式遗言格式；法术效果正文的可读性权威说明见 `法术索引.md`。
+- `死者之书.md`：法术大全数据的引擎事实源（`RuleSync.extract_spells_from_file` 读取此文件）与「## 死者之页」（生平＋遗言）格式；法术效果正文的可读性权威说明见 `法术索引.md`。
 - `物品索引.md`：遗物、消耗品与法器。
 - `副本索引.md`：副本清单；其链接的已实现副本文档进入运行时，未实现草案只参与文档校验。
 
@@ -60,7 +60,7 @@ engine/
 ├── document_validation.py # Markdown标题、文件链接与锚点校验（含资源设计标准 11 项标记）
 ├── custom_resources.py  # 自定义资源 v1：JSON 声明 → 道纹注册表/Mechanism/consume_item
 │                        #   复用 verbs/Phase/relic_active；校验四条设计标准；示例见 data/custom_resources/examples
-├── death_book.py        # 《死者之书》遗言节读写（文件是事实源；审核后只改 ## 遗言）
+├── death_book.py        # 《死者之书》死者之页读写（生平自动总结＋遗言自定义；审核后只改 ## 死者之页）
 ├── personality.py       # 角色性格特征（实例级，行为推断"先射箭后画靶"，命零即清除；不写模板不跨实例继承）
 ├── validator.py         # 规则校验器（20 条内置检查，违规入库 + 已迁移机制护栏）
 ├── mechanisms/          # 最小可行机制系统（MVP）：Verb/Mechanism/Trigger/Condition/Target
@@ -232,13 +232,8 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `dismiss_employee` | 解雇[员工]（自由行动，无代价） |
 | `pay_employee_wage` | 战终对某[员工]的工资做出pay/refuse决策 |
 | `choose_hired_daowen` | 雇佣diy后，从3个发现的转化道纹候选中选择1个 |
-| `declare_betrayal` | 背叛：由[朋友]／[员工]自己声明夺书（自选项，无阈值、不自动触发）；`names` 指名背叛者 |
-| `suppress_rebellion` | 背叛·镇压：背叛者搬入state.enemies开战 |
-| `resolve_rebellion_battle` | 镇压结算(outcome=victory/defeat) |
-| `appease_rebellion` | 背叛·让利：全局工资+5，平息叛乱（仅对[员工]背叛有效） |
-| `negotiate_rebellion` | 背叛·谈判：抛Interrupt交DM裁定 |
-| `resolve_final_duel` | 第8场死斗结算；失败时触发【死之传承】中断，可选带`death_book_entry`作草稿 |
-| `submit_ruling`（死之传承） | 轮回者命零后审核遗言：`action=approve/edit/reject`；通过或修改后写入`死者之书.md`的「## 遗言」节 |
+| `resolve_final_duel` | 第8场死斗结算；失败时触发【死者之页】中断，可选带`death_book_entry`作草稿 |
+| `submit_ruling`（死者之页） | 轮回者命零后审核其页：`action=approve/edit/reject`；生平由引擎自动总结（`summarize_life`），玩家只自定义`text`（≤20字），通过或修改后写入`死者之书.md`的「## 死者之页」节 |
 | `choose_terminal_artifact` | 死斗胜利后按副本领取终音法器(choice=序号) |
 | `choose_first_embrace` | 初拥之夜9选1(choice=1~9，1~8限选1次，9可重复)；选项3 发放消耗品【血翼】3/3，不占遗物位 |
 | `define_resource` | 声明一条自定义资源（道纹/遗物/法器/消耗品）；`spec` 或 `specs`，默认就地授予。这是「当场设计」的唯一入口，不占出手 |
@@ -246,7 +241,7 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `list_resources` | 列出已注册的自定义资源 |
 | `use_black_card` | 黑金名片(罪孽都市终音)：敌方血限减半，等量碎片(允许负债≤50) |
 | `use_crime_vault` | 罪业金库(罪孽都市终音)：消耗X碎片(≤2%当前碎片)换2X格挡 |
-| `fire_godfather_revolver` | 教父左轮(罪孽都市终音)：对target打出30%血限×本场使用次数的必中伤害 |
+| `fire_godfather_revolver` | 教父左轮(罪孽都市终音)：对target打出30%血限×本场使用次数的必中伤害（每场6发，[战始]回满） |
 | `select_shared_dragon_heart` | 共心环(龙心谷终音)：选定本场共享的龙心类型 |
 | `declare_fuyuebei_toll` | 负岳碑(龙心谷终音)：预声明保护某[朋友]/[员工]下次撤退 |
 | `unlock_dragon_trait` | 真龙之心：代价累积满12点解锁1种龙族遗物(trait)；trait=烬翼 时改发消耗品【烬翼】5/5。震岳龙躯为常驻被动，无独立 action |

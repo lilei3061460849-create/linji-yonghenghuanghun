@@ -5,7 +5,7 @@
 删干净了、留下的空缺是显式登记过的（而不是悄悄漂移）。
 
 留下的空缺（已登记，是否补位待定）：
-- 残韵：【全力】的（转换）出边留空（仍有 反转→弱化、曲解→再生）；
+- 残韵：【全力】的（转换）出边原留空，2026-10-26 已接给【全速】（反转→弱化、曲解→再生不变）；
 - 怪物面板：`tests/test_dungeon_audit.py::PENDING_DW_GAPS` 新增
   乱葬岗/腐疫鼠、乱葬岗/红嫁衣鬼、沉沦海/褪鳞蟹、沉沦海/忘潮祭司；
   沉沦海/潜水员（[员工]面板）道纹清零，不在该审计口径内。
@@ -50,12 +50,13 @@ def test_three_daowen_are_not_registered():
         assert name not in MONSTER_TRANSFORM_DAOWEN
 
 
-def test_quanli_transform_edge_is_left_empty_on_purpose():
-    """边界：【借力】删除后【全力】的（转换）出边**留空**，不得被悄悄补上新目标。
+def test_quanli_transform_edge_now_routes_to_quansu():
+    """边界：【借力】删除后【全力】的（转换）出边曾留空；2026-10-26 用户令接给【全速】。
 
-    这是用户明确口径（不新增道路），所以这里断言的是"空"，不是"有替代"。
+    留空的理由是「不新增道路」，【全速】是既有道纹，接它不新增道路。
     """
-    assert ResonanceEngine.find_transformation("全力", "转换") is None
+    assert ResonanceEngine.find_transformation("全力", "转换") == "全速"
+    assert "借力" not in DaoWenEngine._registry
     # 另两条边必须还在
     assert ResonanceEngine.find_transformation("全力", "反转") == "弱化"
     assert ResonanceEngine.find_transformation("全力", "曲解") == "再生"

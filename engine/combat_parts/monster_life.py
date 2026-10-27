@@ -102,7 +102,7 @@ class MonsterLifeMixin:
         使玩家的构筑本身成为风险来源——越依赖某条公式化路线，被复制时反噬越重，
         从而抑制"无脑最优解"。同时保持怪物与轮回者的身份区隔
         （怪物仍不持有法力/速度/残韵/局外阶段，只是临时借用道纹）。
-        前置（怪物准则#3）：须处于困境；逃跑与进化二选一，每场战斗限一次。
+        前置（规则正文·怪物准则·困境）：须处于困境；逃跑与进化二选一，每场战斗限一次。
         """
         if not monster.is_alive:
             return {"success": False, "error": f"{monster.name}已命零"}
@@ -151,7 +151,7 @@ class MonsterLifeMixin:
     def get_plight_evolution_options(self) -> list[dict]:
         """
         供AI决策（事实源计算）：当前存活、处于困境、且本场未选择过逃跑/进化的怪物，
-        及其【原初X】可用参数。怪物准则#3：陷入困境时强制逃跑/进化二选一，每场限一次；
+        及其【原初X】可用参数。规则正文·怪物准则·困境：陷入困境时强制逃跑/进化二选一，每场限一次；
         AI扮演怪物方，自行决定是否调用 declare_evolution 及参数。
         """
         options = []
@@ -233,7 +233,7 @@ class MonsterLifeMixin:
         return math.ceil(monster.blood_limit * self.REDEMPTION_HP_RATIO)
 
     def check_redemption(self, monster: Entity, *, force: bool = False) -> Optional[dict]:
-        """救赎：通常要求残血且没有六种原始怪物道纹；自由结晶可强制触发。"""
+        """救赎：通常要求残血且没有原始怪物道纹（全力／疯狂／减速／必中）；自由结晶可强制触发。"""
         if monster is None or monster.entity_type != "怪物" or not monster.is_alive:
             return None
         if monster.is_sculptured or monster.is_proliferated or monster.is_debt_bound:
@@ -311,7 +311,7 @@ class MonsterLifeMixin:
                 results.append(self._sculpture_monster(monster))
                 continue
 
-            # 2. 救赎：残血且没有六种原始怪物道纹
+            # 2. 救赎：残血且没有原始怪物道纹（全力／疯狂／减速／必中）
             redemption = self.check_redemption(monster)
             if redemption:
                 results.append(redemption)
@@ -638,40 +638,6 @@ class MonsterLifeMixin:
             options=[
                 {"id": "wish_resolved", "label": "实现愿望（扭曲方式）",
                  "description": "「某人」以最符合其扭曲本质的方式实现愿望，代价由愿望本身决定"},
-            ],
-            state_snapshot=self.state.to_dict()
-        )
-
-    def initiate_negotiation(self, proposal: str) -> Interrupt:
-        """
-        背叛·谈判声明：给出合理的谈判方案破解叛乱，需要DM裁定方案是否成立。
-
-        2026-10-24 起背叛是[朋友]／[员工]的自选项，谈判对象是声明背叛的人
-        （state.rebellion_rebels），不再是"全体员工按攻击总值对撞"。
-        """
-        declared = list(getattr(self.state, "rebellion_rebels", []) or [])
-        if declared:
-            wanted = set(declared)
-            rebels = [e.name for e in self.state.employees + self.state.friends
-                      if e.name in wanted]
-        else:
-            rebels = [e.name for e in self.state.employees]
-        return Interrupt(
-            interrupt_type=InterruptType.STAFF_MUTINY,
-            context={
-                "rebels": rebels,
-                "player_hp": self.state.player.current_hp if self.state.player else 0,
-                "shards": self.state.shards,
-                "proposal": proposal,
-            },
-            description=(
-                f"轮回者尝试以谈判方案破解背叛：\n\n{proposal}\n\n"
-                f"背叛者：{'、'.join(rebels) or '（未具名）'}\n"
-                f"请DM裁定该方案是否合理、能否平息叛乱。"
-            ),
-            options=[
-                {"id": "negotiation_success", "label": "谈判成功", "description": "叛乱平息，方案对应的代价/效果按DM裁定生效"},
-                {"id": "negotiation_fail", "label": "谈判失败", "description": "叛乱未平息，需改用镇压或让利处理"},
             ],
             state_snapshot=self.state.to_dict()
         )

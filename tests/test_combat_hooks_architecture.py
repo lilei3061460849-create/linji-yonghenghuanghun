@@ -15,7 +15,6 @@ from engine.combat_hooks import (
     CombatHookManager,
     QianjingjiaHook,
     BifenglingHook,
-    ShouyedengHook,
 )
 
 
@@ -124,10 +123,6 @@ def test_hooks_handles_none_and_invalid_state():
     # None 实体闪避
     d_none = manager.apply_dodge(None, None)
     assert d_none == {}
-
-    # None 实体回始
-    rs_none = manager.apply_round_start(None, True, None)
-    assert rs_none == {}
 
     # 负数伤害调整
     neg_adj = manager.apply_incoming_adjust(None, -5, "普通", None, None)

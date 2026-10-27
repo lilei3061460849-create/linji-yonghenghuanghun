@@ -45,7 +45,10 @@ from .gamedata import (REGION_EXCLUSIVE_DAOWEN, ORIGINAL_MONSTER_DAOWEN,
                        UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN, FIRST_EMBRACE_DAOWEN,
                        learnability_error)
 from .dm_rulings import DMRulingsDB, DMRuling, Interrupt
-from .death_book import DeathBookStore, draft_legacy, validate_legacy
+from .death_book import (
+    DeathBookStore, draft_legacy, summarize_life, validate_legacy,
+    LIFE_FIELD,
+)
 from .ai_memory import clear_memory, condense_to_legacy
 from .effect_context import make_context, normalize_context
 from . import custom_resources
@@ -67,11 +70,6 @@ from .handlers.economy import (
     handle_dismiss_employee,
     handle_repay_debt_employee,
     handle_pay_employee_wage,
-    handle_declare_betrayal,
-    handle_suppress_rebellion,
-    handle_resolve_rebellion_battle,
-    handle_appease_rebellion,
-    handle_negotiate_rebellion,
 )
 from .handlers.duel import (
     handle_activate_duel_relic,
@@ -529,8 +527,7 @@ class GameEngine:
                             "params_schema": {"name": pending_learned,
                                               "recipient": "现存轮回者/朋友/员工/造物名称或runtime_id"},
                             "note": "学习成果可以暂存，待未来结识朋友后再分配"})
-        has_ten_thousand_souls_banner = any(
-            relic.name == "万魂幡" for relic in (self.state.relics or []))
+        has_ten_thousand_souls_banner = "万魂幡" in (self.state.artifacts_owned or [])
         if (has_ten_thousand_souls_banner
                 and not any(action.get("params_schema", {}).get("sub_action") == "造生"
                             for action in actions)):
@@ -688,11 +685,6 @@ class GameEngine:
     def _get_battle_start_actions(self) -> dict:
         relic_choices_schema: dict[str, Any] = {"_instruction": "按当前回始遗物逐件显式提交"}
         player = self.state.player
-        # 2026-10-12 用户令：【血契】只保留「数值型代价可与朋友/员工平分」，
-        # 与【透支】重合的「[回始]流血4X换X法力」已删除，故它不再是回始主动遗物，
-        # `血契`/`对手血契` 两个回始决策键取消。平分仍通过各代价提交处的
-        # cost_share_target_ref 生效（见 _get_pre_battle_actions / use_daowen /
-        # 负岳碑 / 血族血脉 四处，全部保留）。
         round_start_schema: dict[str, Any] = {"relic_choices": relic_choices_schema}
         global_spells = self.combat.prepare_global_trigger_spells(TriggerTiming.ROUND_START.value)
         if global_spells:
@@ -774,9 +766,20 @@ class GameEngine:
                     "cost_share_target_ref": (
                         [{"ref": ref, "name": entity.name}
                          for ref, entity in self.combat.blood_pact_targets().items()]
-                        if self.combat._has_active_blood_pact(player) else []
+                        if (self.combat._has_active_blood_pact(player)
+                            and not self.combat._blood_pact_group(player)) else []
                     ),
                 }
+                if name in ("波及", "血契"):
+                    selectable = [{"ref": ref, "name": entity.name}
+                                  for ref, entity in refs.items()
+                                  if entity.is_alive and entity is not player]
+                    params_schema["dodge_targets"] = {
+                        "exact_count": "X", "targets": selectable,
+                        "entry": {"target_ref": "存活非自身目标引用",
+                                  "dodge": "敌对目标可选布尔值",
+                                  "blood_shadow": "可选布尔值"},
+                    }
             actions.append({
                 "action_type": "use_daowen", "available": max_x >= 1,
                 "params_schema": params_schema,
@@ -790,14 +793,14 @@ class GameEngine:
                 fixed_x = instance.x_value if instance.x_value > 0 else 1
                 # 波及X（固定X）：合法目标不足X时该指令永远无法发动——
                 # 与玩家侧同一规则。
-                if name == "波及":
+                if name in ("波及", "血契"):
                     wave_candidates = [e for e in refs.values()
                                        if e.is_alive and e is not actor]
                     if len(wave_candidates) < fixed_x:
                         actions.append({"action_type": "use_daowen", "available": False,
                                         "params_schema": {"actor_ref": actor_ref,
                                                           "daowen_name": name, "x": fixed_x},
-                                        "reason": f"波及{fixed_x}需要{fixed_x}个目标，"
+                                        "reason": f"{name}{fixed_x}需要{fixed_x}个目标，"
                                                   f"当前仅{len(wave_candidates)}个存活非自身角色"})
                         continue
                 actions.append({"action_type": "use_daowen", "available": True,
@@ -1011,10 +1014,10 @@ class GameEngine:
             legal = x
         # 波及X：X还不得超过合法目标数（全部存活非自身角色）——否则schema会给出
         # 永远无法发动的X。
-        if name == "波及":
-            wave_candidates = [e for e in self.combat._combat_entity_refs().values()
-                               if e.is_alive and e is not actor]
-            legal = min(legal, len(wave_candidates))
+        if name in ("波及", "血契"):
+            candidates = [e for e in self.combat._combat_entity_refs().values()
+                          if e.is_alive and e is not actor]
+            legal = min(legal, len(candidates))
         return legal
 
     def _get_battle_end_actions(self) -> dict:
@@ -1022,6 +1025,7 @@ class GameEngine:
         player = self.state.player
         if (player and self.state._relic_active(player, "血族血脉")
                 and self.combat._has_active_blood_pact(player)
+                and not self.combat._blood_pact_group(player)
                 and player.damage_dealt_this_round <= 0):
             round_end_schema["blood_lineage_cost_share_target_ref"] = [
                 {"ref": ref, "name": entity.name}
@@ -1057,8 +1061,8 @@ class GameEngine:
         "declare_parry", "cast", "focus", "rest",
         "deploy_employee", "lianxin_in_battle", "declare_evolution",
         "prepare_monster_phase", "resolve_monster_phase", "monster_phase",
-        "round_start", "round_end", "resolve_rebellion_battle",
-        # resolve_final_duel不在此列：死斗败者先过死之传承（reset进setup相）
+        "round_start", "round_end",
+        # resolve_final_duel不在此列：死斗败者先过死者之页（reset进setup相）
         # 再结算defeat，战斗限定会把它挡在setup外导致擂主永不回槽（r16实战复现）。
         "activate_duel_relic", "use_black_card", "use_crime_vault",
         "fire_godfather_revolver", "select_shared_dragon_heart", "declare_fuyuebei_toll",
@@ -1429,14 +1433,15 @@ class GameEngine:
         # 豁免：自创法术 dm_approved 重提是"结算中断"的动作，不该被自己挡住
         # 注：旧 is_custom_approve 旁路口（局外自创法术的 dm_approved 重提）
         # 已于 2026-09-16 随局外自创入口一并删除，不再需要豁免待裁定门禁。
-        # 世界最终死斗中的轮回者可能已命零并触发【死之传承】；先允许战终把胜负
+        # 世界最终死斗中的轮回者可能已命零并触发【死者之页】；先允许战终把胜负
         # 和存活者写回世界，再让调用方处理遗言。普通 pending interrupt 仍封锁行动。
         pending_world_duel_death = (
             action_type == "battle_end"
             and bool(self.state.event_modifiers.get("world_final_duel"))
             and self.state.phase == GamePhase.IN_COMBAT.value
             and all(getattr(interrupt.interrupt_type, "value", interrupt.interrupt_type)
-                    == "死之传承" for interrupt in self._pending_interrupts)
+                    == InterruptType.DEATH_INHERITANCE.value
+                    for interrupt in self._pending_interrupts)
         )
         if (self._pending_interrupts and action_type != "restart_battle"
                 and not pending_world_duel_death):
@@ -1453,7 +1458,7 @@ class GameEngine:
         if queued:
             return {
                 "success": False,
-                "error": "轮回者已命零，死之传承等待审核",
+                "error": "轮回者已命零，死者之页等待审核",
                 "interrupt": queued.to_dict(),
                 "pending_interrupts": [i.to_dict() for i in self._pending_interrupts],
                 "result": {"player_dead": True},
@@ -1538,7 +1543,7 @@ class GameEngine:
                 result["interrupt"] = queued.to_dict()
                 result["instruction"] = (
                     (result.get("instruction") or "")
-                    + " 轮回者命零，死之传承等待审核；请调用 submit_ruling(approve/edit/reject)。"
+                    + " 轮回者命零，死者之页等待审核；请调用 submit_ruling(approve/edit/reject)。"
                 ).strip()
 
             self._last_result = result
@@ -1665,16 +1670,6 @@ class GameEngine:
             return self._action_pay_employee_wage(params)
         elif action_type == "choose_hired_daowen":
             return self._action_choose_hired_daowen(params)
-        elif action_type == "declare_betrayal":
-            return self._action_declare_betrayal(params)
-        elif action_type == "suppress_rebellion":
-            return self._action_suppress_rebellion(params)
-        elif action_type == "resolve_rebellion_battle":
-            return self._action_resolve_rebellion_battle(params)
-        elif action_type == "appease_rebellion":
-            return self._action_appease_rebellion(params)
-        elif action_type == "negotiate_rebellion":
-            return self._action_negotiate_rebellion(params)
         elif action_type == "activate_duel_relic":
             return self._action_activate_duel_relic(params)
         elif action_type == "resolve_final_duel":
@@ -3292,7 +3287,7 @@ class GameEngine:
             cost_formula="X", effect_formula=""))
 
     def _action_resolve_redemption(self, params: dict) -> dict:
-        """救赎：接纳昏迷微光者为员工（待命，需派遣+战终工资；背叛对他们同样开放），或当场【终结】。
+        """救赎：接纳昏迷微光者为员工（待命，需派遣+战终工资；夺书对他们同样开放），或当场【终结】。
 
         【终结】：救赎不是免费收获——把昏迷
         的微光者当场终结，效果等同击杀：它被还原为一次正常[命零]，[战终]按与普通击杀
@@ -3703,7 +3698,7 @@ class GameEngine:
         # 缺少该校验会让任意副本都能用他人专属行动，统计与平衡数据将失真。
         REGION_EXCLUSIVE = {"维修": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "造生": "乱葬岗"}
         need_region = REGION_EXCLUSIVE.get(action)
-        if action == "造生" and any(relic.name == "万魂幡" for relic in (self.state.relics or [])):
+        if action == "造生" and "万魂幡" in (self.state.artifacts_owned or []):
             need_region = None
         if need_region and self.state.current_region != need_region:
             if not world_mode:
@@ -3846,6 +3841,8 @@ class GameEngine:
     # 保证「有流程」与「有所需道纹」永不脱节）。此处只做别名，避免两处维护。
     # 法术不再需要【学习】：持全部所需道纹即可直接使用（见 spell_definition）。
     SPELL_REGISTRY = CombatEngine.BUILTIN_SPELL_DAOWEN
+    # 教父左轮：每场弹药数（[战始]回满＝把本场使用次数清零，见 _action_fire_godfather_revolver）
+    GODFATHER_REVOLVER_AMMO = 6
     # 三副本终音法器（死斗胜利后按current_region发放，见resolve_final_duel/choose_terminal_artifact）
     TERMINAL_ARTIFACTS = {
         "扭曲都市": [
@@ -3857,7 +3854,7 @@ class GameEngine:
         "罪孽都市": [
             ("黑金名片", "[战始]，可使场上所有敌方[目标][血限]减半后，付出等量[碎片]（允许负债，负债≤50）"),
             ("罪业金库", "[回始]，可消耗X点[碎片]，获得2X点格挡（X≤2%当前碎片）"),
-            ("教父左轮", "（耐久6/6，永不消耗，[战终]耐久回满）。对[目标]打出30%自身[血限]×使用次数的【必中】伤害"),
+            ("教父左轮", "对[目标]打出30%自身[血限]×本场使用次数的【必中】伤害（每场6发，[战始]自动回满）"),
         ],
         "龙心谷": [
             ("共心环", "[战始]，选择自身拥有的一枚【××龙心】；本场战斗中，自身、[朋友]与[员工]均可消耗该龙心耐久，抵消同类型代价"),
@@ -3884,21 +3881,20 @@ class GameEngine:
     FIRST_EMBRACE_CONSUMABLES = {3: WING_BLOOD}
     FIRST_EMBRACE_RETAIN_CHOICE = 9
 
-    # 遗物池定义（26件；【发现】只列候选，效果在对应触发时点应用）
+    # 遗物池定义（27件；【发现】只列候选，效果在对应触发时点应用）
     # 2026-10-13 用户令：【买路财】改制为轮回者【逃跑】行动，【三相残韵盘】删除
     # （发现侧由道纹【典当】承接），两件均移出遗物池。
     RELIC_DEFS = [
         ("血誓戒", "[回始]首次主动支付流血代价时，获得等同于本次流血的格挡；若支付后生命≤30%，改为获得等量生命"),
-        ("同魂笔", "对[目标]发动残韵时，可另选一[目标]使其一种道纹受同种残韵影响"),
-        ("回锋刀", "每失去1点速度后对[目标]造成3伤害；[回始]对[目标]造成3×([速限]-当前速度)伤害"),
-        ("血契", "数值型【代价】可与一名存活的朋友或员工平分，余数按随机数分配（通用规则见规则正文《基础定义·平分规则》）"),
+        ("同魂笔", "当你对[目标]发动残韵时，可以选择另一个[目标]，使其拥有的一种道纹受到同种残韵影响。"),
+        ("回锋刀", "每失去1点速度后，对[目标]造成3点伤害；[回始]，对[目标]造成3×（你的[速限]-你的当前速度）的伤害。"),
         ("避风铃", "每次闪避后获得3格挡；当前速度归零时获得15格挡"),
-        ("守夜灯", "[回始]获得[法限]50%的法力"),
-        ("无所求", "每当在事件中选拒绝类选项，永久获得1属性点"),
+        ("守夜灯", "[回终]，你获得等同于当前回合数的法力。"),
+        ("无所求", "每当你在事件中选择「拒绝」类选项，永久获得1点属性点。"),
         ("忘忧香", "你受到溢出的回复时将其转化为等量格挡"),
-        ("承露盏", "每累计失去10点生命，获得1点法力（本场累计，余数滚存，[战始]归零）"),
+        ("承露盏", "每累计失去10点生命，获得1点法力。本场累计，余数滚存，[战始]归零。"),
         # 2026-10-03 新增 5 件（承接被删道纹，全部加入通用遗物池）：
-        ("千荆甲", "你受到攻击伤害前，攻击者受到等量伤害（承接原【爆裂】道纹；只对攻击行动生效）"),
+        ("千荆甲", "你受到攻击伤害（指攻击行动所造成的伤害）前，攻击者受到等量伤害。"),
         
         ("癫狂之脑", "你每回合的出手次数+1，受到的攻击伤害翻倍"),
         ("活血衣", "你受到攻击造成的伤害后，恢复等同其一半的生命"),
@@ -3913,10 +3909,15 @@ class GameEngine:
         ("失速冥灯", "任意角色每失去一次速度，其速限降低2"),
         ("寂灭面具", "阻止命零触发的效果"),
         ("衰变沙漏", "任意角色每次发动道纹时，该次道纹数值降低1，最低为0"),
-        ("蚀界残钟", "每回终，所有角色各自失去等同于其攻击力×攻击次数的血限"),
+        ("蚀界残钟", "每回终，所有角色各自失去等同于其当前法力×当前速度的血限"),
         ("窥隙法匣", "每次成功闪避后，下回合获得10点法力"),
         ("逐影胫骨", "每累计成功闪避两次，速度+1"),
-        ("万魂幡", "持有者可在乱葬岗以外发动造生；造生仍只培养其唯一造物"),
+        # 2026-10-25 用户令：引擎早有实现（combat_hooks 的复制体吸血），此前漏登记，补进遗物池。
+        ("共生血囊", "由你创造的复制体造成伤害时，复制体按目标实际减少的生命回复；"
+                     "超出复制体生命上限的回复量改为回复创造者"),
+        # 2026-10-25 用户令：两条原始怪物道纹遗物化，进通用遗物池。
+        ("疯狂", "所有角色每回合出手次数+1"),
+        ("减速", "［战始］所有敌人的当前速度减半"),
     ]
 
     def _init_relic_pool(self):
@@ -4155,7 +4156,7 @@ class GameEngine:
             parsed = parse_spell_definition(trigger, flow, set(DaoWenEngine.list_all()))
         except SpellDslError as exc:
             return {"error": f"自创法术句式错误：{exc}"}
-        from .spell_dsl import collect_step_daowen, TRIGGER_INSTANT
+        from .spell_dsl import collect_step_daowen, spell_tier, TRIGGER_INSTANT
         from .spell_execution import Lifecycle, TriggerType
         # 生命周期校验（Part 6）：允许的取值只有 battle / permanent。
         # 战斗中自创的法术默认是 battle——本场战斗的即兴产物，[战终]即失效；
@@ -4175,7 +4176,7 @@ class GameEngine:
         return {"spell": Spell(
             name=name.strip(), required_daowen=list(required),
             trigger_condition=trigger.strip(), effect_flow=flow.strip(),
-            rank=len(required),
+            rank=spell_tier(parsed.trigger, parsed.steps),
             custom_conditions=list(definition.get("custom_conditions") or []),
             automatic=parsed.trigger == TriggerTiming.SELF_TURN_END.value
                        or bool(definition.get("automatic", False)),
@@ -4238,16 +4239,18 @@ class GameEngine:
         if "error" in built:
             return {"success": False, "error": built["error"]}
         # 先扣出手再写入：出手预算不足时不产生任何效果，也不白造出法术。
-        spell_tier = max(1, len(set(built["spell"].required_daowen)))
+        # 【法术阶级】2026-10-25 用户令：阶数＝重数（触发时机一重＋每步一重），
+        # 不再按「用了几种道纹」计价；定义与施展同价。
+        tier = built["spell"].rank
         budget_error = self._consume_actions_or_error(
-            player, spell_tier, action_type="define_spell")
+            player, tier, action_type="define_spell")
         if budget_error:
             return budget_error
         player.spells.append(built["spell"])
         parsed = built["parsed"]
         wired = parsed.trigger in self.combat._WIRED_TRIGGERS
         result = {"spell": built["spell"].to_dict(), "wired": wired,
-                  "tier": spell_tier, "cost": f"{spell_tier}次主动出手"}
+                  "tier": tier, "cost": f"{tier}次主动出手"}
         if not wired:
             result["warning"] = (f"触发时机【{parsed.trigger}】已通过句式校验，"
                                  "但该时机暂未接入战斗结算管线，本法术目前不会实际触发")
@@ -4570,33 +4573,6 @@ class GameEngine:
                 "result": {"employee": name, "chosen": daowen_name,
                            "employee_daowen": list(emp.dao_wen.keys())}}
 
-    # ==================== 背叛（[朋友]／[员工]自选，三选一处理分支） ====================
-
-    def _pending_rebellion_error(self, force: bool) -> Optional[dict]:
-        """未强制触发时，必须先有人声明背叛才能选择处理分支"""
-        if force:
-            return None
-        if not self.state.rebellion_active:
-            return {"success": False,
-                    "error": "当前没有待处理的背叛（[朋友]／[员工]尚未声明背叛）"}
-        return None
-
-    def _action_declare_betrayal(self, params: dict) -> dict:
-        """[朋友]／[员工]声明背叛：自选项，不是引擎按数值触发的特殊事件。"""
-        return handle_declare_betrayal(self, params)
-
-    def _action_suppress_rebellion(self, params: dict) -> dict:
-        return handle_suppress_rebellion(self, params)
-
-    def _action_resolve_rebellion_battle(self, params: dict) -> dict:
-        return handle_resolve_rebellion_battle(self, params)
-
-    def _action_appease_rebellion(self, params: dict) -> dict:
-        return handle_appease_rebellion(self, params)
-
-    def _action_negotiate_rebellion(self, params: dict) -> dict:
-        return handle_negotiate_rebellion(self, params)
-
     def _pre_battle_lianxin(self, params: dict) -> dict:
         """炼心（龙心谷专属，局外版：已消耗1精力，见_action_pre_battle统一扣减）"""
         self.state.pending_lianxin = True
@@ -4616,7 +4592,7 @@ class GameEngine:
             return {"success": False, "error": "没有玩家"}
         if not self.state.world_state:
             return {"success": False, "error": "造生需要先初始化开放世界"}
-        has_banner = any(relic.name == "万魂幡" for relic in (self.state.relics or []))
+        has_banner = "万魂幡" in (self.state.artifacts_owned or [])
         if self.state.current_region != "乱葬岗" and not has_banner:
             return {"success": False, "error": "造生只能在乱葬岗发动；持有万魂幡时不受地点限制"}
         from .monsters import MONSTER_PREFERENCE_POOL
@@ -4784,7 +4760,7 @@ class GameEngine:
 
         怪物读正文「每回合 1 次攻击 + 1 种道纹」（single_round_action_count）——
         Entity.action_count 对怪物按速限推导，而怪物面板不含[速限]，恒为 0。
-        其余角色读 Entity.action_count（全体基础 2 次，再受【疯狂】/【无力】/【蓄锐·增】修正），
+        其余角色读 Entity.action_count（全体基础 2 次，再受遗物与【无力】/【蓄锐·增】修正），
         并叠加遗物【癫狂之脑】的 +1（统一走 combat.single_round_action_count，避免口径分叉）。
         """
         if entity is None:
@@ -4928,10 +4904,11 @@ class GameEngine:
         _real_self_buff = bool(_bizhong_st and _bizhong_st.remaining_rounds > 0)
         if hostile_possible and _real_self_buff:
             log["must_hit"] = True
-            return log, None
+            if name != "血契":
+                return log, None
         if hostile_possible and self.combat.bizhong_remaining(actor) > 0:
             log["must_hit"] = self.combat.consume_bizhong(actor)
-            if log["must_hit"]:
+            if log["must_hit"] and name != "血契":
                 return log, None
         if blood_shadow:
             if (target is None or not self._hostile_to(actor, target)
@@ -4944,6 +4921,53 @@ class GameEngine:
             log["blood_shadow"] = True
             log["fully_dodged"] = True
             return log, None
+        if name == "血契":
+            refs = self.combat._combat_entity_refs()
+            if not isinstance(dodge_targets, list) or len(dodge_targets) != wave_count:
+                raise ValueError(f"血契必须显式提交恰好{wave_count}个目标")
+            entries = {}
+            for entry in dodge_targets:
+                if (not isinstance(entry, dict) or not isinstance(entry.get("target_ref"), str)
+                        or not isinstance(entry.get("dodge", False), bool)
+                        or not isinstance(entry.get("blood_shadow", False), bool)
+                        or entry.get("dodge", False) and entry.get("blood_shadow", False)):
+                    raise ValueError("血契每个目标必须提交target_ref及合法的dodge/blood_shadow")
+                ref = entry["target_ref"]
+                if ref in entries:
+                    raise ValueError("血契目标不得重复")
+                ent = refs.get(ref)
+                if ent is None or not ent.is_alive or ent is actor:
+                    raise ValueError("血契目标必须是存活的非自身目标")
+                if not self.combat.is_targetable(actor, ent):
+                    raise ValueError(f"{ent.name}处于飞行，无法被选中")
+                entries[ref] = (entry, ent)
+            accepted = []
+            for entry, ent in entries.values():
+                hostile = self._hostile_to(actor, ent)
+                if not hostile or log["must_hit"]:
+                    accepted.append(ent)
+                    continue
+                if entry.get("blood_shadow"):
+                    if not self.state._relic_active(ent, "血影") or ent.current_hp <= 10:
+                        raise ValueError(f"{ent.name}不能使用血影")
+                    self.combat.pay_numeric_cost(
+                        ent, "流血", 10,
+                        cost_share_target_ref=entry.get("cost_share_target_ref", ""),
+                        cost_context={"timing": "reaction", "source": "血影",
+                                      "source_type": "relic", "tags": {"active_payment"}})
+                    log["dodged_names"].append({"name": ent.name, "blood_shadow": True})
+                elif entry.get("dodge"):
+                    if ent.current_speed < 1:
+                        raise ValueError(f"{ent.name}速度不足")
+                    extra = self.combat._spend_dodge_speed(
+                        ent, entry.get("dodge_relic_target_ref"))
+                    log["dodged_names"].append({"name": ent.name, "speed_after": ent.current_speed, **extra})
+                else:
+                    accepted.append(ent)
+            log["blood_pact_targets"] = [entity.name for entity in accepted]
+            log["fully_dodged"] = not accepted
+            return log, accepted
+
         if name == "波及":
             refs = self.combat._combat_entity_refs()
             if not isinstance(dodge_targets, list) or len(dodge_targets) != wave_count:
@@ -5010,12 +5034,12 @@ class GameEngine:
     def _compute_pending_wages(self):
         """战终首次结算：为每个"存活+已部署+非还债"的员工计算应付工资，写入 pending_wage_decisions。
         已经出现过的key(无论是否已决策)不会被重新计算，避免同一员工在同一场战斗内被反复计费。
-        wage_bonus(背叛·让利)在封顶后叠加，不影响12碎片的封顶本身。"""
+        工资只按公式算，不吃任何外部加成（原「让利+5」随背叛条目一并删除）。"""
         for e in self.state.employees:
             if e.is_alive and e.is_deployed and not e.is_debt_bound and e.name not in self.state.pending_wage_decisions:
                 # current_round 为1-indexed的"当前回合序号"，与 deployed_at_round 同口径，故+1为闭区间计数
                 rounds_participated = max(0, self.state.current_round - e.deployed_at_round + 1)
-                wage = min(self.WAGE_CAP, 2 * (1 + rounds_participated)) + self.state.wage_bonus
+                wage = min(self.WAGE_CAP, 2 * (1 + rounds_participated))
                 self.state.pending_wage_decisions[e.name] = wage
 
     def _action_repay_debt_employee(self, params: dict) -> dict:
@@ -5122,8 +5146,8 @@ class GameEngine:
         import inspect
         DaoWenEngine.register_all()
         requires_target = "target" in inspect.signature(DaoWenEngine._registry[name]).parameters
-        if name == "波及" and not (target_ref or target_name):
-            # 波及X：目标由dodge_targets显式提交X个；主引用取首个已提交目标。
+        if name in ("波及", "血契") and not (target_ref or target_name):
+            # 多目标道纹：从dodge_targets取首个引用作为通用目标。
             submitted = list(params.get("dodge_targets") or [])
             if submitted and isinstance(submitted[0], dict) and submitted[0].get("target_ref"):
                 target_ref = submitted[0]["target_ref"]
@@ -5147,6 +5171,23 @@ class GameEngine:
             target = matches[0]
         if is_command and target is actor:
             return {"success": False, "error": "听从指令发动道纹必须指定一个非自身目标"}
+        if name == "血契":
+            pact_entries = list(params.get("dodge_targets") or [])
+            if len(pact_entries) != x:
+                return {"success": False, "error": f"血契X={x}必须显式选择恰好{x}个目标"}
+            pact_refs = [entry.get("target_ref") for entry in pact_entries
+                         if isinstance(entry, dict)]
+            if len(pact_refs) != x or len(set(pact_refs)) != x:
+                return {"success": False, "error": "血契目标必须是X个互不重复的target_ref"}
+            if any(ref not in refs or refs[ref] is actor or not refs[ref].is_alive
+                   or not self.combat.is_targetable(actor, refs[ref])
+                   for ref in pact_refs):
+                return {"success": False, "error": "血契目标必须为当前可选的存活非自身角色"}
+            if any(("dodge" in entry and not isinstance(entry["dodge"], bool))
+                   or ("blood_shadow" in entry and not isinstance(entry["blood_shadow"], bool))
+                   or entry.get("dodge", False) and entry.get("blood_shadow", False)
+                   for entry in pact_entries):
+                return {"success": False, "error": "血契目标的dodge/blood_shadow必须为互斥布尔值"}
         if target is not actor and not self.combat.is_targetable(actor, target):
             return {"success": False, "error": f"{target.name}处于飞行，无法被选中"}
         # 自愈X「目标死亡时」：显式目标（默认自身不算选中；波及X 记全部已提交目标）。
@@ -5224,7 +5265,7 @@ class GameEngine:
         # 兜底，属「同一条规则两处实现」。现统一调用共享实现。
         # 等价性已验证：遍历全部 63 个道纹 × X∈{1,3}，凡 cost_type=="消耗" 的
         # calc 都带 `cost` 键；缺 `cost` 只有 `cost_mutation` 的 6 个道纹
-        # （全力/减速/封印/必中/疯狂/自愈）全部是「异变」类型，不进法力分支，
+        # （全力/封印/必中/自愈）全部是「异变」类型，不进法力分支，
         # 故该兜底是死代码，删除后数值逐字节不变。
         _cost_paid, mana_error = self.combat.pay_daowen_mana(actor, calc, target)
         if mana_error:
@@ -5262,9 +5303,12 @@ class GameEngine:
             blood_shadow_cost_share_target_ref=params.get(
                 "blood_shadow_cost_share_target_ref", ""),
             dodge_relic_target_ref=params.get("dodge_relic_target_ref", ""),
-            wave_count=int(calc.get("mark_targets", 0)),
+            wave_count=int(calc.get("mark_targets", x if name == "血契" else 0)),
             activation_x=x,
         )
+        if name == "血契":
+            calc["blood_pact_target_ids"] = [str(entity.runtime_id)
+                                                for entity in (aoe_targets_override or [])]
         if dodge_log.get("fully_dodged"):
             self._advance_duel_turn()
             if self.state.in_final_duel and not self._duel_side_can_act("player_side") and not self._duel_side_can_act("opponent_side"):
@@ -5688,10 +5732,11 @@ class GameEngine:
                 return {"success": False,
                         "error": f"瞬发法术第{idx}步的trigger_spell_choices非法：{exc}"}
         # 结构合法：按【法术阶级规则】整次 cast 一次付清 X 次出手
-        # （X = 用到的不同道纹种数；见 法术索引.md「法术阶级规则」——
-        #  施展或定义X阶法术必须在声明时一次性消耗X次出手机会，出手不足时不能开始施法）。
-        # 出手不按步骤数扣；此后无论哪一步中断（法力不足等），出手都已用掉——施法失败不退出手。
-        spell_tier = max(1, len(set(execution.definition.required_daowen)))
+        # （2026-10-25 用户令：X＝重数＝触发时机一重＋每个效果步骤各一重；
+        #  见 法术索引.md「法术阶级规则」——施展或定义X阶法术必须在声明时一次性
+        #  消耗X次出手机会，出手不足时不能开始施法）。
+        # 此后无论哪一步中断（法力不足等），出手都已用掉——施法失败不退出手。
+        tier = execution.definition.rank
         huangfu_mana = 0
         if huangfu_spell is not None:
             huangfu_mana = max(1, huangfu_spell.rank or 1)
@@ -5702,7 +5747,7 @@ class GameEngine:
                 return {"success": False,
                         "error": f"【黄符】施法实际需要{effective_huangfu_mana}点法力，{actor.name}当前{actor.current_mana}"}
         budget_err = self._consume_actions_or_error(
-            actor, spell_tier, action_type="cast")
+            actor, tier, action_type="cast")
         if budget_err:
             for daowen in huangfu_temp_granted:
                 actor.dao_wen.pop(daowen, None)
@@ -5741,8 +5786,8 @@ class GameEngine:
             "interrupt_detail": execution.interrupt_detail or None,
             "step_results": execution.step_summaries(),
             "steps": step_logs,
-            "tier": spell_tier,
-            "cost": f"{spell_tier}次主动出手",
+            "tier": tier,
+            "cost": f"{tier}次主动出手",
         }
         if huangfu_spell is not None:
             cast_result["huangfu_mana_spent"] = huangfu_mana
@@ -6399,7 +6444,7 @@ class GameEngine:
                         "actor": self.state.player, "target": self.state.player,
                         "mechanic": "cost", "subtype": "mutation", "amount": layers,
                         "tags": {"consumable", "active_payment"}})
-                    # 变身不产生"死亡"，不触发死之传承；命零才走 collapse 死因
+                    # 变身不产生"死亡"，不触发死者之页；命零才走 collapse 死因
                     if res["lost"] == "death":
                         self.state.last_death_cause = "collapse"
                     mutation_info["note"] = res["note"]
@@ -7594,10 +7639,7 @@ class GameEngine:
         self.state.current_round = 0
         self.combat.reset_monster_activation()
         self.state.shared_dragon_heart_type = ""  # 共心环：每场需重新选定
-        self.state.godfather_revolver_uses = 0
-        gun = next((c for c in self.state.consumables if c.name == "教父左轮" and c.kind == "artifact_weapon"), None)
-        if gun is not None:
-            gun.current_uses = gun.max_uses  # 教父左轮：[战终]耐久回满(此处按下一场[战始]起效实现，效果等价)
+        self.state.godfather_revolver_uses = 0  # 教父左轮：每场6发，[战始]回满即计数归零
 
         region = self.state.current_region
         pool = self._monster_pool_for_battle()
@@ -8283,9 +8325,6 @@ class GameEngine:
 
         if name == "红头绳":
             self.state.has_sacrifice_action = True
-        if name == "教父左轮":
-            self.state.consumables.append(Consumable(
-                name="教父左轮", effect=effect, current_uses=6, max_uses=6, kind="artifact_weapon"))
         if name == "猩红尖牙":
             self.state.pending_first_embrace = True
             self.state.seal_pending_after_embrace = True
@@ -8548,6 +8587,10 @@ class GameEngine:
 
     # ==================== 自定义资源：声明 / 激活 / 列表 ====================
 
+    # 乱葬岗「亡者的执念」三选一法器（副本/乱葬岗.md）。
+    # 该副本终音尚未接入引擎：三件都只登记名字与效果，不发放。
+    DRAFT_ARTIFACTS = ("染血嫁衣", "燃魂灯", "万魂幡")
+
     def _builtin_resource_names(self) -> set[str]:
         """内建资源名全集：自定义资源不得与其重名（命名唯一性）。"""
         DaoWenEngine.register_all()
@@ -8555,6 +8598,7 @@ class GameEngine:
         names |= set(TWISTED_TOOL_LIBRARY)
         for items in self.TERMINAL_ARTIFACTS.values():
             names |= {n for n, _ in items}
+        names |= set(self.DRAFT_ARTIFACTS)
         names |= set(self.DRAGON_TRAITS) | set(self.DRAGON_CONSUMABLE_TRAITS)
         names |= {WING_BLOOD, WING_EMBER}
         names |= {name for _, (name, _) in self.FIRST_EMBRACE_OPTIONS.items()}
@@ -8709,18 +8753,21 @@ class GameEngine:
                 "result": {"spent": x, "shield_gained": 2 * x, "shards": self.state.shards, "shield": player.shield}}
 
     def _action_fire_godfather_revolver(self, params: dict) -> dict:
-        """教父左轮(罪孽都市终音)：耐久6/6永不消耗(仅按场次回满)，对[目标]打出30%自身[血限]×本场使用次数的必中伤害"""
+        """教父左轮(罪孽都市终音)：每场 6 发，[战始]回满；
+        对[目标]打出 30%自身[血限]×本场使用次数 的【必中】伤害。
+
+        2026-10-26 用户令：它是法器，不再借消耗品的耐久记账——回满属于[战始]重置，
+        发射次数由 `state.godfather_revolver_uses` 单点计数。
+        """
         if "教父左轮" not in self.state.artifacts_owned:
             return {"success": False, "error": "没有教父左轮"}
-        gun = next((c for c in self.state.consumables if c.name == "教父左轮" and c.kind == "artifact_weapon"), None)
-        if gun is None or gun.current_uses <= 0:
-            return {"success": False, "error": "教父左轮本场弹药已耗尽，需等待下一场[战终]回满"}
+        if self.state.godfather_revolver_uses >= self.GODFATHER_REVOLVER_AMMO:
+            return {"success": False, "error": "教父左轮本场弹药已打空，下一场[战始]回满"}
         player = self.state.player
         target = self.combat._combat_entity_refs().get(params.get("target_ref", ""))
         if not player or target is None:
             return {"success": False, "error": "target_ref不是当前合法目标"}
         self.state.godfather_revolver_uses += 1
-        gun.current_uses -= 1
         damage = math.ceil(player.blood_limit * 0.3) * self.state.godfather_revolver_uses
         dmg = self.combat._apply_hostile_damage(target, damage, "必中", player, ctx={
             "timing": self.state.combat_subphase or self.state.phase, "source": "教父左轮", "source_type": "artifact",
@@ -8730,7 +8777,8 @@ class GameEngine:
         return {"success": True, "action": "教父左轮",
                 "result": {"target": target.name, "damage": damage,
                            "uses_this_battle": self.state.godfather_revolver_uses,
-                           "ammo_remaining": gun.current_uses, **dmg}}
+                           "ammo_remaining": self.GODFATHER_REVOLVER_AMMO - self.state.godfather_revolver_uses,
+                           **dmg}}
 
     def _action_select_shared_dragon_heart(self, params: dict) -> dict:
         """共心环(龙心谷终音)：[战始]选定自身拥有的一枚【××龙心】类型，本场自身/朋友/员工均可用它抵消同类型代价"""
@@ -9243,10 +9291,6 @@ class GameEngine:
 
         self.state.phase = "pre_battle"
 
-        # 2026-10-24 用户令：背叛改为[朋友]／[员工]的自选项——[战终]不再按
-        # 攻击总值判定、不自动置 rebellion_active，只把可选对象报给 AI。
-        betrayal_check = self.combat.betrayal_candidates()
-
         # 捕获战终结果数值，因【最终的冠冕】可能在下面把self.state整个替换为新轮回者的空白状态
         battle_end_result = {
             "shard_reward": shard_reward,
@@ -9265,9 +9309,6 @@ class GameEngine:
             "spell_logs": spell_logs,
             "scoped_effects_rolled_back": scoped_rollbacks,
             "spell_bindings_removed": spell_bindings_removed,
-            "betrayal": {**betrayal_check,
-                         "pending": self.state.rebellion_active,
-                         "rebels": list(self.state.rebellion_rebels)},
             "employee_promotions": promoted,   # [员工]出场存活满3场 → 转为[朋友]
             "player_dead": (not self.state.player.is_alive) if self.state.player else False,
         }
@@ -9282,7 +9323,7 @@ class GameEngine:
             "result": battle_end_result,
         }
 
-    # ==================== 死之传承 / 死者之书 ====================
+    # ==================== 死者之页 / 死者之书 ====================
 
     def _reload_death_book(self):
         self.state.death_book_legacies = self.death_book.load()
@@ -9292,7 +9333,7 @@ class GameEngine:
 
         2026-10-05 用户令：癌变休整加成已废止，此处不再携带 rest_heal_bonus。"""
         wisdom = list(self.state.death_book_wisdom)
-        # 死斗败者先过死之传承（reset）再走resolve_final_duel(defeat)；
+        # 死斗败者先过死者之页（reset）再走resolve_final_duel(defeat)；
         # reset若清空擂主快照，defeat就无声吞掉擂主（r14实战复现）。
         was_duel = self.state.in_final_duel
         duel_snap = dict(self.state.duel_defending_snapshot) if was_duel else {}
@@ -9340,7 +9381,12 @@ class GameEngine:
         return "attack"
 
     def _queue_death_inheritance_if_needed(self, action_type: str = "") -> Optional[Interrupt]:
-        """轮回者命零后只抛一次死之传承中断，草稿写入 context 待审核。"""
+        """轮回者命零后只抛一次【死者之页】中断，草稿写入 context 待审核。
+
+        2026-10-24/25 用户令：一页两项——〖生平〗由引擎自动总结（`summarize_life`，
+        含死因这种事实），〖遗言〗由本人自定义（≤20字，也可以不写）。
+        死因不是遗言，所以草稿里不带任何死因模板文案；生平不接受改稿。
+        """
         if self.state.death_inheritance_queued:
             return None
         player = self.state.player
@@ -9352,11 +9398,12 @@ class GameEngine:
             draft = self.state.pending_death_draft
         elif getattr(player, "ai_memory", None):
             # 记忆只活到当前轮回者命零这一刻。先压缩出遗言，再立即清空
-            # 身世、经历、经验和人格缓存；是否真正写入仍交给死之传承审核。
+            # 身世、经历、经验和人格缓存；是否真正写入仍交给死者之页审核。
             draft = validate_legacy({
                 "text": condense_to_legacy(
                     player.ai_memory, cause, last_action,
                     self.state.death_book_capacity),
+                "life": summarize_life(self.state, cause),
             }, self.state.death_book_capacity)
             clear_memory(player)
             personality_remove(self.state, player)
@@ -9364,6 +9411,10 @@ class GameEngine:
             draft = draft_legacy(
                 self.state, cause, last_action,
                 self.state.death_book_capacity)
+        if not draft.get(LIFE_FIELD):
+            life = summarize_life(self.state, cause)
+            if life:
+                draft = dict(draft, **{LIFE_FIELD: life})
         self.state.pending_death_draft = draft
         self.state.death_inheritance_queued = True
         interrupt = Interrupt(
@@ -9376,13 +9427,15 @@ class GameEngine:
                 "region": self.state.current_region,
             },
             description=(
-                f"{player.name}已[命零]，触发【死之传承】。\n"
-                f"草稿：「{draft['text']}」（上限{self.state.death_book_capacity}字）\n"
+                f"{player.name}已[命零]，其页将录入【死者之页】。\n"
+                f"生平（引擎自动总结，不可改）：{draft.get(LIFE_FIELD) or '（无）'}\n"
+                f"遗言：{('「' + draft['text'] + '」') if draft.get('text') else '空'}"
+                f"（本人自定义，上限{self.state.death_book_capacity}字；不写就留空）\n"
                 "请审核：通过、修改后写入、或驳回（驳回不写入死者之书）。"
             ),
             options=[
-                {"id": "approve", "label": "通过", "description": "按草稿写入《死者之书》"},
-                {"id": "edit", "label": "修改后写入", "description": "提交修改后的遗言再写入"},
+                {"id": "approve", "label": "通过", "description": "按草稿写入《死者之书》（无遗言则只写生平）"},
+                {"id": "edit", "label": "修改后写入", "description": "提交自定义遗言（生平不变）再写入"},
                 {"id": "reject", "label": "驳回", "description": "不写入《死者之书》，本轮回结束"},
             ],
             state_snapshot=self.state.to_dict(),
@@ -9397,21 +9450,26 @@ class GameEngine:
                    "approve": "approve", "edit": "edit", "reject": "reject"}
         action = aliases.get(action, action)
         if action not in {"approve", "edit", "reject"}:
-            raise ValueError("死之传承裁定必须是 approve / edit / reject")
+            raise ValueError("死者之页裁定必须是 approve / edit / reject")
         if action == "reject":
             return {"action": "reject"}
+        draft = interrupt.context.get("draft") or self.state.pending_death_draft or {}
         if action == "approve":
             source = (ruling_data or {})
             if source.get("text"):
+                source = dict(source)
+                # 生平只由引擎总结：通过时给了自定义遗言，也照样带上草稿的生平。
+                if not source.get(LIFE_FIELD) and draft.get(LIFE_FIELD):
+                    source[LIFE_FIELD] = draft[LIFE_FIELD]
                 legacy = validate_legacy(source, self.state.death_book_capacity)
             else:
-                legacy = validate_legacy(
-                    interrupt.context.get("draft") or self.state.pending_death_draft,
-                    self.state.death_book_capacity)
+                legacy = validate_legacy(draft, self.state.death_book_capacity)
             return {"action": "approve", "legacy": legacy}
         legacy = validate_legacy({
             "text": (ruling_data or {}).get("text"),
             **({"title": ruling_data["title"]} if (ruling_data or {}).get("title") else {}),
+            # 生平只由引擎总结：改稿时照抄草稿，玩家不能借 edit 改生平。
+            **({LIFE_FIELD: draft[LIFE_FIELD]} if draft.get(LIFE_FIELD) else {}),
         }, self.state.death_book_capacity)
         return {"action": "edit", "legacy": legacy}
 
@@ -9419,23 +9477,23 @@ class GameEngine:
         if prepared["action"] == "reject":
             self._reset_after_death()
             return {"written": False, "rejected": True,
-                    "instruction": "遗言已驳回，未写入死者之书；请调用 setup_attributes 开始新的轮回者"}
+                    "instruction": "已驳回，未写入死者之书；请调用 setup_attributes 开始新的轮回者"}
         written = self.death_book.append(prepared["legacy"])
         self._reset_after_death()
         return {
             "written": True,
-            "legacy": {"text": written["text"]},
+            "legacy": {k: written[k] for k in ("life", "text") if written.get(k)},
             "total_legacies": len(self.state.death_book_legacies),
             "path": str(self.death_book.path),
-            "instruction": "遗言已写入死者之书；请调用 setup_attributes 开始新的轮回者",
+            "instruction": "死者之页已写入；请调用 setup_attributes 开始新的轮回者",
         }
 
     def _action_read_death_book(self, params: dict) -> dict:
-        """翻阅《死者之书》：读回全部〖遗言〗与已积累的智慧条目。
+        """翻阅《死者之书》：读回全部〖死者之页〗（生平＋遗言）与已积累的智慧条目。
 
         纯查询：不消耗精力、不掷骰、不改任何数值——《死者之书》与轮回者灵魂绑定
         （《故事文档》世界观·死者之书与微光者），本就随身携带，翻阅不花代价。
-        在此之前遗言只有「写入」（死之传承 → `_commit_death_ruling`）没有「读取」：
+        在此之前死者之页只有「写入」（死者之页 → `_commit_death_ruling`）没有「读取」：
         `state.death_book_legacies` 只被序列化与计数，轮回者/AI 一条也看不到。
         """
         legacies = [dict(entry) for entry in self.state.death_book_legacies]
@@ -9446,7 +9504,7 @@ class GameEngine:
             "total_legacies": len(legacies),
             "wisdom": list(self.state.death_book_wisdom),
             "path": str(self.death_book.path),
-            "instruction": "已读回《死者之书》遗言，可作为本轮决策的前车之鉴",
+            "instruction": "已读回《死者之书》各页（生平＋遗言），可作为本轮决策的前车之鉴",
         }
 
     # ==================== DM裁定接口 ====================
@@ -9478,7 +9536,7 @@ class GameEngine:
                 prepared = self._prepare_death_ruling(interrupt, ruling_data or {})
             except ValueError as exc:
                 return {"success": False, "error": str(exc),
-                        "instruction": "非法遗言未写入；中断仍在，请改提交合法遗言（一句话，≤20字）"}
+                        "instruction": "非法内容未写入；中断仍在，请改提交合法内容（遗言一句话、≤20字，也可不写遗言）"}
 
         interrupt = self._pending_interrupts.pop(0)
 

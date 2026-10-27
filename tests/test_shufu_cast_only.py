@@ -2,6 +2,7 @@
 
 from engine.daowen import DaoWenEngine
 from engine.models import Consumable, DaoWen, DaoWenInstance, Entity, StatusEffect
+from tests.setup_support import grant_extra_actions
 from tests.test_reincarnator_basic_attack import _engine
 
 
@@ -67,6 +68,8 @@ def test_bound_player_can_cast_but_cannot_use_other_active_actions(tmp_path):
 
 def test_custom_spell_actions_are_allowed_but_direct_daowen_is_blocked(tmp_path):
     engine, _player, _target = _bound_engine(tmp_path, "spell_actions")
+    # 本用例连续定义/施展两次法术，按「阶数＝重数」各 2 次出手，先给足预算。
+    grant_extra_actions(_player, 6)
 
     blocked = engine.execute_action("cast", {
         "kind": "daowen", "daowen_name": "杀伐", "x": 1,

@@ -42,7 +42,7 @@ from ..enums import ActionPhase, TriggerTiming, CostType
 from ..effect_context import EffectContext, make_context, normalize_context
 from ..spell_dsl import (
     ActionStep, IfStep, LoopStep, count_action_steps, evaluate_condition,
-    iter_action_slots, collect_step_daowen,
+    iter_action_slots, collect_step_daowen, spell_tier,
 )
 from ..spell_execution import (
     ExecutionStatus, InterruptReason, Lifecycle, MAX_SPELL_LOOP_ITERATIONS,
@@ -197,7 +197,7 @@ class SpellReactionMixin:
             required_daowen=list(required),
             trigger_condition=flow.get("trigger", ""),
             effect_flow=effect_flow,
-            rank=len(required),
+            rank=spell_tier(flow.get("trigger", ""), self._flow_program(flow)),
             automatic=bool(flow.get("automatic")),
         )
 
@@ -296,7 +296,8 @@ class SpellReactionMixin:
                 lifecycle = Lifecycle.PERMANENT
         return SpellDefinition(
             name=name, required_daowen=required, trigger=trigger,
-            lifecycle=lifecycle, body=program, rank=len(required),
+            lifecycle=lifecycle, body=program,
+            rank=spell_tier(trigger_str, program),
             automatic=bool(flow.get("automatic")),
             effect_flow_text=flow.get("effect_flow", ""),
             loop_stop_conditions=list(flow.get("loop_stop_conditions") or []),
@@ -1357,7 +1358,7 @@ class SpellReactionMixin:
         definition = SpellDefinition(
             name=spell_name, required_daowen=required,
             trigger=TriggerType.IMMEDIATE, lifecycle=Lifecycle.INSTANT,
-            body=program, rank=len(required),
+            body=program, rank=spell_tier(TriggerType.IMMEDIATE, program),
             effect_flow_text=flow_text.strip(),
         )
         return SpellExecution(

@@ -24,7 +24,7 @@ from engine.api import GameEngine
 from engine.models import Relic
 from tests.setup_support import finish_initial_daowen
 
-FIVE = ["守夜灯", "承露盏", "血契", "同魂笔", "不离"]
+FIVE = ["守夜灯", "承露盏", "避风铃", "同魂笔", "不离"]
 
 
 def _engine():
@@ -56,27 +56,27 @@ def test_set_active_relics_picks_any_two_of_five():
     e = _engine()
     _give_five(e)
 
-    r = e.execute_action("set_active_relics", {"relic_names": ["血契", "不离"]})
+    r = e.execute_action("set_active_relics", {"relic_names": ["避风铃", "不离"]})
 
     assert r["success"] is True, r
-    assert r["result"]["enabled"] == ["不离", "血契"], r["result"]
+    assert r["result"]["enabled"] == ["不离", "避风铃"], r["result"]
     assert r["result"]["disabled"] == ["同魂笔", "守夜灯", "承露盏"], r["result"]
     assert {x.name for x in e.state.relics} == set(FIVE), "停用不得丢弃，5 件全持有"
-    assert e.state.enabled_relic_names() == {"血契", "不离"}
+    assert e.state.enabled_relic_names() == {"避风铃", "不离"}
 
 
 def test_set_active_relics_over_capacity_is_rejected_without_changes():
     """边界：提交 3 件超过承载 2 → 拒绝，且启用集合保持原样。"""
     e = _engine()
     _give_five(e)
-    e.execute_action("set_active_relics", {"relic_names": ["血契", "不离"]})
+    e.execute_action("set_active_relics", {"relic_names": ["避风铃", "不离"]})
 
     r = e.execute_action("set_active_relics",
-                         {"relic_names": ["血契", "不离", "守夜灯"]})
+                         {"relic_names": ["避风铃", "不离", "守夜灯"]})
 
     assert r["success"] is False, r
     assert "超出承载" in r["error"], r["error"]
-    assert e.state.enabled_relic_names() == {"血契", "不离"}, "失败提交不得改动启用集合"
+    assert e.state.enabled_relic_names() == {"避风铃", "不离"}, "失败提交不得改动启用集合"
 
 
 def test_set_active_relics_unknown_name_is_rejected():
@@ -116,7 +116,7 @@ def test_battle_start_active_relics_selects_for_this_battle():
     assert e.state.enabled_relic_names() == {"守夜灯", "同魂笔"}
     player = e.state.player
     assert e.state._relic_active(player, "守夜灯") is True
-    assert e.state._relic_active(player, "血契") is False, "未选中的遗物本场不得生效"
+    assert e.state._relic_active(player, "避风铃") is False, "未选中的遗物本场不得生效"
 
 
 def test_battle_start_active_relics_over_capacity_fails_atomically():
@@ -127,7 +127,7 @@ def test_battle_start_active_relics_over_capacity_fails_atomically():
     phase_before = e.state.phase
 
     r = e.execute_action("battle_start",
-                         {"active_relics": ["守夜灯", "血契", "不离"]})
+                         {"active_relics": ["守夜灯", "避风铃", "不离"]})
 
     assert r["success"] is False, r
     assert "超出承载" in r["error"], r["error"]
@@ -138,17 +138,18 @@ def test_battle_start_active_relics_over_capacity_fails_atomically():
 # ==================== 3. 停用即不生效 ====================
 
 def test_disabled_relic_does_not_trigger_its_effect():
-    """正常路径：守夜灯停用时[回始]法力结算入口读到 0，启用后恢复。"""
+    """正常路径：守夜灯停用时[回终]法力结算入口读到 0，启用后恢复。"""
     e = _engine()
     player = e.state.player
     e.state.relics = [Relic("守夜灯", "", enabled=False)]
 
     assert e.combat._relic_active(player, "守夜灯") is False
-    assert e.combat._shouyedeng_pending_grant(player) == 0, "停用遗物不得结算效果"
+    assert e.combat._shouyedeng_grant_amount(player) == 0, "停用遗物不得结算效果"
 
+    e.state.current_round = 3
     e.state.relics[0].enabled = True
     assert e.combat._relic_active(player, "守夜灯") is True
-    assert e.combat._shouyedeng_pending_grant(player) > 0
+    assert e.combat._shouyedeng_grant_amount(player) == 3, "启用后按当前回合数授予"
 
 
 def test_disabled_stacks_with_sealed_not_replacing_it():
@@ -174,7 +175,7 @@ def test_grant_relic_auto_enables_until_capacity_then_holds_disabled():
     e.state.relics = []
 
     gained = []
-    for name in ("守夜灯", "血契", "不离"):
+    for name in ("守夜灯", "避风铃", "不离"):
         relic = Relic(name, "")
         e.state.relics.append(relic)
         e.state.note_relic_gained(relic)     # 发现/自选/交易/拾取等入口共用此归口
@@ -209,12 +210,12 @@ def test_enabled_flag_survives_save_load_roundtrip():
     """边界：停用状态写入存档，读档后仍停用（旧档缺字段默认启用由 getattr 兜底）。"""
     e = _engine()
     _give_five(e)
-    e.execute_action("set_active_relics", {"relic_names": ["血契"]})
+    e.execute_action("set_active_relics", {"relic_names": ["避风铃"]})
 
     assert e.save_game("ras")["success"]
     assert e.load_game("ras")["success"]
 
-    assert e.state.enabled_relic_names() == {"血契"}, "读档后启用集合不得丢失"
+    assert e.state.enabled_relic_names() == {"避风铃"}, "读档后启用集合不得丢失"
     assert {x.name for x in e.state.relics} == set(FIVE)
 
 
@@ -224,30 +225,30 @@ def test_toggle_relic_flips_one_relic_off_and_on():
     """正常路径：toggle 一次停用、再一次启用，只动被点名的那一件。"""
     e = _engine()
     _give_five(e)
-    e.execute_action("set_active_relics", {"relic_names": ["血契", "不离"]})
+    e.execute_action("set_active_relics", {"relic_names": ["避风铃", "不离"]})
 
-    off = e.execute_action("toggle_relic", {"relic_name": "血契"})
+    off = e.execute_action("toggle_relic", {"relic_name": "避风铃"})
     assert off["success"] is True, off
     assert off["result"]["enabled"] is False
     assert e.state.enabled_relic_names() == {"不离"}, "只应停用被点名的一件"
 
-    on = e.execute_action("toggle_relic", {"relic_name": "血契"})
+    on = e.execute_action("toggle_relic", {"relic_name": "避风铃"})
     assert on["success"] is True, on
     assert on["result"]["enabled"] is True
-    assert e.state.enabled_relic_names() == {"血契", "不离"}
+    assert e.state.enabled_relic_names() == {"避风铃", "不离"}
 
 
 def test_toggle_relic_on_when_full_is_rejected():
     """边界：生效数已满（2/2）时启用第 3 件被拒，提示先停用一件。"""
     e = _engine()
     _give_five(e)
-    e.execute_action("set_active_relics", {"relic_names": ["血契", "不离"]})
+    e.execute_action("set_active_relics", {"relic_names": ["避风铃", "不离"]})
 
     r = e.execute_action("toggle_relic", {"relic_name": "守夜灯"})
 
     assert r["success"] is False, r
     assert "已满承载" in r["error"], r["error"]
-    assert e.state.enabled_relic_names() == {"血契", "不离"}, "失败切换不得改动状态"
+    assert e.state.enabled_relic_names() == {"避风铃", "不离"}, "失败切换不得改动状态"
 
 
 def test_toggle_relic_unowned_is_rejected():

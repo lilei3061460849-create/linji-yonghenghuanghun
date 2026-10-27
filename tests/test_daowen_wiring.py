@@ -5,6 +5,7 @@
 """
 import os
 import sys
+from pathlib import Path
 
 from tests.setup_support import finish_initial_daowen
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -234,17 +235,36 @@ def test_retired_healing_runes_are_not_registered():
     assert "眩晕" not in DaoWenEngine._registry
 
 
-def test_relicized_trigger_daowen_registry_and_flight_rehoming():
-    """已遗物化触发型道纹不可再施放；飞行由骨天使的变形附带。"""
+def test_relicized_trigger_daowen_registry_and_flight_is_not_a_daowen():
+    """已遗物化触发型道纹不可再施放；【飞行】是状态，不出现在道纹注册表。"""
     retired = {
         "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
         "冥气", "退化", "畸变", "缄默", "飞行",
     }
     assert retired.isdisjoint(DaoWenEngine._registry)
 
-    engine = _engine("bone_angel_flight")
+    # 2026-10-25 用户令：飞行是状态，不由【变形】凭空附带（旧实现是自造机制，已删）。
+    engine = _engine("bone_angel_no_flight")
     bone_angel = _monster(engine, name="骨天使", hp=30, atk=7, ap=3)
     _give(bone_angel, "变形")
     calc = DaoWenEngine.resolve("变形", 1, target=bone_angel, caster=bone_angel)
     engine.combat.apply_daowen_effect("变形", calc, bone_angel, bone_angel)
-    assert bone_angel.has_status("飞行")
+    assert not bone_angel.has_status("飞行"), "【变形】不得附带飞行状态"
+
+
+def test_flight_rule_line_matches_the_engine():
+    """规则正文的飞行条文与引擎拦目标的口径必须一致。
+
+    2026-10-25 用户令：条文只保留这一句「飞行X：非飞行者无法把飞行者选为[目标]，持续X回合。」
+    """
+    rules = Path("规则正文.md").read_text(encoding="utf-8")
+    section = rules.split("### 战斗行动", 1)[1].split("\n### ", 1)[0]
+    assert "飞行X：非飞行者无法把飞行者选为[目标]，持续X回合。" in section
+    assert "飞行" not in DaoWenEngine._registry
+
+    engine = _engine("flight_targeting")
+    p = engine.state.player
+    m = _monster(engine, ap=8)
+    p.is_flying = True
+    assert engine.combat.is_targetable(p, m) is True, "飞行者可以选地面目标"
+    assert engine.combat.is_targetable(m, p) is False, "非飞行者不能选飞行目标"

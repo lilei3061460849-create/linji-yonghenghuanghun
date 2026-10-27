@@ -57,6 +57,7 @@ def _give_daowen(entity: Entity, name: str, x: int = 1, tags=None) -> None:
 
 def _put_enemy(engine: GameEngine, monster: Entity) -> None:
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()
     engine.state.enemies.append(monster)
 
 
@@ -132,7 +133,11 @@ def test_resonance_on_enemy_grants_dest_and_rewrites_next_activation():
             "actor_ref": actor["actor_ref"],
             "daowen": {"name": "弱化", "target_ref": "player:0",
                        "dodge": False, "blood_shadow": False, "trigger_spell_choices": {}},
-            "attack_actions": [{"hits": [{"target_ref": "player:0", "dodge": False, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}}]}],
+            # 2026-10-25：击数＝[攻击次数]＝当前速度，按 prepare 契约提交完整命中数
+            "attack_actions": [{"hits": [{"target_ref": "player:0", "dodge": False,
+                                          "blood_shadow": False,
+                                          "spell_choices": {"before": {}, "after": {}}}
+                                         for _ in range(actor["base_hits_per_attack"])]}],
         }],
     })
     assert phase["success"], phase
@@ -194,8 +199,8 @@ def test_resonance_fails_without_holder_or_stock():
 
 # ========================================================================
 # 2. 法力一池制（DM裁定 2026-09-09）：[战始]直接给满法限（先给满再结算遗物），
-#    [回始]不回填，[回终]/[敌回终]不清空，[战终]复原。守夜灯走[回始]加[法限]10%
-#    / [敌回终]只清自己那一份。
+#    [回始]不回填，[回终]/[敌回终]不清空，[战终]复原。
+#    守夜灯 2026-10-25 用户令改到[回终]：获得等同当前回合数的法力。
 # ========================================================================
 
 def test_zhesu_overflow_survives_first_round_start():
@@ -243,36 +248,36 @@ def test_no_zhesu_means_no_bonus_mana():
 
 
 def test_shouyedeng_bonus_is_its_own_slice():
-    """正常路径（2026-09-13 新口径）：守夜灯[回始]授予 ceil(法限*50%)，授予的法力不再清空；
+    """正常路径（2026-10-25 用户令）：守夜灯[回终]授予等同当前回合数的法力，授予的法力不再清空；
     一池制下回始本身仍不回填。"""
     engine = _engine("lamp_happy")
     p = engine.state.player
-    engine.state.relics.append(Relic(name="守夜灯", effect="[回始]获得等同于[法限]10%的法力"))
+    engine.state.relics.append(Relic(name="守夜灯", effect="[回终]获得等同于当前回合数的法力"))
     engine.execute_action("battle_start", {})
+    engine.execute_action("round_start", {})
+    round_no = engine.state.current_round
     # 满池时授予会被[法限]全额吃掉，先花干净才看得到授予量。
     p.spend_mana(p.current_mana)
-    granted = engine.combat._grant_shouyedeng(p)
-    assert granted and granted["gained"] == math.ceil(EXP_MANA * 0.5)
-    assert p.current_mana == granted["gained"]
-    base = p.current_mana
     finish_round(engine)
-    assert p.current_mana == base, f"回终不再清空，实{p.current_mana}"
+    assert p.current_mana == min(EXP_MANA, round_no), (
+        f"第{round_no}回合回终应授予{round_no}点（受[法限]{EXP_MANA}截断），实{p.current_mana}")
+    base = p.current_mana
+    engine.execute_action("round_start", {})
+    assert p.current_mana == base, f"回始不回填，实{p.current_mana}"
 
 
 def test_shouyedeng_refills_a_spent_pool_up_to_limit():
-    """边界：全局上限下超池不可能，守夜灯只把花掉的池子回充、且填不过[法限]。"""
+    """边界：守夜灯只把花掉的池子回充，且填不过[法限]。"""
     engine = _engine("lamp_bound")
     p = engine.state.player
-    engine.state.relics.append(Relic(name="守夜灯", effect="[回始]获得等同于[法限]10%的法力"))
+    engine.state.relics.append(Relic(name="守夜灯", effect="[回终]获得等同于当前回合数的法力"))
     engine.execute_action("battle_start", {"relic_choices": {}})
+    engine.state.current_round = 10  # 远超法限，验证截断
     p.spend_mana(p.current_mana)
-    grant = math.ceil(EXP_MANA * 0.5)
     engine.combat._grant_shouyedeng(p)
-    assert p.current_mana == min(EXP_MANA, grant), (
-        f"[回始]+{grant}（受[法限]{EXP_MANA}截断），实{p.current_mana}")
+    assert p.current_mana == EXP_MANA, (
+        f"回终+10（受[法限]{EXP_MANA}截断），实{p.current_mana}")
     # 满池后再授予：溢出丢弃，不会超过上限。
-    p.current_mana = EXP_MANA
-    p._shouyedeng_granted = 0
     engine.combat._grant_shouyedeng(p)
     assert p.current_mana == EXP_MANA, "满池再授予应溢出丢弃"
 

@@ -171,7 +171,7 @@ class TacticalAI:
 
     def remaining_actions(self) -> int:
         # 2026-09-10：出手次数不再由速度换算，改读 action_count（全体角色基础2次，
-        # 疯狂/无力/蓄锐·增的修正已含在属性里；朋友/员工不再按攻次算）。
+        # 遗物/无力/蓄锐·增的修正已含在属性里；朋友/员工不再按攻次算）。
         # 沿用 ceil(速限/3) 会让 AI 按旧口径估预算，法力分配跟着算错。
         total = max(1, self.player.action_count)
         return max(0, total - getattr(self.player, "actions_used_this_round", 0))

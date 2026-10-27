@@ -558,10 +558,15 @@ class Entity:
         【全速】覆盖：生效期间攻击次数锁定 = [速限]。
         由于 clamp_immortal_body 已让「当前速度≤[速限]」无条件成立，本效果实为
         增益——把被削的速度补满到上限，并免疫后续减速。走状态层，对全体角色生效。
+
+        【手雷减攻】只减普攻次数，不减速度、也不减出手预算（2026-10-25 起对全体同口径：
+        怪物阶段不再单独读旧面板字段 attack_count 算击数，击数一律走本方法）。
         """
         if self.get_status_value("全速"):
-            return max(0, self.speed_limit)
-        return max(0, self.current_speed)
+            hits = self.speed_limit
+        else:
+            hits = self.current_speed
+        return max(0, hits - self.get_status_value("手雷减攻"))
 
     def effective_attack_power(self) -> int:
         """攻击力＝ 当前法力。
@@ -611,7 +616,8 @@ class Entity:
 
         不再由速限/攻击次数推导——速限已改作攻击次数的来源，再拿它算出手会重复记账；
         微光者旧的「攻击次数/3」口径同步废止（该式会让高攻次微光者白拿第3、4次出手）。
-        在基础值之上叠加：遗物、【疯狂】+X、【无力】-X、【蓄锐·增】+1（持续1回合）。
+        在基础值之上叠加：遗物（含【疯狂】的全体 +1，由战斗层统一查询）、
+        状态【疯狂】/【无力】层数、【蓄锐·增】+1（持续1回合）。
         LLM 侧按「每个动作槽位一条决策」描述，不得写死每回合固定 2 次。
         怪物行动仍由CombatEngine的prepare/resolve两阶段接口独立计算。"""
         base = 2
@@ -1233,15 +1239,6 @@ class GameState:
     # 字段名保留 delayed_monster_reentries 是为了不打断既有调用方与存档。
     delayed_monster_reentries: list[dict] = field(default_factory=list)
 
-    # 背叛（2026-10-24 用户令：不再是特殊事件，改为[朋友]／[员工]的自选项）：
-    #   rebellion_active   —— 已有人声明背叛、等待轮回者选镇压/让利/谈判；
-    #   rebellion_rebels   —— 声明背叛者的名字（可能同时含[员工]与[朋友]）。
-    rebellion_active: bool = False
-    rebellion_rebels: list[str] = field(default_factory=list)
-    # 背叛·镇压子战斗：进行中标记（背叛者已搬入enemies，需resolve_rebellion_battle结算）
-    rebellion_in_progress: bool = False
-    # 背叛·让利：每场工资在原公式基础上的固定加成（本次轮回持续生效）
-    wage_bonus: int = 0
 
     # 养蛊场（怪物互斗）训练模式：开启后怪物阶段的合法目标从「玩家侧」扩为「其它怪物」，
     # 并允许逐个 actor 提交（严格交替，避免先手方一次结算全场）。默认 False——
@@ -1659,7 +1656,9 @@ class GameState:
                     or name in self.opponent_first_embrace_traits
                     or name in self.opponent_artifacts_owned
                     or any(r.name == name for r in self.opponent_relics))
-        return False
+        # 2026-10-25 用户令：怪物也能持有随机遗物——队友与怪物按各自 relics 判定。
+        # （此前这里对所有非「玩家／敌方轮回者」直接返回 False，怪物抽到的遗物一律读不到。）
+        return any(r.name == name for r in getattr(entity, "relics", []))
 
     def side_body_shield(self, entity: Entity) -> int:
         if entity is self.player:
@@ -1861,10 +1860,6 @@ class GameState:
                  "home": entry.get("home") or "enemies"}
                 for entry in getattr(self, "delayed_monster_reentries", [])
             ],
-            "rebellion_active": self.rebellion_active,
-            "rebellion_rebels": list(self.rebellion_rebels),
-            "rebellion_in_progress": self.rebellion_in_progress,
-            "wage_bonus": self.wage_bonus,
             "in_final_duel": self.in_final_duel,
             "duel_turn": self.duel_turn,
             "duel_tie_alternating": self.duel_tie_alternating,

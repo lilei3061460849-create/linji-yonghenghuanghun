@@ -40,7 +40,7 @@ from tests.setup_support import finish_initial_daowen
 # 2026-10-13：【买路财】改制为【逃跑】行动、【三相残韵盘】删除，均移出审计池。
 RELIC_POOL = [
     "血誓戒", "同魂笔", "回锋刀",
-    "血契", "避风铃", "守夜灯", "无所求", "忘忧香",
+    "避风铃", "守夜灯", "无所求", "忘忧香",
 ]
 INTERACTIVE = {"回锋刀", "无所求"}
 HUNT = {

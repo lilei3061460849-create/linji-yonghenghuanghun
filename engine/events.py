@@ -940,10 +940,14 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
                 continue
             if not any(sp.name == name for sp in player.spells):
                 flow = engine.combat.SPELL_FLOWS.get(name, {})
-                player.spells.append(Spell(name=name, required_daowen=list(required),
-                                           trigger_condition=flow.get("trigger", ""),
-                                           effect_flow=flow.get("effect_flow", ""),
-                                           rank=len(required), automatic=bool(flow.get("automatic"))))
+                from .spell_dsl import spell_tier
+                player.spells.append(Spell(
+                    name=name, required_daowen=list(required),
+                    trigger_condition=flow.get("trigger", ""),
+                    effect_flow=flow.get("effect_flow", ""),
+                    rank=spell_tier(flow.get("trigger", ""),
+                                    engine.combat._flow_program(flow)),
+                    automatic=bool(flow.get("automatic"))))
             granted.append(name)
         if granted:
             applied.append(f"取得法术定义：{'、'.join(granted)}")

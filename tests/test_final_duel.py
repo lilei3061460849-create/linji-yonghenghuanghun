@@ -5,7 +5,7 @@ pytest 风格测试 - 里程碑7：最终的冠冕 / 第8场最终死斗
 "完成第7场后触发【最终的冠冕】：若无封存候选，本次轮回角色被完整封存，玩家以新的轮回者重新开始；
 若已有封存候选，双方进入死斗。先手顺序：[速限]→[法限]→[血限]→当前生命。每轮交替消耗出手次数，
 残韵可任意时刻插队，无法逃跑。死斗只允许一名轮回者离开。胜者进入下一阶副本，败者失去轮回者身份，
-触发【死之传承】。"
+触发【死者之页】。"
 
 设计要点(已与用户逐条确认)：
 1. 持久化：JSON文件(sealed_candidate_path)，可在不同GameEngine实例间共享，模拟跨playthrough持久化。
@@ -224,12 +224,12 @@ def test_victory_seals_winner_forming_arena_cycle():
 
 
 def test_defeat_triggers_reset_without_resealing():
-    """正常路径：战败方触发死之传承并重置，不会被封存(封存槽位保持空缺)"""
+    """正常路径：战败方触发死者之页并重置，不会被封存(封存槽位保持空缺)"""
     path = "data/test_duel_defeat.json"
     book_path = "data/test_duel_defeat_book.md"
     _cleanup(path)
     _cleanup(book_path)
-    Path(book_path).write_text("# 死者之书\n\n## 遗言\n\n当前没有遗言。\n", encoding="utf-8")
+    Path(book_path).write_text("# 死者之书\n\n## 死者之页\n\n当前没有死者之页。\n", encoding="utf-8")
     sealed = _new_candidate("defeat_sealed", path, name="对手", death_book_path=book_path)
     _finish_battle_7(sealed)
     loser = _new_candidate("defeat_loser", path, name="失败者", death_book_path=book_path)
@@ -239,10 +239,13 @@ def test_defeat_triggers_reset_without_resealing():
     r = loser.execute_action("resolve_final_duel", {"outcome": "defeat", "death_book_entry": legacy})
     assert r["success"] is True
     interrupt = r.get("interrupt") or {}
-    assert interrupt.get("interrupt_type") == "死之传承"
-    ruling = loser.submit_ruling("死之传承", "通过", {"action": "approve", **legacy})
+    assert interrupt.get("interrupt_type") == "死者之页"
+    ruling = loser.submit_ruling("死者之页", "通过", {"action": "approve", **legacy})
     assert ruling["success"] is True
-    assert ruling["death_book"]["legacy"] == legacy
+    written = ruling["death_book"]["legacy"]
+    # 2026-10-24：一页 = 生平（引擎自动总结）＋遗言（本人自定义，原样不改）
+    assert written["text"] == legacy["text"]
+    assert written.get("life")
     assert loser.state.player is None
     # 败者（挑战者）不应被封存；但擂主卫冕成功须按 规则正文回到队首重新封存——
     # 此前的实现把擂主无声吞掉，封存队列越打越空（2026-08-22 修复）。
@@ -531,6 +534,9 @@ def test_duel_round_end_keeps_both_reincarnator_mana():
     _finish_battle_7(challenger)
     opp = next(e for e in challenger.state.enemies if e.entity_type == "轮回者")
     player = challenger.state.player
+    # 只测双方面板法力保留；候选快照里的随机遗物不属于本断言范围。
+    challenger.state.relics.clear()
+    challenger.state.opponent_relics.clear()
 
     rs = challenger.execute_action("round_start", {})
     assert rs["success"] is True
@@ -620,7 +626,7 @@ def test_duel_last_leftover_then_both_exhausted_rejects():
     _finish_battle_7(challenger)
     opp = next(e for e in challenger.state.enemies if e.entity_type == "轮回者")
     player = challenger.state.player
-    # 2026-10-13：遗物池删2件后随机发放漂移（双方万钧印→自伤致死触发死之传承，
+    # 2026-10-13：遗物池删2件后随机发放漂移（双方万钧印→自伤致死触发死者之页，
     # 掩盖预算断言）；本测只关心出手预算，清空双方遗物钉死环境。
     challenger.state.relics = []
     challenger.state.opponent_relics = []

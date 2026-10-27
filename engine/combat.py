@@ -31,7 +31,7 @@ MEDIOCRITY_ROUNDS = Entity.MEDIOCRITY_ROUNDS
 
 
 # 实现分片：方法体在 engine/combat_parts/*.py，本文件保留门面与核心结算
-# （__init__ / 伤害与数值管线 / resolve_attack / 回合管理 / 背叛候选与死之传承 /
+# （__init__ / 伤害与数值管线 / resolve_attack / 回合管理 / 死者之页 /
 #  遗物结算 / 凡庸与目标合法性）。拆分不改变行为与对外契约：CombatEngine 仍是
 # 唯一入口，全部引用方（含 self.combat.X 与 CombatEngine.X）经 MRO 解析不变。
 # 新增分片时请同步 engine/validator.py 的机制护栏扫描范围。
@@ -55,7 +55,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     }
     
     # 原始怪物道纹（道纹归属规则：各组起点）——【原初X】可借用范围
-    ORIGINAL_MONSTER_DAOWEN = ("全力", "疯狂", "减速", "必中")  # 【飞行】并入骨天使的【变形】
+    ORIGINAL_MONSTER_DAOWEN = ("全力", "必中")  # 2026-10-25 用户令：【疯狂】【减速】遗物化
     # 原始怪物道纹每次实际发动时支付异变5X（X 恒为面板/借用时写定的值；
     # 2026-09-16 用户令：道纹递增机制已废止）；效果持续期间（未再次发动）不再重复计费。
     # 必中为次数型（下X次选择[目标]无法闪避），余数记在 entity._bizhong_left。
@@ -579,17 +579,21 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             target.add_status(StatusEffect(
                 name="无力", value=new_stacks, remaining_rounds=1, source="寒冰法力"))
 
-    def _shouyedeng_pending_grant(self, entity: Optional[Entity]) -> int:
-        """守夜灯：每次[回始]获得等同于[法限]50%的法力。"""
+    def _shouyedeng_grant_amount(self, entity: Optional[Entity]) -> int:
+        """守夜灯：[回终]获得等同于当前回合数的法力（2026-10-25 用户令）。
+
+        回合数取 `state.current_round`（回始里 +1，回终时就是本回合的序号），
+        所以第 1 回合回终得 1 点、第 5 回合得 5 点：越拖越补给，前期近乎没有。
+        """
         if entity is None or not entity.is_alive or entity.entity_type != "轮回者":
             return 0
         if not self._relic_active(entity, "守夜灯"):
             return 0
-        return math.ceil(entity.mana_limit * 0.5)
+        return max(0, int(getattr(self.state, "current_round", 0) or 0))
 
     def _grant_shouyedeng(self, entity: Optional[Entity]) -> Optional[dict]:
-        """守夜灯：[回始]获得等同于[法限]50%的法力。"""
-        gained = self._shouyedeng_pending_grant(entity)
+        """守夜灯：[回终]按当前回合数授予法力。"""
+        gained = self._shouyedeng_grant_amount(entity)
         if gained <= 0:
             return None
         before = entity.current_mana
@@ -611,16 +615,29 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             return 0
         if entity.entity_type == "怪物":
             n = 2
-            act = self._monster_activated.get(id(entity), set())
-            # 疯狂(2026-08-17全局裁定)：状态盖到所有角色，怪物从自身状态读+X。
-            # 不再走激活集合分支，避免与全局状态双重计数。
+            # 状态通道照旧：怪物读自身【疯狂】/【无力】层数。
+            # 2026-10-25 用户令：【疯狂】遗物化——遗物效果见下方全场判定，不是道纹。
             n += entity.get_status_value("疯狂")
             n -= entity.get_status_value("无力")
+            if self._relic_active(entity, "癫狂之脑"):
+                n += 1
+            if self._any_active_relic("疯狂"):
+                n += 1
+            # 【沉重枷锁】与【疯狂】对称：出手预算直接 -1，不经速度绕道
+            # （2026-10-25 用户令：出手预算＝基础 2 次，不再由速度换算）。
+            if self._any_active_relic("沉重枷锁"):
+                n -= 1
             return max(0, n)
         n = DaoWenEngine.single_round_action_count(entity)
         # 癫狂之脑（通用遗物池，2026-10-03 新增）：你每回合的出手次数+1。
         if self._relic_active(entity, "癫狂之脑"):
             n += 1
+        # 【疯狂】（2026-10-25 遗物化）：所有角色每回合出手次数+1。
+        if self._any_active_relic("疯狂"):
+            n += 1
+        # 【沉重枷锁】：所有角色每回合出手次数-1。
+        if self._any_active_relic("沉重枷锁"):
+            n -= 1
         return n
 
     def _current_context_timing(self) -> str:
@@ -830,8 +847,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 result["note"] = "招架空刀：未返还速度"
                 return result
 
-        # 伤害结算。新白刃战由攻击者为每击自由分配非负整数伤害；
-        # 未传 allocated_damage 的旧调用仍按当前攻击力结算，以兼容怪物阶段等入口。
+        # 伤害结算。新白刃战由攻击者为每击自由分配非负整数伤害（玩家侧与怪物阶段
+        # 均显式传 allocated_damage）；未传的旧调用仍按当前攻击力结算，兼容
+        # NPC 遭遇战等尚未接入逐击契约的入口。
         damage = (attacker.effective_attack_power()
                   if allocated_damage is None else allocated_damage)
         # 逆鳞（F2）：下次伤害+全部层数后清空
@@ -962,21 +980,6 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         if player is not None:
             effects.extend(self._dispatch_phase(Phase.ROUND_START_PREPARE, target=player))
 
-        # 沉重枷锁：场上存在有效持有者时，回始全场每名角色失去1点当前速度，
-        # 即本回合少一次出手；通过唯一失速入口结算，速度类遗物仍能收到真实信号。
-        if self._any_active_relic("沉重枷锁"):
-            seen_for_chain: set[int] = set()
-            for chained in self.state.get_all_player_side() + self.state.get_all_enemy_side():
-                if id(chained) in seen_for_chain:
-                    continue
-                seen_for_chain.add(id(chained))
-                if chained.is_alive:
-                    self._lose_current_speed(chained, 1, ctx={
-                        "timing": "round_start", "source": "沉重枷锁", "source_type": "relic",
-                        "actor": None, "target": chained, "owner": None, "mechanic": "speed_change",
-                        "subtype": "current_speed", "amount": -1, "tags": {"relic", "round_start"},
-                    })
-
         # 活血追踪归零 + 出手预算归零（回始重置本回合已用出手次数）+ 血誓戒每回合限一次归零 + 血族血脉判定归零
         seen_entities: set[int] = set()
         for e in self.state.get_all_player_side() + self.state.get_all_enemy_side():
@@ -1039,13 +1042,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         # 遗物：回始触发（回锋刀按速限缺口造伤）。
         relic_logs = self.process_relics(TriggerTiming.ROUND_START, {"relic_choices": relic_choices or {}})
         effects.extend({"type": "relic", "log": l} for l in relic_logs)
-        # 守夜灯：[回始]获得[法限]50%的法力，不设每回合触发次数上限。
-        # 玩家与死斗对手（同为轮回者）同口径，在回始遗物之后结算。
-        for entity in ([self.state.player] if self.state.player else []) + list(self.state.enemies):
-            granted = self._grant_shouyedeng(entity) if entity.entity_type == "轮回者" else None
-            if granted:
-                effects.append(granted)
-        
+        # 【守夜灯】2026-10-25 用户令改到[回终]结算（见 round_end），[回始]不再授予。
+
         # 结算回始效果
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
             # 蓄锐（2026-09-28）：上回合施放蓄锐积攒的 pending 转成【蓄锐·增】1回 buff（+1出手）。
@@ -1138,10 +1136,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         mediocrity_ready: list[tuple[Entity, str]] = []
 
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
-            # 蚀界残钟：场上有持有者时，每个角色在回终第一拍失去“当前攻击力×攻击次数”的血限。
+            # 蚀界残钟：场上有持有者时，每个角色在回终第一拍失去「当前法力×当前速度」的血限。
             # 保持旧【畸变】的回终锚点，走统一血限变化/命零管线，不手改 current_hp。
             if entity.is_alive and self._any_active_relic("蚀界残钟"):
-                # 统一属性模型：攻击力=当前法力，攻击次数=当前速度；轮回者的旧 attack_power/attack_count 字段不再是真实面板。
                 erosion = max(0, int(entity.current_mana) * int(entity.current_speed))
                 if erosion > 0:
                     change = self._apply_blood_limit_change(
@@ -1153,6 +1150,11 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                     )
                     effects.append({"type": "relic", "relic": "蚀界残钟", "entity": entity.name,
                                     "blood_limit_loss": erosion, **change})
+            # 守夜灯：[回终]获得等同于当前回合数的法力（2026-10-25 用户令）。
+            # 位置在蚀界残钟之后：残钟读到的仍是授予前的法力，不与新效果互相干扰。
+            granted = self._grant_shouyedeng(entity)
+            if granted:
+                effects.append(granted)
             # 机制系统：ROUND_END 相位分发。锚定语义：回终第一循环顶部、凡庸 tick 之前
             # （原畸变·结算位置）。凡庸之后的回终机制禁止注册到 ROUND_END
             # （会改变既有顺序），详见机制迁移台账。
@@ -1283,26 +1285,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     # ========== 辅助方法 ==========
     
 
-    # ========== 大流程：背叛候选 / 死之传承 ==========
-
-    def betrayal_candidates(self) -> dict:
-        """背叛候选（2026-10-24 用户令：改为[朋友]／[员工]的自选项）。
-
-        旧口径在[战终]按「员工攻击总值 ≥ 玩家生命 + 朋友攻击总值」判定，
-        命中即全体员工作为特殊事件夺书。现改为：没有阈值、不自动触发、
-        也不由 DM 代为发动——由扮演他们的 AI 自己决定要不要夺书，再用
-        `declare_betrayal` 显式声明。这里只列出人选，不含任何判定。
-        """
-        employees = [e.name for e in self.state.employees if e.is_alive]
-        friends = [f.name for f in self.state.friends if f.is_alive]
-        return {
-            "rebellion": False,
-            "automatic": False,
-            "reason": "背叛是[朋友]／[员工]的自选项，引擎不按数值判定",
-            "candidates": employees + friends,
-            "employees": employees,
-            "friends": friends,
-        }
+    # ========== 大流程：死者之页 ==========
 
     def trigger_death_legacy(self, legacy: dict[str, str] | str) -> dict:
         """新增一页遗言；一句话，上限=`state.death_book_capacity`（默认20字）。
@@ -1434,6 +1417,20 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 target = refs[choices["负岳索"]["target_ref"]]
                 target.add_status(StatusEffect("负岳索", -1, 1, "负岳索"))
                 logs.append(f"负岳索：保护{target.name}首次受伤")
+            if "减速" in relics:
+                # 【减速】（2026-10-25 遗物化）：战始所有敌人当前速度减半，
+                # 走唯一失速入口，速度类遗物照常收到真实信号。
+                for foe in self.state.get_all_enemy_side():
+                    lost = foe.current_speed - math.ceil(foe.current_speed / 2)
+                    if lost <= 0:
+                        continue
+                    self._lose_current_speed(foe, lost, ctx={
+                        "timing": "battle_start", "source": "减速", "source_type": "relic",
+                        "actor": player, "target": foe, "owner": player,
+                        "mechanic": "speed_change", "subtype": "current_speed",
+                        "amount": -lost, "tags": {"relic", "battle_start"},
+                    })
+                    logs.append(f"减速：{foe.name}当前速度-{lost}")
             if "炉心坠" in relics:
                 heart = next(item for item in self.state.consumables
                              if item.name == choices["炉心坠"]["heart_name"] and item.kind == "dragon_heart")

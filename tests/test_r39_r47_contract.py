@@ -328,21 +328,21 @@ def test_r43_all_implemented_event_options_have_a_runtime_route(tmp_path):
 # R44：统一向上取整
 
 def test_r44_normal_guard_lamp_ceil(tmp_path):
+    """守夜灯（2026-10-25 用户令）：[回终]获得等同于当前回合数的法力，与法限无关。"""
     engine = _engine(tmp_path); player, _ = _combat(engine)
     player.mana_limit = 5; player.current_mana = 0
     engine.state.relics = [Relic("守夜灯", "")]
     engine.combat.round_start({})
-    # DM裁定 2026-09-09：一池制，[回始]不回填（法限5 也不再自动补满）；
-    # 2026-10-15：守夜灯改为每次[回始]授予 ceil(法限*50%)=ceil(2.5)=3。
-    assert player.current_mana == 3
-    player.current_mana = 0
+    # [回始] 不再授予：一池制下回始不回填，守夜灯已改到回终。
+    assert player.current_mana == 0
+    engine.state.current_round = 4
     granted = engine.combat._grant_shouyedeng(player)
-    assert granted["gained"] == 3
-    assert player.current_mana == 3
+    assert granted["gained"] == 4
+    assert player.current_mana == 4
+    # 金额随回合数涨，但一律不得超过[法限]：法限 5 时第 9 回合只进 5 点。
     player.current_mana = 0
-    granted_again = engine.combat._grant_shouyedeng(player)
-    assert granted_again["gained"] == 3
-    assert player.current_mana == 3
+    engine.state.current_round = 9
+    assert engine.combat._grant_shouyedeng(player)["gained"] == 5
 
 
 def test_r44_boundary_slow_one_stays_one(tmp_path):

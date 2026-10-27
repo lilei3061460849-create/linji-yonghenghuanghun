@@ -85,31 +85,6 @@ class BifenglingHook:
         return {"shield_gained": 3, "total_shield": entity.shield}
 
 
-class ShouyedengHook:
-    """守夜灯：[回始]获得等同于[法限]10%的法力（2026-09-13 用户改版，不再清空）
-
-    ⚠️ 双实现登记（P1）：引擎真实分发路径是 `CombatEngine._grant_shouyedeng()`
-    （额外校验 存活/轮回者/遗物封印，并调用 clamp_immortal_body）。
-    `CombatHookManager.apply_round_start()` **没有任何引擎调用点**，只有单元测试直接调用它。
-    两侧都以 `entity._shouyedeng_granted` 做每回合幂等，因此即便误接也不会重复授予法力，
-    但校验条件不同，迁移前不得接线。
-    """
-    priority = 60
-
-    def on_round_start(self, entity: Any, is_enemy_turn: bool, state: Any) -> Dict[str, Any]:
-        # is_enemy_turn 保留在签名里只为兼容 hook 协议：授予已改为[回始]，与敌我回合无关。
-        checker = getattr(state, "_relic_active", None) or getattr(state, "side_has", None)
-        if not entity or checker is None or not checker(entity, "守夜灯"):
-            return {}
-        if getattr(entity, "_shouyedeng_granted", 0):
-            return {}
-        mana_to_gain = math.ceil(entity.mana_limit * 0.1)
-        # 2026-10-08：走统一入口，【勾魂】期间不生效
-        gained = entity.gain_mana(mana_to_gain)
-        entity._shouyedeng_granted = gained
-        return {"mana_gained": gained}
-
-
 class DamageRedirectionHook:
     """背负：伤害重定向逻辑（【嫁祸】2026-10-11 已删除，效果与遗物【贪婪契约】重复）"""
     priority = 70
@@ -397,7 +372,7 @@ class CombatHookManager:
 
     两类分发：
       * 通用遍历（apply_multiplier_adjust / apply_incoming_adjust / apply_before_damage /
-        apply_after_damage / apply_dodge / apply_round_start）——按 priority 升序执行。
+        apply_after_damage / apply_dodge）——按 priority 升序执行。
       * 显式分发（apply_redirection / apply_mitigation / apply_after_damage_pipeline）——
         由 CombatEngine 在伤害管线的固定位置调用。被显式分发的 Hook 标记
         `explicit_dispatch = True`，通用遍历会跳过它们，杜绝“同一效果触发两次”。
@@ -422,7 +397,6 @@ class CombatHookManager:
             *mechanism_hooks,
             QianjingjiaHook(),
             BifenglingHook(),
-            ShouyedengHook(),
             self.redirection_hook,
             self.mitigation_hook,
             self.after_damage_hook,
@@ -605,13 +579,3 @@ class CombatHookManager:
                     result.update(res)
         return result
 
-    def apply_round_start(self, entity: Any, is_enemy_turn: bool, state: Any) -> Dict[str, Any]:
-        result = {}
-        for hook in self._hooks:
-            if self._is_explicit(hook):
-                continue
-            if hasattr(hook, "on_round_start"):
-                res = hook.on_round_start(entity, is_enemy_turn, state)
-                if res:
-                    result.update(res)
-        return result

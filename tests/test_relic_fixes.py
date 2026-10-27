@@ -172,8 +172,9 @@ def test_wangyouxiang_registered_in_revised_relic_pool():
     engine = _new_engine("wangyou_registered")
     names = {n for n, _ in engine.RELIC_DEFS}
     assert "忘忧香" in names
-    assert len(engine.RELIC_DEFS) == 26   # 万钧印已改为消耗品；忘忧香属于现行遗物池
-    assert "血契" in names
+    # 2026-10-26：【血契】转为道纹，遗物池 28 → 27。
+    assert len(engine.RELIC_DEFS) == 27   # 万钧印已改为消耗品；忘忧香属于现行遗物池
+    assert "血契" not in names
     assert "钱袋" not in names
 
 
@@ -254,6 +255,7 @@ def test_moneybag_does_not_add_kill_shards():
     engine.state.energy = 0
     engine.execute_action("battle_start", {})
     engine.state.enemies.clear()
+    engine.state.monster_reinforcements.clear()   # 夹具只打这一波
     monster = Entity(name="待宰怪", entity_type="怪物", blood_limit=100, current_hp=0)
     monster.is_alive = False
     engine.state.enemies.append(monster)

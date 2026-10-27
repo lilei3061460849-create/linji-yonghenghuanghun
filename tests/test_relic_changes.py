@@ -9,7 +9,8 @@ from engine.models import Consumable, Entity, GameState, Relic
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_shouyedeng_grants_half_mana_limit_every_round_start_call():
+def test_shouyedeng_grants_mana_equal_to_current_round_at_round_end():
+    """2026-10-25 用户令：守夜灯改为[回终]获得等同于当前回合数的法力。"""
     state = GameState()
     player = Entity(
         name="测试者", entity_type="轮回者",
@@ -19,13 +20,13 @@ def test_shouyedeng_grants_half_mana_limit_every_round_start_call():
     state.relics = [Relic(name="守夜灯", effect="")]
     combat = CombatEngine(state, DiceEngine())
 
-    first = combat._grant_shouyedeng(player)
-    assert first["gained"] == 50
-    assert player.current_mana == 50
+    state.current_round = 1
+    assert combat._grant_shouyedeng(player)["gained"] == 1
+    assert player.current_mana == 1
 
-    second = combat._grant_shouyedeng(player)
-    assert second["gained"] == 50
-    assert player.current_mana == 100
+    state.current_round = 7
+    assert combat._grant_shouyedeng(player)["gained"] == 7
+    assert player.current_mana == 8
 
 
 def test_wanjunyin_is_a_three_durability_consumable_not_a_relic():
@@ -70,7 +71,7 @@ def test_wanjunyin_is_a_three_durability_consumable_not_a_relic():
 def test_relic_wording_uses_requested_concise_descriptions():
     index = (ROOT / "物品索引.md").read_text(encoding="utf-8")
     api = (ROOT / "engine/api.py").read_text(encoding="utf-8")
-    assert "[回始]，你获得等同于[法限]50%的法力。" in index
+    assert "[回终]，你获得等同于当前回合数的法力。" in index
     assert "任意角色每次失去生命时，使其衰老1。" in index
     assert "本回合你每失去1点生命，造成的伤害+1。" in index
     assert "战斗被动" not in index

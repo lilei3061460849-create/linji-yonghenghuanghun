@@ -94,6 +94,8 @@ def test_boundary_retreat_resets_next_battle():
     assert started_round["success"], started_round
     for m in list(e.state.enemies):
         m.is_alive = False
+    # 本场只打这一波：出怪配方排下的增援整批清掉，战终才允许结算。
+    e.state.monster_reinforcements.clear()
     ended = e.execute_action("battle_end", {})
     assert ended["success"], ended
     assert ally.has_retreated is False, "战终后撤退标记应重置"

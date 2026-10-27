@@ -352,7 +352,7 @@ def test_user_original_playthrough_no_longer_stucks(tmp_path):
     _controlled_combat(e, [_magma_lizard()])
     e.state.combat_subphase = "await_round_start"  # 从完整回合循环开始
     for _ in range(3):
-        e.state.player.current_hp = e.state.player.blood_limit  # 夹具：避免死之传承中断干扰
+        e.state.player.current_hp = e.state.player.blood_limit  # 夹具：避免死者之页中断干扰
         assert e.execute_action("round_start", {"relic_choices": {}})["success"]
         prepared, actor = _prepared_monster_option(e)
         # solo 场上【波及】降 X 为 1 持续可选（2026-10-09：X 下限 repealed）——

@@ -74,15 +74,19 @@ def test_shishang_xuenang_heals_holder_from_actual_damage_taken_by_anyone():
     assert player.current_hp == 51  # ceil(3 * 20%) = 1
 
 
-def test_chongzhong_jiasuo_removes_one_current_speed_from_each_living_role():
+def test_chongzhong_jiasuo_cuts_one_action_from_each_living_role():
+    """【沉重枷锁】：所有角色每回合出手次数-1；速度不动（出手预算不再由速度换算）。"""
     state, player, target, combat = _combat()
+    player.current_speed, target.current_speed = 3, 1
+    base_player_actions = combat.single_round_action_count(player)
+    base_target_actions = combat.single_round_action_count(target)
     state.relics.append(Relic(name="沉重枷锁", effect="", tags=[]))
-    target.current_speed = 1
 
     combat.round_start()
 
-    assert player.current_speed == 2
-    assert target.current_speed == 0
+    assert player.current_speed == 3 and target.current_speed == 1, "不得再走失速"
+    assert combat.single_round_action_count(player) == max(0, base_player_actions - 1)
+    assert combat.single_round_action_count(target) == max(0, base_target_actions - 1)
 
 
 def test_shisu_mingdeng_reduces_speed_limit_only_when_speed_is_actually_lost():

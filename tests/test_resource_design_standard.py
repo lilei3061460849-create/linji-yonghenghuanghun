@@ -205,8 +205,8 @@ def test_artifact_section_exists_and_entries_are_unique():
 
     relic_names = {n for n, _ in GameEngine.RELIC_DEFS}
     overlap = relic_names & set(names)
-    # 【万魂幡】是已知的跨品类冲突（索引列为法器、引擎 RELIC_DEFS 收为遗物），单独立账。
-    assert overlap <= {"万魂幡"}, f"法器与遗物池重名：{sorted(overlap)}"
+    # 【万魂幡】2026-10-25 用户令归法器，已退出 RELIC_DEFS：法器与遗物池不得再有任何重名。
+    assert not overlap, f"法器与遗物池重名：{sorted(overlap)}"
 
 
 # ==================== 消耗品：不耗出手 / 主被动均可 ====================

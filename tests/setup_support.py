@@ -8,7 +8,7 @@ from engine.models import DaoWen, DaoWenInstance
 # 2026-10-14：【猩红果实】重做为被动（当前生命可超出[血限]）；【余火印】删除
 # （效果并入道纹【透支】）。两者都不再需要战始/回始决策。
 OPTIONAL_BATTLE_START = ()
-OPTIONAL_ROUND_START = ("血契",)
+OPTIONAL_ROUND_START = ()
 
 
 def resolve_opening_relic(engine, prefer: Optional[str] = None) -> Optional[str]:
@@ -95,3 +95,29 @@ def begin_round(engine, relic_choices=None):
         if name in active and name not in choices:
             choices[name] = {"use": False}
     return engine.execute_action("round_start", {"relic_choices": choices})
+
+
+def strip_monster_relics(engine) -> None:
+    """清掉场上怪物自带的随机遗物。
+
+    2026-10-25 起 X 阶怪物出厂自带 X 种随机遗物（活血衣、回锋刀等会改变
+    伤害/回血数值）。凡断言精确数值的用例先调用本函数隔离掉这层，避免
+    随机遗物把断言改写成另一套机制。
+    """
+    for foe in getattr(engine.state, "enemies", []) or []:
+        foe.relics.clear()
+
+
+def grant_extra_actions(entity, extra: int) -> None:
+    """给实体临时增加出手预算（等价于【蓄锐】攒下的出手）。
+
+    2026-10-25 起法术阶数＝重数：带触发时机的 2 步法术就是 3 阶、要 3 次出手，
+    而全体基础出手只有 2 次。凡测试要连续定义/施展高阶法术，用本函数把预算补足，
+    不要去改 `Entity.action_count`——它是只读 property，由基础值与状态层共同决定。
+    """
+    from engine.models import StatusEffect
+
+    if extra <= 0:
+        return
+    entity.add_status(StatusEffect(name="蓄锐·增", value=int(extra), remaining_rounds=1,
+                                   source="测试夹具"))

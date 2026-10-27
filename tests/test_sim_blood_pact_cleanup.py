@@ -1,4 +1,4 @@
-"""A25：血契不再作为回始主动遗物；合法遗物与平分功能仍保留。"""
+"""血契由遗物改为道纹；不得出现在回始主动遗物决策里。"""
 from __future__ import annotations
 
 import ast
@@ -35,8 +35,14 @@ def test_discovery_filters_do_not_skip_blood_pact_as_an_active_relic():
         assert next(candidate for candidate in choices if candidate not in interactive) == "血契"
 
 
-def test_blood_pact_stays_in_the_valid_relic_pool():
-    assert "血契" in _literal_constant("sim/combo_loop_audit.py", "RELIC_POOL")
+def test_blood_pact_is_a_daowen_not_a_relic():
+    from engine.api import GameEngine
+    from engine.daowen import DaoWenEngine
+    assert "血契" not in {name for name, _ in GameEngine.RELIC_DEFS}
+    DaoWenEngine.register_all()
+    assert "血契" in DaoWenEngine._registry
+    calc = DaoWenEngine.resolve("血契", 2)
+    assert calc["cost"] == 20 and calc["mark_targets"] == 2 and calc["duration"] == -1
 
 
 def _engine(relics, *, speed=4, speed_limit=4, alive_enemies=0, sealed=None):

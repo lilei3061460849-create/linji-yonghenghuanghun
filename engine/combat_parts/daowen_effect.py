@@ -175,6 +175,8 @@ class DaowenEffectMixin:
             if wave_targets:
                 has_wave_targets = True
                 effective: list[Entity] = []
+                # 波及：本次直接目标与所有波及目标共同分担数值效果；
+                # 状态类效果则分别作用于这些目标，不把施法者计入目标组。
                 for wt in ([target] if target is not caster and target.is_alive else []) + wave_targets:
                     if wt.is_alive and wt not in effective:
                         effective.append(wt)
@@ -684,15 +686,6 @@ class DaowenEffectMixin:
                 result["effects"].append({"type": "swap", "target": swap_target.name,
                                           "current_speed": swap_target.current_speed,
                                           "current_mana": swap_target.current_mana})
-                # 【飞行】不再是独立道纹：骨天使发动【变形】时附带飞行状态，持续X。
-                from ..gamedata import MONSTER_DAOWEN_BONUSES
-                bonus = MONSTER_DAOWEN_BONUSES.get(caster.name, {}).get(name)
-                if caster.entity_type == "怪物" and bonus == "飞行":
-                    caster.add_status(self._daowen_status(
-                        daowen_order=daowen_order, name=bonus, value=x,
-                        remaining_rounds=x, source=f"{caster.name}·{name}"))
-                    result["effects"].append({"type": "flying", "target": caster.name,
-                                              "duration": x, "source_daowen": name})
 
         # ---- 速度修改 ----
         if "speed_boost" in calc:
@@ -718,7 +711,7 @@ class DaowenEffectMixin:
                 result["effects"].append({"type": "speed_boost", "target": target.name,
                                           "speed": target.current_speed, "gained": gained})
         if "speed_halved" in calc:
-            # 减速X：速度减半为状态类效果（非数值平分），对波及目标原样生效。
+            # 速度减半类效果（原【减速】，2026-10-25 遗物化）：对波及目标原样生效。
             for wt in wave_status_targets:
                 lost = wt.current_speed - math.ceil(wt.current_speed / 2)
                 self._lose_current_speed(wt, lost, ctx={
@@ -1050,7 +1043,7 @@ class DaowenEffectMixin:
               and not (name == "变形" and bianxing_blocked)
               # 波及标记由 use_daowen/怪物结算逐目标处理，不走通用状态块
               # 乱葬岗道纹已在上方乱葬岗段自行 add_status，跳过通用状态处理避免重复叠加
-              and name not in ("勾魂", "冥气", "缄默", "瓦解", "波及")):
+              and name not in ("勾魂", "冥气", "缄默", "瓦解", "波及", "血契")):
             duration = calc["duration"] if calc["duration"] != 0 else -1
             effect_target = target if target else caster
             # 自身作用型道纹（变形/超频等）作用于施法者
@@ -1062,18 +1055,7 @@ class DaowenEffectMixin:
             # 2026-09-17 用户令：【变形】改为可自由选择目标（不指定时默认自身），
             # 故移出"自身作用型"名单，状态随之挂到目标身上（到期还原也落在目标）。
             self_targeted = name in ("飞行", "必中", "固执", "贯穿")
-            if name == "疯狂":
-                # 2026-08-17 用户裁定：疯狂X改为【所有角色出手+X】（全局，变相平衡）。
-                # 状态盖到双方全部存活角色；出手口径各自读取自身疯狂状态：
-                # 轮回者/朋友/员工走 Entity.action_count，怪物攻击轮数走 _monster_attack_actions。
-                for et_all in self.state.get_all_player_side() + self.state.get_all_enemy_side():
-                    if not et_all.is_alive:
-                        continue
-                    et_all.add_status(self._daowen_status(daowen_order=daowen_order, name="疯狂", remaining_rounds=duration,
-                                                   value=x, source=caster.name))
-                    result["effects"].append({"type": "status_added", "target": et_all.name,
-                                              "status": name, "duration": duration, "value": x})
-            elif self_targeted:
+            if self_targeted:
                 et = caster
                 et.add_status(self._daowen_status(daowen_order=daowen_order, name=name, remaining_rounds=duration, value=x, source=caster.name))
                 result["effects"].append({"type": "status_added", "target": et.name,
@@ -1086,6 +1068,19 @@ class DaowenEffectMixin:
                     et.add_status(self._daowen_status(daowen_order=daowen_order, name=name, remaining_rounds=duration, value=x, source=caster.name))
                     result["effects"].append({"type": "status_added", "target": et.name,
                                               "status": name, "duration": duration, "value": x})
+
+        if name == "血契":
+            # 重新发动时以新目标组替换旧组；目标ID写入状态，随战斗快照保存。
+            import json
+            target_ids = list(calc.get("blood_pact_target_ids") or [str(target.runtime_id)])
+            caster.status_effects[:] = [st for st in caster.status_effects if st.name != "血契"]
+            if target_ids:
+                caster.add_status(self._daowen_status(
+                    daowen_order=daowen_order, name="血契", value=len(target_ids),
+                    remaining_rounds=-1, source=json.dumps(target_ids, ensure_ascii=False)))
+            result["effects"].append({"type": "blood_pact", "targets": [
+                entity.name for entity in self._blood_pact_group(caster)],
+                "duration": "∞"})
 
         # ---- 龙心谷专属 3 件（F2）：逆鳞/背负/伤痕 的 combat 侧实装 ----
         # （【嫁祸】2026-10-11 已删除，效果与遗物【贪婪契约】重复）
@@ -1134,8 +1129,7 @@ class DaowenEffectMixin:
                 result["effects"].append({"type": "haoduo", "target": st_target.name,
                                           "stolen": stolen or None, "rounds": x})
 
-        # 波及X：标记建立/解除由 use_daowen 与怪物两阶段结算按显式提交逐目标处理，
-        # 此处仅登记结算信息（通用状态块已排除波及，避免重复挂状态）。
+        # 波及X：目标标记由 use_daowen 的逐目标提交建立/解除；此处只记结果。
         if name == "波及":
             result["effects"].append({"type": "boba_register", "target": target.name, "x": x})
 
