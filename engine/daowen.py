@@ -228,7 +228,7 @@ class DaoWenEngine:
     
     @staticmethod
     def calculate_xueqi(x: int, target: Entity = None) -> dict:
-        """血契X：支付：法力10X。选择X个目标，目标组彼此平分数值型代价，持续∞。"""
+        """血契X：支付：法力10X。选择X个存活的非自身目标建立血契分担组，持续∞；施法者支付的数值型【代价】由分担组内存活目标平分（不含施法者），余数按平分规则随机分配。"""
         cost = 10 * x
         return {
             "dao_wen": "血契", "x": x,
@@ -721,21 +721,21 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_chao(x: int) -> dict:
-        """唤潮X：支付法力X，在开放地图中将自身周围X个可用格改为水流地形。"""
+        """唤潮X：支付：法力X。在开放地图中，以自身所在格为中心选择周围X个可用地图格，将其改为【水流】地形；只有鲛族可以进入或穿越【水流】格。"""
         return {"dao_wen": "唤潮", "x": x, "cost_type": CostType.MANA.value,
                 "cost": x, "map_terrain": "water_current",
                 "summary": f"支付：{x}法力，在开放地图周围设置{x}格水流地形"}
 
     @staticmethod
     def calculate_shenjing(x: int) -> dict:
-        """蜃景X：支付法力10X，在开放地图施术者所在格创造X个地图幻象。"""
+        """蜃景X：支付：法力10X。在开放地图的施术者所在格创造X个外观与施术者相同的地图幻象；生成后，施术者与幻象分别向不同方向自主移动，欺骗追踪与寻路。幻象不参与战斗；被任何其他角色接触时消散，施术者死亡时其全部幻象消散。进入战斗本身不会清除幻象。"""
         return {"dao_wen": "蜃景", "x": x, "cost_type": CostType.MANA.value,
                 "cost": 10 * x, "map_illusions": x,
                 "summary": f"支付：{10*x}法力，在开放地图创造{x}个地图幻象"}
 
     @staticmethod
     def calculate_ningzhi(x: int, target: Entity = None, status_name: str = "") -> dict:
-        """凝滞X：支付法力5X。使[目标]身上一种有限持续效果的剩余回合数+X。"""
+        """凝滞X：支付：法力5X。选择[目标]身上的一种有限持续状态，使该状态剩余回合数+X；必须提交status_name指定状态。"""
         if target is None:
             raise ValueError("凝滞必须显式选择目标")
         if not status_name:
