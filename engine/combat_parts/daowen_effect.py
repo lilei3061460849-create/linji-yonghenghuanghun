@@ -1050,15 +1050,13 @@ class DaowenEffectMixin:
                     result["effects"].append({"type": "status_added", "target": et.name,
                                               "status": status_name, "duration": duration, "value": x})
 
-        if name == "凝滞" and calc.get("rounds_delta"):
-            # 凝滞重做：使用统一 rounds 动词延长目标指定状态的剩余回合数。
-            status_name = calc["status_name"]
+        if name == "凝滞" and calc.get("extra_target_rounds"):
+            # 凝滞：目标真实经历额外回合，推进目标回增/回终事件、凡庸与自身限时状态。
             for st_target in wave_status_targets:
-                applied = apply_verb(self, "rounds", {
-                    "target": st_target, "status_name": status_name,
-                    "delta": calc["rounds_delta"],
-                }, daowen_ctx.to_dict())
-                result["effects"].append({"type": "rounds_extended", **applied})
+                if not st_target.is_alive:
+                    continue
+                advanced = self.advance_target_rounds(st_target, int(calc["extra_target_rounds"]), source="凝滞")
+                result["effects"].extend(advanced)
 
         if name == "血契":
             # 重新发动时以新目标组替换旧组；目标ID写入状态，随战斗快照保存。
