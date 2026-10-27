@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine, OUT_OF_COMBAT_DAOWEN  # noqa: E402
 from engine.daowen import DaoWenEngine  # noqa: E402
-from engine.models import DaoWen, DaoWenInstance  # noqa: E402
+from engine.models import Consumable, DaoWen, DaoWenInstance  # noqa: E402
 from tests.setup_support import finish_initial_daowen  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -140,15 +140,15 @@ def test_daowen_x_scales_strength_or_duration():
 # ==================== 道纹：局外发动须明示 ====================
 
 def test_out_of_combat_daowen_whitelist_is_explicit():
-    """默认局内；局外白名单只能由条文明示项构成：消灾、真理、唤潮、蜃景。"""
-    assert OUT_OF_COMBAT_DAOWEN == frozenset({"消灾", "真理", "唤潮", "蜃景"})
+    """默认局内；已转为消耗品的逆命筹不再占用道纹局外发动白名单。"""
+    assert OUT_OF_COMBAT_DAOWEN == frozenset({"真理", "唤潮", "蜃景"})
+    assert "消灾" not in DaoWenEngine._registry
 
 
-def test_unlisted_daowen_rejected_out_of_combat_and_listed_one_allowed(engine):
-    """边界：名单外的道纹在局外被拒且错误文案点明明示口径；名单内的照常发动。"""
-    _grant(engine, ["杀伐", "消灾"])
+def test_unlisted_daowen_rejected_out_of_combat_and_converted_rune_is_retired(engine):
+    """边界：未明示局外的道纹被拒；已转换的消灾不再接受道纹发动入口。"""
+    _grant(engine, ["杀伐"])
     engine.state.phase = "pre_battle"
-    engine.state.fake_shards = 100
 
     blocked = engine.execute_action("use_daowen", {
         "daowen_name": "杀伐", "x": 1,
@@ -156,12 +156,40 @@ def test_unlisted_daowen_rejected_out_of_combat_and_listed_one_allowed(engine):
     assert not blocked["success"]
     assert "局外发动须条文明示" in blocked["error"], blocked
 
-    allowed = engine.execute_action("use_daowen", {
+    retired = engine.execute_action("use_daowen", {
         "daowen_name": "消灾", "x": 1,
         "dodge": False, "blood_shadow": False, "trigger_spell_choices": {}})
-    assert allowed["success"], allowed
-    assert engine.state.player.actions_used_this_round == 0
+    assert not retired["success"], retired
     engine.state.phase = "in_combat"
+
+
+def test_inverse_fate_consumable_registers_one_reroll_and_spends_durability(engine):
+    """逆命筹是固定耐久消耗品；使用后只为下一次随机结算增加一次重投。"""
+    previous_phase = engine.state.phase
+    previous_rerolls = engine.dice.rerolls_pending
+    engine.state.phase = "pre_battle"
+    engine.dice.set_rerolls(0)
+    item = Consumable(
+        name="逆命筹",
+        effect="使用后使引擎下一次随机结算额外投掷一次，并以第二次结果为准",
+        current_uses=1,
+        max_uses=1,
+    )
+    engine.state.consumables.append(item)
+    try:
+        used = engine.execute_action("consume_item", {"name": "逆命筹"})
+        assert used["success"], used
+        assert item.current_uses == 0
+        assert engine.dice.rerolls_pending == 1
+
+        roll = engine.dice.auto_roll("inverse_fate_regression", [1, 2, 3],
+                                     context="逆命筹回归测试")
+        assert roll["rerolled"] is True
+        assert engine.dice.rerolls_pending == 0
+    finally:
+        engine.state.consumables.remove(item)
+        engine.dice.set_rerolls(previous_rerolls)
+        engine.state.phase = previous_phase
 
 
 # ==================== 遗物：无 X 变量 / 必有触发时机 ====================
