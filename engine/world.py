@@ -1023,6 +1023,8 @@ class WorldState:
                 dispelled.append(actor.actor_id)
                 self.record("mirage_dispersed", actor.actor_id, owner_actor_id=actor.owner_actor_id,
                             by_actor_id=by_actor_id, position=list(position), reason=reason)
+        if dispelled:
+            self.map.version += 1
         return dispelled
 
     def _clear_illusions_for_owner(self, owner_actor_id: str, *, reason: str) -> list[str]:
@@ -1034,6 +1036,8 @@ class WorldState:
                 dispelled.append(actor.actor_id)
                 self.record("mirage_dispersed", actor.actor_id, owner_actor_id=owner_actor_id,
                             position=list(actor.position), reason=reason)
+        if dispelled:
+            self.map.version += 1
         return dispelled
 
     def start_encounter(self, participant_ids: list[str], location: Coord) -> EncounterState:
@@ -1042,12 +1046,12 @@ class WorldState:
             raise ValueError("遭遇至少需要两个不同单位")
         for actor_id in unique:
             self._living_actor(actor_id)
+        if not self.map.in_bounds(location):
+            raise ValueError("遭遇地点超出地图")
         player_participants = [self.actors[aid] for aid in unique
                                if self.actors[aid].kind == "player"]
         for player_actor in player_participants:
             self._clear_illusions_for_owner(player_actor.actor_id, reason="combat_started")
-        if not self.map.in_bounds(location):
-            raise ValueError("遭遇地点超出地图")
         is_final_duel = (self.final_duel_search
                          and set(self.final_duel_finalists).issubset(set(unique)))
         encounter = EncounterState(
