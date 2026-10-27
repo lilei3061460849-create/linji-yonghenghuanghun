@@ -97,9 +97,8 @@ FREE_CRYSTAL_COST_AMOUNT = 10
 
 # 局外可发动的道纹白名单（2026-10-23 用户裁定：默认局内，局外须明示）。
 # 「明示」＝该道纹条文自己写明可局外发动；没写的一律只能在战斗中发动。
-# 明示项：【消灾】（局外发动消耗×2）、【真理】、【唤潮】与【蜃景】（鲛族专属开放地图道纹）。
-# 新增一项必须先改条文，再改这里；tests/test_resource_design_standard.py 钉死本集合。
-OUT_OF_COMBAT_DAOWEN = frozenset({"消灾", "真理", "唤潮", "蜃景"})
+# 明示项：【真理】、【唤潮】与【蜃景】（鲛族专属开放地图道纹）。
+OUT_OF_COMBAT_DAOWEN = frozenset({"真理", "唤潮", "蜃景"})
 
 
 class GameEngine:
@@ -5103,10 +5102,9 @@ class GameEngine:
         return self.combat.silenced_by_mask(actor, calc)
 
     def _pay_daowen_shard_cost(self, actor: Entity, name: str, calc: dict, x: int) -> Optional[str]:
-        """消灾X 的碎片类代价。
+        """结算需要碎片支付的旧道纹代价。
 
-        规则实现已上移到 CombatEngine.pay_daowen_shard_cost（法术单步与
-        use_daowen 共用同一口径），这里保留同名入口供既有调用点使用。
+        规则实现由 CombatEngine.pay_daowen_shard_cost 统一处理。
         """
         return self.combat.pay_daowen_shard_cost(actor, name, calc, x)
 
@@ -5450,7 +5448,7 @@ class GameEngine:
         if mana_error:
             return {"success": False, "error": mana_error}
 
-        # 碎片类主动道纹代价预检与支付（目前为消灾；遗物灾厄轮盘无发动/费用）
+        # 碎片类主动道纹代价预检与支付
         shard_error = self._pay_daowen_shard_cost(actor, name, calc, x)
         if shard_error:
             return {"success": False, "error": shard_error}
@@ -6539,7 +6537,7 @@ class GameEngine:
         # 正文具名消耗品：全部在扣耐久前完成参数校验；未实现项不得“成功但只扣耐久”。
         # 2026-10-14 审计F4：镇魂铁钉处理器补齐（此前发而无用）；替死鬼/赶尸铃/黄符见下。
         if item.name in {"绝息淤泥", "活性土壤", "假钞贴", "穿甲弹", "洗劫面具", "赤泉囊", "龙血瓶",
-                          "镇魂铁钉", "赶尸铃", "黄符"}:
+                          "镇魂铁钉", "赶尸铃", "黄符", "逆命筹"}:
             return self._consume_named_event_item(item, params)
 
         # 自定义消耗品（2026-10-23）：声明里的 effects 由 verbs 执行，不占出手。
@@ -6669,7 +6667,11 @@ class GameEngine:
             return {"success": False, "error": "没有玩家"}
         name = item.name
         result: dict[str, Any] = {"item": name}
-        if name == "绝息淤泥":
+        if name == "逆命筹":
+            item.use()
+            self.dice.set_rerolls(self.dice.rerolls_pending + 1)
+            result.update({"rerolls_added": 1, "rerolls_pending": self.dice.rerolls_pending})
+        elif name == "绝息淤泥":
             if self.state.phase != GamePhase.IN_COMBAT.value:
                 return {"success": False, "error": "绝息淤泥只能在战斗中使用"}
             item.use()
