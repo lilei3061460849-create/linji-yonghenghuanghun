@@ -54,6 +54,13 @@ UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN = {
     "净化": "荒疫古城",
 }
 
+# 已有闭环/规则草案节点，但尚未注册运行时效果；不可通过学习或残韵获取。
+UNIMPLEMENTED_DAOWEN = {
+    "流动": "沉沦海",
+    "遗忘": "沉沦海",
+    "回响": "沉沦海",
+}
+
 # 初拥之夜选项5授予的血族专属道纹；不进入局外学习或残韵获取池。
 FIRST_EMBRACE_DAOWEN = frozenset({"真理"})
 
@@ -64,6 +71,9 @@ def learnability_error(name, *, owned, region, known) -> str | None:
     返回 None = 可学；否则返回拒绝文案（逐字沿用旧实现）。
     【典当】的发现池与【学习】同口径，共用本函数——改学习门禁时两处一起变。
     """
+    if name in UNIMPLEMENTED_DAOWEN:
+        owner = UNIMPLEMENTED_DAOWEN[name]
+        return f"【{name}】是{owner}专属道纹，尚未接入运行时，当前不能学习或通过残韵获得"
     if name not in known:
         return f"未知道纹: {name}"
     if name in owned:
