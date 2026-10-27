@@ -103,6 +103,20 @@ def _verb_status(combat, spec, ctx):
             "target": getattr(target, "name", "")}
 
 
+def _verb_rounds(combat, spec, ctx):
+    """修改目标某个有限状态的剩余回合数，供持续效果组合复用。"""
+    target = spec["target"]
+    status_name = spec["status_name"]
+    delta = int(spec.get("delta", 0))
+    status = next((s for s in target.status_effects if s.name == status_name), None)
+    if status is None or status.remaining_rounds <= 0:
+        return {"target": getattr(target, "name", ""), "status": status_name,
+                "delta": 0, "remaining_rounds": None, "applied": False}
+    status.remaining_rounds += delta
+    return {"target": getattr(target, "name", ""), "status": status_name,
+            "delta": delta, "remaining_rounds": status.remaining_rounds, "applied": True}
+
+
 def _verb_speed(combat, spec, ctx):
     delta = spec.get("delta", spec.get("amount", 0))
     if delta > 0:
@@ -222,6 +236,7 @@ register_verb("hp_loss", _verb_hp_loss)
 register_verb("blood_limit", _verb_blood_limit)
 register_verb("cost", _verb_cost)
 register_verb("status", _verb_status)
+register_verb("rounds", _verb_rounds)
 register_verb("speed", _verb_speed)
 register_verb("shield", _verb_shield)
 register_verb("mutation", _verb_mutation)
