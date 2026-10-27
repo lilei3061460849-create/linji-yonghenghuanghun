@@ -1394,7 +1394,10 @@ class GameState:
                 )
         # 2026-10-14：【猩红果实】持有者当前生命可超出[血限]，回复不再封顶
         # （溢出量归零，【忘忧香】/【龙血瓶】无溢出可吃——没有溢出，只有实打实的血）。
-        detail = entity.heal(amount, allow_overflow=self.hp_overflow_exempt(entity))
+        detail = entity.heal(
+            amount,
+            allow_overflow=(self.hp_overflow_exempt(entity) or entity.has_status("无限血限")),
+        )
         detail["heal_ctx"] = heal_ctx.to_dict()
         heal_events = getattr(entity, "_heal_events", None)
         if heal_events is None:
