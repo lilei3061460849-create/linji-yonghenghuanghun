@@ -1045,7 +1045,9 @@ class WorldState:
         if len(unique) < 2:
             raise ValueError("遭遇至少需要两个不同单位")
         for actor_id in unique:
-            self._living_actor(actor_id)
+            participant = self._living_actor(actor_id)
+            if participant.is_illusion:
+                raise ValueError("地图幻象不能成为战斗参与者")
         if not self.map.in_bounds(location):
             raise ValueError("遭遇地点超出地图")
         player_participants = [self.actors[aid] for aid in unique
