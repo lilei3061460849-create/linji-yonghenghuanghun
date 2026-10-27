@@ -2160,7 +2160,8 @@ from sim.run_open_world_replay import run_playthrough
 def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
     # 怪物道纹口径与出怪配方调整后，SEED 那局会在会合前先被世界威胁淘汰掉另一名候选
     # （终局走 sole survivor 分支）；本用例固定验证「真打满一场终局决斗」的路径。
-    duel_seed = 34
+    # 贯穿退出发现池、地图新增消耗品后重新固定仍覆盖完整终局的种子。
+    duel_seed = 3
     replay = run_playthrough(duel_seed, include_winner_snapshot=True,
                              blood_points=11, speed_points=6, mana_points=8)
     final = replay["final_state"]
@@ -2257,7 +2258,7 @@ def test_replay_waits_for_rivals_when_no_hostile_is_reachable():
 
 def test_final_duel_loss_still_settles_world_before_death_legacy_interrupt():
     # 同上：固定一个「终局决斗打输」的种子，不再假定 SEED 那局一定进终局。
-    replay = run_playthrough(8, blood_points=13, speed_points=6, mana_points=6)
+    replay = run_playthrough(15, blood_points=13, speed_points=6, mana_points=6)
     final = replay["final_state"]
 
     assert final["game_complete"] is True

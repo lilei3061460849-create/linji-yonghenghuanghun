@@ -216,7 +216,7 @@ class GameEngine:
         map_payload["locations"] = {
             key: location for key, location in map_payload.get("locations", {}).items()
             if location.get("discovered", False)
-            and (location.get("kind") != "relic"
+            and (location.get("kind") not in {"relic", "consumable"}
                  or player.actor_id in (location.get("discovered_by") or []))
         }
         world_payload["actors"] = {
@@ -1829,6 +1829,8 @@ class GameEngine:
 
     def _sync_world_entity_positions(self, world: WorldState) -> None:
         """将地图中的权威位置同步回实体存档字段，避免移动只存在于地图副本。"""
+        from .world_consumables import discover_consumables
+        discover_consumables(world)
         entities = []
         if self.state.player is not None:
             entities.append(self.state.player)
@@ -2891,7 +2893,7 @@ class GameEngine:
                  "active": location.get("active", True)}
                 for location_id, location in world.map.locations.items()
                 if location.get("discovered", False)
-                and (location.get("kind") != "relic"
+                and (location.get("kind") not in {"relic", "consumable"}
                      or actor_id in (location.get("discovered_by") or []))
             ]
             next_shrink_turn = None

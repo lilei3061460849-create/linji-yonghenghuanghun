@@ -36,6 +36,21 @@ def scatter_consumables(world, dice, specs, available):
     return count
 
 
+def discover_consumables(world):
+    """玩家当前真实视野内的物品可见；NPC私有目击由world原有记忆系统记录。"""
+    for actor in world.actors.values():
+        if actor.kind != "player" or not actor.alive or actor.is_illusion:
+            continue
+        visible = set(world.visible_cells(actor.actor_id))
+        for location in world.map.locations.values():
+            if (location.get("kind") == "consumable"
+                    and (location["x"], location["y"]) in visible):
+                location["discovered"] = True
+                known_by = location.setdefault("discovered_by", [])
+                if actor.actor_id not in known_by:
+                    known_by.append(actor.actor_id)
+
+
 def collect_consumables(world, state):
     entities = ([state.player] if state.player else [])
     for group in ("friends", "employees", "temp_friends", "enemies"):
@@ -51,7 +66,7 @@ def collect_consumables(world, state):
         for actor in world.actors.values():
             entity = by_id.get(actor.actor_id)
             if (actor.is_illusion or not actor.alive or actor.position != pos
-                    or entity is None or not entity.is_alive):
+                    or entity is None or not entity.is_alive or entity.is_departed):
                 continue
             item = Consumable(**location["consumable"])
             if entity is state.player:

@@ -84,5 +84,46 @@ def test_move_collects_not_triggers_event_and_fog_hides_unseen_items(tmp_path):
     result = e.execute_action("world_move", {"actor_id": e.state.player.runtime_id, "x": 3, "y": 1})
     assert result["success"], result
     assert len(e.state.consumables) == 1
-    assert not getattr(e.state, "pending_world_event", None)
+    assert "location_event" not in result["result"]
+    assert e.event_pool.current is None
     assert not e.state.world_state["map"]["locations"]["consumable_1"]["active"]
+
+
+def test_visible_items_known_but_npc_pickup_never_exposes_hidden_locations(tmp_path):
+    from engine.world_consumables import discover_consumables
+    e = engine(tmp_path)
+    world, npc = pickup_world(e)
+    p_actor = world.actors[e.state.player.runtime_id]
+    p_actor.vision_range = 1
+    discover_consumables(world)
+    e.state.world_state = world.to_dict()
+    assert "consumable_1" not in e.get_state()["state"]["world_state"]["map"]["locations"]
+    # A hidden NPC finds and collects the item. Neither location nor pickup event leaks.
+    world.actors[npc.runtime_id].x = 3
+    collect_consumables(world, e.state)
+    e.state.world_state = world.to_dict()
+    projected = e.get_state()["state"]["world_state"]
+    assert "consumable_1" not in projected["map"]["locations"]
+    assert not any(event["type"] == "consumable_collected" for event in projected["event_log"])
+
+
+def test_items_in_real_vision_are_exposed_without_stepping_onto_them(tmp_path):
+    from engine.world_consumables import discover_consumables
+    e = engine(tmp_path)
+    world, _ = pickup_world(e)
+    world.actors[e.state.player.runtime_id].vision_range = 3
+    discover_consumables(world)
+    e.state.world_state = world.to_dict()
+    assert "consumable_1" in e.get_state()["state"]["world_state"]["map"]["locations"]
+    assert not e.state.consumables
+
+
+def test_boundary_and_dead_actor_cannot_collect(tmp_path):
+    e = engine(tmp_path)
+    world, npc = pickup_world(e)
+    world.actors[npc.runtime_id].x = 3
+    npc.is_alive = False
+    assert collect_consumables(world, e.state) == []
+    world.map.locations["consumable_1"]["active"] = False
+    npc.is_alive = True
+    assert collect_consumables(world, e.state) == []
