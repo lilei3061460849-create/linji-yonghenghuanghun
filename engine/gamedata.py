@@ -12,7 +12,12 @@ REGION_EXCLUSIVE_DAOWEN = {
     # 乱葬岗删纹与面板空位保持登记；稳定后再补位。
     "乱葬岗": {"分裂", "瓦解", "勾魂", "招魂"},  # 【缄默】【冥气】已遗物化，闭环留「？？」
     # 2026-10-27：沉沦海专属道纹池已登记；副本运行时效果仍待接入。
-    "沉沦海": {"流动", "波及", "遗忘", "唤潮", "蜃景", "凝滞", "回响"},
+    "沉沦海": {"流动", "波及", "遗忘", "凝滞", "回响"},
+}
+
+# 鲛族专属道纹：不计入任何副本的专属学习池；怪物面板既有配置不受此分类影响。
+RACE_EXCLUSIVE_DAOWEN = {
+    "鲛族": {"唤潮", "蜃景"},
 }
 
 ORIGINAL_MONSTER_DAOWEN = {"全力", "必中"}  # 2026-10-25 用户令：【疯狂】【减速】遗物化；【飞行】是状态
@@ -62,6 +67,9 @@ def learnability_error(name, *, owned, region, known) -> str | None:
         return f"已经掌握道纹: {name}"
     if name in FIRST_EMBRACE_DAOWEN:
         return f"【{name}】是初拥之夜专属道纹，只能通过初拥之夜获得"
+    race_owner = next((race for race, pool in RACE_EXCLUSIVE_DAOWEN.items() if name in pool), None)
+    if race_owner is not None:
+        return f"【{name}】是{race_owner}专属道纹，只能通过{race_owner}专属机制获得"
     owner = next((r for r, pool in REGION_EXCLUSIVE_DAOWEN.items() if name in pool), None)
     if owner is not None:
         if owner != region:
