@@ -574,26 +574,6 @@ class DaowenEffectMixin:
                         actor=caster, owner=caster, clamp_hp=False, lethal=False)["applied"]
                     result["effects"].append({"type": "blood_limit_increase", "target": target.name,
                                               "increase": increase})
-        if "zengzhi_battle_end" in calc:
-            # 2026-10-14：【增殖】重做——血限增长记入战终待决（多次发动累加，
-            # 战终统一结算；目标死亡/持【不朽之躯】则结算时落空）。
-            _ref_of = {}
-            for _ref, _ent in self._combat_entity_refs().items():
-                _ref_of[id(_ent)] = _ref
-            _pending = self.state.event_modifiers.setdefault("zengzhi_pending", [])
-            if "zengzhi_battle_end" in wave_pieces:
-                pieces = self._divide_flat(calc["zengzhi_battle_end"], len(wave_status_targets))
-                wave_pieces["zengzhi_battle_end"] = pieces
-                for wt, piece in zip(wave_status_targets, pieces):
-                    _pending.append({"target_ref": _ref_of.get(id(wt), wt.name),
-                                     "amount": piece})
-                    result["effects"].append({"type": "zengzhi_pending", "target": wt.name,
-                                              "amount": piece})
-            else:
-                _pending.append({"target_ref": _ref_of.get(id(target), target.name),
-                                 "amount": calc["zengzhi_battle_end"]})
-                result["effects"].append({"type": "zengzhi_pending", "target": target.name,
-                                          "amount": calc["zengzhi_battle_end"]})
         # ---- 攻击面板修改 ----
         _panel_keys = ("attack_boost", "attack_reduction", "attack_fixed", "attack_count_fixed")
         # 波及扩散：attack_boost/reduction 数值平分；attack_fixed/attack_count_fixed
@@ -1055,19 +1035,20 @@ class DaowenEffectMixin:
             # 2026-09-17 用户令：【变形】改为可自由选择目标（不指定时默认自身），
             # 故移出"自身作用型"名单，状态随之挂到目标身上（到期还原也落在目标）。
             self_targeted = name in ("飞行", "必中", "固执", "贯穿")
+            status_name = "无限血限" if calc.get("infinite_blood_limit") else name
             if self_targeted:
                 et = caster
-                et.add_status(self._daowen_status(daowen_order=daowen_order, name=name, remaining_rounds=duration, value=x, source=caster.name))
+                et.add_status(self._daowen_status(daowen_order=daowen_order, name=status_name, remaining_rounds=duration, value=x, source=caster.name))
                 result["effects"].append({"type": "status_added", "target": et.name,
-                                          "status": name, "duration": duration, "value": x})
+                                          "status": status_name, "duration": duration, "value": x})
             else:
                 # 波及：状态类效果对每个拥有波及效果的目标（含本次[目标]）原样生效。
                 for et in wave_status_targets:
                     if not et.is_alive:
                         continue
-                    et.add_status(self._daowen_status(daowen_order=daowen_order, name=name, remaining_rounds=duration, value=x, source=caster.name))
+                    et.add_status(self._daowen_status(daowen_order=daowen_order, name=status_name, remaining_rounds=duration, value=x, source=caster.name))
                     result["effects"].append({"type": "status_added", "target": et.name,
-                                              "status": name, "duration": duration, "value": x})
+                                              "status": status_name, "duration": duration, "value": x})
 
         if name == "凝滞" and calc.get("rounds_delta"):
             # 凝滞重做：使用统一 rounds 动词延长目标指定状态的剩余回合数。
