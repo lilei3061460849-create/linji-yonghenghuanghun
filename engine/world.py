@@ -907,6 +907,9 @@ class WorldState:
             actor.visited_cells.add(self.map.key(destination))
             self.record("actor_moved", actor_id, origin=list(origin),
                         destination=list(destination), autonomous=True)
+            # NPC接触幻象同样会使其消散，不限于敌对阵营或玩家手动移动。
+            self._dispel_illusions_at(destination, by_actor_id=actor_id,
+                                      reason="touched_by_character")
             self._append_trail(actor_id, destination)
             if actor.faction in {"monster", "enemy"}:
                 self._dispel_illusions_at(destination, by_actor_id=actor_id, reason="reached_by_hostile")
