@@ -324,6 +324,7 @@ class Entity:
     # 早期版本残韵只挂在 State（仅玩家侧），导致守擂者同为轮回者却无残韵可用。
     # 现下放为实体级，使挑战者/守擂者共用同一套残韵机制（玩家侧仍经 State.resonance 兼容）。
     resonance: dict[str, int] = field(default_factory=dict)
+    consumables: list[Consumable] = field(default_factory=list)  # 死者之页承载的消耗品持有记录；不新增容量规则。
     relics: list[Relic] = field(default_factory=list)  # 由正文明确授予该角色的随身物品（如防弹插板）
     # 统一 AI 的当前轮回记忆：只属于活着的实体；命零前压缩成遗言后清空。
     # 这是主观叙事，不是规则事实，不能改变引擎数值或合法性。
@@ -1029,6 +1030,7 @@ class Entity:
             "ai_memory": self.ai_memory,
             "dao_wen": {k: v.dao_wen.name for k, v in self.dao_wen.items()},
             "reversible_cost_layers": dict(getattr(self, "reversible_cost_layers", {})),
+            "consumables": [item.to_dict() for item in getattr(self, "consumables", [])],
             "amnesia_refundable": [inst.dao_wen.name for inst in self.refundable_daowen()],
             "daowen_cooldowns": {
                 k: {"battles": int(getattr(v, "cooldown_remaining", 0)),

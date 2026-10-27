@@ -659,6 +659,9 @@ def test_ai_state_projection_hides_unseen_entities_terrain_and_locations(tmp_pat
     world.actors[player_id].x, world.actors[player_id].y = 1, 1
     world.actors[seen.runtime_id].x, world.actors[seen.runtime_id].y = 2, 1
     world.actors[hidden.runtime_id].x, world.actors[hidden.runtime_id].y = 7, 7
+    # 本用例控制地点可见性，不依赖生成器恰好留空该格。
+    world.map.locations = {key: loc for key, loc in world.map.locations.items()
+                           if (loc["x"], loc["y"]) != (2, 2)}
     world.map.add_location("hidden_site", {
         "kind": "event", "name": "隐藏地点", "event_name": "秘密",
         "x": 2, "y": 2, "discovered": False, "active": True,

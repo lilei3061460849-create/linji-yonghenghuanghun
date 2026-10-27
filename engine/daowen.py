@@ -21,7 +21,7 @@ RELICIZED_SLOT = "？？"
 PLACEHOLDER_SLOTS = frozenset({RESERVED_SLOT, RELICIZED_SLOT})
 RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执",
+    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿",
 )}
 
 
@@ -281,19 +281,6 @@ class DaoWenEngine:
             cost_key: amount,
             "mana_gain": x,
             "summary": f"{cost_channel}{amount}，获得{x}点法力"
-        }
-    
-    @staticmethod
-    def calculate_guanchuan(x: int) -> dict:
-        """贯穿X：支付：法力2X。你造成的伤害无视格挡，持续X"""
-        return {
-            "dao_wen": "贯穿",
-            "x": x,
-            "cost_type": CostType.MANA.value,
-            "cost": 2 * x,
-            "duration": x,
-            "effect": "伤害无视格挡",
-            "summary": f"支付：{2 * x}法力，造成的伤害无视格挡，持续{x}回合"
         }
     
     @staticmethod
@@ -803,7 +790,6 @@ class DaoWenEngine:
             "增殖": cls.calculate_zengzhi,
             "束缚": cls.calculate_shufu,
             "透支": cls.calculate_touzhi,
-            "贯穿": cls.calculate_guanchuan,
             "封印": cls.calculate_fengyin,
             # 怪物原始（2026-10-25 用户令：【疯狂】【减速】遗物化，退出道纹体系）
             "全力": cls.calculate_quanli,
@@ -946,8 +932,8 @@ class ResonanceEngine:
             ("连击", "转换", "增殖"),
             # 删除慈悲/切割/缓慢后直连（2026-08-21）；贯穿→(曲解)束缚：概念腐化。
             ("增殖", "曲解", "透支"),
-            ("透支", "转换", "贯穿"),
-            ("贯穿", "曲解", "束缚"),
+            ("透支", "转换", RELICIZED_DAOWEN_SLOTS["贯穿"]),
+            (RELICIZED_DAOWEN_SLOTS["贯穿"], "曲解", "束缚"),
             ("束缚", "曲解", "封印"),
             ("封印", "反转", "杀伐"),
         ],

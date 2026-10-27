@@ -890,6 +890,8 @@ class GameEngine:
                 entry: dict[str, Any] = {"action_type": "consume_item",
                                          "params_schema": schema,
                                          "uses_remaining": item.current_uses}
+                if item.name == "破障晶":
+                    schema["mode"] = {"发射": "15点伤害，无视格挡与闪避", "破障": "自身本回合伤害无视格挡"}
                 if item.name in WING_MODES:
                     schema["mode"] = dict(WING_MODES[item.name])
                     entry["note"] = "翼类消耗品：每次使用选一个 mode，耗 1 点耐久"
@@ -2056,6 +2058,7 @@ class GameEngine:
             self._resolve_world_npc_encounters(world)
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
+            self._resolve_world_consumable_pickups(world)
             self._resolve_world_npc_merchant_trades(world)
             self._resolve_world_hiring_signals(world)
             self._resolve_world_temporary_alliances(world)
@@ -2107,6 +2110,18 @@ class GameEngine:
                             "player_visible": entity is self.state.player,
                             "location_id": location_id})
         return pickups
+
+    def _resolve_world_consumable_pickups(self, world: WorldState) -> list[dict]:
+        from .world_consumables import collect_consumables
+        return collect_consumables(world, self.state)
+
+    def _world_consumable_specs(self) -> dict[str, Consumable]:
+        from .events import EVENT_CONSUMABLES
+        specs = {name: Consumable(name, effect, uses, uses)
+                 for name, (uses, effect) in {**EVENT_CONSUMABLES, **TWISTED_TOOL_LIBRARY}.items()}
+        for name in WING_MODES:
+            specs[name] = make_wing_item(name)
+        return specs
 
     def _resolve_world_relic_pickups(self, world: WorldState) -> list[dict]:
         """处理世界时间推进后所有单位踩中真实遗物地点的拾取，不泄露NPC的隐藏所得。"""
@@ -2650,12 +2665,15 @@ class GameEngine:
                     "x": resource_pos[0], "y": resource_pos[1],
                     "discovered": False, "active": True})
                 available.remove(resource_pos)
+            from .world_consumables import scatter_consumables
+            scattered_count = scatter_consumables(world, self.dice, self._world_consumable_specs(), available)
             self._sync_world_entity_positions(world)
             final_phase = self._refresh_world_final_duel(world)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_initialize",
                     "result": {"width": width, "height": height,
                                "world_turn": world.clock.turn,
+                               "consumable_locations": scattered_count,
                                "spawned_monsters": len(spawned_monsters),
                                "spawned_reincarnators": len(spawned_reincarnators),
                                "event_locations": len(world.map.locations),
@@ -2709,6 +2727,9 @@ class GameEngine:
                                      position=[x, y])
                         result["resource_collected"] = {"name": location.get("name", "碎片残留"),
                                                         "shards": amount}
+                    elif location.get("kind") == "consumable":
+                        pickups = self._resolve_world_consumable_pickups(world)
+                        result["consumables_collected"] = [p for p in pickups if p["actor_id"] == actor_id]
                     elif location.get("kind") == "relic":
                         actor_entity = None
                         entity_candidates = ([self.state.player] if self.state.player else [])
@@ -2761,6 +2782,7 @@ class GameEngine:
             # NPC在本回合移动后踩中资源/遗物，也会真正拾取；隐藏NPC所得不会回传给玩家。
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
+            self._resolve_world_consumable_pickups(world)
             npc_trades = self._resolve_world_npc_merchant_trades(world)
             if npc_trades:
                 player_actor = world.actors.get(actor_id)
@@ -2803,6 +2825,7 @@ class GameEngine:
             self._advance_world_turns(world, actor_id, turns)
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
+            self._resolve_world_consumable_pickups(world)
             self._resolve_world_hiring_signals(world)
             self._resolve_world_temporary_alliances(world)
             self._share_created_being_vision(world)
@@ -3497,6 +3520,7 @@ class GameEngine:
             self._advance_world_turns(world, player_id, 1)
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
+            self._resolve_world_consumable_pickups(world)
             self._resolve_world_hiring_signals(world)
             self._resolve_world_temporary_alliances(world)
             self._share_created_being_vision(world)
@@ -3605,6 +3629,7 @@ class GameEngine:
         self._advance_world_turns(world, player_id, duration)
         self._resolve_world_shard_pickups(world)
         self._resolve_world_relic_pickups(world)
+        self._resolve_world_consumable_pickups(world)
         self._resolve_world_hiring_signals(world)
         self._resolve_world_temporary_alliances(world)
         self._share_created_being_vision(world)
@@ -6536,7 +6561,7 @@ class GameEngine:
 
         # 正文具名消耗品：全部在扣耐久前完成参数校验；未实现项不得“成功但只扣耐久”。
         # 2026-10-14 审计F4：镇魂铁钉处理器补齐（此前发而无用）；替死鬼/赶尸铃/黄符见下。
-        if item.name in {"绝息淤泥", "活性土壤", "假钞贴", "穿甲弹", "洗劫面具", "赤泉囊", "龙血瓶",
+        if item.name in {"绝息淤泥", "活性土壤", "假钞贴", "破障晶", "洗劫面具", "赤泉囊", "龙血瓶",
                           "镇魂铁钉", "赶尸铃", "黄符", "逆命筹", "怒火针", "灼罪钉", "定命丸"}:
             return self._consume_named_event_item(item, params)
 
@@ -6737,17 +6762,31 @@ class GameEngine:
         elif name == "假钞贴":
             item.use(); self.state.fake_shards += 20
             result.update({"fake_shards_gained": 20, "fake_shards": self.state.fake_shards})
-        elif name == "穿甲弹":
-            target = refs.get(params.get("target_ref", ""))
-            if target is None or self.state.on_player_side(target) == self.state.on_player_side(player):
-                return {"success": False, "error": "穿甲弹必须显式指定合法敌方target_ref"}
-            item.use()
-            detail = self.combat._apply_hostile_damage(target, 15, "无视格挡", player, ctx={
-                "timing": self.state.combat_subphase or self.state.phase, "source": "穿甲弹", "source_type": "consumable",
-                "actor": player, "target": target, "mechanic": "damage", "subtype": "consumable",
-                "amount": 15, "tags": {"consumable", "ignore_shield"},
-            })
-            result.update({"target": target.name, "damage": detail})
+        elif name == "破障晶":
+            if self.state.phase != GamePhase.IN_COMBAT.value or not player.is_alive:
+                return {"success": False, "error": "破障晶只能由存活角色在战斗中使用"}
+            mode = params.get("mode")
+            if mode not in {"发射", "破障"}:
+                return {"success": False, "error": "破障晶必须选择mode：发射／破障"}
+            if mode == "破障":
+                if params.get("target_ref") not in (None, "", "player:0"):
+                    return {"success": False, "error": "破障模式仅对使用者自身生效"}
+                item.use()
+                player.status_effects[:] = [s for s in player.status_effects if s.name != "贯穿"]
+                player.add_status(StatusEffect("贯穿", 1, value=1, source=name))
+                result.update({"mode": mode, "target": player.name, "duration": 1})
+            else:
+                target = refs.get(params.get("target_ref", ""))
+                if (target is None or not target.is_alive
+                        or self.state.on_player_side(target) == self.state.on_player_side(player)):
+                    return {"success": False, "error": "发射模式必须指定合法存活敌方target_ref"}
+                item.use()
+                detail = self.combat._apply_hostile_damage(target, 15, "无视格挡", player, ctx={
+                    "timing": self.state.combat_subphase or self.state.phase, "source": name, "source_type": "consumable",
+                    "actor": player, "target": target, "mechanic": "damage", "subtype": "consumable",
+                    "amount": 15, "tags": {"consumable", "ignore_shield", "ignore_dodge"},
+                })
+                result.update({"mode": mode, "target": target.name, "damage": detail})
         elif name == "洗劫面具":
             item.use(); self.combat.grant_bizhong(player, 2)
             result.update({"guaranteed_hits": 2, "remaining": self.combat.bizhong_remaining(player)})
@@ -8042,6 +8081,7 @@ class GameEngine:
                                   for k, v in e.dao_wen.items()},
             "spells": [s.to_dict() for s in e.spells],
             "relics": [r.to_dict() for r in e.relics],
+            "consumables": [dataclasses.asdict(item) for item in getattr(e, "consumables", [])],
             "status_effects": [{"name": s.name, "value": s.value,
                                  "remaining_rounds": s.remaining_rounds, "source": s.source,
                                  "scope": s.scope, "polarity": s.polarity,
@@ -8063,6 +8103,7 @@ class GameEngine:
                    is_alive=d.get("is_alive", True), shards=d.get("shards", 0),
                    shards_peak=d.get("shards_peak", max(0, int(d.get("shards", 0)))),
                    is_debt_bound=d.get("is_debt_bound", False))
+        e.consumables = [Consumable(**item) for item in d.get("consumables", [])]
         e.reversible_cost_layers = dict(d.get("reversible_cost_layers", {}))
         e.forgotten_cost_daowen = [DaoWenInstance(
             **{**item, "dao_wen": DaoWen(**item["dao_wen"])})
@@ -9797,6 +9838,10 @@ class GameEngine:
             if isinstance(entry, dict)
         )
         # 旧遗物【龙鳞】更名为物品【叠鳞甲】，不把旧龙鳞道纹/状态误转为遗物。
+        for item in getattr(state, "consumables", []):
+            if item.name == "穿甲弹":
+                item.name = "破障晶"
+                item.effect = "发射：15点伤害无视格挡与闪避；破障：自身伤害无视格挡持续1回合"
         for relic in list(getattr(state, "relics", [])) + list(getattr(state, "relics_pool", [])):
             if relic.name == "龙鳞":
                 relic.name = "叠鳞甲"

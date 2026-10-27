@@ -392,12 +392,12 @@ def test_r45_all_current_named_consumable_handlers(tmp_path):
     engine = _engine(tmp_path); player, enemy = _combat(engine)
     player.current_hp = 80; enemy.shield = 20
     items = [
-        Consumable("穿甲弹", "", 2, 2), Consumable("洗劫面具", "", 2, 2),
+        Consumable("破障晶", "", 2, 2), Consumable("洗劫面具", "", 2, 2),
         Consumable("龙血瓶", "", 10, 10), Consumable("绝息淤泥", "", 1, 1),
         Consumable("活性土壤", "", 1, 1),
     ]
     engine.state.consumables = items
-    shot = engine.execute_action("consume_item", {"name": "穿甲弹", "target_ref": "enemy:0"})
+    shot = engine.execute_action("consume_item", {"name": "破障晶", "mode": "发射", "target_ref": "enemy:0"})
     assert shot["success"] and enemy.current_hp == 85 and enemy.shield == 20
     mask = engine.execute_action("consume_item", {"name": "洗劫面具"})
     assert mask["success"] and engine.combat.bizhong_remaining(player) == 2
