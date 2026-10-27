@@ -5,7 +5,7 @@
 - 效果正文/支付方式：已迁移数值规则取 engine/rule_engine.py 的统一定义，其余取 engine/daowen.py DaoWenEngine.calculate_* docstring
 - 归属分类：engine/gamedata.py（通用核心 / ORIGINAL / TRANSFORM / REGION_EXCLUSIVE / RACE_EXCLUSIVE / BLOODLINE_EXCLUSIVE / UNIMPLEMENTED）
 - 残韵闭环：engine/daowen.py DaoWenEngine.CLOSED_LOOPS
-- 承载怪物：副本/*.md 全部怪物面板行（怪物池 + 事件/雇佣面板）
+- 承载怪物：已实现副本文档及沉沦海专属网络草案的全部面板行（怪物池 + 事件/雇佣面板）
 """
 import inspect
 import re
@@ -64,9 +64,14 @@ for name, fn in DaoWenEngine._registry.items():
         effects[name] = (eff + "。") if eff and not eff.endswith("。") else eff
     params_of[name] = list(inspect.signature(fn).parameters)
 
-# 承载怪物：扫描全部已实现副本文档的面板行（怪物池+事件/雇佣）
+# 承载怪物：扫描已实现副本 + 本阶段纳入道纹索引的沉沦海草案面板。
+# 其它未实现草案仍不计入当前可用道纹的承载怪物列。
 carriers = defaultdict(list)
-for region, text in sorted(load_dungeon_documents().items()):
+dungeon_documents = load_dungeon_documents()
+sunken_sea_path = ROOT / "副本" / "沉沦海.md"
+if sunken_sea_path.is_file():
+    dungeon_documents["沉沦海"] = sunken_sea_path.read_text(encoding="utf-8")
+for region, text in sorted(dungeon_documents.items()):
     for line in text.splitlines():
         m = PANEL.match(line.strip())
         if m and m.group(6):
@@ -193,7 +198,7 @@ A("- **归属与残韵闭环**：`engine/gamedata.py` + `engine/daowen.py`（`CL
   "  `CLOSED_LOOPS` 里的每条边为**无向边**（2026-10-07 用户令：残韵路径双向）——登记 `(a,类型,b)` 表示 a、b 互为相邻节点，\n"
   "  正反两向都走同一种残韵、同样消耗一次；双向由 `ResonanceEngine.find_transformations` 在查询时展开，边表不重复登记反向边。\n"
   "  闭环中的 `？？` 专用于道纹遗物化后的旧节点占位，`（待补）` 用于其它待补设计的空位；两类占位均不可作为残韵结果获得。")
-A("- **承载怪物**：解析自 `副本/*.md` 全部面板行（12只怪物池 + 事件/雇佣面板，如「追求者」）；格式 `怪物名X`。")
+A("- **承载怪物**：解析自已实现副本与沉沦海专属网络草案的面板行（怪物池 + 事件/雇佣面板）；格式 `怪物名X`。")
 A("- 冲突时：数值/结算以引擎为准，规则叙述以 [规则正文](规则正文.md#第四宇宙规则正文) 为准，本索引为派生索引（与两者冲突时应重新生成本文件）。")
 A("- 通用规则（自由规则里的自由控X、[目标]与闪避、代价结算、平分、声明、怪物冷却道纹X≤1等）见 [规则正文](规则正文.md#第四宇宙规则正文)，本文件不重复。")
 A("")
