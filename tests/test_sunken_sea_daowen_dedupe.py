@@ -1,7 +1,7 @@
 """回归：沉沦海道纹去重与【波及】迁移。"""
 from pathlib import Path
 
-from engine.daowen import DaoWenEngine
+from engine.daowen import ResonanceEngine
 from engine.gamedata import REGION_EXCLUSIVE_DAOWEN, SHAFA_LOOP_DAOWEN
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,7 +13,7 @@ def test_wave_moves_from_generic_loop_to_sunken_sea():
     assert "映照" not in REGION_EXCLUSIVE_DAOWEN["沉沦海"]
     assert "扩散" not in REGION_EXCLUSIVE_DAOWEN["沉沦海"]
 
-    loops = DaoWenEngine.CLOSED_LOOPS
+    loops = ResonanceEngine.CLOSED_LOOPS
     shafa = loops["杀伐闭环"]
     assert ("连击", "转换", "增殖") in shafa
     assert not any("波及" in (src, dst) for src, _, dst in shafa)
