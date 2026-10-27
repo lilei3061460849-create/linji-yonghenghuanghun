@@ -118,8 +118,7 @@ class Relic:
     name: str
     effect: str
     tags: list[str] = field(default_factory=list)
-    # 启用归类（2026-10-22 用户令）：持有不再受[血限]承载拦截，改为
-    # 「持有不限、生效数受承载约束」——enabled=False 的遗物仍持有，只是不生效。
+    # 启用归类仍保留：enabled=False 的遗物仍持有并占页，只是不生效；不再另限生效数。
     # 这是既有遗物对象上的一个状态，不是新品类；旧档缺此键一律默认 True。
     enabled: bool = True
 
@@ -315,6 +314,9 @@ class Entity:
     attack_count: int = 0        # 攻击次数
     attack_power: int = 0        # 攻击力
     
+    death_page_count: int = 10  # 四类资源共用，一页承载一种；与血限无关。
+    artifacts: list[str] = field(default_factory=list)
+
     # 道纹与法术
     dao_wen: dict[str, DaoWenInstance] = field(default_factory=dict)
     spells: list[Spell] = field(default_factory=list)
@@ -611,25 +613,25 @@ class Entity:
 
     @property
     def load_capacity(self) -> int:
-        """可承载的道纹/遗物**种类**上限 = [血限] // 30（2026-10-12 用户令）。
+        """死者之页总数；旧存档默认十页，不随血限变化。"""
+        return max(0, int(getattr(self, "death_page_count", 10)))
 
-        原文口径：**30X[血限] = 允许拥有 X 种道纹和 X 种遗物**。
-        两个额度各自独立计数、同为 X，不互相挤占；不足 30[血限] 的余数不折算。
-        血限被【衰老】等压低时额度同步收紧——已超出新额度的部分不会被自动没收
-        （正文没有写剥夺条款），但**再获得**会被 `GameEngine` 的获得入口拒绝。
-        道纹按"种"计（`dao_wen` 的键数），遗物也按"种"计（同名不重复计入）。
-        """
-        return max(0, self.blood_limit // 30)
+    @property
+    def pages_used(self) -> int:
+        from .death_pages import resource_keys
+        return len(resource_keys(self))
+
+    def _kind_capacity(self, kind: str) -> int:
+        from .death_pages import resource_keys
+        return max(0, self.load_capacity - sum(k != kind for k, _ in resource_keys(self)))
 
     @property
     def daowen_capacity(self) -> int:
-        """道纹种类上限（= `load_capacity`，单列出来是为了在报错文案里说清楚）。"""
-        return self.load_capacity
+        return self._kind_capacity("道纹")
 
     @property
     def relic_capacity(self) -> int:
-        """遗物种类上限（= `load_capacity`）。"""
-        return self.load_capacity
+        return self._kind_capacity("遗物")
 
     @property
     def action_count(self) -> int:
@@ -1030,6 +1032,7 @@ class Entity:
             "ai_memory": self.ai_memory,
             "dao_wen": {k: v.dao_wen.name for k, v in self.dao_wen.items()},
             "reversible_cost_layers": dict(getattr(self, "reversible_cost_layers", {})),
+            "death_page_count": self.load_capacity, "pages_used": self.pages_used,
             "consumables": [item.to_dict() for item in getattr(self, "consumables", [])],
             "amnesia_refundable": [inst.dao_wen.name for inst in self.refundable_daowen()],
             "daowen_cooldowns": {
@@ -1585,23 +1588,13 @@ class GameState:
         return {r.name for r in self.relics if getattr(r, "enabled", True)}
 
     def note_relic_gained(self, relic: Relic) -> None:
-        """新获得遗物时的启用归类：生效数未满承载则默认启用，满了则持有但不生效。
-
-        持有本身不再受承载拦截（2026-10-22 用户令）；玩家可在[战始]用
-        battle_start 的 active_relics 参数、或局外 set_active_relics 自定义启用。
-        """
-        player = self.player
-        if player is None:
-            relic.enabled = True
-            return
-        enabled_count = len({r.name for r in self.relics if getattr(r, "enabled", True) and r is not relic})
-        relic.enabled = enabled_count < player.relic_capacity
+        """页数限制持有；合法获得的遗物默认启用，不再另限生效数。"""
+        relic.enabled = True
 
     def set_active_relics(self, names) -> tuple:
         """把本局遗物的启用集合设为 names（战始/局外自定义启用）。
 
-        返回 (True, None) 或 (False, 错误文案)。启用数不得超过当前
-        [血限]承载；未列名的已持有遗物一律置为停用（仍持有，不丢弃）。
+        返回 (True, None) 或 (False, 错误文案)。启用数量不另限；未列名的已持有遗物一律置为停用（仍持有，不丢弃）。
         """
         player = self.player
         if player is None:
@@ -1615,10 +1608,6 @@ class GameState:
         unknown = [n for n in names if n not in owned]
         if unknown:
             return False, f"未持有遗物：{'、'.join(unknown)}"
-        cap = player.relic_capacity
-        if len(names) > cap:
-            return False, (f"生效遗物超出承载：[血限]{player.blood_limit} 只允许{cap}件生效"
-                           f"（30[血限]=1件），提交了{len(names)}件")
         wanted = set(names)
         for relic in self.relics:
             relic.enabled = relic.name in wanted
@@ -1628,7 +1617,7 @@ class GameState:
         """切换单件遗物的启用/停用（2026-10-22 用户令）。
 
         返回 (True, 现在是否启用) 或 (False, 错误文案)。停用永远允许；
-        启用时若生效数已满承载则拒绝（先停用一件，或改用 set_active_relics 整组改选）。
+        启用不再受血限或独立生效额度限制。
         """
         player = self.player
         if player is None:
@@ -1641,11 +1630,6 @@ class GameState:
         if getattr(relic, "enabled", True):
             relic.enabled = False
             return True, False
-        enabled_count = len({r.name for r in self.relics if getattr(r, "enabled", True)})
-        cap = player.relic_capacity
-        if enabled_count >= cap:
-            return False, (f"生效遗物已满承载：[血限]{player.blood_limit} 只允许{cap}件生效"
-                           f"（30[血限]=1件），先停用一件再启用【{name}】")
         relic.enabled = True
         return True, True
 
@@ -1828,9 +1812,7 @@ class GameState:
         """授予一件遗物；tag 用于标记 血族/龙族 等来源。"""
         r = Relic(name=name, effect=effect, tags=[tag] if tag else [])
         self.relics.append(r)
-        # 注意：授予口不走 note_relic_gained 的自动停用——初拥/龙族等「选了即授予」
-        # 的项目旧口径本就绕过承载拦截，默认启用；启用归类的自动停用只管
-        # 发现/自选/交易/拾取这些「遇到遗物」的获得入口（各自调用 note_relic_gained）。
+        # 默认启用；正式行动由事务层统一检查死者之页，失败时整体回滚。
         return r
 
     def remove_relic(self, name: str) -> bool:

@@ -52,6 +52,8 @@ def discover_consumables(world):
 
 
 def collect_consumables(world, state):
+    from .death_pages import bind_resources, can_accept
+    bind_resources(state)
     entities = ([state.player] if state.player else [])
     for group in ("friends", "employees", "temp_friends", "enemies"):
         entities.extend(getattr(state, group, []) or [])
@@ -67,6 +69,8 @@ def collect_consumables(world, state):
             entity = by_id.get(actor.actor_id)
             if (actor.is_illusion or not actor.alive or actor.position != pos
                     or entity is None or not entity.is_alive or entity.is_departed):
+                continue
+            if not can_accept(entity, "消耗品", location["name"]):
                 continue
             item = Consumable(**location["consumable"])
             if entity is state.player:

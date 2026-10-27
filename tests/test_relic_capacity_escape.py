@@ -1,17 +1,4 @@
-"""【承载上限】遗物额度撞「强制发现」时的脱困守护（2026-10-12 用户裁定③）。
-
-死结原文：`engine/api.py` 的门禁规定「有待选遗物时不许做任何别的动作」，
-而 `_action_choose_discovered_relic` 又规定「遗物额度已满不许选」。两条同时成立时
-引擎无法推进，且没有任何动作能清空 `pending_relic_choices`——实测报错
-`battle_start: 必须先从发现候选中选择1件遗物`（sim/build_learner 整局因此被判无效）。
-
-用户裁定：「可以替换/放弃」。故这里固化两条脱困出口，缺一即红：
-  1. `discard_discovered_relic`：放弃本次发现，清空待选列表，不取任何遗物；
-  2. `choose_discovered_relic(replace=…)`：换掉一件已持有的，总种数不变故不受额度限制。
-
-2026-10-22 改版：遗物持有不再受承载拦截（启用归类），超额选择直接成功、
-新遗物先停用——死结从源头上不存在了；替换/放弃作为通用能力保留，本文件继续守护。
-"""
+"""十页共用承载下，遗物满页发现必须仍能替换/放弃脱困。"""
 import os
 import sys
 
@@ -36,7 +23,11 @@ def _engine_at_capacity():
     first = setup["result"]["relic_choices"][0]
     e.execute_action("choose_discovered_relic", {"relic_name": first})
 
-    # 血限30 → 遗物额度恰好 1 种，且已被开局那件占满
+    # 九种道纹+一种遗物占满十张页，与血限无关。
+    from tests.test_load_capacity import _grant
+    e.state.player.dao_wen.clear()
+    for i in range(9):
+        _grant(e.state.player, f"占页{i}")
     e.state.player.blood_limit = 30
     assert e.state.player.relic_capacity == 1
     assert len({r.name for r in e.state.relics}) == 1
@@ -64,10 +55,9 @@ def test_deadlock_is_real_without_an_escape():
     assert "必须先从发现候选中选择1件遗物" in blocked["error"]
 
     pick = e.execute_action("choose_discovered_relic", {"relic_name": fresh[0]})
-    assert pick["success"] is True, pick
-    assert pick["result"]["enabled"] is False, "生效数已满，新遗物应先停用"
-    assert {x.name for x in e.state.relics} == {held, fresh[0]}, "持有不限：两件都在"
-    assert e.state.enabled_relic_names() == {held}, "只有原先那件在生效"
+    assert pick["success"] is False and "死者之页" in pick["error"]
+    assert {x.name for x in e.state.relics} == {held}
+    assert e.state.pending_relic_choices == fresh
 
 
 def test_discard_clears_pending_and_lets_the_game_proceed():
@@ -116,7 +106,7 @@ def test_replace_does_not_consume_the_quota_check():
 def test_replace_still_works_when_there_is_spare_quota():
     """额度还有余量时也允许替换（它是通用能力，不只是脱困手段）。"""
     e, held, fresh = _engine_at_capacity()
-    e.state.player.blood_limit = 90          # 额度 3，尚有余量
+    e.state.player.dao_wen.pop("占页0")  # 释放一页，不通过加血限扩容。
     r = e.execute_action("choose_discovered_relic",
                          {"relic_name": fresh[0], "replace": held})
     assert r["success"] is True
@@ -143,7 +133,7 @@ def test_replace_with_unowned_relic_is_rejected_and_changes_nothing():
                          {"relic_name": fresh[0], "replace": "根本不存在的遗物"})
 
     assert r["success"] is False
-    assert "无法用它替换" in r["error"], r
+    assert "替换" in r["error"], r
     assert {x.name for x in e.state.relics} == before
     assert e.state.pending_relic_choices, "失败的选择不得清空待选列表"
 
@@ -154,4 +144,4 @@ def test_replace_target_must_be_a_relic_not_a_daowen_name():
     r = e.execute_action("choose_discovered_relic",
                          {"relic_name": fresh[0], "replace": "杀伐"})
     assert r["success"] is False
-    assert "无法用它替换" in r["error"]
+    assert "替换" in r["error"]

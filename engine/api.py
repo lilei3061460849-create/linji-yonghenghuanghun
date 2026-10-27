@@ -28,6 +28,7 @@ from .world import (ALLY_KINDS, ALLY_SUGGESTION_RANGE, ALLY_SUGGESTIONS,
 from .enums import (GamePhase, CombatSubphase, ActionPhase, TriggerTiming,
                     InterruptType, EntityType, EffectScope, EffectPolarity)
 from .dice import DiceEngine
+from .death_pages import can_accept as can_accept_page_resource
 from .daowen import DaoWenEngine, ResonanceEngine
 from .combat import CombatEngine
 from .spell_dsl import parse_spell_definition, SpellDslError
@@ -265,6 +266,8 @@ class GameEngine:
         获取当前决策者可观察的游戏状态。
         开放世界局外阶段按当前视野投影；战斗中保留现有完整战斗状态。
         """
+        from .death_pages import bind_resources
+        bind_resources(self.state)
         state_data = self._project_state_for_world_player(self.state.to_dict())
         return {
             "state": state_data,
@@ -508,13 +511,13 @@ class GameEngine:
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "探索", "tier": {1: "发现1个未遇事件", 2: "30碎片发现2个未遇事件"}}},
             {"action_type": "set_active_relics", "params_schema": {
-                "relic_names": "生效遗物名列表（自定义启用）：持有不限，生效数≤[血限]承载（30[血限]=1件）；"
+                "relic_names": "生效遗物名列表（自定义启用）：持有占死者之页，生效数不另限；"
                                "未列名遗物仍持有、只是不生效；也可改在 battle_start 时用 active_relics 提交"},
              "note": (f"当前生效：{sorted(self.state.enabled_relic_names())}；"
-                      f"承载：{self.state.player.relic_capacity if self.state.player else 0}件"
+                      f"死者之页：{self.state.player.pages_used}/{self.state.player.load_capacity}张"
                       if self.state.player else "当前无玩家")},
             {"action_type": "toggle_relic", "params_schema": {
-                "relic_name": "要切换启用/停用的单件遗物名：停用永远允许；启用时生效数已满承载则拒绝"},
+                "relic_name": "要切换启用/停用的单件遗物名；停用不释放死者之页，启用不另限数量"},
              "note": "与 set_active_relics 互补：本行动只翻一件的启用状态"},
         ]
         for region_action in self._get_region_actions():
@@ -582,7 +585,7 @@ class GameEngine:
         if self.state.energy <= 0:
             battle_start_schema: dict[str, Any] = {
                 "relic_choices": "逐件显式提交可选战始遗物",
-                "active_relics": "可选：本场生效的遗物名列表（自定义启用，≤[血限]承载）；不提交则沿用当前启用集合"}
+                "active_relics": "可选：本场生效的遗物名列表（自定义启用，不另限生效数量）；不提交则沿用当前启用集合"}
             global_spells_start = self.combat.prepare_global_trigger_spells(TriggerTiming.BATTLE_START.value)
             if global_spells_start:
                 battle_start_schema["spell_choices"] = {
@@ -1213,6 +1216,8 @@ class GameEngine:
                     setattr(current, key, copy.deepcopy(saved_value))
 
         restore_object(self.state, snapshot)
+        from .death_pages import bind_resources
+        bind_resources(self.state)
 
     def _snapshot_combat_runtime(self) -> dict:
         """保存不在GameState内、但会被行动修改的战斗运行态，供失败事务回滚。"""
@@ -1396,6 +1401,8 @@ class GameEngine:
         """
         if params is None:
             params = {}
+        from .death_pages import bind_resources
+        bind_resources(self.state)
 
         # 被动遗物状态在每次行动入口刷新，获得/封印/解封缄默面具后，后续法限变化
         # 都使用当前真实持有状态；预演路径也走同一核心入口。
@@ -1496,6 +1503,8 @@ class GameEngine:
         if phase_error:
             return phase_error
 
+        from .death_pages import usage, growth_error
+        page_usage_before = usage(self.state)
         state_before = None
         if transaction:
             # 所有行动按“校验失败不改变游戏状态”的原子契约执行。
@@ -1517,6 +1526,10 @@ class GameEngine:
         self.combat.resolution.begin_action(action_type, params, scale=_scale)
         try:
             result = self._dispatch_action(action_type, params)
+            if result.get("success", False):
+                page_error = growth_error(self.state, page_usage_before)
+                if page_error:
+                    result = {"success": False, "error": page_error}
 
             if not result.get("success", False) and transaction:
                 self._restore_state_in_place(state_before)
@@ -2152,9 +2165,8 @@ class GameEngine:
                 owned_names = {relic.name for relic in inventory}
                 relic_name = location.get("relic_name", location.get("name", ""))
                 capacity = getattr(entity, "relic_capacity", 10**9)
-                # 2026-10-22：玩家遗物持有不限（生效数才受承载），照常拾取；
-                # 非玩家单位维持原容量口径。
-                if relic_name not in owned_names and (is_player or len(owned_names) < capacity):
+                # 2026-10-27：各方均按剩余死者之页拾取，满页留在原地。
+                if relic_name not in owned_names and can_accept_page_resource(entity, "遗物", relic_name):
                     relic = Relic(name=relic_name, effect=location.get("relic_effect", ""),
                                   tags=list(location.get("relic_tags") or []))
                     inventory.append(relic)
@@ -2747,7 +2759,7 @@ class GameEngine:
                             capacity = (actor_entity.relic_capacity if is_player
                                         else getattr(actor_entity, "relic_capacity", 10**9))
                             owned_names = {relic.name for relic in owned_relics}
-                            if location.get("relic_name") not in owned_names and (is_player or len(owned_names) < capacity):
+                            if location.get("relic_name") not in owned_names and can_accept_page_resource(actor_entity, "遗物", location.get("relic_name")):
                                 relic = Relic(name=location["relic_name"],
                                               effect=location.get("relic_effect", ""),
                                               tags=list(location.get("relic_tags") or []))
@@ -4063,7 +4075,7 @@ class GameEngine:
                            "note": "本次发现不取任何遗物，待选列表已清空"}}
 
     def _action_set_active_relics(self, params: dict) -> dict:
-        """自定义启用遗物（2026-10-22 用户令）：持有不限，生效数受[血限]承载。
+        """自定义启用已持有的遗物：页数限制持有，不另限制生效数。
 
         局外整理用；战斗中不开放——生效集合在[战始]锁定，也可在
         battle_start 时以 active_relics 参数一次提交。
@@ -4077,14 +4089,14 @@ class GameEngine:
                 "result": {"enabled": sorted(self.state.enabled_relic_names()),
                            "disabled": sorted({r.name for r in self.state.relics}
                                               - self.state.enabled_relic_names()),
-                           "capacity": player.relic_capacity if player else 0,
-                           "blood_limit": player.blood_limit if player else 0}}
+                           "capacity": player.load_capacity if player else 0,
+                           "death_pages": player.load_capacity if player else 0}}
 
     def _action_toggle_relic(self, params: dict) -> dict:
         """切换单件遗物启用/停用（2026-10-22 用户令）。
 
         局外行动；与 set_active_relics（整组改选）互补：本行动只翻一件。
-        停用永远允许；启用时生效数已满承载则拒绝。
+        停用不释放页，启用不另限生效数量。
         """
         name = params.get("relic_name", params.get("name"))
         ok, result = self.state.toggle_relic(name)
@@ -4094,7 +4106,7 @@ class GameEngine:
         return {"success": True, "action": "切换遗物启用",
                 "result": {"relic": name, "enabled": result,
                            "enabled_relics": sorted(self.state.enabled_relic_names()),
-                           "capacity": player.relic_capacity if player else 0}}
+                           "capacity": player.load_capacity if player else 0}}
 
     def _action_choose_discovered_relic(self, params: dict) -> dict:
         choice = params.get("relic_name", "")
@@ -4106,11 +4118,7 @@ class GameEngine:
         relic = next((r for r in self.state.relics_pool if r.name == choice), None)
         if relic is None:
             return {"success": False, "error": f"遗物池中不存在【{choice}】"}
-        # 2026-10-12 用户令：30X[血限] = 允许拥有 X 种道纹和 X 种遗物；
-        # 2026-10-22 用户令改版：遗物**持有**不再受承载拦截，改为「持有不限、
-        # 生效数受承载约束」的启用归类——超出生效数的遗物仍可拿，只是先不生效，
-        # [战始]用 active_relics 自定义启用。原「替换」参数保留（换掉一件已持有
-        # 遗物再放入），原开局豁免与满额拒绝随之废止。
+        # 2026-10-27：四类资源共用死者之页；替换保留，获得由事务层统一校验。
         player = self.state.player
         replace_name = (params.get("replace") or "").strip()
         replaced = None
@@ -4378,8 +4386,8 @@ class GameEngine:
             if len(owned_names) + len(new_names) > cap:
                 self.state.energy += 1
                 return {"success": False,
-                        "error": (f"道纹种类超出接收者承载：[{target_entity.name}血限]"
-                                  f"{target_entity.blood_limit}只允许{cap}种，已持有{len(owned_names)}种，"
+                        "error": (f"道纹种类超出接收者死者之页承载：【{target_entity.name}】"
+                                  f"当前允许{cap}种，已持有{len(owned_names)}种，"
                                   f"本次新增{len(new_names)}种")}
         if cost > 0 and self.state.shards < cost:
             self.state.energy += 1
@@ -4439,7 +4447,7 @@ class GameEngine:
             if self.state.shards < 15:
                 self.state.energy += 1
                 return {"success": False, "error": "碎片不足15"}
-            # 2026-10-22 用户令：遗物持有不再受承载拦截（生效数才受限），
+            # 2026-10-27：获得由事务层统一按死者之页校验，
             # 自选照常扣费拿取，启用与否由 note_relic_gained 按当前生效数归类。
             self.state.shards -= 15
             self.state.energy -= 1
@@ -5806,7 +5814,7 @@ class GameEngine:
             return {"success": False, "error": f"【{target.name}】已经拥有道纹【{name}】"}
         if len(target.dao_wen) >= target.daowen_capacity:
             return {"success": False,
-                    "error": f"【{target.name}】的道纹承载已满：血限{target.blood_limit}，上限{target.daowen_capacity}种"}
+                    "error": f"【{target.name}】死者之页承载已满，当前道纹额度{target.daowen_capacity}种"}
         target.dao_wen[name] = DaoWenInstance(
             DaoWen(name=name, formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
         pending.remove(name)
@@ -6362,8 +6370,8 @@ class GameEngine:
         cap = player.daowen_capacity
         if len(player.dao_wen) >= cap:
             return {"success": False,
-                    "error": (f"道纹种类超出承载：[血限]{player.blood_limit} 只允许{cap}种"
-                              f"（30[血限]=1种），已持有{len(player.dao_wen)}种；"
+                    "error": (f"死者之页承载不足：当前最多允许{cap}种道纹"
+                              f"（四类共用{player.load_capacity}张死者之页），已持有{len(player.dao_wen)}种；"
                               f"本组发现保留，腾出额度后可重试")}
         player.dao_wen[choice] = DaoWenInstance(DaoWen(
             name=choice, formula="", cost_type="消耗",
@@ -7780,7 +7788,7 @@ class GameEngine:
                                scale_monster_def_for_endless, assign_monster_preferences)
         relic_choices = params.get("relic_choices", {})
         # 自定义启用（2026-10-22 用户令）：[战始]可提交 active_relics 选定
-        # 本场生效的遗物（≤[血限]承载），必须在战始遗物结算之前先生效。
+        # 本场生效的遗物（持有占页，生效数不另限），必须在战始遗物结算之前先生效。
         if params.get("active_relics") is not None:
             ok, error = self.state.set_active_relics(params.get("active_relics"))
             if not ok:
@@ -8082,6 +8090,8 @@ class GameEngine:
                                       "rounds": getattr(v, "cooldown_rounds_remaining", 0)}
                                   for k, v in e.dao_wen.items()},
             "spells": [s.to_dict() for s in e.spells],
+            "death_page_count": e.load_capacity,
+            "artifacts": list(getattr(e, "artifacts", [])),
             "relics": [r.to_dict() for r in e.relics],
             "consumables": [dataclasses.asdict(item) for item in getattr(e, "consumables", [])],
             "status_effects": [{"name": s.name, "value": s.value,
@@ -8105,6 +8115,8 @@ class GameEngine:
                    is_alive=d.get("is_alive", True), shards=d.get("shards", 0),
                    shards_peak=d.get("shards_peak", max(0, int(d.get("shards", 0)))),
                    is_debt_bound=d.get("is_debt_bound", False))
+        e.death_page_count = d.get("death_page_count", 10)
+        e.artifacts = list(d.get("artifacts", []))
         e.consumables = [Consumable(**item) for item in d.get("consumables", [])]
         e.reversible_cost_layers = dict(d.get("reversible_cost_layers", {}))
         e.forgotten_cost_daowen = [DaoWenInstance(
