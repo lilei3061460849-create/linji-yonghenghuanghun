@@ -761,7 +761,10 @@ class Entity:
         out: dict[str, tuple[int, int]] = {}
         if self.can_trigger_mutation_lost():
             out["迷失"] = (int(self.mutation_count), int(self.MUTATION_COLLAPSE_THRESHOLD))
-        if self.blood_limit > 0:
+        if self.has_status("无限血限"):
+            # -1 是结构化数据中的无限阈值哨兵；展示层统一渲染为 ∞。
+            out["癌变"] = (int(self.total_healed), -1)
+        elif self.blood_limit > 0:
             out["癌变"] = (int(self.total_healed),
                            int(math.ceil(self.blood_limit * self.CANCER_HEAL_MULTIPLIER)))
         if self.no_action_rounds or self.no_damage_rounds:
@@ -781,6 +784,9 @@ class Entity:
         """
         out = []
         for name, (current, limit) in self.lethal_counters().items():
+            if name == "癌变" and limit == -1:
+                out.append(f"癌变（{current}/∞）")
+                continue
             fmt = lethal_events.by_name(name)["progress_format"]
             out.append(fmt.format(name=name, current=current, limit=limit))
         return out
@@ -815,7 +821,8 @@ class Entity:
     def heal(self, amount: int, allow_overflow: bool = False) -> dict:
         """回复生命。allow_overflow=True 时当前生命可超出[血限]（遗物【猩红果实】）。"""
         before = self.current_hp
-        if allow_overflow:
+        # 【增殖】：临时无限血限期间，当前生命可以随回复超过基础血限。
+        if allow_overflow or self.has_status("无限血限"):
             self.current_hp = self.current_hp + amount
         else:
             self.current_hp = min(self.blood_limit, self.current_hp + amount)
@@ -972,7 +979,7 @@ class Entity:
             "created_by_runtime_id": getattr(self, "created_by_runtime_id", ""),
             "created_being_vision_range": max(1, int(getattr(self, "created_being_vision_range", 1))),
             "is_summoned": bool(getattr(self, "is_summoned", False)),
-            "blood_limit": self.blood_limit,
+            "blood_limit": "∞" if self.has_status("无限血限") else self.blood_limit,
             "current_hp": self.current_hp,
             "mana_limit": self.mana_limit,
             "current_mana": self.current_mana,
@@ -1387,7 +1394,10 @@ class GameState:
                 )
         # 2026-10-14：【猩红果实】持有者当前生命可超出[血限]，回复不再封顶
         # （溢出量归零，【忘忧香】/【龙血瓶】无溢出可吃——没有溢出，只有实打实的血）。
-        detail = entity.heal(amount, allow_overflow=self.hp_overflow_exempt(entity))
+        detail = entity.heal(
+            amount,
+            allow_overflow=(self.hp_overflow_exempt(entity) or entity.has_status("无限血限")),
+        )
         detail["heal_ctx"] = heal_ctx.to_dict()
         heal_events = getattr(entity, "_heal_events", None)
         if heal_events is None:

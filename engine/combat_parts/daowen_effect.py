@@ -467,6 +467,39 @@ class DaowenEffectMixin:
                     "owner": caster, "mechanic": "heal", "subtype": "daowen_pct", "amount": h,
                     "tags": {"daowen"},
                 })})
+        if name == "净化" and calc.get("cost_reductions"):
+            # 净化只逆转可逆的数值型代价；流血/失忆/冷却等不可直接按层恢复的事件不纳入。
+            reductions = calc["cost_reductions"]
+            for wt in wave_status_targets:
+                if not wt.is_alive:
+                    continue
+                applied = {}
+                if reductions.get("衰老", 0) > 0:
+                    amount = int(reductions["衰老"])
+                    wt.blood_limit += amount
+                    applied["衰老"] = amount
+                if reductions.get("枯竭", 0) > 0:
+                    amount = int(reductions["枯竭"])
+                    wt.mana_limit += amount
+                    applied["枯竭"] = amount
+                if reductions.get("萎缩", 0) > 0:
+                    amount = int(reductions["萎缩"])
+                    wt.speed_limit += amount
+                    applied["萎缩"] = amount
+                if reductions.get("疲惫", 0) > 0:
+                    amount = int(reductions["疲惫"])
+                    wt.current_speed = min(wt.speed_limit, wt.current_speed + amount)
+                    applied["疲惫"] = amount
+                if reductions.get("异变", 0) > 0:
+                    amount = int(reductions["异变"])
+                    pay = wt.add_mutation(-amount)
+                    applied["异变"] = {"requested": amount, "mutation_total": pay["mutation_total"]}
+                    if wt.entity_type == "怪物":
+                        redemption = self.check_redemption(wt)
+                        if redemption:
+                            result["effects"].append(redemption)
+                result["effects"].append({"type": "cost_purified", "target": wt.name,
+                                          "requested": reductions, "applied": applied})
         if "mutation_reduction" in calc:
             if "mutation_reduction" in wave_pieces:
                 pieces = self._divide_flat(calc["mutation_reduction"], len(wave_status_targets))
@@ -574,26 +607,6 @@ class DaowenEffectMixin:
                         actor=caster, owner=caster, clamp_hp=False, lethal=False)["applied"]
                     result["effects"].append({"type": "blood_limit_increase", "target": target.name,
                                               "increase": increase})
-        if "zengzhi_battle_end" in calc:
-            # 2026-10-14：【增殖】重做——血限增长记入战终待决（多次发动累加，
-            # 战终统一结算；目标死亡/持【不朽之躯】则结算时落空）。
-            _ref_of = {}
-            for _ref, _ent in self._combat_entity_refs().items():
-                _ref_of[id(_ent)] = _ref
-            _pending = self.state.event_modifiers.setdefault("zengzhi_pending", [])
-            if "zengzhi_battle_end" in wave_pieces:
-                pieces = self._divide_flat(calc["zengzhi_battle_end"], len(wave_status_targets))
-                wave_pieces["zengzhi_battle_end"] = pieces
-                for wt, piece in zip(wave_status_targets, pieces):
-                    _pending.append({"target_ref": _ref_of.get(id(wt), wt.name),
-                                     "amount": piece})
-                    result["effects"].append({"type": "zengzhi_pending", "target": wt.name,
-                                              "amount": piece})
-            else:
-                _pending.append({"target_ref": _ref_of.get(id(target), target.name),
-                                 "amount": calc["zengzhi_battle_end"]})
-                result["effects"].append({"type": "zengzhi_pending", "target": target.name,
-                                          "amount": calc["zengzhi_battle_end"]})
         # ---- 攻击面板修改 ----
         _panel_keys = ("attack_boost", "attack_reduction", "attack_fixed", "attack_count_fixed")
         # 波及扩散：attack_boost/reduction 数值平分；attack_fixed/attack_count_fixed
@@ -791,7 +804,7 @@ class DaowenEffectMixin:
             else:
                 caster.fake_shards = getattr(caster, "fake_shards", 0) + calc["fake_shards"]
             result["effects"].append({"type": "fake_shards", "gained": calc["fake_shards"]})
-        if "cost_shards" in calc and name != "消灾":  # 消灾的付费在专属分支统一处理
+        if "cost_shards" in calc:
             spent = self._lose_shards_of(self.state.player, calc["cost_shards"]) if caster is self.state.player else 0
             result["effects"].append({"type": "cost_shards", "spent": spent})
 
@@ -1055,29 +1068,28 @@ class DaowenEffectMixin:
             # 2026-09-17 用户令：【变形】改为可自由选择目标（不指定时默认自身），
             # 故移出"自身作用型"名单，状态随之挂到目标身上（到期还原也落在目标）。
             self_targeted = name in ("飞行", "必中", "固执", "贯穿")
+            status_name = "无限血限" if calc.get("infinite_blood_limit") else name
             if self_targeted:
                 et = caster
-                et.add_status(self._daowen_status(daowen_order=daowen_order, name=name, remaining_rounds=duration, value=x, source=caster.name))
+                et.add_status(self._daowen_status(daowen_order=daowen_order, name=status_name, remaining_rounds=duration, value=x, source=caster.name))
                 result["effects"].append({"type": "status_added", "target": et.name,
-                                          "status": name, "duration": duration, "value": x})
+                                          "status": status_name, "duration": duration, "value": x})
             else:
                 # 波及：状态类效果对每个拥有波及效果的目标（含本次[目标]）原样生效。
                 for et in wave_status_targets:
                     if not et.is_alive:
                         continue
-                    et.add_status(self._daowen_status(daowen_order=daowen_order, name=name, remaining_rounds=duration, value=x, source=caster.name))
+                    et.add_status(self._daowen_status(daowen_order=daowen_order, name=status_name, remaining_rounds=duration, value=x, source=caster.name))
                     result["effects"].append({"type": "status_added", "target": et.name,
-                                              "status": name, "duration": duration, "value": x})
+                                              "status": status_name, "duration": duration, "value": x})
 
-        if name == "凝滞" and calc.get("rounds_delta"):
-            # 凝滞重做：使用统一 rounds 动词延长目标指定状态的剩余回合数。
-            status_name = calc["status_name"]
+        if name == "沉溺" and calc.get("extra_target_rounds"):
+            # 沉溺：目标额外经历回合，推进目标回合事件、凡庸与自身限时状态。
             for st_target in wave_status_targets:
-                applied = apply_verb(self, "rounds", {
-                    "target": st_target, "status_name": status_name,
-                    "delta": calc["rounds_delta"],
-                }, daowen_ctx.to_dict())
-                result["effects"].append({"type": "rounds_extended", **applied})
+                if not st_target.is_alive:
+                    continue
+                advanced = self.advance_target_rounds(st_target, int(calc["extra_target_rounds"]), source="沉溺")
+                result["effects"].extend(advanced)
 
         if name == "血契":
             # 重新发动时以新目标组替换旧组；目标ID写入状态，随战斗快照保存。
@@ -1115,17 +1127,13 @@ class DaowenEffectMixin:
             for st_target in wave_status_targets:
                 result["effects"].append({"type": "shanghen", "target": st_target.name, "x": x})
 
-        # ---- F2 全量：罪孽都市（清算/消灾/抵扣）的注册与即时结算 ----
+        # ---- F2 全量：罪孽都市（清算/抵扣）的注册与即时结算 ----
         # （2026-10-13 用户令删【逼债】：此处原挂账块与【逼债·结算/对账】机制一并移除）
         # 清算X：[回始]使[目标]失去你[碎片]点格挡，持续X。此处仅挂账。
         if name == "清算":
             for st_target in wave_status_targets:
                 ledger_of(st_target, "清算").append({"x": x, "caster": caster})
                 result["effects"].append({"type": "qingsuan_register", "target": st_target.name, "x": x})
-        # 消灾X：玩家侧在_action_use_daowen预检付费；怪物侧由两阶段决策结算器付费；此处登记重投次数。
-        elif name == "消灾":
-            self.dice.set_rerolls(self.dice.rerolls_pending + x)
-            result["effects"].append({"type": "xiaozai_rerolls", "added": x, "total": self.dice.rerolls_pending})
         # 抵扣X（旧名）：封印[目标]拥有的一件遗物，持续X
         elif name == "抵扣":
             for st_target in wave_status_targets:

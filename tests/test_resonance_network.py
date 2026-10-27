@@ -1,7 +1,7 @@
 """
 pytest - 残韵闭环完整性（引擎 CLOSED_LOOPS 必须与规则正文声明一致）
 
-背景：现行将原杀伐/切割两轨首尾接成一个14节点【杀伐闭环】；
+背景：现行杀伐闭环为10个节点；原杀伐/切割两轨已合并并持续去重。
 规则正文声明的三条副本闭环与怪物原始道纹转化也必须完整登记，
 导致对怪物面板道纹发动残韵必然失败。
 
@@ -92,26 +92,59 @@ def test_monster_transform_branch_is_reversible():
     ]
 
 
-def test_single_fourteen_node_core_loop():
-    """正常路径：杀伐闭环为唯一11节点核心闭环（2026-08-21：冲击改名波及；删除缓慢、慈悲、切割）。"""
+def test_single_ten_node_core_loop():
+    """正常路径：杀伐闭环为唯一10节点核心闭环（2026-08-21：冲击改名波及；删除缓慢、慈悲、切割）。"""
     assert "杀伐闭环" in R.CLOSED_LOOPS
     assert "切割闭环" not in R.CLOSED_LOOPS
     edges = R.CLOSED_LOOPS["杀伐闭环"]
-    assert len(edges) == 11
+    assert len(edges) == 10
     assert sorted(source for source, _, _ in edges) == sorted(target for _, _, target in edges)
-    assert R.find_transformation("连击", "转换") == "波及"
-    assert R.find_transformation("波及", "反转") == "增殖"
+    assert R.find_transformation("连击", "转换") == "增殖"
+    assert R.find_transformation("增殖", "转换") == "连击"
+    assert R.find_transformation("波及", "反转") == "遗忘"
     assert R.find_transformation("封印", "反转") == "杀伐"
     for removed in ("冲击", "慈悲", "切割", "缓慢"):
         assert not any(src == removed or tgt == removed for src, _, tgt in edges)
 
 
+def test_unimplemented_sunken_sea_nodes_cannot_be_acquired_by_resonance():
+    from engine.gamedata import UNIMPLEMENTED_DAOWEN, learnability_error
+    from engine.daowen import DaoWenEngine
+
+    for name in UNIMPLEMENTED_DAOWEN:
+        error = learnability_error(name, owned=set(), region="沉沦海",
+                                   known=set(DaoWenEngine._registry))
+        assert "尚未接入运行时" in error
+
+    for source, rtype, target in (
+        ("回响", "转换", "流动"),
+        ("波及", "反转", "遗忘"),
+        
+    ):
+        result = R.apply_resonance(source, rtype, caster_has_daowen=True,
+                                   target_has_daowen=True, target_daowen=target)
+        assert not result["success"]
+        assert "尚未接入运行时" in result["error"]
+
+
+def test_race_exclusive_sunken_sea_nodes_cannot_be_acquired_by_resonance():
+    for source, rtype, target in (
+        ("遗忘", "曲解", "唤潮"),
+        ("沉溺", "曲解", "蜃景"),
+    ):
+        result = R.apply_resonance(source, rtype, caster_has_daowen=True,
+                                   target_has_daowen=True, target_daowen=target)
+        assert not result["success"]
+        assert "鲛族专属道纹" in result["error"]
+
+
 def test_region_loops_present():
     """正常路径：所有已登记的副本闭环必须存在"""
-    # 2026-10-03：扭曲都市删【爆裂】、龙心谷删【活血】，这两条闭环 8 → 7 条边；罪孽都市不变。
+    # 2026-10-03：扭曲都市删【爆裂】、龙心谷删【活血】，这两条闭环 8 → 7 条边。
+    # 2026-10-27：罪孽都市移除【消灾】，闭环压缩为7条边。
     # 2026-10-11：龙心谷删【嫁祸】（效果与遗物【贪婪契约】重复），由【裂变】直连【背负】，7 → 6 条边。
     # 2026-10-14：扭曲都市删【搏命】（并入【透支】），该格留成空占位符（镇尸先例），仍 7 条边。
-    expected = {"扭曲都市闭环": 7, "罪孽都市闭环": 8, "龙心谷闭环": 6, "沉沦海闭环": 8}
+    expected = {"扭曲都市闭环": 7, "罪孽都市闭环": 7, "龙心谷闭环": 6, "沉沦海闭环": 7}
     for loop, n in expected.items():
         assert loop in R.CLOSED_LOOPS, f"缺少 {loop}"
         assert len(R.CLOSED_LOOPS[loop]) == n, f"{loop} 应有{n}条边"
@@ -129,6 +162,14 @@ def test_monster_daowen_now_transformable():
 
 
 # ---------- 边界条件 ----------
+
+def test_disaster_ward_is_removed_from_sin_city_loop():
+    edges = R.CLOSED_LOOPS["罪孽都市闭环"]
+    assert len(edges) == 7
+    assert not any(src == "消灾" or dst == "消灾" for src, _, dst in edges)
+    assert R.get_available_resonance("消灾") == []
+    assert R.find_transformation("？？", "曲解", target_daowen="点金") == "点金"
+
 
 def test_region_loops_are_closed():
     """边界：副本闭环必须真正合拢（每个节点入度=出度=1）"""
@@ -162,10 +203,16 @@ def test_ambiguous_path_requires_explicit_target():
         assert R.find_transformation(s, t) is None
         res = R.apply_resonance(s, t, True, True, resonance_stock={t: 1})
         assert res["success"] is False and res.get("ambiguous") is True, (s, t, res)
+        from engine.gamedata import UNIMPLEMENTED_DAOWEN, RACE_EXCLUSIVE_DAOWEN, BLOODLINE_EXCLUSIVE_DAOWEN
+        exclusive = set(BLOODLINE_EXCLUSIVE_DAOWEN) | set(UNIMPLEMENTED_DAOWEN)
+        exclusive |= {name for pool in RACE_EXCLUSIVE_DAOWEN.values() for name in pool}
         for dst in candidates:
             assert R.find_transformation(s, t, dst) == dst
             ok = R.apply_resonance(s, t, True, True, resonance_stock={t: 1}, target_daowen=dst)
-            assert ok["success"] is True and ok["target"] == dst, (s, t, dst, ok)
+            if dst in exclusive:
+                assert ok["success"] is False, (s, t, dst, ok)
+            else:
+                assert ok["success"] is True and ok["target"] == dst, (s, t, dst, ok)
         bad = R.apply_resonance(s, t, True, True, resonance_stock={t: 1}, target_daowen="不存在的道纹")
         assert bad["success"] is False
     assert checked > 0, "仍应存在至少一个具有多个真实出口的歧义路径"

@@ -1,12 +1,9 @@
 """资源设计标准的机械护栏（2026-10-23 用户裁定落地）。
 
-四类资源的资格与结构写在《AI知识库》「【二、资源设计标准】」：
+四类资源的类型定义与结构写在《规则正文》「基础定义」；《AI_EXPERIENCE.md》只保留新增资源资格与资源转换标准：
 
-- 新增资格（道纹／遗物／法器）：现有任何资源都无法实现的效果，才有资格新增资源。消耗品不受此限制。
-- 道纹：名称仅二字；默认局内发动，局外须条文**明示**；必有 X，X 只能提升强度或持续时间。
-- 遗物：无 X 变量；必有触发时机及对应效果。
-- 法器：不受限其他资源规则；必有明确且独特的效果。
-- 消耗品：主／被动均可；不消耗出手；可当场设计。
+- **新增资源资格**：新增道纹、遗物、法器，必须实现现有资源无论如何组合都无法实现的效果；消耗品不受此限制。
+- **资源转换标准**：凡是不符合自身类型定义的资源，应转换为其他符合其自身定义的资源类型；效果强度过高时优先转换为消耗品，效果强度过低时优先转换为遗物。
 
 本文件只做「能机械判定」的那部分。设计层判断（是否真的独一无二、触发时机是否自洽）
 留给 DM 与评审，不在此处伪造通过。
@@ -27,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine, OUT_OF_COMBAT_DAOWEN  # noqa: E402
 from engine.daowen import DaoWenEngine  # noqa: E402
-from engine.models import DaoWen, DaoWenInstance  # noqa: E402
+from engine.models import Consumable, DaoWen, DaoWenInstance  # noqa: E402
 from tests.setup_support import finish_initial_daowen  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -143,15 +140,15 @@ def test_daowen_x_scales_strength_or_duration():
 # ==================== 道纹：局外发动须明示 ====================
 
 def test_out_of_combat_daowen_whitelist_is_explicit():
-    """默认局内；局外白名单只能由条文明示项构成：消灾、真理、唤潮、蜃景。"""
-    assert OUT_OF_COMBAT_DAOWEN == frozenset({"消灾", "真理", "唤潮", "蜃景"})
+    """默认局内；已转为消耗品的逆命筹不再占用道纹局外发动白名单。"""
+    assert OUT_OF_COMBAT_DAOWEN == frozenset({"真理", "唤潮", "蜃景"})
+    assert "消灾" not in DaoWenEngine._registry
 
 
-def test_unlisted_daowen_rejected_out_of_combat_and_listed_one_allowed(engine):
-    """边界：名单外的道纹在局外被拒且错误文案点明明示口径；名单内的照常发动。"""
-    _grant(engine, ["杀伐", "消灾"])
+def test_unlisted_daowen_rejected_out_of_combat_and_converted_rune_is_retired(engine):
+    """边界：未明示局外的道纹被拒；已转换的消灾不再接受道纹发动入口。"""
+    _grant(engine, ["杀伐"])
     engine.state.phase = "pre_battle"
-    engine.state.fake_shards = 100
 
     blocked = engine.execute_action("use_daowen", {
         "daowen_name": "杀伐", "x": 1,
@@ -159,12 +156,40 @@ def test_unlisted_daowen_rejected_out_of_combat_and_listed_one_allowed(engine):
     assert not blocked["success"]
     assert "局外发动须条文明示" in blocked["error"], blocked
 
-    allowed = engine.execute_action("use_daowen", {
+    retired = engine.execute_action("use_daowen", {
         "daowen_name": "消灾", "x": 1,
         "dodge": False, "blood_shadow": False, "trigger_spell_choices": {}})
-    assert allowed["success"], allowed
-    assert engine.state.player.actions_used_this_round == 0
+    assert not retired["success"], retired
     engine.state.phase = "in_combat"
+
+
+def test_inverse_fate_consumable_registers_one_reroll_and_spends_durability(engine):
+    """逆命筹是固定耐久消耗品；使用后只为下一次随机结算增加一次重投。"""
+    previous_phase = engine.state.phase
+    previous_rerolls = engine.dice.rerolls_pending
+    engine.state.phase = "pre_battle"
+    engine.dice.set_rerolls(0)
+    item = Consumable(
+        name="逆命筹",
+        effect="使用后使引擎下一次随机结算额外投掷一次，并以第二次结果为准",
+        current_uses=1,
+        max_uses=1,
+    )
+    engine.state.consumables.append(item)
+    try:
+        used = engine.execute_action("consume_item", {"name": "逆命筹"})
+        assert used["success"], used
+        assert item.current_uses == 0
+        assert engine.dice.rerolls_pending == 1
+
+        roll = engine.dice.auto_roll("inverse_fate_regression", [1, 2, 3],
+                                     context="逆命筹回归测试")
+        assert roll["rerolled"] is True
+        assert engine.dice.rerolls_pending == 0
+    finally:
+        engine.state.consumables.remove(item)
+        engine.dice.set_rerolls(previous_rerolls)
+        engine.state.phase = previous_phase
 
 
 # ==================== 遗物：无 X 变量 / 必有触发时机 ====================
@@ -211,15 +236,25 @@ def test_artifact_section_exists_and_entries_are_unique():
 
 # ==================== 消耗品：不耗出手 / 主被动均可 ====================
 
-def test_consumable_rules_text_keeps_no_action_and_passive_capability():
-    """消耗品口径：不消耗出手（正文）＋主／被动均可当场设计（知识库）。"""
+def test_four_resource_type_definitions_live_in_rules_text():
+    """四类资源的类型定义统一以《规则正文》为事实源，知识库只保留跨类型设计原则。"""
     rules = RULES_TEXT.read_text(encoding="utf-8")
+    assert ("**道纹：**" in rules and "必有 X 变量" in rules
+            and "效果强度、持续时间或目标数量" in rules and "无触发时机" in rules)
+    assert "**遗物：**" in rules and "不得自带第二种货币" in rules
+    assert "**法器：**" in rules and "明确且独特的效果" in rules
+    assert "**消耗品：**" in rules and "主动与被动均可生效" in rules
     assert "使用时不消耗出手" in rules
     assert "消耗品（X/Y）" in rules
+
     knowledge = KNOWLEDGE.read_text(encoding="utf-8")
-    assert "主动与被动均可生效" in knowledge
-    assert "不消耗出手" in knowledge
-    assert "当场设计" in knowledge
+    assert "现有资源无论如何组合都无法实现的效果" in knowledge
+    assert "资源转换标准" in knowledge
+    # 类型定义不得在知识库重复维护。
+    assert "- **道纹：" not in knowledge
+    assert "- **遗物：" not in knowledge
+    assert "- **法器：" not in knowledge
+    assert "- **消耗品：" not in knowledge
 
 
 def test_consumable_without_registered_handler_is_rejected(engine):

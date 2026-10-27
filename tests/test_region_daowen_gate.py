@@ -17,7 +17,7 @@ sys.path.insert(0, ROOT)
 
 from engine.api import GameEngine
 from engine.models import DaoWen, DaoWenInstance
-from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
+from engine.gamedata import REGION_EXCLUSIVE_DAOWEN, BLOODLINE_EXCLUSIVE_DAOWEN
 
 
 def _engine(region="龙心谷"):
@@ -46,8 +46,47 @@ def _learn(e, name):
 def test_common_daowen_always_learnable():
     """正常路径：通用核心道纹不受副本门禁限制"""
     e = _engine("龙心谷")
-    for dw in ("庇护", "再生", "波及", "连击"):
+    for dw in ("庇护", "再生", "连击"):
         assert _learn(e, dw)["success"], f"通用道纹{dw}应可学习"
+
+
+def test_race_exclusive_daowen_are_not_learnable_from_generic_pool():
+    from engine.gamedata import learnability_error
+
+    known = {"唤潮", "蜃景"}
+    assert "鲛族专属道纹" in learnability_error("唤潮", owned=set(), region="沉沦海", known=known)
+    assert "鲛族专属道纹" in learnability_error("蜃景", owned=set(), region="龙心谷", known=known)
+
+
+def test_disaster_ward_is_retired_and_replaced_by_consumable():
+    from engine.daowen import DaoWenEngine
+    from engine.gamedata import learnability_error
+    from pathlib import Path
+
+    DaoWenEngine.register_all()
+    assert "消灾" not in DaoWenEngine._registry
+    assert "消灾" not in BLOODLINE_EXCLUSIVE_DAOWEN
+    assert all("消灾" not in pool for pool in REGION_EXCLUSIVE_DAOWEN.values())
+    root = Path(__file__).resolve().parents[1]
+    crime_text = (root / "副本" / "罪孽都市.md").read_text(encoding="utf-8")
+    loop = next(line for line in crime_text.splitlines() if "⇄" in line)
+    assert "消灾" not in loop
+    assert "通缉犯（66/4/3，假钞）" in crime_text
+    item_index = (root / "物品索引.md").read_text(encoding="utf-8")
+    assert "### 逆命筹" in item_index
+    error = learnability_error("消灾", owned=set(), region="罪孽都市", known=set(DaoWenEngine._registry))
+    assert "未知道纹" in error
+
+
+def test_wave_is_sunken_sea_exclusive():
+    """【波及】归属门禁可独立验证；沉沦海尚未接入完整副本运行时。"""
+    from engine.gamedata import learnability_error
+
+    known = {"波及"}
+    rejected = learnability_error("波及", owned=set(), region="龙心谷", known=known)
+    assert "沉沦海专属道纹" in rejected
+    allowed = learnability_error("波及", owned={"沉溺"}, region="沉沦海", known=known)
+    assert allowed is None
 
 
 def test_can_learn_same_region_after_owning_one():
@@ -57,7 +96,7 @@ def test_can_learn_same_region_after_owning_one():
     e.state.player.dao_wen["裂变"] = DaoWenInstance(
         DaoWen(name="裂变", formula="", cost_type="消耗",
                cost_formula="X", effect_formula=""))
-    for dw in ("加害", "龙鳞"):
+    for dw in ("龙鳞", "背负"):
         assert _learn(e, dw)["success"], f"同副本专属道纹{dw}应可学习"
 
 
@@ -97,7 +136,7 @@ def test_rejected_monster_daowen_refunds_energy():
 def test_first_exclusive_cannot_be_learned_directly():
     """边界：未持有任何本副本专属道纹时，不能直接学习第一个"""
     e = _engine("龙心谷")
-    r = _learn(e, "加害")
+    r = _learn(e, "龙鳞")
     assert not r["success"]
     assert "残韵" in r["error"]
 
@@ -112,13 +151,14 @@ def test_energy_refunded_on_rejection():
 
 
 def test_gate_applies_to_every_region():
-    """边界：三个副本的专属道纹都应受门禁约束"""
-    for region, pool in REGION_EXCLUSIVE_DAOWEN.items():
-        e = _engine(region)
+    """边界：所有登记副本的专属池都必须拒绝跨副本学习；不要求副本已接入运行时。"""
+    from engine.gamedata import learnability_error
+
+    for region in REGION_EXCLUSIVE_DAOWEN:
         other = next(rg for rg in REGION_EXCLUSIVE_DAOWEN if rg != region)
         foreign = sorted(REGION_EXCLUSIVE_DAOWEN[other])[0]
-        r = _learn(e, foreign)
-        assert not r["success"], f"{region}不应能学{other}的{foreign}"
+        error = learnability_error(foreign, owned=set(), region=region, known={foreign})
+        assert error is not None, f"{region}不应能学{other}的{foreign}"
 
 
 # ---------- 错误输入 ----------
@@ -129,7 +169,7 @@ def test_foreign_region_exclusive_always_rejected():
     e.state.player.dao_wen["裂变"] = DaoWenInstance(
         DaoWen(name="裂变", formula="", cost_type="消耗",
                cost_formula="X", effect_formula=""))
-    for foreign in ("超频", "点金", "坏死", "典当"):   # 遗物化道纹退化已删除；其余异副本专属仍应拒绝
+    for foreign in ("超频", "点金", "坏死", "典当", "波及"):   # 遗物化道纹退化已删除；其余异副本专属仍应拒绝
         r = _learn(e, foreign)
         assert not r["success"], f"{foreign}属于其他副本，不应可学"
         assert "专属道纹" in r["error"]

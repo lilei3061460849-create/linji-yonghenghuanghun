@@ -368,16 +368,13 @@ class DaoWenRuleDefinition:
     def _rule_text(self, rule: DamageRuleDefinition, x: str | int, subject: str) -> str:
         value_label = _value_label(rule.reads)
         operator = rule.operator
-        # 2026-10-11 用户令：固执改为「你每次失去的生命不会超过1」，加害/龙鳞描述简化。
+        # 2026-10-11 用户令：固执改为「你每次失去的生命不会超过1」，龙鳞描述简化。
         # 三条都不再复述「格挡后仍有伤害待结算的非代价受击」这一长串触发口径。
         # 主语按用户口径写「你」（default_subject 仍是「自身」，只在文案层改写）。
         subject = "你" if self.default_subject == "自身" else subject
         if rule.daowen_name == "固执":
             cap = _format_number(operator.operand if operator.operand is not None else 0)
             return f"{subject}每次失去的生命不会超过{cap}，{self.duration.describe(x)}"
-        if rule.daowen_name == "加害":
-            # 2026-10-11 用户令简化：正文口径「[目标]每次受到伤害+X，永久」
-            return f"{subject}每次受到伤害+{x}，{self.duration.describe(x)}"
         if rule.daowen_name == "龙鳞":
             bound = _format_number(operator.lower_bound) if operator.lower_bound is not None else "0"
             return f"{subject}每次受到伤害-{x}（最低为{bound}），{self.duration.describe(x)}"
@@ -1082,10 +1079,12 @@ def _damage_rule(rule_id: str, daowen_id: str, name: str, status_name: str,
     )
 
 
+# 【加害】已转为消耗品【灼罪钉】。此规则仅结算消耗品施加的「加害」状态，不再代表可发动道纹。
 JIAHAI_RULE = _damage_rule(
-    "daowen.jiahai.incoming_damage.add", "daowen.jiahai", "加害", "加害",
+    "item.jiazuoding.incoming_damage.add", "item.jiazuoding", "加害", "加害",
     OperatorSpec(RuleOperator.ADD), OperandSource.STATUS_VALUE, 20,
 )
+STATUS_DAMAGE_RULES = (JIAHAI_RULE,)
 LONG_LIN_RULE = _damage_rule(
     "daowen.longlin.incoming_damage.subtract", "daowen.longlin", "龙鳞", "龙鳞",
     OperatorSpec(RuleOperator.SUBTRACT, lower_bound=0), OperandSource.STATUS_VALUE, 30,
@@ -1097,10 +1096,6 @@ GUZHI_RULE = _damage_rule(
 )
 
 DAOWEN_RULES: dict[str, DaoWenRuleDefinition] = {
-    "加害": DaoWenRuleDefinition(
-        daowen_id="daowen.jiahai", name="加害", cost_type="消耗",
-        cost_multiplier=Fraction(2), duration=DurationSpec(DurationKind.PERMANENT),
-        rules=(JIAHAI_RULE,), default_subject="目标"),
     "龙鳞": DaoWenRuleDefinition(
         daowen_id="daowen.longlin", name="龙鳞", cost_type="消耗",
         cost_multiplier=Fraction(2), duration=DurationSpec(DurationKind.PERMANENT),
@@ -1113,10 +1108,13 @@ DAOWEN_RULES: dict[str, DaoWenRuleDefinition] = {
 
 RULES_BY_ID: dict[str, DamageRuleDefinition] = {
     rule.rule_id: rule
-    for daowen in DAOWEN_RULES.values()
-    for rule in daowen.rules
+    for rule in (
+        [rule for daowen in DAOWEN_RULES.values() for rule in daowen.rules]
+        + list(STATUS_DAMAGE_RULES)
+    )
 }
-if len(RULES_BY_ID) != sum(len(defn.rules) for defn in DAOWEN_RULES.values()):
+if len(RULES_BY_ID) != (
+        sum(len(defn.rules) for defn in DAOWEN_RULES.values()) + len(STATUS_DAMAGE_RULES)):
     raise RuleError("规则 ID 重复")
 
 UNMIGRATED_REASON = (

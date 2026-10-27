@@ -1104,6 +1104,96 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             "state": self._get_combat_state()
         }
     
+    def advance_target_rounds(self, target: Entity, rounds: int, source: str = "沉溺") -> list[dict]:
+        """令单一目标额外经历若干回合。
+
+        角色经历的回合数与世界回合数分离：这里不修改 state.current_round，也不执行
+        全场回合结算、增援/封印计时或额外行动。每个额外回合只结算目标的角色回合相位、
+        凡庸、有限状态到期与对应清理；回增机制读取的仍是当前世界回合数。
+        """
+        effects: list[dict] = []
+        rounds = max(0, int(rounds))
+        # 额外回合需要自己的周期记录，但不能覆盖正在进行的世界回合记录。
+        # 例如目标已经在世界第10回合出手后再受到【沉溺】，其额外回合应按
+        # “没有在这个额外回合出手”推进凡庸；结算结束后，第10回合原始行动/伤害记录恢复。
+        cycle_fields = (
+            "hp_lost_this_round", "_hp_loss_events", "_speed_change_events",
+            "_blood_limit_events", "actions_used_this_round",
+            "blood_oath_used_this_round", "mana_inflicted_this_round",
+            "damage_dealt_this_round",
+        )
+        saved_fields = {}
+        for field_name in cycle_fields:
+            if hasattr(target, field_name):
+                value = getattr(target, field_name)
+                saved_fields[field_name] = list(value) if isinstance(value, list) else value
+
+        try:
+            for index in range(rounds):
+                if not target.is_alive or self.state.battle_over():
+                    break
+
+                # 这些字段属于单个角色经历的回合，不是世界时间。每次额外经历都从
+                # 独立的周期记录开始；不运行全场 ROUND_START_SETTLE，因为其中包含
+                # 灾厄轮盘等会影响其他角色的全局效果。
+                target.hp_lost_this_round = 0
+                if hasattr(target, "_hp_loss_events"):
+                    target._hp_loss_events = []
+                if hasattr(target, "_speed_change_events"):
+                    target._speed_change_events = []
+                if hasattr(target, "_blood_limit_events"):
+                    target._blood_limit_events = []
+                target.actions_used_this_round = 0
+                target.damage_dealt_this_round = 0
+                target.blood_oath_used_this_round = False
+                target.mana_inflicted_this_round = 0
+
+                effects.extend(self._dispatch_phase(Phase.ROUND_START_PREPARE, target=target))
+                effects.extend(self._dispatch_phase(Phase.ROUND_START, target=target))
+
+                # 回增机制按角色经历回合触发，但读取的 current_round 始终是世界回合数。
+                effects.extend(self._dispatch_phase(Phase.ROUND_INCREASE, target=target))
+                effects.extend(self._dispatch_phase(Phase.ROUND_END, target=target))
+
+                why = self._tick_mediocrity_counters(target) if target.is_alive else None
+                if why:
+                    effects.extend(self._apply_mediocrity(target, why))
+
+                expired = target.tick_status_effects()
+                if expired:
+                    if "无限血限" in expired and not self.state.hp_overflow_exempt(target):
+                        before_hp = target.current_hp
+                        target.current_hp = min(target.current_hp, target.blood_limit)
+                        if target.current_hp <= 0 and target.is_alive:
+                            self._check_hp_zero_death(target)
+                        effects.append({"type": "infinite_blood_limit_expired", "entity": target.name,
+                                        "blood_limit": target.blood_limit, "hp_before": before_hp,
+                                        "hp_after": target.current_hp})
+                    panel_modifier_sources = {"全力", "弱化"}
+                    rolled_back = self.state.rollback_scoped_sources(target, set(expired) & panel_modifier_sources)
+                    effects.append({"type": "status_expired", "entity": target.name,
+                                    "expired_effects": expired, "rolled_back_deltas": rolled_back})
+                    if "逆鳞" in expired and hasattr(target, "_nilin"):
+                        target._nilin = 0
+                    if "飞行" in expired and not self._is_flying(target):
+                        target.is_flying = False
+                    if "变形" in expired and hasattr(target, "_bianxing_original"):
+                        target.current_speed, target.current_mana = target._bianxing_original
+                        delattr(target, "_bianxing_original")
+                        self.clamp_immortal_body(target)
+                        effects.append({"type": "bianxing_restore", "entity": target.name,
+                                        "current_speed": target.current_speed, "current_mana": target.current_mana})
+
+                effects.extend(self._dispatch_phase(Phase.ROUND_END_POST_MEDIOCRITY, target=target))
+                effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=target))
+                effects.append({"type": "extra_target_round", "source": source, "target": target.name,
+                                "round": self.state.current_round, "index": index + 1, "total": rounds})
+        finally:
+            for field_name, value in saved_fields.items():
+                setattr(target, field_name, value)
+
+        return effects
+
     def round_end(self, blood_lineage_cost_share_target_ref: str = "") -> dict:
         """
         回终结算
@@ -1178,6 +1268,19 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
             expired = entity.tick_status_effects()
             if expired:
+                # 【增殖】到期后恢复基础血限；若当前生命超出基础血限，按恢复后的血限封顶。
+                if "无限血限" in expired and not self.state.hp_overflow_exempt(entity):
+                    before_hp = entity.current_hp
+                    entity.current_hp = min(entity.current_hp, entity.blood_limit)
+                    if entity.current_hp <= 0 and entity.is_alive:
+                        self._check_hp_zero_death(entity)
+                    effects.append({
+                        "type": "infinite_blood_limit_expired",
+                        "entity": entity.name,
+                        "blood_limit": entity.blood_limit,
+                        "hp_before": before_hp,
+                        "hp_after": entity.current_hp,
+                    })
                 # 只有“持续期间直接改写面板”的效果到期即还原；畸变/伤痕等
                 # 已经产生的累计局内后果保留到战终，再由battle作用域统一回滚。
                 panel_modifier_sources = {"全力", "弱化"}

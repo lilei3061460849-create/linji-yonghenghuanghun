@@ -7,6 +7,7 @@ from typing import Optional, Any
 from .models import Entity, StatusEffect, DaoWen, DaoWenInstance
 from .enums import CostType
 from .rule_engine import daowen_migration_status, get_daowen_rule
+from .gamedata import UNIMPLEMENTED_DAOWEN, RACE_EXCLUSIVE_DAOWEN, BLOODLINE_EXCLUSIVE_DAOWEN
 import math
 
 
@@ -20,7 +21,7 @@ RELICIZED_SLOT = "？？"
 PLACEHOLDER_SLOTS = frozenset({RESERVED_SLOT, RELICIZED_SLOT})
 RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-    "冥气", "退化", "畸变", "缄默",
+    "冥气", "退化", "畸变", "缄默", "加害",
 )}
 
 
@@ -160,7 +161,7 @@ class DaoWenEngine:
 
     # 连击六通道价格（2026-10-22 用户令：与【透支】同类多代价道纹，价格与效果全表同乘五）：
     # 流血5X／法力5X／衰老X／枯竭X／碎片5X／假碎片50X；效果 选择[目标]5X次、每次1点伤害。
-    # 比率锚现有体系：【消灾】1单位=5碎片/50假碎片、【假钞】1法力=10假碎片、
+    # 比率锚现有体系：消耗品【逆命筹】承接重投效果；【假钞】1法力=10假碎片、
     # 【透支】上限类按整X计价；全乘五后衰老/枯竭回到整数X计价，不留⌈X/5⌉零头，
     # 流血也回到旧【血债】「1点生命换1点伤害」的老比率（只是以5为一段）。
     # 各通道效果完全相同，只有倍率不同，不带任何通道专属机制
@@ -223,11 +224,11 @@ class DaoWenEngine:
             "summary": f"支付：{2 * x}法力。选择{x}个目标，目标组彼此平分道纹效果，持续∞。"
         }
     
-    # ---- 杀伐11节点闭环后半（增殖至封印）----
+    # ---- 杀伐10节点闭环后半（增殖至封印）----
     
     @staticmethod
     def calculate_xueqi(x: int, target: Entity = None) -> dict:
-        """血契X：支付：法力10X。选择X个目标，目标组彼此平分数值型代价，持续∞。"""
+        """血契X：支付：法力10X。选择X个存活的非自身目标建立血契分担组，持续∞；施法者支付的数值型【代价】由分担组内存活目标平分（不含施法者），余数按平分规则随机分配。"""
         cost = 10 * x
         return {
             "dao_wen": "血契", "x": x,
@@ -238,21 +239,16 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_zengzhi(x: int, target: Entity = None) -> dict:
-        """增殖X：支付：流血10X。［战终］［目标］［血限］+2X
-
-        2026-10-14 用户令重做：承接遗物【猩红果实】旧效果
-        （战始可选流血10 → 战终血限+2），按 X 等比放大为流血10X → 战终+2X；
-        原「支付：X、即时血限+X」废止。发动即付流血代价（走代价管线，
-        触发【血誓戒】/【烙痕钉】等），血限增长记入战终待决、战终统一结算。
-        """
+        """增殖X：支付：流血10X。使[目标]的[血限]变为∞，持续X回合（战终清除）。"""
         target_name = target.name if target is not None else "未选定目标"
         return {
             "dao_wen": "增殖",
             "x": x,
             "cost_type": CostType.BLEED.value,
             "cost_hp": 10 * x,
-            "zengzhi_battle_end": 2 * x,
-            "summary": f"流血{10 * x}，战终{target_name}血限+{2 * x}"
+            "duration": x,
+            "infinite_blood_limit": True,
+            "summary": f"流血{10 * x}，使{target_name}的血限变为∞，持续{x}回合"
         }
     
     @staticmethod
@@ -365,16 +361,29 @@ class DaoWenEngine:
         }
     
     @staticmethod
-    def calculate_jinghua(x: int, target: Entity = None) -> dict:
-        """净化X：支付：法力2X。使[目标]【异变】-X层"""
+    def calculate_jinghua(x: int, target: Entity = None, cost_choices: list[dict] | None = None) -> dict:
+        """净化X：支付法力2X；施法者自选要消除的可逆数值型代价，层数合计不超过X。"""
         target_name = target.name if target is not None else "未选定目标"
+        allowed = {"衰老", "枯竭", "萎缩", "疲惫", "异变"}
+        choices = cost_choices if cost_choices is not None else [{"type": "异变", "layers": x}]
+        normalized = {}
+        for item in choices:
+            if not isinstance(item, dict):
+                raise ValueError("净化的 cost_choices 必须是 {type, layers} 列表")
+            kind = str(item.get("type", ""))
+            layers = item.get("layers", 0)
+            if kind not in allowed:
+                raise ValueError(f"净化暂不支持消除【{kind or '未指定'}】代价")
+            if not isinstance(layers, int) or isinstance(layers, bool) or layers < 0:
+                raise ValueError("净化每类代价层数必须是非负整数")
+            normalized[kind] = normalized.get(kind, 0) + layers
+        total = sum(normalized.values())
+        if total > x:
+            raise ValueError(f"净化选择的代价总层数{total}超过X={x}")
         return {
-            "dao_wen": "净化",
-            "x": x,
-            "cost_type": CostType.MANA.value,
-            "cost": 2 * x,
-            "mutation_reduction": x,
-            "summary": f"支付：{2 * x}法力，使{target_name}【异变】-{x}层",
+            "dao_wen": "净化", "x": x, "cost_type": CostType.MANA.value, "cost": 2 * x,
+            "cost_reductions": normalized,
+            "summary": f"支付：{2*x}法力，使{target_name}消除代价{normalized}（共{total}/{x}层）",
         }
     
     @staticmethod
@@ -398,20 +407,6 @@ class DaoWenEngine:
         }
     
 
-    @staticmethod
-    def calculate_fennu(x: int, target: Entity = None) -> dict:
-        """愤怒X：支付：法力2X。使[目标]法力消耗减半，持续X"""
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "愤怒",
-            "x": x,
-            "cost_type": CostType.MANA.value,
-            "cost": 2 * x,
-            "mana_cost_halved": True,
-            "duration": x,
-            "summary": f"支付：{2 * x}法力，使{target_name}法力消耗减半，持续{x}回合"
-        }
-    
     @staticmethod
     def calculate_ruhua(x: int, target: Entity = None) -> dict:
         """弱化X：支付：法力2X。使[目标]攻击力-X，持续∞"""
@@ -553,23 +548,6 @@ class DaoWenEngine:
     
 
     @staticmethod
-    def calculate_jiahai(x: int, target: Entity = None) -> dict:
-        """加害X：支付：法力2X。数值规则见 engine.rule_engine.DAOWEN_RULES。"""
-        definition = get_daowen_rule("加害")
-        target_name = target.name if target is not None else "未选定目标"
-        cost = definition.cost(x)
-        return {
-            "dao_wen": "加害",
-            "x": x,
-            "cost_type": definition.cost_type,
-            "cost": cost,
-            "duration": definition.duration.value(x),
-            "status": {"name": definition.rules[0].status_name, "value": x,
-                       "duration": definition.duration.value(x)},
-            "summary": definition.summary(x, target_name=target_name),
-        }
-
-    @staticmethod
     def calculate_dianjin(x: int) -> dict:
         """点金X：代价失忆X；你获得80X碎片。"""
         return {
@@ -668,16 +646,6 @@ class DaoWenEngine:
             "summary": f"支付：{x}法力，获得{10*x}假碎片"
         }
     
-    @staticmethod
-    def calculate_xiaozai(x: int) -> dict:
-        """消灾X：支付：50X假碎片/5X碎片（局外发动支付：×2）。重置随机数X次以改变结果"""
-        return {
-            "dao_wen": "消灾", "x": x, "cost_type": "碎片",
-            "fake_cost": 50 * x, "real_cost": 5 * x,
-            "rerolls": x,
-            "summary": f"支付：{50*x}假碎片或{5*x}碎片（局外×2），重置随机数{x}次"
-        }
-    
     # ---- 龙心谷专属道纹 ----
     
     @staticmethod
@@ -720,34 +688,27 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_chao(x: int) -> dict:
-        """唤潮X：支付法力X，在开放地图中将自身周围X个可用格改为水流地形。"""
+        """唤潮X：支付：法力X。在开放地图中，以自身所在格为中心选择周围X个可用地图格，将其改为【水流】地形；只有鲛族可以进入或穿越【水流】格。"""
         return {"dao_wen": "唤潮", "x": x, "cost_type": CostType.MANA.value,
                 "cost": x, "map_terrain": "water_current",
                 "summary": f"支付：{x}法力，在开放地图周围设置{x}格水流地形"}
 
     @staticmethod
     def calculate_shenjing(x: int) -> dict:
-        """蜃景X：支付法力10X，在开放地图施术者所在格创造X个地图幻象。"""
+        """蜃景X：支付：法力10X。在开放地图的施术者所在格创造X个外观与施术者相同的地图幻象；生成后，施术者与幻象分别向不同方向自主移动，欺骗追踪与寻路。幻象不参与战斗；被任何其他角色接触时消散，施术者死亡时其全部幻象消散。进入战斗本身不会清除幻象。"""
         return {"dao_wen": "蜃景", "x": x, "cost_type": CostType.MANA.value,
                 "cost": 10 * x, "map_illusions": x,
                 "summary": f"支付：{10*x}法力，在开放地图创造{x}个地图幻象"}
 
     @staticmethod
-    def calculate_ningzhi(x: int, target: Entity = None, status_name: str = "") -> dict:
-        """凝滞X：支付法力5X。使[目标]身上一种有限持续效果的剩余回合数+X。"""
+    def calculate_chengni(x: int, target: Entity = None) -> dict:
+        """沉溺X：支付：法力5X。使[目标]额外经历X个回合；世界回合数不变，不提供额外行动机会。"""
         if target is None:
-            raise ValueError("凝滞必须显式选择目标")
-        if not status_name:
-            raise ValueError("凝滞必须提交status_name，指定要延长的状态")
-        status = next((s for s in target.status_effects if s.name == status_name), None)
-        if status is None:
-            raise ValueError(f"目标{target.name}没有状态：{status_name}")
-        if status.remaining_rounds <= 0:
-            raise ValueError(f"状态{status_name}没有可延长的有限剩余回合数")
+            raise ValueError("沉溺必须显式选择目标")
         return {
-            "dao_wen": "凝滞", "x": x, "cost_type": CostType.MANA.value,
-            "cost": 5 * x, "rounds_delta": x, "status_name": status_name,
-            "summary": f"支付：{5*x}法力，使{target.name}的状态【{status_name}】剩余回合数+{x}",
+            "dao_wen": "沉溺", "x": x, "cost_type": CostType.MANA.value,
+            "cost": 5 * x, "extra_target_rounds": x,
+            "summary": f"支付：{5*x}法力，使{target.name}真实额外经历{x}回合",
         }
 
     # ========== 乱葬岗（二阶）专属道纹 ==========
@@ -878,7 +839,6 @@ class DaoWenEngine:
             "净化": cls.calculate_jinghua,
             "必中": cls.calculate_bizhong,
             # 怪物转化（2026-10-11 A14：无神/借力/衰败 已删）
-            "愤怒": cls.calculate_fennu,
             "弱化": cls.calculate_ruhua,
             "全速": cls.calculate_quansu,
             "蒙蔽": cls.calculate_mengbi,
@@ -888,7 +848,6 @@ class DaoWenEngine:
             "超频": cls.calculate_chaopin,
             "坏死": cls.calculate_huaisi,
             # 罪孽都市
-            "加害": cls.calculate_jiahai,
             "点金": cls.calculate_dianjin,
             # 2026-10-13 用户令：【逼债】删除，【典当】顶替其闭环格（点金—转换—典当—反转—豪夺）。
             "典当": cls.calculate_diandang,
@@ -898,7 +857,6 @@ class DaoWenEngine:
             # 2026-10-14 用户令：补点金反转分叉，还债新生产者。
             "勒索": cls.calculate_lesuo,
             "假钞": cls.calculate_jiachao,
-            "消灾": cls.calculate_xiaozai,
             # 龙心谷
             "龙鳞": cls.calculate_longlin,
             "裂变": cls.calculate_liebian,
@@ -906,7 +864,7 @@ class DaoWenEngine:
             # ---- 沉沦海（二阶）----
             "唤潮": cls.calculate_chao,
             "蜃景": cls.calculate_shenjing,
-            "凝滞": cls.calculate_ningzhi,
+            "沉溺": cls.calculate_chengni,
             # ---- 乱葬岗（二阶）----
             "分裂": cls.calculate_fenlie,
             "瓦解": cls.calculate_wajie,
@@ -1014,10 +972,9 @@ class ResonanceEngine:
             ("再生", "曲解", "庇护"),
             ("庇护", "曲解", "固执"),
             ("固执", "反转", "连击"),
-            ("连击", "转换", "波及"),
-            # 删除慈悲/切割/缓慢后直连（2026-08-21）：
-            # 波及→(反转)增殖：扩散伤害与成长的极性对冲；贯穿→(曲解)束缚：概念腐化。
-            ("波及", "反转", "增殖"),
+            # 2026-10-27：波及迁入沉沦海；原位直连，沿用前一条边的残韵类型。
+            ("连击", "转换", "增殖"),
+            # 删除慈悲/切割/缓慢后直连（2026-08-21）；贯穿→(曲解)束缚：概念腐化。
             ("增殖", "曲解", "透支"),
             ("透支", "转换", "贯穿"),
             ("贯穿", "曲解", "束缚"),
@@ -1044,10 +1001,9 @@ class ResonanceEngine:
             ("豪夺", "曲解", "清算"),
             ("清算", "反转", "抢劫"),
             ("抢劫", "转换", "假钞"),
-            # 2026-10-14 用户令：凡道纹遗物化，原闭环节点直接移除并以 RELICIZED_SLOT（？？）占位；保留两侧边，不重连。
+            # 原遗物化节点以「？？」占位；移除【消灾】后，按用户要求将该占位直接接向【点金】。
             ("假钞", "曲解", RELICIZED_SLOT),
-            (RELICIZED_SLOT, "反转", "消灾"),
-            ("消灾", "曲解", "点金"),
+            (RELICIZED_SLOT, "曲解", "点金"),
         ],
         # ---- 副本专属分叉（非闭环：单边spur，不参与合拢断言）----
         # 2026-10-14 用户令：补【点金】的【反转】→【勒索】。点金已有出边
@@ -1060,14 +1016,14 @@ class ResonanceEngine:
             ("点金", "反转", "勒索"),
         ],
         "龙心谷闭环": [
-            ("加害", "反转", "龙鳞"),
+            (RELICIZED_DAOWEN_SLOTS["加害"], "反转", "龙鳞"),
             ("龙鳞", "曲解", RELICIZED_DAOWEN_SLOTS["逆鳞"]),
             (RELICIZED_DAOWEN_SLOTS["逆鳞"], "转换", "裂变"),
             # 2026-10-11 用户令（A13）：【嫁祸】整条删除（效果与遗物【贪婪契约】重复）
             #   → 沿用活血/尸爆的删除先例：断边**重连**为 裂变—转换→背负，环长 7→6。
             ("裂变", "转换", "背负"),
             ("背负", "曲解", RELICIZED_DAOWEN_SLOTS["伤痕"]),
-            (RELICIZED_DAOWEN_SLOTS["伤痕"], "转换", "加害"),
+            (RELICIZED_DAOWEN_SLOTS["伤痕"], "转换", RELICIZED_DAOWEN_SLOTS["加害"]),
         ],
         "乱葬岗闭环": [
             # 【缄默】已遗物化：该节点保留独立「？？」占位，不与相邻节点直连。
@@ -1082,13 +1038,12 @@ class ResonanceEngine:
             ("招魂", "转换", "分裂"),
         ],
         "沉沦海闭环": [
-            ("流动", "转换", "映照"),
-            ("映照", "转换", "扩散"),
-            ("扩散", "反转", "遗忘"),
+            ("流动", "转换", "波及"),
+            ("波及", "反转", "遗忘"),
             ("遗忘", "曲解", "唤潮"),
             ("唤潮", "反转", "蜃景"),
-            ("蜃景", "曲解", "凝滞"),
-            ("凝滞", "曲解", "回响"),
+            ("蜃景", "曲解", "沉溺"),
+            ("沉溺", "曲解", "回响"),
             ("回响", "转换", "流动"),
         ],
         # ---- 原始怪物道纹 → 转化道纹（规则正文）----
@@ -1287,6 +1242,30 @@ class ResonanceEngine:
             }
         else:
             chosen = candidates[0]
+
+        # 闭环草案节点、种族专属与血族专属都不能通过普通残韵越过获取门禁。
+        target_name = chosen["target_daowen"]
+        if target_name in UNIMPLEMENTED_DAOWEN:
+            owner = UNIMPLEMENTED_DAOWEN[target_name]
+            return {
+                "success": False,
+                "error": f"道纹【{target_name}】属于{owner}草案，尚未接入运行时，不能通过残韵获得",
+                "unimplemented": True,
+            }
+        race_owner = next((race for race, pool in RACE_EXCLUSIVE_DAOWEN.items()
+                           if target_name in pool), None)
+        if race_owner is not None:
+            return {
+                "success": False,
+                "error": f"道纹【{target_name}】是{race_owner}专属道纹，只能通过{race_owner}专属机制获得，不能通过残韵获得",
+                "exclusive": True,
+            }
+        if target_name in BLOODLINE_EXCLUSIVE_DAOWEN:
+            return {
+                "success": False,
+                "error": f"道纹【{target_name}】是血族专属道纹，只能通过血族专属机制获得，不能通过残韵获得",
+                "exclusive": True,
+            }
 
         # 检查玩家是否拥有该类型残韵
         if resonance_stock is not None:

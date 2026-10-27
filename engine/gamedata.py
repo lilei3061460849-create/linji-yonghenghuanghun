@@ -7,13 +7,21 @@
 REGION_EXCLUSIVE_DAOWEN = {
     "扭曲都市": {"变形", "定型", "超频", "坏死"},  # 【畸变】【退化】已遗物化，闭环留「？？」
     # 2026-10-13 用户令：删【逼债】，【典当】顶替其闭环格。
-    "罪孽都市": {"点金", "典当", "豪夺", "清算", "抢劫", "假钞", "消灾", "勒索"},  # 2026-10-14 +勒索
-    "龙心谷": {"加害", "龙鳞", "裂变", "背负"},  # 【逆鳞】【伤痕】已遗物化，闭环留「？？」
+    "罪孽都市": {"点金", "典当", "豪夺", "清算", "抢劫", "假钞", "勒索"},  # 2026-10-14 +勒索
+    "龙心谷": {"龙鳞", "裂变", "背负"},  # 【加害】已转换为消耗品【灼罪钉】，闭环旧节点留「？？」。  # 【逆鳞】【伤痕】已遗物化，闭环留「？？」
     # 乱葬岗删纹与面板空位保持登记；稳定后再补位。
     "乱葬岗": {"分裂", "瓦解", "勾魂", "招魂"},  # 【缄默】【冥气】已遗物化，闭环留「？？」
-    # 2026-10-27：沉沦海专属道纹池已登记；副本运行时效果仍待接入。
-    "沉沦海": {"流动", "映照", "扩散", "遗忘", "唤潮", "蜃景", "凝滞", "回响"},
+    # 2026-10-27：沉沦海专属池已登记；【流动】【遗忘】【回响】尚未接入运行时。
+    "沉沦海": {"流动", "波及", "遗忘", "沉溺", "回响"},
 }
+
+# 种族专属道纹：不计入任何副本专属学习池；怪物面板既有配置不受分类影响，普通残韵不能授予。
+RACE_EXCLUSIVE_DAOWEN = {
+    "鲛族": {"唤潮", "蜃景"},
+}
+
+# 血族专属道纹集合当前为空；原【消灾】已转换为消耗品【逆命筹】。
+BLOODLINE_EXCLUSIVE_DAOWEN = frozenset()
 
 ORIGINAL_MONSTER_DAOWEN = {"全力", "必中"}  # 2026-10-25 用户令：【疯狂】【减速】遗物化；【飞行】是状态
 
@@ -26,15 +34,15 @@ REGION_TIERS = {
 }
 
 MONSTER_TRANSFORM_DAOWEN = {
-    # 2026-10-03 删【兴奋】【滑翔】【坠落】；2026-10-08 再删一条无残韵路径的孤儿转化道纹；
-    # 2026-10-11 用户令删【无神】【借力】【衰败】
-    "愤怒", "弱化", "全速", "蒙蔽",
+    # 2026-10-03 删【兴奋】【滑翔】【坠落】；2026-10-08 删一条无残韵路径的孤儿转化道纹；
+    # 2026-10-11 删【无神】【借力】【衰败】；2026-10-27【愤怒】转为消耗品【怒火针】
+    "弱化", "全速", "蒙蔽",
 }
 
-# 杀伐闭环 11 节点；开局【发现】初始道纹只从这里抽。
+# 杀伐闭环 10 节点；开局【发现】初始道纹只从这里抽。
 # （2026-08-21：冲击改名波及；删除缓慢、慈悲、切割）
 SHAFA_LOOP_DAOWEN = (
-    "杀伐", "再生", "庇护", "固执", "连击", "波及",
+    "杀伐", "再生", "庇护", "固执", "连击",
     "增殖", "透支", "贯穿", "束缚", "封印",
 )
 
@@ -44,6 +52,13 @@ MONSTER_DAOWEN = ORIGINAL_MONSTER_DAOWEN | MONSTER_TRANSFORM_DAOWEN
 # 所属副本尚未接入运行时，但计算已实现；局外学习仍按专属道纹拒绝。
 UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN = {
     "净化": "荒疫古城",
+}
+
+# 已有闭环/规则草案节点，但尚未注册运行时效果；不可通过学习或残韵获取。
+UNIMPLEMENTED_DAOWEN = {
+    "流动": "沉沦海",
+    "遗忘": "沉沦海",
+    "回响": "沉沦海",
 }
 
 # 初拥之夜选项5授予的血族专属道纹；不进入局外学习或残韵获取池。
@@ -56,12 +71,20 @@ def learnability_error(name, *, owned, region, known) -> str | None:
     返回 None = 可学；否则返回拒绝文案（逐字沿用旧实现）。
     【典当】的发现池与【学习】同口径，共用本函数——改学习门禁时两处一起变。
     """
+    if name in UNIMPLEMENTED_DAOWEN:
+        owner = UNIMPLEMENTED_DAOWEN[name]
+        return f"【{name}】是{owner}专属道纹，尚未接入运行时，当前不能学习或通过残韵获得"
     if name not in known:
         return f"未知道纹: {name}"
     if name in owned:
         return f"已经掌握道纹: {name}"
     if name in FIRST_EMBRACE_DAOWEN:
         return f"【{name}】是初拥之夜专属道纹，只能通过初拥之夜获得"
+    race_owner = next((race for race, pool in RACE_EXCLUSIVE_DAOWEN.items() if name in pool), None)
+    if race_owner is not None:
+        return f"【{name}】是{race_owner}专属道纹，只能通过{race_owner}专属机制获得"
+    if name in BLOODLINE_EXCLUSIVE_DAOWEN:
+        return f"【{name}】是血族专属道纹，只能通过血族专属机制获得"
     owner = next((r for r, pool in REGION_EXCLUSIVE_DAOWEN.items() if name in pool), None)
     if owner is not None:
         if owner != region:

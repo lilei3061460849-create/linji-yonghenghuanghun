@@ -187,8 +187,8 @@ class MonsterLifeMixin:
     SCULPTURE_SHIELD = special_events.shield_per_durability("diaosu")    # 每点耐久可获得的格挡
 
     def cancer_threshold_of(self, entity: Entity) -> int:
-        """规则正文：累计恢复量达到血限×2（过量按原值计入 total_healed，双倍机制已删）。"""
-        if entity.blood_limit <= 0:
+        """累计回复达到血限×2；【增殖】期间阈值视为无限，不会由有限回复量触发。"""
+        if entity.has_status("无限血限") or entity.blood_limit <= 0:
             return 0
         return math.ceil(entity.blood_limit * self.PROLIFERATION_THRESHOLD)
 

@@ -97,9 +97,8 @@ FREE_CRYSTAL_COST_AMOUNT = 10
 
 # 局外可发动的道纹白名单（2026-10-23 用户裁定：默认局内，局外须明示）。
 # 「明示」＝该道纹条文自己写明可局外发动；没写的一律只能在战斗中发动。
-# 明示项：【消灾】（局外发动消耗×2）、【真理】、【唤潮】与【蜃景】（沉沦海地图道纹）。
-# 新增一项必须先改条文，再改这里；tests/test_resource_design_standard.py 钉死本集合。
-OUT_OF_COMBAT_DAOWEN = frozenset({"消灾", "真理", "唤潮", "蜃景"})
+# 明示项：【真理】、【唤潮】与【蜃景】（鲛族专属开放地图道纹）。
+OUT_OF_COMBAT_DAOWEN = frozenset({"真理", "唤潮", "蜃景"})
 
 
 class GameEngine:
@@ -779,7 +778,7 @@ class GameEngine:
                     **({"zaisheng_cost": ["法力", "攻击力"]} if name == "再生" else {}),
                     **({"lianji_cost": ["流血", "法力", "衰老", "枯竭", "碎片", "假碎片"]}
                        if name == "连击" else {}),
-                    **({"status_name": "目标身上要延长的有限持续状态名（凝滞必填）"} if name == "凝滞" else {}),
+                    **({"cost_choices": "净化：施法者自选，格式为[{type: 衰老/枯竭/萎缩/疲惫/异变, layers: 非负整数}]，总层数≤X"} if name == "净化" else {}),
                     "cost_share_target_ref": (
                         [{"ref": ref, "name": entity.name}
                          for ref, entity in self.combat.blood_pact_targets().items()]
@@ -5103,10 +5102,9 @@ class GameEngine:
         return self.combat.silenced_by_mask(actor, calc)
 
     def _pay_daowen_shard_cost(self, actor: Entity, name: str, calc: dict, x: int) -> Optional[str]:
-        """消灾X 的碎片类代价。
+        """结算需要碎片支付的旧道纹代价。
 
-        规则实现已上移到 CombatEngine.pay_daowen_shard_cost（法术单步与
-        use_daowen 共用同一口径），这里保留同名入口供既有调用点使用。
+        规则实现由 CombatEngine.pay_daowen_shard_cost 统一处理。
         """
         return self.combat.pay_daowen_shard_cost(actor, name, calc, x)
 
@@ -5393,8 +5391,8 @@ class GameEngine:
             daowen_y = 1
         try:
             resolve_kw = {"target": target, "caster": actor}
-            if name == "凝滞":
-                resolve_kw["status_name"] = params.get("status_name", "")
+            if name == "净化":
+                resolve_kw["cost_choices"] = params.get("cost_choices")
             resolve_kw["y"] = daowen_y
             # 2026-10-14：【透支】多代价通道（缺省流血；resolve 按签名分发，其余道纹无感）。
             if name == "透支":
@@ -5450,7 +5448,7 @@ class GameEngine:
         if mana_error:
             return {"success": False, "error": mana_error}
 
-        # 碎片类主动道纹代价预检与支付（目前为消灾；遗物灾厄轮盘无发动/费用）
+        # 碎片类主动道纹代价预检与支付
         shard_error = self._pay_daowen_shard_cost(actor, name, calc, x)
         if shard_error:
             return {"success": False, "error": shard_error}
@@ -6539,7 +6537,7 @@ class GameEngine:
         # 正文具名消耗品：全部在扣耐久前完成参数校验；未实现项不得“成功但只扣耐久”。
         # 2026-10-14 审计F4：镇魂铁钉处理器补齐（此前发而无用）；替死鬼/赶尸铃/黄符见下。
         if item.name in {"绝息淤泥", "活性土壤", "假钞贴", "穿甲弹", "洗劫面具", "赤泉囊", "龙血瓶",
-                          "镇魂铁钉", "赶尸铃", "黄符"}:
+                          "镇魂铁钉", "赶尸铃", "黄符", "逆命筹", "怒火针", "灼罪钉"}:
             return self._consume_named_event_item(item, params)
 
         # 自定义消耗品（2026-10-23）：声明里的 effects 由 verbs 执行，不占出手。
@@ -6669,7 +6667,25 @@ class GameEngine:
             return {"success": False, "error": "没有玩家"}
         name = item.name
         result: dict[str, Any] = {"item": name}
-        if name == "绝息淤泥":
+        if name == "灼罪钉":
+            target = refs.get(params.get("target_ref", ""))
+            if target is None or not target.is_alive:
+                return {"success": False, "error": "灼罪钉必须显式指定合法存活target_ref"}
+            item.use()
+            target.add_status(StatusEffect(name="加害", value=1, remaining_rounds=2, source=name))
+            result.update({"target": target.name, "duration": 2, "incoming_damage_bonus": 1})
+        elif name == "怒火针":
+            target = refs.get(params.get("target_ref", ""))
+            if target is None or not target.is_alive:
+                return {"success": False, "error": "怒火针必须显式指定合法存活target_ref"}
+            item.use()
+            target.add_status(StatusEffect(name="愤怒", value=1, remaining_rounds=2, source=name))
+            result.update({"target": target.name, "duration": 2, "mana_cost_halved": True})
+        elif name == "逆命筹":
+            item.use()
+            self.dice.set_rerolls(self.dice.rerolls_pending + 1)
+            result.update({"rerolls_added": 1, "rerolls_pending": self.dice.rerolls_pending})
+        elif name == "绝息淤泥":
             if self.state.phase != GamePhase.IN_COMBAT.value:
                 return {"success": False, "error": "绝息淤泥只能在战斗中使用"}
             item.use()
@@ -9261,19 +9277,10 @@ class GameEngine:
                                   "source": "地下角斗场"})
         bonus_total = sum(b["amount"] for b in event_bonuses)
         self.state.shards += shard_reward + bonus_total
-        modifiers.pop("scarlet_fruit_active", False)  # 2026-10-14：旧战终血限+2 已随重做废弃（效果移交道纹【增殖】）
-        # 2026-10-14：【增殖】战终待决统一结算（目标死亡/持【不朽之躯】落空）。
+        modifiers.pop("scarlet_fruit_active", False)  # 旧战终血限+2效果已废止
+        # 旧存档兼容：新版【增殖】是战斗内状态，不再有战终待决血限增长。
+        modifiers.pop("zengzhi_pending", None)
         zengzhi_settled = []
-        for entry in modifiers.pop("zengzhi_pending", []) or []:
-            tgt = self.combat._combat_entity_refs().get(entry.get("target_ref", "")) if isinstance(entry, dict) else None
-            if tgt is None or not tgt.is_alive:
-                continue
-            if self.state._relic_active(tgt, "不朽之躯"):
-                zengzhi_settled.append({"target": tgt.name, "increase": 0, "blocked_by": "不朽之躯"})
-                continue
-            amt = entry.get("amount", 0)
-            tgt.blood_limit += amt
-            zengzhi_settled.append({"target": tgt.name, "increase": amt})
         modifiers.pop("pale_flower_active", False)   # 2026-10-11：旧战终精力+1 已随重做废弃
         modifiers.pop("brand_nail_target_ref", None)
         modifiers.pop("huifeng_target_ref", None)

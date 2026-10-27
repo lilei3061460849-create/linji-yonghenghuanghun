@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
 from engine.daowen import DaoWenEngine
-from engine.models import DaoWen, DaoWenInstance, Entity, StatusEffect
+from engine.models import Consumable, DaoWen, DaoWenInstance, Entity, Relic, StatusEffect
 
 
 def _engine(suffix):
@@ -166,23 +166,38 @@ def test_boba_boundary_and_invalid_submissions():
 
 
 
-def test_jiahai_guzhi_fennu():
-    """加害挂目标加伤；固执单次掉 1；愤怒法力减半。
+def test_jiahai_status_consumable_guzhi_and_anger_consumable():
+    """灼罪钉施加固定加害状态；固执单次掉1；怒火针使法力消耗减半。
 
     2026-10-11 用户令：【借力】已删除，原「借力2 → _jieli_boost +20%」段落一并移除。
     """
     engine = _engine("hooks")
+    assert "加害" not in DaoWenEngine._registry
+    assert "愤怒" not in DaoWenEngine._registry
+    from engine.rule_engine import DAOWEN_RULES, STATUS_DAMAGE_RULES
+    assert "加害" not in DAOWEN_RULES
+    assert any(rule.status_name == "加害" for rule in STATUS_DAMAGE_RULES)
     p = engine.state.player
-    for n in ("加害", "固执", "愤怒"):
-        _give(p, n)
+    _give(p, "固执")
     m = _monster(engine, ap=10)
     engine.execute_action("round_start", {})
 
-    r = engine.execute_action("use_daowen", {"daowen_name": "加害", "x": 4, "target": m.name})
-    assert r["success"]
-    assert m.has_status("加害")
-    d = engine.combat._apply_hostile_damage(m, 10)
-    assert d["actual_damage"] == 14
+    item = Consumable(name="灼罪钉", effect="使目标每次受到伤害+1，持续2回合",
+                       current_uses=1, max_uses=1)
+    engine.state.consumables.append(item)
+    enemy_ref = next(ref for ref, entity in engine.combat._combat_entity_refs().items()
+                     if entity is m)
+    try:
+        used = engine.execute_action("consume_item", {
+            "name": "灼罪钉", "target_ref": enemy_ref,
+        })
+        assert used["success"], used
+        assert item.current_uses == 0
+        assert m.has_status("加害")
+        d = engine.combat._apply_hostile_damage(m, 10)
+        assert d["actual_damage"] == 11
+    finally:
+        engine.state.consumables.remove(item)
 
     p.current_hp = 50
     engine.execute_action("use_daowen", {"daowen_name": "固执", "x": 2})
@@ -196,11 +211,23 @@ def test_jiahai_guzhi_fennu():
     assert d3["actual_damage"] == 1
     assert p.current_hp == 48
 
-    engine.execute_action("use_daowen", {"daowen_name": "愤怒", "x": 2, "target": p.name})
-    assert p.has_status("愤怒")
-    mana = p.current_mana
-    assert p.spend_mana(10) is True
-    assert p.current_mana == mana - 5
+    item = Consumable(name="怒火针", effect="使目标法力消耗减半，持续2回合",
+                       current_uses=1, max_uses=1)
+    engine.state.consumables.append(item)
+    player_ref = next(ref for ref, entity in engine.combat._combat_entity_refs().items()
+                      if entity is p)
+    try:
+        used = engine.execute_action("consume_item", {
+            "name": "怒火针", "target_ref": player_ref,
+        })
+        assert used["success"], used
+        assert item.current_uses == 0
+        assert p.has_status("愤怒")
+        mana = p.current_mana
+        assert p.spend_mana(10) is True
+        assert p.current_mana == mana - 5
+    finally:
+        engine.state.consumables.remove(item)
 
 
 
@@ -225,6 +252,40 @@ def test_huaxiang_dingxing_wushen():
 
 
 
+
+
+def test_damage_needle_is_forged_from_dragon_valley_event():
+    """熔炉余火真实支付流血10并发放灼罪钉。"""
+    engine = _engine("damage_needle_forge")
+    engine.state.phase = "pre_battle"
+    engine.state.current_region = "龙心谷"
+    engine.event_pool.current = "熔炉余火"
+    hp_before = engine.state.player.current_hp
+
+    result = engine.execute_action("resolve_event", {
+        "event": "熔炉余火", "option_id": 3,
+    })
+    assert result["success"], result
+    assert engine.state.player.current_hp == hp_before - 10
+    item = next(c for c in engine.state.consumables if c.name == "灼罪钉")
+    assert item.current_uses == item.max_uses == 1
+
+
+def test_anger_needle_is_purchased_from_black_market_event():
+    """黑市事件真实扣除12碎片并发放固定耐久的怒火针。"""
+    engine = _engine("anger_needle_purchase")
+    engine.state.phase = "pre_battle"
+    engine.state.current_region = "罪孽都市"
+    engine.state.shards = 20
+    engine.event_pool.current = "黑市军火贩"
+
+    result = engine.execute_action("resolve_event", {
+        "event": "黑市军火贩", "option_id": 3,
+    })
+    assert result["success"], result
+    assert engine.state.shards == 8
+    item = next(c for c in engine.state.consumables if c.name == "怒火针")
+    assert item.current_uses == item.max_uses == 1
 
 
 def test_retired_healing_runes_are_not_registered():
@@ -268,3 +329,100 @@ def test_flight_rule_line_matches_the_engine():
     p.is_flying = True
     assert engine.combat.is_targetable(p, m) is True, "飞行者可以选地面目标"
     assert engine.combat.is_targetable(m, p) is False, "非飞行者不能选飞行目标"
+
+
+def test_zengzhi_grants_temporary_infinite_blood_limit_and_bypasses_cancer():
+    """增殖X：支付流血10X，目标血限暂时视为无限；有限回复不触发癌变。"""
+    engine = _engine("zengzhi_infinite_blood")
+    p = engine.state.player
+    _give(p, "增殖")
+    target = _monster(engine, "增殖靶怪", hp=100)
+    engine.execute_action("round_start", {})
+
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "增殖", "x": 1, "target": target.name,
+    })
+    assert result["success"], result
+    assert target.has_status("无限血限")
+    assert target.to_dict()["blood_limit"] == "∞"
+    assert engine.combat.cancer_threshold_of(target) == 0
+
+    heal = engine.state.apply_heal(target, 300)
+    assert heal["hp_after"] == 400
+    assert target.total_healed == 300
+    assert engine.combat.check_cancer(target) is None
+    assert "癌变（300/∞）" in target.lethal_progress()
+
+    # 回终递减持续时间；到期时撤销无限血限，并将生命封顶到基础血限。
+    engine.combat.round_end()
+    assert not target.has_status("无限血限")
+    assert target.current_hp == target.blood_limit == 100
+
+
+def test_chengni_advances_target_rounds_without_advancing_world_time():
+    """沉溺推进目标经历的回合，不推进世界回合；状态与凡庸按该回合结算。"""
+    engine = _engine("ningzhi_real_round")
+    _give(engine.state.player, "沉溺")
+    target = _monster(engine, "沉溺靶怪", hp=100)
+    target.add_status(StatusEffect(name="测试增益", value=1, remaining_rounds=2, source="test"))
+    target.actions_used_this_round = 1
+    target.damage_dealt_this_round = 1
+    engine.execute_action("round_start", {})
+    before_round = engine.state.current_round
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "沉溺", "x": 1, "target": target.name,
+        "dodge": False, "blood_shadow": False,
+    })
+    assert result["success"], result
+    assert engine.state.current_round == before_round
+    assert target.get_status_effects("测试增益")[0].remaining_rounds == 1
+    assert target.no_action_rounds == 1
+    assert target.no_damage_rounds == 1
+    assert any(e.get("type") == "extra_target_round" for e in result["execution"]["effects"])
+
+
+def test_chengni_triggers_nightwatch_per_extra_round_using_world_round():
+    """沉溺每让角色经历一个回合就触发守夜灯，但收益始终按世界回合数计算。"""
+    engine = _engine("chengni_nightwatch")
+    target = Entity(
+        name="持灯轮回者", entity_type="轮回者",
+        blood_limit=100, current_hp=100,
+        mana_limit=100, current_mana=0,
+        speed_limit=3, current_speed=3,
+        relics=[],
+    )
+    engine.state.enemies.append(target)
+    engine.state.opponent_relics.append(
+        Relic("守夜灯", "每经历一个回合获得当前世界回合数的法力"))
+    engine.state.current_round = 10
+    target.add_status(StatusEffect(name="测试减益", value=1, remaining_rounds=3, source="test"))
+    engine.state.player.add_status(
+        StatusEffect(name="玩家状态", value=1, remaining_rounds=3, source="test"))
+
+    effects = engine.combat.advance_target_rounds(target, 3, source="沉溺")
+
+    assert engine.state.current_round == 10
+    assert target.current_mana == 30
+    assert not target.has_status("测试减益")
+    assert engine.state.player.get_status_effects("玩家状态")[0].remaining_rounds == 3
+    assert target.actions_used_this_round == 0
+    assert len([e for e in effects if isinstance(e, dict) and e.get("type") == "extra_target_round"]) == 3
+
+
+def test_jinghua_allows_caster_selected_reversible_cost_layers():
+    """净化由施法者自选可逆数值型代价，层数总和不能超过X。"""
+    engine = _engine("jinghua_cost_choices")
+    _give(engine.state.player, "净化")
+    target = _monster(engine, "净化靶怪", hp=100)
+    target.blood_limit = 100
+    target.mutation_count = 4
+    engine.execute_action("round_start", {})
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "净化", "x": 3, "target": target.name,
+        "cost_choices": [{"type": "衰老", "layers": 1}, {"type": "异变", "layers": 2}],
+        "dodge": False, "blood_shadow": False,
+    })
+    assert result["success"], result
+    assert target.blood_limit == 101
+    assert target.mutation_count == 2
+

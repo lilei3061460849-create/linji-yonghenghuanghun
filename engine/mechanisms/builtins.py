@@ -1,4 +1,4 @@
-"""已迁移到声明层的机制（当前注册表共22项，以下为原16项历史说明：加害、龙鳞、帮派令、畸变·结算、
+"""已迁移到声明层的机制（当前注册表共22项，以下为原16项历史说明：灼罪钉施加的加害状态、龙鳞、帮派令、畸变·结算、
 焦黑发丝、洞察·结算、狂暴·标记、畸变·标记、洗劫·夺碎片、缄默面具、龙爪、
 清算·结算、灾厄轮盘·结算（遗物被动）、清算·对账；2026-10-13 用户令删【逼债】，
 【逼债·结算/对账】与【三相残韵盘·战终】随道纹/遗物删除一并移除；缄默面具现为法限增量翻倍）。
@@ -29,7 +29,7 @@ import math
 from ..combat_events import CombatEventType
 from ..models import StatusEffect
 from ..rule_engine import (
-    DAOWEN_RULES, DamageResolutionContext, RULE_EXECUTOR, rule_matches,
+    DAOWEN_RULES, STATUS_DAMAGE_RULES, DamageResolutionContext, RULE_EXECUTOR, rule_matches,
 )
 from .conditions import (
     all_, any_, damage_type_not, entity_type, has_status, is_alive,
@@ -42,7 +42,7 @@ from .triggers import Phase, Trigger, TriggerContext
 from .verbs import apply_verb
 
 def _shouyedeng_effect(ctx: TriggerContext, targets: list) -> str:
-    """守夜灯：回增时获得等同于增加后当前回合数的法力。"""
+    """守夜灯：每当持有者经历一个回合，获得等同于当前世界回合数的法力。"""
     entity = ctx.target
     amount = max(0, int(getattr(ctx.state, "current_round", 0) or 0))
     if entity is None or not entity.is_alive or entity.entity_type != "轮回者" or amount <= 0:
@@ -97,8 +97,12 @@ def _rule_effect(rule):
 
 
 def _numeric_rule_mechanism(name: str) -> Mechanism:
-    definition = DAOWEN_RULES[name]
-    rule = definition.rules[0]
+    if name == "加害":
+        # 【加害】不再是道纹；只保留由消耗品【灼罪钉】施加的状态结算。
+        rule = next(rule for rule in STATUS_DAMAGE_RULES if rule.status_name == name)
+    else:
+        definition = DAOWEN_RULES[name]
+        rule = definition.rules[0]
     return Mechanism(
         name=name,
         when=Trigger.phase(Phase.INCOMING_ADJUST),
@@ -112,8 +116,8 @@ def _numeric_rule_mechanism(name: str) -> Mechanism:
 
 
 
-# 数值事实与运行时摘要共用 engine.rule_engine.DAOWEN_RULES；这里仅保留
-# MechanismHookAdapter 兼容壳，不另写条件、运算或组合配方。
+# 道纹数值事实共用 engine.rule_engine.DAOWEN_RULES；【加害】只桥接消耗品施加的同名状态。
+# 这里仅保留 MechanismHookAdapter 兼容壳，不另写条件、运算或组合配方。
 JIAHAI = _numeric_rule_mechanism("加害")
 LONGLIN = _numeric_rule_mechanism("龙鳞")
 GUZHI = _numeric_rule_mechanism("固执")
