@@ -107,6 +107,26 @@ def test_single_ten_node_core_loop():
         assert not any(src == removed or tgt == removed for src, _, tgt in edges)
 
 
+def test_unimplemented_sunken_sea_nodes_cannot_be_acquired_by_resonance():
+    from engine.gamedata import UNIMPLEMENTED_DAOWEN, learnability_error
+    from engine.daowen import DaoWenEngine
+
+    for name in UNIMPLEMENTED_DAOWEN:
+        error = learnability_error(name, owned=set(), region="沉沦海",
+                                   known=set(DaoWenEngine._registry))
+        assert "尚未接入运行时" in error
+
+    for source, rtype, target in (
+        ("回响", "转换", "流动"),
+        ("波及", "反转", "遗忘"),
+        ("凝滞", "曲解", "回响"),
+    ):
+        result = R.apply_resonance(source, rtype, caster_has_daowen=True,
+                                   target_has_daowen=True, target_daowen=target)
+        assert not result["success"]
+        assert "尚未接入运行时" in result["error"]
+
+
 def test_region_loops_present():
     """正常路径：所有已登记的副本闭环必须存在"""
     # 2026-10-03：扭曲都市删【爆裂】、龙心谷删【活血】，这两条闭环 8 → 7 条边。
