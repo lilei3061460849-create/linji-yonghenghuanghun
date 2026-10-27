@@ -328,9 +328,11 @@ def test_chengni_triggers_nightwatch_per_extra_round_using_world_round():
         blood_limit=100, current_hp=100,
         mana_limit=100, current_mana=0,
         speed_limit=3, current_speed=3,
-        relics=[Relic("守夜灯", "每经历一个回合获得当前世界回合数的法力")],
+        relics=[],
     )
     engine.state.enemies.append(target)
+    engine.state.opponent_relics.append(
+        Relic("守夜灯", "每经历一个回合获得当前世界回合数的法力"))
     engine.state.current_round = 10
     target.add_status(StatusEffect(name="测试减益", value=1, remaining_rounds=3, source="test"))
     engine.state.player.add_status(
