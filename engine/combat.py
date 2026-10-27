@@ -1112,6 +1112,14 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         for index in range(rounds):
             if not target.is_alive or self.state.battle_over():
                 break
+            # 额外回合从目标自己的回始开始；只分发给目标，避免其他角色也被推进。
+            target.actions_used_this_round = 0
+            target.damage_dealt_this_round = 0
+            target.blood_oath_used_this_round = False
+            target.mana_inflicted_this_round = 0
+            effects.extend(self._dispatch_phase(Phase.ROUND_START_PREPARE, target=target))
+            effects.extend(self._dispatch_phase(Phase.ROUND_START, target=target))
+            effects.extend(self._dispatch_phase(Phase.ROUND_START_SETTLE, target=target))
             self.state.current_round += 1
             effects.extend(self._dispatch_phase(Phase.ROUND_INCREASE, target=target))
             effects.extend(self._dispatch_phase(Phase.ROUND_END, target=target))
