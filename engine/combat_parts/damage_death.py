@@ -184,7 +184,28 @@ class DamageDeathMixin:
         wing_logs = note_blood_wing_hp_loss(self.state, entity, amount)
         if wing_logs:
             record["wing_recharge"] = wing_logs
+        conversion = self._convert_blood_wing_loss(entity, amount, parent_ctx)
+        if conversion:
+            record["blood_wing_conversion"] = conversion
         return record
+
+    def _convert_blood_wing_loss(self, entity: Entity, amount: int,
+                                 parent_ctx: Optional[EffectContext | dict] = None) -> Optional[dict]:
+        """血翼噬血模式：本回合实际失去的生命按等量回复结算。"""
+        if (entity is None or amount <= 0 or entity is not self.state.player
+                or not entity.has_status("噬血")):
+            return None
+        before = entity.current_hp
+        heal_ctx = make_context(
+            timing=self._current_context_timing(), source="血翼", source_type="consumable",
+            actor=entity, target=entity, owner=entity, mechanic="heal",
+            subtype="blood_wing_life_loss_conversion", amount=amount,
+            parent_event_id=(parent_ctx.event_id if hasattr(parent_ctx, "event_id") else None),
+            tags={"consumable", "blood_wing", "life_loss_conversion"})
+        healed = self.state.apply_heal(entity, amount, ctx=heal_ctx)
+        return {"lost": amount, "healing_requested": amount,
+                "healing_actual": healed.get("actual_heal", entity.current_hp - before),
+                "hp_after": entity.current_hp}
 
     def _settle_chenglu(self, entity: Entity, amount: int,
                            parent_ctx: Optional[EffectContext | dict] = None) -> Optional[dict]:
@@ -273,7 +294,10 @@ class DamageDeathMixin:
         # 与 ctx-rich 路径（_record_hp_loss_event）保持一致。
         logs = self._fire_after_life_lost(entity, ctx)
         if logs:
-            self._write_hp_loss_record(entity, old - new, ctx, "fallback_hp_loss", logs)
+            record = self._write_hp_loss_record(entity, old - new, ctx, "fallback_hp_loss", logs)
+            conversion = self._convert_blood_wing_loss(entity, old - new, ctx)
+            if conversion:
+                record["blood_wing_conversion"] = conversion
 
     # ========== 统一死亡判定 / 统一血限变化 ==========
 
