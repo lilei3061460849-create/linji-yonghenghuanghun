@@ -41,6 +41,28 @@ from .targets import RANDOM_ALL, SELF, TARGET, roll_pick
 from .triggers import Phase, Trigger, TriggerContext
 from .verbs import apply_verb
 
+def _shouyedeng_effect(ctx: TriggerContext, targets: list) -> str:
+    """守夜灯：回增时获得等同于增加后当前回合数的法力。"""
+    entity = ctx.target
+    amount = max(0, int(getattr(ctx.state, "current_round", 0) or 0))
+    if entity is None or not entity.is_alive or entity.entity_type != "轮回者" or amount <= 0:
+        return ""
+    before = entity.current_mana
+    apply_verb(ctx.combat, "mana", {"target": entity, "delta": amount}, {
+        "timing": "round_increase", "source": "守夜灯", "source_type": "relic",
+        "actor": entity, "target": entity, "owner": entity,
+        "mechanic": "mana", "subtype": "shouyedeng", "amount": amount,
+        "tags": {"relic", "round_increase"},
+    })
+    actual = entity.current_mana - before
+    return f"守夜灯：{entity.name}获得{actual}点法力（声明{amount}）"
+
+
+SHOUYEDENG = Mechanism(
+    name="守夜灯", when=Trigger.phase(Phase.ROUND_INCREASE), target=SELF,
+    condition=relic_active("守夜灯", of="target"), effect=_shouyedeng_effect, priority=10)
+
+
 
 def _rule_context(rule, ctx: TriggerContext) -> DamageResolutionContext:
     amount = ctx.amount
@@ -596,5 +618,5 @@ DRAGON_BLOODLINE = Mechanism(
 # 2026-10-13 用户令：【三相残韵盘】遗物删除，SANXIANG_END（【三相残韵盘·战终】）一并移除。
 
 for _mechanism in (BLOOD_LINEAGE, RED_CURSE, FIRST_ROUND_SHIELD, LEATHER_SHIELD,
-                   LEATHER_RECORD, ROUND_TRACKING_RESET, BULLETPROOF, DRAGON_BLOODLINE):
+                   LEATHER_RECORD, ROUND_TRACKING_RESET, BULLETPROOF, DRAGON_BLOODLINE, SHOUYEDENG):
     MECHANISMS.register(_mechanism)
