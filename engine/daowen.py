@@ -364,23 +364,37 @@ class DaoWenEngine:
     def calculate_jinghua(x: int, target: Entity = None, cost_choices: list[dict] | None = None) -> dict:
         """净化X：支付：法力2X。选择目标拥有的一种代价，使其层数-X。"""
         target_name = target.name if target is not None else "未选定目标"
-        allowed = {"衰老", "枯竭", "萎缩", "疲惫", "异变"}
+        allowed = {"衰老", "枯竭", "萎缩", "疲惫", "异变", "失忆", "冷却"}
         if not isinstance(cost_choices, list) or len(cost_choices) != 1:
             raise ValueError("净化必须显式选择目标拥有的一种代价")
         item = cost_choices[0]
         if not isinstance(item, dict) or item.get("type") not in allowed:
-            raise ValueError("净化只支持有可逆层数的衰老/枯竭/萎缩/疲惫/异变；不可逆代价尚不支持")
+            raise ValueError("净化支持衰老/枯竭/萎缩/疲惫/异变/失忆/冷却")
         kind = item["type"]
         if "layers" in item and (type(item["layers"]) is not int or item["layers"] != x):
             raise ValueError("净化所选代价固定减少X层，不能拆分层数")
+        cooldown_name = item.get("daowen_name")
         if target is not None:
-            owned = (target.mutation_count if kind == "异变"
-                     else getattr(target, "reversible_cost_layers", {}).get(kind, 0))
+            if kind == "失忆":
+                owned = len(target.refundable_daowen())
+            elif kind == "冷却":
+                options = [n for n, inst in target.dao_wen.items()
+                           if inst.cooldown_remaining > 0 or inst.cooldown_rounds_remaining > 0]
+                if cooldown_name is None and len(options) == 1:
+                    cooldown_name = options[0]
+                if cooldown_name not in options:
+                    raise ValueError("净化冷却须用daowen_name选择目标的一种正在冷却的道纹")
+                inst = target.dao_wen[cooldown_name]
+                owned = max(inst.cooldown_remaining, inst.cooldown_rounds_remaining)
+            else:
+                owned = (target.mutation_count if kind == "异变"
+                         else getattr(target, "reversible_cost_layers", {}).get(kind, 0))
             if owned <= 0:
                 raise ValueError(f"目标未拥有可净化的【{kind}】层数")
         return {
             "dao_wen": "净化", "x": x, "cost_type": CostType.MANA.value, "cost": 2 * x,
             "cost_reductions": {kind: x},
+            "purify_cooldown_daowen": cooldown_name,
             "summary": f"支付：法力{2*x}。使{target_name}的{kind}层数-{x}",
         }
 

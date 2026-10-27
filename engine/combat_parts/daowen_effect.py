@@ -468,19 +468,36 @@ class DaowenEffectMixin:
                     "tags": {"daowen"},
                 })})
         if name == "净化" and calc.get("cost_reductions"):
-            # 净化只逆转可逆的数值型代价；流血/失忆/冷却等不可直接按层恢复的事件不纳入。
+            # 仅返还真实支付记录；失忆保留原实例，冷却减指定道纹的剩余值。
             reductions = calc["cost_reductions"]
             for wt in wave_status_targets:
                 if not wt.is_alive:
                     continue
                 reductions = dict(calc["cost_reductions"])
                 ledger = getattr(wt, "reversible_cost_layers", {})
-                for kind in reductions:
+                applied = {}
+                for kind in list(reductions):
+                    if kind == "失忆":
+                        refunded = []
+                        for inst in list(reversed(wt.refundable_daowen()))[:reductions[kind]]:
+                            wt.dao_wen[inst.dao_wen.name] = inst
+                            wt.forgotten_cost_daowen.remove(inst)
+                            refunded.append(inst.dao_wen.name)
+                        applied[kind] = refunded
+                        continue
+                    if kind == "冷却":
+                        inst = wt.dao_wen.get(calc.get("purify_cooldown_daowen"))
+                        if inst is not None:
+                            inst.cooldown_remaining = max(0, inst.cooldown_remaining - reductions[kind])
+                            inst.cooldown_rounds_remaining = max(0, inst.cooldown_rounds_remaining - reductions[kind])
+                            applied[kind] = {"daowen_name": inst.dao_wen.name,
+                                             "battles": inst.cooldown_remaining,
+                                             "rounds": inst.cooldown_rounds_remaining}
+                        continue
                     owned = wt.mutation_count if kind == "异变" else ledger.get(kind, 0)
                     reductions[kind] = min(reductions[kind], max(0, owned))
                     if kind != "异变":
                         ledger[kind] = max(0, owned - reductions[kind])
-                applied = {}
                 if reductions.get("衰老", 0) > 0:
                     amount = int(reductions["衰老"])
                     wt.blood_limit += amount
@@ -764,7 +781,7 @@ class DaowenEffectMixin:
             if len(chosen) < count and name in caster.dao_wen:
                 chosen.append(name)
             for forgotten in chosen[:count]:
-                caster.dao_wen.pop(forgotten, None)
+                caster.forget_for_cost(forgotten)
             result["effects"].append({"type": "amnesia", "lost_daowen": chosen[:count]})
 
         # 【典当】：失忆结算之后，发现获得X种道纹（学习口径池+承载上限）。

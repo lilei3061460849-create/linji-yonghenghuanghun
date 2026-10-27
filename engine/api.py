@@ -778,7 +778,7 @@ class GameEngine:
                     **({"zaisheng_cost": ["法力", "攻击力"]} if name == "再生" else {}),
                     **({"lianji_cost": ["流血", "法力", "衰老", "枯竭", "碎片", "假碎片"]}
                        if name == "连击" else {}),
-                    **({"cost_choices": "净化：必须显式选择目标拥有的一种代价，格式为[{type: 衰老/枯竭/萎缩/疲惫/异变}]，固定减少X层"} if name == "净化" else {}),
+                    **({"cost_choices": "净化：必须显式选择目标拥有的一种代价，格式为[{type: 衰老/枯竭/萎缩/疲惫/异变/失忆/冷却, daowen_name: 冷却时指定道纹}]，固定减少X层"} if name == "净化" else {}),
                     "cost_share_target_ref": (
                         [{"ref": ref, "name": entity.name}
                          for ref, entity in self.combat.blood_pact_targets().items()]
@@ -6388,7 +6388,7 @@ class GameEngine:
                     context=f"自由结晶·失忆：{target.name}失去道纹{slot + 1}")
                 name = roll["record"]["selected_value"]
                 pool.remove(name)
-                target.dao_wen.pop(name, None)
+                target.forget_for_cost(name)
                 lost.append(name)
             return {"payer": target.name, "cost_type": cost_type,
                     "paid": len(lost), "lost_daowen": lost}
@@ -8003,6 +8003,7 @@ class GameEngine:
 
     def _serialize_entity_full(self, e: Entity) -> dict:
         """完整序列化单个实体(用于封存候选人，需能无损还原道纹X值/法术/状态/面板等)"""
+        from dataclasses import asdict
         return {
             "name": e.name, "entity_type": e.entity_type,
             "world_region": e.world_region, "world_x": e.world_x, "world_y": e.world_y,
@@ -8019,6 +8020,8 @@ class GameEngine:
             # 带伤续战必须带着异变续战，否则封存=免费洗白迷失进度。
             # （癌变 total_healed 不随封存走：DM 已裁定它是局内减益、每场归零。）
             "mutation_count": e.mutation_count,
+            "reversible_cost_layers": dict(getattr(e, "reversible_cost_layers", {})),
+            "forgotten_cost_daowen": [asdict(inst) for inst in getattr(e, "forgotten_cost_daowen", [])],
             # 致死进度：封存快照同样保留可读进度
             "no_action_rounds": e.no_action_rounds, "no_damage_rounds": e.no_damage_rounds,
             "lethal_counters": {k: list(v) for k, v in e.lethal_counters().items()},
@@ -8050,6 +8053,10 @@ class GameEngine:
                    is_alive=d.get("is_alive", True), shards=d.get("shards", 0),
                    shards_peak=d.get("shards_peak", max(0, int(d.get("shards", 0)))),
                    is_debt_bound=d.get("is_debt_bound", False))
+        e.reversible_cost_layers = dict(d.get("reversible_cost_layers", {}))
+        e.forgotten_cost_daowen = [DaoWenInstance(
+            **{**item, "dao_wen": DaoWen(**item["dao_wen"])})
+            for item in d.get("forgotten_cost_daowen", [])]
         e.mutation_count = d.get("mutation_count", 0)   # ④修复：旧档无此键回退0
         from .daowen import normalize_daowen_name as _norm_dw
         for name, x in d.get("dao_wen", {}).items():

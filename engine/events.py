@@ -500,7 +500,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             names = params.get("daowen_names")
             if not isinstance(names, list) or len(names) != memory_cost or names[0] not in player.dao_wen:
                 return {"applied": [], "instructions": [], "error": "失忆1必须用daowen_names指定1种持有的道纹"}
-            del player.dao_wen[names[0]]
+            player.forget_for_cost(names[0])
             applied.append(f"失忆1：失去{names[0]}")
             engine.state.resonance["反转"] = engine.state.resonance.get("反转", 0) + 1
             applied.append("获得残韵·反转×1")
@@ -866,7 +866,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
     if memory_cost:
         forgotten = params['daowen_names']
         for name in forgotten:
-            del player.dao_wen[name]
+            player.forget_for_cost(name)
         applied.append(f"失忆{memory_cost}：失去{'、'.join(forgotten)}")
     # 失去精力
     if '失去1次精力' in text or '精力-1' in text:

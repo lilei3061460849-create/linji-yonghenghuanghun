@@ -405,8 +405,23 @@ class Entity:
         self.is_proliferated = value
 
     # 异变计数：非怪物角色达到迷失阈值时交由战斗层处理；怪物照常累计但不触发迷失。
+    forgotten_cost_daowen: list[DaoWenInstance] = field(default_factory=list)
     reversible_cost_layers: dict[str, int] = field(default_factory=dict)
     mutation_count: int = 0
+
+    def forget_for_cost(self, name: str):
+        """Only amnesia payments are refundable; resonance/removal is not amnesia."""
+        inst = self.dao_wen.pop(name, None)
+        if inst is not None:
+            if not hasattr(self, "forgotten_cost_daowen"):
+                self.forgotten_cost_daowen = []
+            self.forgotten_cost_daowen.append(inst)
+        return inst
+
+    def refundable_daowen(self):
+        # Do not duplicate an independently reacquired rune or reset its cooldown.
+        return [inst for inst in getattr(self, "forgotten_cost_daowen", [])
+                if inst.dao_wen.name not in self.dao_wen]
 
     # 存活
     is_alive: bool = True
@@ -1013,6 +1028,8 @@ class Entity:
             "hp_ratio": round(self.hp_ratio, 2),
             "ai_memory": self.ai_memory,
             "dao_wen": {k: v.dao_wen.name for k, v in self.dao_wen.items()},
+            "reversible_cost_layers": dict(getattr(self, "reversible_cost_layers", {})),
+            "amnesia_refundable": [inst.dao_wen.name for inst in self.refundable_daowen()],
             "daowen_cooldowns": {
                 k: {"battles": int(getattr(v, "cooldown_remaining", 0)),
                     "rounds": int(getattr(v, "cooldown_rounds_remaining", 0))}
