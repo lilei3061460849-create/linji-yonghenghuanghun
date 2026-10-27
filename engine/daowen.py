@@ -719,6 +719,20 @@ class DaoWenEngine:
     
 
     @staticmethod
+    def calculate_chao(x: int) -> dict:
+        """唤潮X：支付法力X，在开放地图中将自身周围X个可用格改为水流地形。"""
+        return {"dao_wen": "唤潮", "x": x, "cost_type": CostType.MANA.value,
+                "cost": x, "map_terrain": "water_current",
+                "summary": f"支付：{x}法力，在开放地图周围设置{x}格水流地形"}
+
+    @staticmethod
+    def calculate_shenjing(x: int) -> dict:
+        """蜃景X：支付法力10X，在自身周围创造X个仅有1点生命的幻象单位。"""
+        return {"dao_wen": "蜃景", "x": x, "cost_type": CostType.MANA.value,
+                "cost": 10 * x, "create_illusions": x, "illusion_hp": 1,
+                "summary": f"支付：{10*x}法力，创造{x}个1生命幻象"}
+
+    @staticmethod
     def calculate_ningzhi(x: int, target: Entity = None, status_name: str = "") -> dict:
         """凝滞X：支付法力5X。使[目标]身上一种有限持续效果的剩余回合数+X。"""
         if target is None:
@@ -890,6 +904,8 @@ class DaoWenEngine:
             "裂变": cls.calculate_liebian,
             "背负": cls.calculate_beifu,
             # ---- 沉沦海（二阶）----
+            "唤潮": cls.calculate_chao,
+            "蜃景": cls.calculate_shenjing,
             "凝滞": cls.calculate_ningzhi,
             # ---- 乱葬岗（二阶）----
             "分裂": cls.calculate_fenlie,
