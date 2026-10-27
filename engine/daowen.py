@@ -53,9 +53,8 @@ class DaoWenEngine:
     # 用于"雇佣"后"发现并选择一种转化道纹"等需要从此类别中随机抽取的场景
     # 2026-10-08 清理：原孤儿转化道纹已移除（曾挂在【狂暴】的反转分支下）。
     TRANSFORMED_DAOWEN = [
-        "弱化", "全速", "蒙蔽",
+        "愤怒", "弱化", "全速", "蒙蔽",
         # 2026-10-11 用户令（A14）：【无神】【借力】【衰败】整条删除，不补位。
-        # 2026-10-27：【愤怒】转为消耗品【怒火针】。
     ]
 
     # 波及X：选择X个目标建立/解除无限期效果分摊关系；X决定目标数与法力消耗。
@@ -548,6 +547,107 @@ class DaoWenEngine:
         }
     
 
+    @staticmethod
+    def calculate_dianjin(x: int) -> dict:
+        """点金X：代价失忆X；你获得80X碎片。"""
+        return {
+            "dao_wen": "点金",
+            "x": x,
+            "cost_type": CostType.AMNESIA.value,
+            "cost": x,
+            "forget_daowen": x,
+            "shard_gain": 80 * x,
+            "summary": f"失忆{x}，获得{80*x}个碎片",
+        }
+
+    # ---- 罪孽都市专属道纹 ----
+    
+    @staticmethod
+    def calculate_diandang(x: int) -> dict:
+        """典当X：代价失忆2X；发现获得X种道纹（2026-10-13 用户令顶替【逼债】的闭环格）。
+
+        发现口径 = 局外【学习】口径（见 engine/gamedata.py::learnability_error）：
+        已持有/异副本专属/未解锁门禁/怪物转化/未实装的一律不出池。
+        轮回者发动→每种 pending 一组3选1（choose_diandang_daowen 逐组领取）；
+        非轮回者发动（如怪物经【原初】借用）→即时随机授予（怪物没有发现选择界面）。
+        授予一律受【承载上限】约束，超额不授予。
+        """
+        return {
+            "dao_wen": "典当",
+            "x": x,
+            "cost_type": CostType.AMNESIA.value,
+            "cost": 2 * x,
+            "forget_daowen": 2 * x,
+            "discover_daowen": x,
+            "summary": f"失忆{2 * x}，发现获得{x}种道纹",
+        }
+    
+    @staticmethod
+    def calculate_haoduo(x: int, target: Entity = None) -> dict:
+        """豪夺X（2026-09-28 用户令，旧【抵扣】改名）：支付：5X碎片，夺取[目标]1件遗物持续X回合。
+
+        夺取=把目标的一件遗物转移到己方（施法者）临时持有，持续X回合，到期归还。
+        与旧【抵扣】（只封印）的区别：夺取期间施法者**真正持有**该遗物并能触发其被动，
+        目标在这段时间里不能触发该遗物。
+        """
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "豪夺", "x": x,
+            # 2026-09-28 用户令：支付：5X碎片（沿用现有 cost_shards 付费通道；
+            # 不写 cost_type=MANA，避免被当成法力支付）。
+            "cost_type": "代价", "cost_shards": 5 * x,
+            "relic_steal": 1, "duration": x,
+            "summary": f"支付：{5*x}碎片，夺取{target_name}一件遗物，持续{x}回合"
+        }
+
+    # 旧名 calculate_dikou 不再保留（避免注册时与"豪夺"双注册）。
+    
+    @staticmethod
+    def calculate_qingsuan(x: int, target: Entity = None, caster_shards: int = 0) -> dict:
+        """清算X：支付：法力2X。[回始]使目标失去你碎片点格挡，持续X"""
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "清算", "x": x, "cost_type": CostType.MANA.value, "cost": 2 * x,
+            "qingsuan_register": True, "duration": x,
+            "summary": f"支付：{2 * x}法力，[回始]使{target_name}失去{caster_shards}格挡，持续{x}回合"
+        }
+    
+    @staticmethod
+    def calculate_qiangjie(x: int, target: Entity = None) -> dict:
+        """抢劫X：支付：法力3X。夺取目标10X碎片；若无碎片则失去X点速度"""
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "抢劫", "x": x, "cost_type": CostType.MANA.value, "cost": 3 * x,
+            "shard_steal": 10 * x, "speed_penalty": x,
+            "summary": f"支付：{3 * x}法力，夺取{target_name} {10*x}碎片或{x}速度"
+        }
+
+    @staticmethod
+    def calculate_lesuo(x: int, target: Entity = None) -> dict:
+        """勒索X：支付：法力3X。目标失去10X碎片，不足部分记负债（真碎片扣负；2026-10-14 补点金反转分叉，还债新生产者）。
+
+        与【抢劫】同价同量（3X→10X），形状不同：抢劫是偷取（施法者获得，不足不记负债；
+        无碎片改失速），勒索是销毁+记负债（谁都不获得，不足部分真碎片扣负，可触发【还债】）。
+        单次结算，无持续（用户 2026-10-14 选单次，不 mirror 逼债的回始∞）。
+        """
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "勒索", "x": x, "cost_type": CostType.MANA.value, "cost": 3 * x,
+            "shard_debt": 10 * x,
+            "summary": f"支付：{3 * x}法力，{target_name}失去{10*x}碎片，不足记负债"
+        }
+    
+    @staticmethod
+    def calculate_jiachao(x: int) -> dict:
+        """假钞X：支付：法力X。获得10X假碎片"""
+        return {
+            "dao_wen": "假钞", "x": x, "cost_type": CostType.MANA.value, "cost": x,
+            "fake_shards": 10 * x,
+            "summary": f"支付：{x}法力，获得{10*x}假碎片"
+        }
+    
+    # ---- 龙心谷专属道纹 ----
+    
     @staticmethod
     def calculate_longlin(x: int, target: Entity = None) -> dict:
         """龙鳞X：支付：法力2X。数值规则见 engine.rule_engine.DAOWEN_RULES。"""
