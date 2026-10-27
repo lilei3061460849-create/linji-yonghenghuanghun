@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
 from engine.daowen import DaoWenEngine
-from engine.models import DaoWen, DaoWenInstance, Entity, StatusEffect
+from engine.models import DaoWen, DaoWenInstance, Entity, Relic, StatusEffect
 
 
 def _engine(suffix):
