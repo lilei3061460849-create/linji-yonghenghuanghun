@@ -240,6 +240,23 @@ def test_huaxiang_dingxing_wushen():
 
 
 
+def test_anger_needle_is_purchased_from_black_market_event():
+    """黑市事件真实扣除12碎片并发放固定耐久的怒火针。"""
+    engine = _engine("anger_needle_purchase")
+    engine.state.phase = "pre_battle"
+    engine.state.current_region = "罪孽都市"
+    engine.state.shards = 20
+    engine.event_pool.current = "黑市军火贩"
+
+    result = engine.execute_action("resolve_event", {
+        "event": "黑市军火贩", "option_id": 3,
+    })
+    assert result["success"], result
+    assert engine.state.shards == 8
+    item = next(c for c in engine.state.consumables if c.name == "怒火针")
+    assert item.current_uses == item.max_uses == 1
+
+
 def test_retired_healing_runes_are_not_registered():
     """边界：自愈与滋养已删除，不得通过旧注册表恢复。"""
     DaoWenEngine.register_all()
