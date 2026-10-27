@@ -7,7 +7,7 @@
 REGION_EXCLUSIVE_DAOWEN = {
     "扭曲都市": {"变形", "定型", "超频", "坏死"},  # 【畸变】【退化】已遗物化，闭环留「？？」
     # 2026-10-13 用户令：删【逼债】，【典当】顶替其闭环格。
-    "罪孽都市": {"点金", "典当", "豪夺", "清算", "抢劫", "假钞", "消灾", "勒索"},  # 2026-10-14 +勒索
+    "罪孽都市": {"点金", "典当", "豪夺", "清算", "抢劫", "假钞", "勒索"},  # 2026-10-14 +勒索
     "龙心谷": {"加害", "龙鳞", "裂变", "背负"},  # 【逆鳞】【伤痕】已遗物化，闭环留「？？」
     # 乱葬岗删纹与面板空位保持登记；稳定后再补位。
     "乱葬岗": {"分裂", "瓦解", "勾魂", "招魂"},  # 【缄默】【冥气】已遗物化，闭环留「？？」
@@ -15,10 +15,13 @@ REGION_EXCLUSIVE_DAOWEN = {
     "沉沦海": {"流动", "波及", "遗忘", "凝滞", "回响"},
 }
 
-# 鲛族专属道纹：不计入任何副本的专属学习池；怪物面板既有配置不受此分类影响。
+# 种族专属道纹：不计入任何副本的专属学习池；怪物面板既有配置不受此分类影响。
 RACE_EXCLUSIVE_DAOWEN = {
     "鲛族": {"唤潮", "蜃景"},
 }
+
+# 血族专属道纹：不计入罪孽都市的专属学习池；现有怪物面板配置不因分类迁移而改变。
+BLOODLINE_EXCLUSIVE_DAOWEN = frozenset({"消灾"})
 
 ORIGINAL_MONSTER_DAOWEN = {"全力", "必中"}  # 2026-10-25 用户令：【疯狂】【减速】遗物化；【飞行】是状态
 
@@ -70,6 +73,8 @@ def learnability_error(name, *, owned, region, known) -> str | None:
     race_owner = next((race for race, pool in RACE_EXCLUSIVE_DAOWEN.items() if name in pool), None)
     if race_owner is not None:
         return f"【{name}】是{race_owner}专属道纹，只能通过{race_owner}专属机制获得"
+    if name in BLOODLINE_EXCLUSIVE_DAOWEN:
+        return f"【{name}】是血族专属道纹，只能通过血族专属机制获得"
     owner = next((r for r, pool in REGION_EXCLUSIVE_DAOWEN.items() if name in pool), None)
     if owner is not None:
         if owner != region:
