@@ -97,9 +97,9 @@ FREE_CRYSTAL_COST_AMOUNT = 10
 
 # 局外可发动的道纹白名单（2026-10-23 用户裁定：默认局内，局外须明示）。
 # 「明示」＝该道纹条文自己写明可局外发动；没写的一律只能在战斗中发动。
-# 明示项：【消灾】（条文：局外发动消耗×2）、【真理】（2026-10-23 用户裁定列入）。
+# 明示项：【消灾】（局外发动消耗×2）、【真理】、【唤潮】与【蜃景】（沉沦海地图道纹）。
 # 新增一项必须先改条文，再改这里；tests/test_resource_design_standard.py 钉死本集合。
-OUT_OF_COMBAT_DAOWEN = frozenset({"消灾", "真理"})
+OUT_OF_COMBAT_DAOWEN = frozenset({"消灾", "真理", "唤潮", "蜃景"})
 
 
 class GameEngine:
@@ -735,8 +735,8 @@ class GameEngine:
             "note": "结束本场战斗，恢复到战始前状态，并按当前规则重新开始本场战斗；不保留本场战斗结果",
         }]
         for name, instance in player.dao_wen.items():
-            # 【唤潮】是开放地图地形道纹，不在战斗行动列表里显示。
-            if name == "唤潮":
+            # 【唤潮】【蜃景】是开放地图道纹，不在战斗行动列表里显示。
+            if name in {"唤潮", "蜃景"}:
                 continue
             # 已定义【镇魔印】后，【封印】由法术流程自动发动，
             # 不再作为主动道纹候选；仅持有【封印】时仍照常显示。
@@ -5171,6 +5171,83 @@ class GameEngine:
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
+    def _action_shenjing(self, params: dict, actor: Entity) -> dict:
+        """蜃景X：在开放地图放置X个玩家伪装目标；进入战斗时自动消散。"""
+        if not self.state.world_state or self.state.phase == GamePhase.IN_COMBAT.value:
+            return {"success": False, "error": "蜃景只能在没有进行战斗遭遇的开放地图中发动"}
+        if actor is not self.state.player:
+            return {"success": False, "error": "蜃景只能由轮回者在开放地图中发动"}
+        if "蜃景" not in actor.dao_wen:
+            return {"success": False, "error": "尚未掌握蜃景"}
+        x = params.get("x", 1)
+        if isinstance(x, int) and not isinstance(x, bool) and x == 0:
+            return {"success": True, "action": "use_daowen", "skipped": True,
+                    "result": {"daowen": "蜃景", "x": 0, "skipped": True, "actor": actor.name}}
+        if not isinstance(x, int) or isinstance(x, bool) or x < 1 or x > 8:
+            return {"success": False, "error": "蜃景X必须为1至8的整数"}
+        instance = actor.dao_wen["蜃景"]
+        if not instance.can_use():
+            return {"success": False, "error": "蜃景当前冷却中或被封印"}
+        try:
+            world = self._world_from_state()
+            player_actor = next((a for a in world.actors.values()
+                                 if a.kind == "player" and a.actor_id == actor.runtime_id), None)
+            if player_actor is None:
+                player_actor = next((a for a in world.actors.values() if a.kind == "player"), None)
+            if player_actor is None:
+                return {"success": False, "error": "开放地图中找不到轮回者位置"}
+            cells = params.get("illusion_cells")
+            if not isinstance(cells, list) or len(cells) != x:
+                return {"success": False, "error": f"蜃景X={x}必须提交恰好{x}个illusion_cells坐标"}
+            parsed = []
+            for cell in cells:
+                if isinstance(cell, dict):
+                    cx, cy = cell.get("x"), cell.get("y")
+                elif isinstance(cell, (list, tuple)) and len(cell) == 2:
+                    cx, cy = cell
+                else:
+                    return {"success": False, "error": "illusion_cells每项必须是{x,y}或[x,y]"}
+                if (not isinstance(cx, int) or isinstance(cx, bool)
+                        or not isinstance(cy, int) or isinstance(cy, bool)):
+                    return {"success": False, "error": "蜃景坐标必须为整数"}
+                pos = (cx, cy)
+                if pos in parsed:
+                    return {"success": False, "error": "illusion_cells不能包含重复坐标"}
+                if abs(cx - player_actor.x) > 1 or abs(cy - player_actor.y) > 1 or pos == player_actor.position:
+                    return {"success": False, "error": "蜃景只能放置在自身周围八格"}
+                if not world.map.is_passable(pos, player_actor):
+                    return {"success": False, "error": f"坐标{pos}不是可用地图格"}
+                if any(a.alive and a.position == pos for a in world.actors.values()):
+                    return {"success": False, "error": f"坐标{pos}已有单位，不能放置幻象"}
+                parsed.append(pos)
+            try:
+                calc = DaoWenEngine.resolve("蜃景", x, target=actor, caster=actor)
+            except Exception as exc:
+                return {"success": False, "error": f"蜃景计算失败：{exc}"}
+            _, mana_error = self.combat.pay_daowen_mana(actor, calc, actor)
+            if mana_error:
+                return {"success": False, "error": mana_error}
+            created = []
+            for idx, pos in enumerate(parsed, start=1):
+                illusion = WorldActorState(
+                    actor_id=f"mirage-{player_actor.actor_id}-{world.clock.turn}-{world.next_event_id}-{idx}",
+                    name=player_actor.name, kind="illusion", x=pos[0], y=pos[1],
+                    alive=True, faction=player_actor.faction, mode="passive",
+                    owner_actor_id=player_actor.actor_id,
+                    vision_range=player_actor.vision_range, species=player_actor.species)
+                world.add_actor(illusion)
+                created.append({"actor_id": illusion.actor_id, "position": list(pos)})
+            world.map.version += 1
+            world.record("mirage_created", player_actor.actor_id, count=len(created),
+                         illusions=created, cost=10 * x)
+            self.state.world_state = world.to_dict()
+            return {"success": True, "action": f"发动道纹【蜃景X={x}】",
+                    "result": {"illusions": created, "count": len(created),
+                               "mana_cost": 10 * x, "current_mana": actor.current_mana,
+                               "behavior": "地图伪装目标；施术者进入战斗时消散"}}
+        except (ValueError, KeyError, TypeError) as exc:
+            return {"success": False, "error": str(exc)}
+
     def _action_use_daowen(self, params: dict) -> dict:
         """
         发动道纹。
@@ -5214,6 +5291,8 @@ class GameEngine:
         x = params.get("x", 1)
         if name == "唤潮":
             return self._action_tidecall(params, actor)
+        if name == "蜃景":
+            return self._action_shenjing(params, actor)
         target_name = params.get("target", "")
         target_ref = params.get("target_ref", "")
 
