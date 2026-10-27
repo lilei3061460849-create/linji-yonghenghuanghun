@@ -727,7 +727,7 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_shenjing(x: int) -> dict:
-        """蜃景X：支付法力10X，在开放地图自身周围创造X个伪装目标。"""
+        """蜃景X：支付法力10X，在开放地图施术者所在格创造X个地图幻象。"""
         return {"dao_wen": "蜃景", "x": x, "cost_type": CostType.MANA.value,
                 "cost": 10 * x, "map_illusions": x,
                 "summary": f"支付：{10*x}法力，在开放地图创造{x}个地图幻象"}
