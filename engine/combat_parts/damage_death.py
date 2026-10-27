@@ -293,11 +293,12 @@ class DamageDeathMixin:
         # 使血限压顶/衰老/道纹直减等“由兜底钩子接管”的降血也可见、可追踪，
         # 与 ctx-rich 路径（_record_hp_loss_event）保持一致。
         logs = self._fire_after_life_lost(entity, ctx)
+        record = None
         if logs:
             record = self._write_hp_loss_record(entity, old - new, ctx, "fallback_hp_loss", logs)
-            conversion = self._convert_blood_wing_loss(entity, old - new, ctx)
-            if conversion:
-                record["blood_wing_conversion"] = conversion
+        conversion = self._convert_blood_wing_loss(entity, old - new, ctx)
+        if conversion and record is not None:
+            record["blood_wing_conversion"] = conversion
 
     # ========== 统一死亡判定 / 统一血限变化 ==========
 
