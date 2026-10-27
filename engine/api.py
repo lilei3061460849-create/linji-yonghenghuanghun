@@ -763,6 +763,7 @@ class GameEngine:
                     **({"zaisheng_cost": ["法力", "攻击力"]} if name == "再生" else {}),
                     **({"lianji_cost": ["流血", "法力", "衰老", "枯竭", "碎片", "假碎片"]}
                        if name == "连击" else {}),
+                    **({"status_name": "目标身上要延长的有限持续状态名（凝滞必填）"} if name == "凝滞" else {}),
                     "cost_share_target_ref": (
                         [{"ref": ref, "name": entity.name}
                          for ref, entity in self.combat.blood_pact_targets().items()]
