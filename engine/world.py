@@ -290,6 +290,7 @@ class WorldActorState:
     visited_cells: set[str] = field(default_factory=set)
     memory: list[dict[str, Any]] = field(default_factory=list)
     species: str = ""  # 地形通行种族标记；鲛族可进入【水流】格
+    is_illusion: bool = False  # 地图伪装目标；对观察者呈现为普通角色
 
     @property
     def position(self) -> Coord:
@@ -312,6 +313,7 @@ class WorldActorState:
         last_position = values.get("last_position")
         values["last_position"] = tuple(last_position) if last_position is not None else None
         values.setdefault("species", "")
+        values.setdefault("is_illusion", False)
         values.setdefault("behavior", "explore")
         values.setdefault("owner_actor_id", "")
         values.setdefault("vision_range", 1)
@@ -655,7 +657,7 @@ class WorldState:
                 if any(e.active and actor_id in e.participants for e in self.encounters.values()):
                     continue
             occupied = {other.position for other in self.actors.values()
-                        if other.alive and other.kind != "illusion" and other.actor_id != actor_id}
+                        if other.alive and not other.is_illusion and other.actor_id != actor_id}
             candidates = [p for p in self.map.neighbors(actor.position)
                           if p not in occupied]
             if not candidates:
@@ -905,7 +907,7 @@ class WorldState:
         创建数个互相锁死的战斗。相邻的其他敌人会在当前遭遇结束后再被登记。
         """
         created: list[str] = []
-        living = [a for a in self.actors.values() if a.alive and a.kind != "illusion"]
+        living = [a for a in self.actors.values() if a.alive and not a.is_illusion]
         engaged_ids = {
             participant_id
             for encounter in self.encounters.values() if encounter.active
@@ -973,7 +975,7 @@ class WorldState:
         actor = self._living_actor(actor_id)
         interactions: list[dict[str, Any]] = []
         for other in self.actors.values():
-            if not other.alive or other.actor_id == actor_id or other.kind == "illusion":
+            if not other.alive or other.actor_id == actor_id or other.is_illusion:
                 continue
             was_adjacent = abs(other.x - origin[0]) + abs(other.y - origin[1]) == 1
             is_adjacent = abs(other.x - actor.x) + abs(other.y - actor.y) == 1
@@ -1016,7 +1018,7 @@ class WorldState:
         """敌对单位抵达幻象所在格时，幻象消散，但不会触发战斗或死亡结算。"""
         dispelled = []
         for actor in self.actors.values():
-            if actor.alive and actor.kind == "illusion" and actor.position == position:
+            if actor.alive and actor.is_illusion and actor.position == position:
                 actor.alive = False
                 dispelled.append(actor.actor_id)
                 self.record("mirage_dispersed", actor.actor_id, owner_actor_id=actor.owner_actor_id,
@@ -1027,7 +1029,7 @@ class WorldState:
         """施术者进入战斗时，清除其全部地图蜃景，不把幻象带入战斗。"""
         dispelled = []
         for actor in self.actors.values():
-            if actor.alive and actor.kind == "illusion" and actor.owner_actor_id == owner_actor_id:
+            if actor.alive and actor.is_illusion and actor.owner_actor_id == owner_actor_id:
                 actor.alive = False
                 dispelled.append(actor.actor_id)
                 self.record("mirage_dispersed", actor.actor_id, owner_actor_id=owner_actor_id,
