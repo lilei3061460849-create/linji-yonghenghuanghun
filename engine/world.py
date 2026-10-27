@@ -655,7 +655,7 @@ class WorldState:
                 if any(e.active and actor_id in e.participants for e in self.encounters.values()):
                     continue
             occupied = {other.position for other in self.actors.values()
-                        if other.alive and other.actor_id != actor_id}
+                        if other.alive and other.kind != "illusion" and other.actor_id != actor_id}
             candidates = [p for p in self.map.neighbors(actor.position)
                           if p not in occupied]
             if not candidates:
@@ -873,6 +873,8 @@ class WorldState:
             self.record("actor_moved", actor_id, origin=list(origin),
                         destination=list(destination), autonomous=True)
             self._append_trail(actor_id, destination)
+            if actor.faction in {"monster", "enemy"}:
+                self._dispel_illusions_at(destination, by_actor_id=actor_id, reason="reached_by_hostile")
             self.visible_cells(actor_id)
             generated.append({"type": "actor_moved", "actor_id": actor_id,
                               "from": list(origin), "to": list(destination)})
@@ -903,7 +905,7 @@ class WorldState:
         创建数个互相锁死的战斗。相邻的其他敌人会在当前遭遇结束后再被登记。
         """
         created: list[str] = []
-        living = [a for a in self.actors.values() if a.alive]
+        living = [a for a in self.actors.values() if a.alive and a.kind != "illusion"]
         engaged_ids = {
             participant_id
             for encounter in self.encounters.values() if encounter.active
@@ -971,7 +973,7 @@ class WorldState:
         actor = self._living_actor(actor_id)
         interactions: list[dict[str, Any]] = []
         for other in self.actors.values():
-            if not other.alive or other.actor_id == actor_id:
+            if not other.alive or other.actor_id == actor_id or other.kind == "illusion":
                 continue
             was_adjacent = abs(other.x - origin[0]) + abs(other.y - origin[1]) == 1
             is_adjacent = abs(other.x - actor.x) + abs(other.y - actor.y) == 1
@@ -1010,8 +1012,34 @@ class WorldState:
                 break
         return self.clock.turn
 
+    def _dispel_illusions_at(self, position: Coord, *, by_actor_id: str, reason: str) -> list[str]:
+        """敌对单位抵达幻象所在格时，幻象消散，但不会触发战斗或死亡结算。"""
+        dispelled = []
+        for actor in self.actors.values():
+            if actor.alive and actor.kind == "illusion" and actor.position == position:
+                actor.alive = False
+                dispelled.append(actor.actor_id)
+                self.record("mirage_dispersed", actor.actor_id, owner_actor_id=actor.owner_actor_id,
+                            by_actor_id=by_actor_id, position=list(position), reason=reason)
+        return dispelled
+
+    def _clear_illusions_for_owner(self, owner_actor_id: str, *, reason: str) -> list[str]:
+        """施术者进入战斗时，清除其全部地图蜃景，不把幻象带入战斗。"""
+        dispelled = []
+        for actor in self.actors.values():
+            if actor.alive and actor.kind == "illusion" and actor.owner_actor_id == owner_actor_id:
+                actor.alive = False
+                dispelled.append(actor.actor_id)
+                self.record("mirage_dispersed", actor.actor_id, owner_actor_id=owner_actor_id,
+                            position=list(actor.position), reason=reason)
+        return dispelled
+
     def start_encounter(self, participant_ids: list[str], location: Coord) -> EncounterState:
         unique = list(dict.fromkeys(participant_ids))
+        player_participants = [self.actors[aid] for aid in unique
+                               if aid in self.actors and self.actors[aid].kind == "player"]
+        for player_actor in player_participants:
+            self._clear_illusions_for_owner(player_actor.actor_id, reason="combat_started")
         if len(unique) < 2:
             raise ValueError("遭遇至少需要两个不同单位")
         for actor_id in unique:
