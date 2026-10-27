@@ -1285,6 +1285,14 @@ class ResonanceEngine:
         else:
             chosen = candidates[0]
 
+        # 闭环草案可先保留节点，但没有运行时注册的道纹不能被残韵授予。
+        if chosen["target_daowen"] not in DaoWenEngine._registry:
+            return {
+                "success": False,
+                "error": f"道纹【{chosen['target_daowen']}】尚未接入运行时，不能通过残韵获得",
+                "unimplemented": True,
+            }
+
         # 检查玩家是否拥有该类型残韵
         if resonance_stock is not None:
             available = resonance_stock.get(resonance_type, 0)
