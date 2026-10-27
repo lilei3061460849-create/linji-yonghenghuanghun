@@ -90,7 +90,8 @@ def test_normal_auto_prefers_daowen_when_owned():
     """正常路径：朋友持进攻道纹时自主出手优先发动道纹。"""
     e = _engine("autodw")
     ally = _start_battle(e)
-    _give_daowen(ally, "加害")  # 进攻类道纹，对敌有益
+    _give_daowen(ally, "杀伐")  # 现行进攻道纹；加害已转为消耗品
+    ally.mana_limit = ally.current_mana = 30
     r = e.execute_action("resolve_ally_phases", {})
     assert r["success"]
     kinds = [a["kind"] for entry in r["result"]["allies"] for a in entry["actions"]]
@@ -139,10 +140,11 @@ def test_boundary_command_respects_action_budget():
     """边界：朋友出手用完后再命令被拒。"""
     e = _engine("budget")
     ally = _start_battle(e)
-    # 2026-09-16：出手次数全体固定 2（旧口径为攻次/3=1），故要连下 3 次指令才会耗尽。
-    for i in range(2):
+    # 单轮行动窗口按战斗层预算校验，不拿角色总预算代替窗口预算。
+    budget = e.combat.single_round_action_count(ally)
+    for i in range(budget):
         r = e.execute_action("command_ally", {"ally_ref": "friend:0", "instruction": "攻击 靶怪"})
-        assert r["success"], f"第{i+1}次指令应成功（预算2次）"
+        assert r["success"], f"第{i+1}次指令应成功（窗口预算{budget}次）"
     r2 = e.execute_action("command_ally", {"ally_ref": "friend:0", "instruction": "攻击 靶怪"})
     assert not r2["success"]
     assert "出手已用完" in r2["error"]

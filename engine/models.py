@@ -1420,6 +1420,11 @@ class GameState:
                     tags=heal_ctx.tags, event_id=heal_ctx.event_id,
                     parent_event_id=heal_ctx.parent_event_id,
                 )
+        # 坏死封锁所有来源的回复，包括消耗品；不累计治疗、不产生溢出收益。
+        if entity.has_status("坏死"):
+            return {"heal_amount": amount, "actual_heal": 0,
+                    "hp_before": entity.current_hp, "hp_after": entity.current_hp,
+                    "overheal": 0, "blocked_by": "坏死", "heal_ctx": heal_ctx.to_dict()}
         # 2026-10-14：【猩红果实】持有者当前生命可超出[血限]，回复不再封顶
         # （溢出量归零，【忘忧香】/【龙血瓶】无溢出可吃——没有溢出，只有实打实的血）。
         detail = entity.heal(

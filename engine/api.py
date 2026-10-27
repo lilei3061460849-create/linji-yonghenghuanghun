@@ -31,6 +31,9 @@ from .dice import DiceEngine
 from .death_pages import can_accept as can_accept_page_resource
 from .daowen import DaoWenEngine, ResonanceEngine
 from .combat import CombatEngine
+from .npc_consumables import (consume_tool, consume_named_combat_item,
+                              NAMED_COMBAT_ITEMS, auto_use_consumables, consume_ordinary,
+                              consume_infinite_meat, consume_wing, tick_world_item_statuses)
 from .spell_dsl import parse_spell_definition, SpellDslError
 from .combat_events import register_combat_event_observer
 from .consumables import (
@@ -1999,6 +2002,7 @@ class GameEngine:
         for group_name in ("friends", "employees", "temp_friends", "enemies"):
             entities.extend(getattr(self.state, group_name, []) or [])
         entity_by_id = {entity.runtime_id: entity for entity in entities if entity is not None}
+        tick_world_item_statuses(self.state, entity_by_id.values(), world.clock.turn)
         # 地图互战以世界回合为轮次；延后的部分在下一世界回合造成普通伤害，
         # 也可再被沙漏延后。先取出本回合的伤害，避免把下一回合提前到当场。
         deferred_due = []
@@ -2050,6 +2054,17 @@ class GameEngine:
                 if target is None or not target.is_alive:
                     target_actor.alive = False
                     continue
+                item_logs = auto_use_consumables(
+                    self.combat, attacker,
+                    [entity_by_id[a.actor_id] for a in targets if a.actor_id in entity_by_id])
+                for item_log in item_logs:
+                    world.record("npc_consumable_used", attacker_actor.actor_id,
+                                 item=item_log["item"], uses_remaining=item_log["uses_remaining"],
+                                 detail=item_log["detail"])
+                for participant in participants:
+                    entity = entity_by_id.get(participant.actor_id)
+                    if entity is not None:
+                        participant.alive = bool(entity.is_alive and not entity.is_departed)
                 # 一名单位在一个世界回合内按其攻击次数行动；不额外推进世界时间。
                 for hit_index in range(max(1, int(getattr(attacker, "attack_count", 0)))):
                     if not attacker.is_alive or not target.is_alive:
@@ -6492,6 +6507,8 @@ class GameEngine:
                 return {"success": False,
                         "error": (f"【{item.name}】需要mode参数，可选："
                                   + "；".join(f"{k}={v}" for k, v in modes.items()))}
+            if mode != WING_MODE_FLEE:
+                return consume_wing(self.combat, item, params, player)
             if mode == WING_MODE_FLEE:
                 blocked = self._escape_blocked_reason()
                 if blocked:
@@ -6501,18 +6518,7 @@ class GameEngine:
                                       "uses_remaining": remaining,
                                       "max_uses": item.max_uses,
                                       "is_depleted": item.is_depleted}
-            if mode == WING_MODE_FLY:
-                player.add_status(StatusEffect(name="飞行", value=1, remaining_rounds=1,
-                                               source=item.name))
-                result["flying_rounds"] = 1
-            elif mode == WING_MODE_LIFESTEAL:
-                player.add_status(StatusEffect(name=WING_STATUS_LIFESTEAL, value=1,
-                                               remaining_rounds=1, source=item.name))
-            elif mode == WING_MODE_SUPPRESS:
-                player.add_status(StatusEffect(name=WING_STATUS_SUPPRESS, value=1,
-                                               remaining_rounds=1, source=item.name))
-            elif mode == WING_MODE_FLEE:
-                result.update(self._force_disengage(reason=f"{item.name}·立刻逃跑"))
+            result.update(self._force_disengage(reason=f"{item.name}·立刻逃跑"))
             return {
                 "success": True,
                 "action": f"使用消耗品【{item.name}】（{modes[mode]}）",
@@ -6574,24 +6580,7 @@ class GameEngine:
 
         # 【无限肉块】：恢复10生命（2026-10-05 用户令：5→10），但本次恢复不计入癌变累计治疗量。
         if item.kind == "infinite_meat":
-            before_total = self.state.player.total_healed
-            before_battle_total = self.state.player.healed_this_battle
-            remaining = item.use()
-            heal = self.state.apply_heal(self.state.player, 10, ctx={
-                "timing": self.state.phase, "source": item.name, "source_type": "consumable",
-                "actor": self.state.player, "target": self.state.player, "mechanic": "heal",
-                "subtype": "infinite_meat", "amount": 10,
-                "tags": {"consumable", "exclude_cancer_accumulation"},
-            })
-            self.state.player.total_healed = before_total
-            self.state.player.healed_this_battle = before_battle_total
-            return {
-                "success": True,
-                "action": f"使用消耗品【{item.name}】",
-                "result": {"uses_remaining": remaining, "heal": heal,
-                           "excluded_from_cancer_accumulation": True},
-                "state": self.combat._get_combat_state(),
-            }
+            return consume_infinite_meat(self.combat, item, self.state.player)
 
         # 正文具名消耗品：全部在扣耐久前完成参数校验；未实现项不得“成功但只扣耐久”。
         # 2026-10-14 审计F4：镇魂铁钉处理器补齐（此前发而无用）；替死鬼/赶尸铃/黄符见下。
@@ -6620,104 +6609,7 @@ class GameEngine:
                     "result": {"uses_remaining": remaining, "effects": logs},
                     "state": self.combat._get_combat_state()}
 
-        # 普通消耗品：扣减耐久；异变类效果走统一入口 add_mutation
-        # （裁定⑧= A4全量：任何角色的任何异变来源同一入口，达50层即【迷失】命零；
-        #  其余效果仅限已经有机械解析器的回复/异变文本；未知效果在扣耐久前拒绝。）
-        effect = item.effect or ""
-        heal_match = (re.search(r"恢复(\d+)生命", effect)
-                      or re.search(r"\[回复\]\s*(\d+)", effect)
-                      or re.search(r"回复(\d+)", effect))
-        mut_match = re.search(r"获得异变(\d+)", effect)
-        if heal_match is None and mut_match is None:
-            return {"success": False, "error": f"消耗品【{item.name}】没有已注册的效果处理器"}
-        remaining = item.use()
-        mutation_info = None
-        heal_info = None
-        cancer_info = None
-        if self.state.player:
-            if heal_match:
-                amount = int(heal_match.group(1))
-                heal_info = self.state.apply_heal(self.state.player, amount, ctx={
-                    "timing": self.state.phase, "source": item.name, "source_type": "consumable",
-                    "actor": self.state.player, "target": self.state.player, "mechanic": "heal",
-                    "subtype": "consumable", "amount": amount, "tags": {"consumable"},
-                })
-                cancer = self.combat.check_cancer(self.state.player)
-                if cancer:
-                    cancer_info = cancer
-                    if not self.state.player.is_alive and not self.state.last_death_cause:
-                        self.state.last_death_cause = "cancer"
-        mut_match = re.search(r"获得异变(\d+)", effect)
-        if mut_match and self.state.player:
-            layers = int(mut_match.group(1))
-            mut = self.state.player.add_mutation(layers)
-            mutation_info = {
-                "mutation_added": mut["mutation_added"],
-                "mutation_total": mut["mutation_total"],
-                "collapsed": mut["collapsed"],
-                "lost": mut.get("lost", False),
-            }
-            if mut["collapsed"]:
-                # 怪物（理论上玩家不会走到这里）：异变爆体命零
-                self.combat._on_entity_death(
-                    self.state.player,
-                    ctx=self.combat._lost_context(self.state.player, {
-                        "timing": self.state.combat_subphase or self.state.phase,
-                        "source": "消耗品", "source_type": "consumable",
-                        "actor": self.state.player, "target": self.state.player,
-                        "mechanic": "cost", "subtype": "mutation", "amount": layers,
-                        "tags": {"consumable", "active_payment"}}, subtype="collapse"))
-                self.state.last_death_cause = "collapse"
-                mutation_info["note"] = (
-                    f"异变达{mut['mutation_total']}层触发【迷失】，"
-                    f"{self.state.player.name}异变爆体直接命零")
-            elif mut.get("lost"):
-                # 非怪物：触发【迷失】——战斗中则变身/命零；局外则直接命零。
-                if self.state.phase == "in_combat":
-                    res = self.combat._resolve_mutation_lost(self.state.player, {
-                        "timing": self.state.combat_subphase or self.state.phase,
-                        "source": "消耗品", "source_type": "consumable",
-                        "actor": self.state.player, "target": self.state.player,
-                        "mechanic": "cost", "subtype": "mutation", "amount": layers,
-                        "tags": {"consumable", "active_payment"}})
-                    # 变身不产生"死亡"，不触发死者之页；命零才走 collapse 死因
-                    if res["lost"] == "death":
-                        self.state.last_death_cause = "collapse"
-                    mutation_info["note"] = res["note"]
-                    mutation_info["lost_transform"] = (res["lost"] == "transform")
-                    mutation_info["collapsed"] = (res["lost"] == "death")
-                else:
-                    # 局外触发【迷失】无队友可战：直接命零。_on_entity_death 本身不置 hp/is_alive，
-                    # 需调用方先归零（与 add_mutation 怪物路径的口径一致）。
-                    self.state.player.current_hp = 0
-                    self.state.player.is_alive = False
-                    self.combat._on_entity_death(
-                        self.state.player,
-                        ctx=self.combat._lost_context(self.state.player, {
-                            "timing": self.state.combat_subphase or self.state.phase,
-                            "source": "消耗品", "source_type": "consumable",
-                            "actor": self.state.player, "target": self.state.player,
-                            "mechanic": "cost", "subtype": "mutation", "amount": layers,
-                            "tags": {"consumable", "active_payment"}}, subtype="collapse"))
-                    self.state.last_death_cause = "collapse"
-                    mutation_info["collapsed"] = True
-                    mutation_info["note"] = (
-                        f"异变达{mut['mutation_total']}层触发【迷失】，"
-                        f"身边无可战之敌，{self.state.player.name}直接命零")
-        return {
-            "success": True,
-            "action": f"使用消耗品【{item_name}】",
-            "result": {
-                "effect": item.effect,
-                "uses_remaining": remaining,
-                "is_depleted": item.is_depleted,
-                "heal": heal_info,
-                "cancer": cancer_info,
-                "mutation": mutation_info,
-                "note": "消耗品效果按其描述结算，使用不消耗出手",
-            },
-            "state": self.combat._get_combat_state(),
-        }
+        return consume_ordinary(self.combat, item, self.state.player)
 
     def _consume_named_event_item(self, item: Consumable, params: dict) -> dict:
         refs = self.combat._combat_entity_refs()
@@ -6725,31 +6617,10 @@ class GameEngine:
         if player is None:
             return {"success": False, "error": "没有玩家"}
         name = item.name
+        if name in NAMED_COMBAT_ITEMS:
+            return consume_named_combat_item(self.combat, item, params, player)
         result: dict[str, Any] = {"item": name}
-        if name == "定命丸":
-            if self.state.phase != GamePhase.IN_COMBAT.value or not player.is_alive:
-                return {"success": False, "error": "定命丸只能由存活角色在战斗中使用"}
-            if params.get("target_ref") not in (None, "", "player:0"):
-                return {"success": False, "error": "定命丸仅对使用者自身生效"}
-            item.use()
-            player.status_effects[:] = [s for s in player.status_effects if s.name != "固执"]
-            player.add_status(StatusEffect(name="固执", value=1, remaining_rounds=1, source=name))
-            result.update({"target": player.name, "duration": 1, "max_life_loss": 1})
-        elif name == "灼罪钉":
-            target = refs.get(params.get("target_ref", ""))
-            if target is None or not target.is_alive:
-                return {"success": False, "error": "灼罪钉必须显式指定合法存活target_ref"}
-            item.use()
-            target.add_status(StatusEffect(name="加害", value=1, remaining_rounds=2, source=name))
-            result.update({"target": target.name, "duration": 2, "incoming_damage_bonus": 1})
-        elif name == "怒火针":
-            target = refs.get(params.get("target_ref", ""))
-            if target is None or not target.is_alive:
-                return {"success": False, "error": "怒火针必须显式指定合法存活target_ref"}
-            item.use()
-            target.add_status(StatusEffect(name="愤怒", value=1, remaining_rounds=2, source=name))
-            result.update({"target": target.name, "duration": 2, "mana_cost_halved": True})
-        elif name == "逆命筹":
+        if name == "逆命筹":
             item.use()
             self.dice.set_rerolls(self.dice.rerolls_pending + 1)
             result.update({"rerolls_added": 1, "rerolls_pending": self.dice.rerolls_pending})
@@ -6796,34 +6667,6 @@ class GameEngine:
         elif name == "假钞贴":
             item.use(); self.state.fake_shards += 20
             result.update({"fake_shards_gained": 20, "fake_shards": self.state.fake_shards})
-        elif name == "破障晶":
-            if self.state.phase != GamePhase.IN_COMBAT.value or not player.is_alive:
-                return {"success": False, "error": "破障晶只能由存活角色在战斗中使用"}
-            mode = params.get("mode")
-            if mode not in {"发射", "破障"}:
-                return {"success": False, "error": "破障晶必须选择mode：发射／破障"}
-            if mode == "破障":
-                if params.get("target_ref") not in (None, "", "player:0"):
-                    return {"success": False, "error": "破障模式仅对使用者自身生效"}
-                item.use()
-                player.status_effects[:] = [s for s in player.status_effects if s.name != "贯穿"]
-                player.add_status(StatusEffect("贯穿", 1, value=1, source=name))
-                result.update({"mode": mode, "target": player.name, "duration": 1})
-            else:
-                target = refs.get(params.get("target_ref", ""))
-                if (target is None or not target.is_alive
-                        or self.state.on_player_side(target) == self.state.on_player_side(player)):
-                    return {"success": False, "error": "发射模式必须指定合法存活敌方target_ref"}
-                item.use()
-                detail = self.combat._apply_hostile_damage(target, 15, "无视格挡", player, ctx={
-                    "timing": self.state.combat_subphase or self.state.phase, "source": name, "source_type": "consumable",
-                    "actor": player, "target": target, "mechanic": "damage", "subtype": "consumable",
-                    "amount": 15, "tags": {"consumable", "ignore_shield", "ignore_dodge"},
-                })
-                result.update({"mode": mode, "target": target.name, "damage": detail})
-        elif name == "洗劫面具":
-            item.use(); self.combat.grant_bizhong(player, 2)
-            result.update({"guaranteed_hits": 2, "remaining": self.combat.bizhong_remaining(player)})
         elif name == "赤泉囊":
             if self.state.phase != GamePhase.PRE_BATTLE.value:
                 return {"success": False, "error": "赤泉囊只能在局外使用"}
@@ -6956,130 +6799,8 @@ class GameEngine:
         return {"success": True, "action": f"使用消耗品【{name}】", "result": result}
 
     def _consume_twisted_tool(self, item: Consumable, params: dict) -> dict:
-        """扭曲工具库 8 件的引擎侧真实结算（F3）"""
-        name = item.name
-        player = self.state.player
-        if not player:
-            return {"success": False, "error": "没有玩家"}
-        def selected_enemy():
-            target = self.combat._combat_entity_refs().get(params.get("target_ref", ""))
-            if target in self.state.get_all_enemy_side():
-                return target
-            legacy = params.get("target", "")
-            matches = [entity for entity in self.state.get_all_enemy_side() if entity.name == legacy]
-            return matches[0] if len(matches) == 1 else None
-        # 急救箱的“清除一种”必须由AI显式选择，先校验后扣耐久。
-        aid_status = None
-        if name == "急救箱":
-            negative = [s for s in player.status_effects
-                        if s.remaining_rounds > 0 or s.name in ("坏死", "退化", "伤痕", "畸变", "蒙蔽")]
-            selected = params.get("remove_status")
-            if negative:
-                if not isinstance(selected, str) or selected not in [s.name for s in negative]:
-                    return {"success": False,
-                            "error": f"急救箱必须显式提交remove_status，可选{[s.name for s in negative]}"}
-                aid_status = next(s for s in negative if s.name == selected)
-            elif selected not in (None, ""):
-                return {"success": False, "error": "当前没有可由急救箱清除的负面状态"}
-
-        # 全部参数合法后统一扣耐久。
-        remaining = item.use()
-        result: dict[str, Any] = {"tool": name, "uses_remaining": remaining, "is_depleted": item.is_depleted}
-        # 1. 反怪物电击枪：对目标 25 伤害，飞行目标额外 +15
-        #
-        if name == "反怪物电击枪":
-            target = selected_enemy()
-            if target is None:
-                item.current_uses += 1
-                return {"success": False, "error": "找不到敌方target_ref"}
-            # 只有当前飞行状态算飞行；仅“持有”飞行道纹不算已经飞行。
-            flying = target.is_flying or target.has_status("飞行")
-            dmg = 25 + (15 if flying else 0)
-            detail = self.combat._apply_hostile_damage(target, dmg, source=player, ctx={
-                "timing": self.state.combat_subphase or self.state.phase, "source": "反怪物电击枪", "source_type": "consumable",
-                "actor": player, "target": target, "mechanic": "damage", "subtype": "consumable",
-                "amount": dmg, "tags": {"consumable"},
-            })
-            result.update({"target": target.name, "damage": dmg, "flying_bonus": 15 if flying else 0, "hp_after": target.current_hp, "detail": detail})
-            # 2026-10-03：原“击落”（施【坠落1】）随道纹删除移除。
-        # 2. 备用血泵：回复20（走 heal，计入癌变/战终回吐），≤30% 额外30格挡
-        elif name == "备用血泵":
-            heal_detail = self.state.apply_heal(player, 20, ctx={
-                "timing": self.state.combat_subphase or self.state.phase, "source": "备用血泵", "source_type": "consumable",
-                "actor": player, "target": player, "mechanic": "heal", "subtype": "consumable",
-                "amount": 20, "tags": {"consumable"},
-            })
-            healed = heal_detail["actual_heal"]
-            shield_gained = 0
-            if player.current_hp <= player.blood_limit * 0.3:
-                player.shield += 30
-                shield_gained = 30
-            cancer = self.combat.check_cancer(player)
-            result.update({"healed": healed, "hp_after": player.current_hp,
-                           "shield_gained": shield_gained, "heal": heal_detail,
-                           "cancer": cancer})
-        # 3. 强光探照灯：目标蒙蔽2
-        elif name == "强光探照灯":
-            target = selected_enemy()
-            if target is None:
-                item.current_uses += 1
-                return {"success": False, "error": "找不到敌方target_ref"}
-            target.add_status(StatusEffect(name="蒙蔽", value=2, remaining_rounds=-1, source="强光探照灯"))
-            result.update({"target": target.name, "蒙蔽": 2})
-        # 4. 高压水枪：清除全场敌方所有持续X效果
-        elif name == "高压水枪":
-            cleared = []
-            for m in self.state.get_all_enemy_side():
-                before = len(m.status_effects)
-                m.status_effects = [s for s in m.status_effects if s.remaining_rounds <= 0]
-                if len(m.status_effects) != before:
-                    cleared.append(m.name)
-            result.update({"cleared_enemies": cleared})
-        # 5. 储能电池：使用后立即获得12法力
-        elif name == "储能电池":
-            # 2026-10-08：走统一入口，【勾魂】期间不生效
-            gained = player.gain_mana(12)
-            self.combat.clamp_immortal_body(player)
-            result.update({"mana_gained": gained, "mana_after": player.current_mana})
-        # 6. 急救箱：回复25（走 heal）并清一种负面持续
-        elif name == "急救箱":
-            heal_detail = self.state.apply_heal(player, 25, ctx={
-                "timing": self.state.combat_subphase or self.state.phase, "source": "急救箱", "source_type": "consumable",
-                "actor": player, "target": player, "mechanic": "heal", "subtype": "consumable",
-                "amount": 25, "tags": {"consumable"},
-            })
-            healed = heal_detail["actual_heal"]
-            removed = None
-            if aid_status is not None:
-                player.status_effects.remove(aid_status)
-                removed = aid_status.name
-            cancer = self.combat.check_cancer(player)
-            result.update({"healed": healed, "removed_status": removed,
-                           "heal": heal_detail, "cancer": cancer})
-        # 7. 干扰仪：全场敌方本回合无法发动道纹（加干扰1状态）
-        elif name == "干扰仪":
-            jammed = []
-            for m in self.state.get_all_enemy_side():
-                m.add_status(StatusEffect(name="干扰", value=1, remaining_rounds=1, source="干扰仪"))
-                jammed.append(m.name)
-            result.update({"jammed": jammed})
-        # 8. 高爆手雷：目标15伤害 + 本回合攻击次数-1
-        elif name == "高爆手雷":
-            target = selected_enemy()
-            if target is None:
-                item.current_uses += 1
-                return {"success": False, "error": "找不到敌方target_ref"}
-            detail = self.combat._apply_hostile_damage(target, 15, source=player, ctx={
-                "timing": self.state.combat_subphase or self.state.phase, "source": "高爆手雷", "source_type": "consumable",
-                "actor": player, "target": target, "mechanic": "damage", "subtype": "consumable",
-                "amount": 15, "tags": {"consumable"},
-            })
-            # 攻击次数-1：用状态标记，本回合内 _monster_attack_actions 会读取
-            target.add_status(StatusEffect(name="手雷减攻", value=1, remaining_rounds=1, source="高爆手雷"))
-            result.update({"target": target.name, "damage": 15, "detail": detail, "nade_minus": 1})
-        else:
-            result.update({"note": "未知工具"})
-        return {"success": True, "action": f"使用工具【{name}】", "result": result, "state": self.combat._get_combat_state()}
+        return consume_tool(self.combat, item, params, self.state.player,
+                            self.state.get_all_enemy_side())
 
     # ==================== 事件结算 ====================
 
@@ -7471,6 +7192,8 @@ class GameEngine:
                     break
                 ally_ref = f"{prefix}:{index}"
                 entry = {"ally": ally.name, "actions": []}
+                entry["consumables"] = auto_use_consumables(self.combat, ally)
+                enemies = [e for e in self.state.enemies if e.is_alive]
                 # 自主出手次数：用完 action_count（至少1次）；每次攻击或道纹
                 for _ in range(max(1, ally.action_count)):
                     if not ally.is_alive or not enemies:

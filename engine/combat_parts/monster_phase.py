@@ -1090,5 +1090,10 @@ class MonsterPhaseMixin:
                         break
                 if not monster.is_alive:
                     break
+        # Only after all submitted attacks/casts: automatic items cannot invalidate
+        # their explicit target/hit/budget snapshots. Still inside the transaction.
+        from ..npc_consumables import auto_use_consumables
+        for actor_ref in submitted:
+            results.extend(auto_use_consumables(self, refs.get(actor_ref)))
         return results
 

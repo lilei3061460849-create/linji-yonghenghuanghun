@@ -540,11 +540,12 @@ class MonsterLifeMixin:
         }
 
     def use_sculpture(self, consumable: Consumable, target: Entity = None,
-                      mode: str = "damage") -> dict:
+                      mode: str = "damage", actor: Entity = None) -> dict:
         """
         使用雕塑：消耗1点耐久，造成15伤害或获得20格挡
         mode: "damage"(对target造伤) / "shield"(自身格挡)
         """
+        actor = actor if actor is not None else self.state.player
         if consumable.kind != "sculpture":
             return {"success": False, "error": "非雕塑消耗品"}
         if consumable.is_depleted:
@@ -553,11 +554,11 @@ class MonsterLifeMixin:
             return {"success": False, "error": "雕塑mode必须是damage或shield"}
         if mode == "damage" and target is None:
             return {"success": False, "error": "伤害模式需指定目标"}
-        if mode == "shield" and self.state.player is None:
+        if mode == "shield" and actor is None:
             return {"success": False, "error": "没有玩家，无法获得格挡"}
         consumable.use()
         if mode == "shield":
-            player = self.state.player
+            player = actor
             player.gain_shield(self.SCULPTURE_SHIELD)
             return {
                 "success": True,
@@ -567,9 +568,9 @@ class MonsterLifeMixin:
                 "note": f"雕塑赋能：获得{self.SCULPTURE_SHIELD}点格挡",
             }
         else:
-            dmg = self._apply_hostile_damage(target, self.SCULPTURE_DAMAGE, source=self.state.player, ctx={
+            dmg = self._apply_hostile_damage(target, self.SCULPTURE_DAMAGE, source=actor, ctx={
                 "timing": self._current_context_timing(), "source": "雕塑", "source_type": "consumable",
-                "actor": self.state.player, "target": target, "mechanic": "damage", "subtype": "sculpture",
+                "actor": actor, "target": target, "mechanic": "damage", "subtype": "sculpture",
                 "amount": self.SCULPTURE_DAMAGE, "tags": {"consumable", "sculpture"},
             })
             return {

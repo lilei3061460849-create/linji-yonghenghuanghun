@@ -270,11 +270,14 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                     or entity.has_status("飞行"))
 
     def _wanjunyin_holder(self, target: Entity) -> bool:
-        """己方被攻击角色是否有剩余耐久的【万钧印】消耗品。"""
-        if target is None or not self.state.on_player_side(target):
+        """被攻击角色实际持有的【万钧印】；敌我同规则。"""
+        if target is None:
             return False
         return any(item.name == "万钧印" and not item.is_depleted
-                   for item in self.state.consumables)
+                   for item in self._held_consumables(target))
+
+    def _held_consumables(self, entity):
+        return self.state.consumables if entity is self.state.player else entity.consumables
 
     def _incoming_adjust(self, target: Entity, amount: int, damage_type: str = "普通") -> int:
         if amount <= 0 or damage_type == "代价" or target is None:
@@ -705,13 +708,13 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             "hp_lost": 0,
             "target_died": False,
         }
-        # 万钧印（消耗品）：己方角色被选为攻击目标时自动触发并消耗1点耐久，
+        # 万钧印（消耗品）：持有者被选为攻击目标时自动触发并消耗1点耐久，
         # 将攻击改为攻击者对自己发动。显式传 wanjunyin=False 可拒绝本次；
         # 被改道的一次自攻不会再被改道（_wanjunyin_converted 防 A→B→A 递归）。
         if (not _wanjunyin_converted and wanjunyin is not False
                 and attacker is not target and attacker.is_alive
                 and self._wanjunyin_holder(target)):
-            item = next(item for item in self.state.consumables
+            item = next(item for item in self._held_consumables(target)
                         if item.name == "万钧印" and not item.is_depleted)
             item.use()
             # 原受击者的反应提交随改道失效；自攻目标按自身可用反应法术生成
