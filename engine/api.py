@@ -969,7 +969,7 @@ class GameEngine:
              "remaining_groups": len(self.state.pending_diandang_discoveries),
              "note": "领取【典当】发现：从当前组3选1里选1种获得，不消耗出手"},
             {"action_type": "command_ally", "params_schema": {
-                "ally_ref": ally_options, "instruction": "语言命令，如：攻击 余烬侍者 / 发动 背负",
+                "ally_ref": ally_options, "instruction": "语言命令，如：攻击 余烬侍者 / 发动 再生 / 护卫 3",
                 "available": bool(ally_options)}},
             {"action_type": "resolve_ally_phases", "params_schema": {},
              "available": bool(idle_allies),
@@ -7290,7 +7290,7 @@ class GameEngine:
             （2026-10-14 审计F4；法术须经黄符获授且在本场有效）
           「护卫 [X]」「保护我 [X]」「挡伤 [X]」「替我挡 [X]」 → 无消耗强制护卫：
             该[朋友]/[员工]替轮回者承担下X次受到的伤害（X默认1，1~9）。
-            机制=对盟友强制施加背负标记（复用龙心谷背负的伤害重定向），
+            机制=对盟友强制施加背负标记（复用护卫标记的伤害重定向），
             不消耗盟友出手、不消耗法力，视为轮回者的指挥能力。
         目标名缺省时取当前存活敌人中当前生命最少者。
         """
@@ -7345,7 +7345,7 @@ class GameEngine:
         def _resolve_target(name_hint: str = "", allow_allies: bool = False):
             """解析命令目标。allow_allies=False（攻击指令）只允许敌方；
             allow_allies=True（道纹指令）允许全场存活单位（轮回者/朋友/员工/怪物），
-            使「发动背负 打 轮回者」这类保护/治疗命令可行。
+            使「发动再生 对 轮回者」这类治疗命令可行。
             「轮回者/我/我自己」是玩家别名（道纹指令保护队友时用）。"""
             if allow_allies and name_hint in ("轮回者", "我", "我自己"):
                 pl = self.state.player
@@ -7417,7 +7417,7 @@ class GameEngine:
                                            "detail": cast.get("result")}}
                     return {"success": False,
                             "error": f"{ally.name}未持有道纹「{daowen}」；持有：{list(ally.dao_wen)}"}
-                # 道纹指令允许指定我方目标（背负/再生/庇护保护队友），按全场解析
+                # 道纹指令允许指定我方目标（再生/庇护保护队友），按全场解析
                 target = _resolve_target(target_name, allow_allies=True)
                 if target is None:
                     return {"success": False,
@@ -8153,6 +8153,8 @@ class GameEngine:
         e.mutation_count = d.get("mutation_count", 0)   # ④修复：旧档无此键回退0
         from .daowen import normalize_daowen_name as _norm_dw
         for name, x in d.get("dao_wen", {}).items():
+            if name == "背负":
+                continue  # 已删除道纹不从旧封存复活；护卫内部标记单独保留。
             name = _norm_dw(name)  # 旧封存【血债】读入即映射【连击】
             cooldowns = d.get("daowen_cooldowns", {}).get(name, {})
             e.dao_wen[name] = DaoWenInstance(
@@ -9899,6 +9901,8 @@ class GameEngine:
             if isinstance(entity, Entity) and id(entity) not in seen:
                 seen.add(id(entity))
                 unique_entities.append(entity)
+        for entity in unique_entities:
+            entity.dao_wen.pop("背负", None)  # 不清理护卫状态/_beifu_*，也不让已删除道纹占页。
         # 状态可能挂在目标身上，但其排序锚点来自施加该状态的角色。
         # 例如【清算】的状态在目标身上，位置却属于施法者的道纹序列。
         entity_by_name = {entity.name: entity for entity in unique_entities}

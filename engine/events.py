@@ -708,7 +708,6 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
     elif event_name == "断桥余烬" and text.startswith("接过伤者"):
         friend = Entity("岩行者", "朋友", blood_limit=54, current_hp=54,
                         attack_count=2, attack_power=4)
-        _grant_daowen(friend, "背负", 1)
         _pay_numeric("流血", 10)
         applied.append("流血10")
         engine.state.friends.append(friend)

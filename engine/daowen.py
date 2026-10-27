@@ -21,7 +21,7 @@ RELICIZED_SLOT = "？？"
 PLACEHOLDER_SLOTS = frozenset({RESERVED_SLOT, RELICIZED_SLOT})
 RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变",
+    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变", "背负",
 )}
 
 
@@ -625,17 +625,6 @@ class DaoWenEngine:
 
     
     @staticmethod
-    def calculate_beifu(x: int, target: Entity = None) -> dict:
-        """背负X：支付：法力2X。选择目标，其下X次受到伤害由自身承担"""
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "背负", "x": x, "cost_type": CostType.MANA.value, "cost": 2 * x,
-            "absorb_count": x,
-            "summary": f"支付：{2 * x}法力，{target_name}下{x}次受伤由自身承担"
-        }
-    
-
-    @staticmethod
     def calculate_chao(x: int) -> dict:
         """唤潮X：支付：法力X。在开放地图中，以自身所在格为中心选择周围X个可用地图格，将其改为【水流】地形；只有鲛族可以进入或穿越【水流】格。"""
         return {"dao_wen": "唤潮", "x": x, "cost_type": CostType.MANA.value,
@@ -805,7 +794,6 @@ class DaoWenEngine:
             "勒索": cls.calculate_lesuo,
             "假钞": cls.calculate_jiachao,
             # 龙心谷
-            "背负": cls.calculate_beifu,
             # ---- 沉沦海（二阶）----
             "唤潮": cls.calculate_chao,
             "蜃景": cls.calculate_shenjing,
@@ -966,8 +954,8 @@ class ResonanceEngine:
             (RELICIZED_DAOWEN_SLOTS["逆鳞"], "转换", RELICIZED_DAOWEN_SLOTS["裂变"]),
             # 2026-10-11 用户令（A13）：【嫁祸】整条删除（效果与遗物【贪婪契约】重复）
             #   → 沿用活血/尸爆的删除先例：断边**重连**为 裂变—转换→背负，环长 7→6。
-            (RELICIZED_DAOWEN_SLOTS["裂变"], "转换", "背负"),
-            ("背负", "曲解", RELICIZED_DAOWEN_SLOTS["伤痕"]),
+            (RELICIZED_DAOWEN_SLOTS["裂变"], "转换", RELICIZED_DAOWEN_SLOTS["背负"]),
+            (RELICIZED_DAOWEN_SLOTS["背负"], "曲解", RELICIZED_DAOWEN_SLOTS["伤痕"]),
             (RELICIZED_DAOWEN_SLOTS["伤痕"], "转换", RELICIZED_DAOWEN_SLOTS["加害"]),
         ],
         "乱葬岗闭环": [

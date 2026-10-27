@@ -65,13 +65,13 @@ def test_normal_command_ally_attack():
 
 
 def test_normal_command_ally_daowen():
-    """正常路径：语言命令「发动 背负 打 靶怪」让朋友发动道纹。"""
+    """正常路径：语言命令「发动 杀伐 打 靶怪」让朋友发动道纹。"""
     e = _engine("dw")
     ally = _start_battle(e)
-    _give_daowen(ally, "背负")
-    r = e.execute_action("command_ally", {"ally_ref": "friend:0", "instruction": "发动 背负 打 靶怪"})
+    _give_daowen(ally, "杀伐")
+    r = e.execute_action("command_ally", {"ally_ref": "friend:0", "instruction": "发动 杀伐 打 靶怪"})
     assert r["success"], r
-    assert r["result"]["daowen"] == "背负"
+    assert r["result"]["daowen"] == "杀伐"
     assert ally.actions_used_this_round == 1
 
 

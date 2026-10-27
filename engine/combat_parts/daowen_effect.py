@@ -1115,7 +1115,7 @@ class DaowenEffectMixin:
                 entity.name for entity in self._blood_pact_group(caster)],
                 "duration": "∞"})
 
-        # ---- 龙心谷专属 3 件（F2）：逆鳞/背负/伤痕 的 combat 侧实装 ----
+        # ---- 旧遗物状态兼容：逆鳞/伤痕；背负道纹已删除 ----
         # （【嫁祸】2026-10-11 已删除，效果与遗物【贪婪契约】重复）
         # 逆鳞X：目标每失去1HP积1层，下次伤害+全部层后清空，持续X（已通过 duration 加状态，此处初始化计数）
         if name == "逆鳞":
@@ -1123,16 +1123,6 @@ class DaowenEffectMixin:
                 if not hasattr(st_target, "_nilin"):
                     st_target._nilin = 0
                 result["effects"].append({"type": "nilin_setup", "target": st_target.name, "x": x})
-        # 存 runtime_id 而非实体引用：自施/互指会形成实体引用环，
-        # 事务回滚 _restore_state_in_place 的递归会无限深入（2026-08-22 学习遥测 RecursionError）。
-        # 背负X：目标下X次受伤由自身承担（只存 runtime_id）
-        elif name == "背负":
-            caster._beifu_left = x
-            caster._beifu_target = target.runtime_id
-            # 在目标侧加标记便于查询
-            for st_target in wave_status_targets:
-                st_target.add_status(self._daowen_status(daowen_order=daowen_order, name="被背负", value=x, remaining_rounds=-1, source=caster.name))
-                result["effects"].append({"type": "beifu", "caster": caster.name, "target": st_target.name, "count": x})
         # 伤痕X：目标每次掉血后血限-X，永久（已通过 duration 加伤痕状态，此处仅补日志）
         elif name == "伤痕":
             for st_target in wave_status_targets:
