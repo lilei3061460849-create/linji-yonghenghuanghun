@@ -292,7 +292,7 @@ def test_zengzhi_grants_temporary_infinite_blood_limit_and_bypasses_cancer():
     assert engine.combat.check_cancer(target) is None
     assert "癌变（300/∞）" in target.lethal_progress()
 
-    # 增殖到期时撤销无限血限，超出基础血限的生命同步封顶。
-    target.tick_status_effects()
+    # 回终递减持续时间；到期时撤销无限血限，并将生命封顶到基础血限。
+    engine.combat.round_end()
     assert not target.has_status("无限血限")
-    assert target.current_hp == 400  # 到期钳位由战斗回合结算器执行
+    assert target.current_hp == target.blood_limit == 100
