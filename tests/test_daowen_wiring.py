@@ -410,7 +410,7 @@ def test_chengni_triggers_nightwatch_per_extra_round_using_world_round():
 
 
 def test_jinghua_rejects_mixed_cost_layers():
-    """净化由施法者自选可逆数值型代价，层数总和不能超过X。"""
+    """净化只能选择一种数值类代价，不能混选或拆分X。"""
     engine = _engine("jinghua_cost_choices")
     _give(engine.state.player, "净化")
     target = _monster(engine, "净化靶怪", hp=100)

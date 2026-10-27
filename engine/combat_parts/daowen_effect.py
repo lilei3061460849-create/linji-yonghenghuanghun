@@ -108,6 +108,10 @@ class DaowenEffectMixin:
         aoe_targets_override: Optional[list[Entity]] = None,
     ) -> dict:
         """应用道纹效果；aoe_targets_override用于绑定两阶段决策的目标快照。"""
+        if name == "净化":
+            kinds = set(calc.get("cost_reductions", {}))
+            if len(kinds) != 1 or not kinds <= {"衰老", "枯竭", "萎缩", "疲惫", "异变"}:
+                raise ValueError("净化仅允许减少一种数值类代价，不支持失忆或冷却")
         result = {"daowen": name, "effects": []}
         # 永恒的偏爱只延长该持有者本次发动后新增/刷新的持续状态，
         # 不会把其他角色施加给他的负面状态错误地永久化。
@@ -468,7 +472,7 @@ class DaowenEffectMixin:
                     "tags": {"daowen"},
                 })})
         if name == "净化" and calc.get("cost_reductions"):
-            # 仅返还真实支付记录；失忆保留原实例，冷却减指定道纹的剩余值。
+            # 只逆转已承担的数值类代价；不返还失忆道纹，不改变冷却。
             reductions = calc["cost_reductions"]
             for wt in wave_status_targets:
                 if not wt.is_alive:
@@ -477,23 +481,6 @@ class DaowenEffectMixin:
                 ledger = getattr(wt, "reversible_cost_layers", {})
                 applied = {}
                 for kind in list(reductions):
-                    if kind == "失忆":
-                        refunded = []
-                        for inst in list(reversed(wt.refundable_daowen()))[:reductions[kind]]:
-                            wt.dao_wen[inst.dao_wen.name] = inst
-                            wt.forgotten_cost_daowen.remove(inst)
-                            refunded.append(inst.dao_wen.name)
-                        applied[kind] = refunded
-                        continue
-                    if kind == "冷却":
-                        inst = wt.dao_wen.get(calc.get("purify_cooldown_daowen"))
-                        if inst is not None:
-                            inst.cooldown_remaining = max(0, inst.cooldown_remaining - reductions[kind])
-                            inst.cooldown_rounds_remaining = max(0, inst.cooldown_rounds_remaining - reductions[kind])
-                            applied[kind] = {"daowen_name": inst.dao_wen.name,
-                                             "battles": inst.cooldown_remaining,
-                                             "rounds": inst.cooldown_rounds_remaining}
-                        continue
                     owned = wt.mutation_count if kind == "异变" else ledger.get(kind, 0)
                     reductions[kind] = min(reductions[kind], max(0, owned))
                     if kind != "异变":

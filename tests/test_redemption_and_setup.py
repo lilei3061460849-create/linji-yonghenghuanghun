@@ -199,7 +199,7 @@ def test_jinghua_reduces_mutation():
     engine = _ready_combat(_engine("jh_ok"))
     player = engine.state.player
     _give(player, "净化")
-    player.current_mana = 50
+    player.current_mana = 150
     monster = Entity(name="疫怪", entity_type="怪物", blood_limit=80, current_hp=80,
                      attack_count=2, attack_power=4)
     monster.mutation_count = 12
@@ -211,7 +211,8 @@ def test_jinghua_reduces_mutation():
     })
     assert r["success"]
     assert monster.mutation_count == 7
-    assert r["calculation"]["cost"] == 10  # 净化消耗5X→2X（2026-09-16），X=5
+    assert r["calculation"]["cost"] == 100  # 最新裁定：法力20X，X=5
+    assert player.current_mana == 50
 
 
 def test_jinghua_rejects_unowned_mutation():

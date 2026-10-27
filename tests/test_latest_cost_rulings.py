@@ -37,6 +37,8 @@ def test_purification_requires_owned_cost_and_cannot_inflate(kind, attr):
     assert result["success"], result
     assert getattr(m, attr) == before
     assert m.reversible_cost_layers[kind] == 0
+    assert result["calculation"]["cost"] == 60
+    assert e.state.player.current_mana == 20
 
 
 def test_purification_mutation_is_explicit_single_choice():
@@ -52,7 +54,7 @@ def test_purification_mutation_is_explicit_single_choice():
     assert m.mutation_count == 5
 
 
-def test_amnesia_returns_actual_instance_without_resetting_cooldown_or_unique():
+def test_amnesia_is_rejected_without_returning_rune_or_spending_mana():
     e = _engine("refund_amnesia")
     p = e.state.player
     _give(p, "净化")
@@ -61,17 +63,21 @@ def test_amnesia_returns_actual_instance_without_resetting_cooldown_or_unique():
     inst.cooldown_remaining = 7
     inst.spent_unique = True
     p.forget_for_cost("固执")
+    mana_before = p.current_mana
+    actions_before = p.actions_used_this_round
     result = e.execute_action("use_daowen", {
         "daowen_name": "净化", "x": 1, "target_ref": "player:0",
         "cost_choices": [{"type": "失忆"}],
     })
-    assert result["success"], result
-    assert p.dao_wen["固执"] is inst
+    assert not result["success"], result
+    assert "固执" not in p.dao_wen
     assert inst.cooldown_remaining == 7 and inst.spent_unique
-    assert not p.refundable_daowen()
+    assert p.refundable_daowen() == [inst]
+    assert p.current_mana == mana_before
+    assert p.actions_used_this_round == actions_before
 
 
-def test_cooldown_reduces_selected_rune_only_and_clamps_to_zero():
+def test_cooldown_is_rejected_without_altering_either_cooldown():
     e = _engine("refund_cooldown")
     p = e.state.player
     _give(p, "净化")
@@ -83,8 +89,10 @@ def test_cooldown_reduces_selected_rune_only_and_clamps_to_zero():
         "daowen_name": "净化", "x": 3, "target_ref": "player:0",
         "cost_choices": [{"type": "冷却", "daowen_name": "固执"}],
     })
-    assert result["success"], result
-    assert p.dao_wen["固执"].cooldown_remaining == 0
+    assert not result["success"], result
+    assert p.current_mana == 80
+    assert p.actions_used_this_round == 0
+    assert p.dao_wen["固执"].cooldown_remaining == 2
     assert p.dao_wen["束缚"].cooldown_rounds_remaining == 6
 
 
@@ -101,8 +109,8 @@ def test_refund_history_survives_full_entity_snapshot():
     assert restored.refundable_daowen()[0].cooldown_remaining == 3
 
 
-def test_confirmed_balance_risk_dianjin_with_ally_purification_repeats_for_shards():
-    """风险证据而非平衡背书：队友用2法力净化可反复返还点金1的失忆。"""
+def test_dianjin_ally_purification_amnesia_loop_is_blocked():
+    """最新范围限制切断旧点金+队友净化循环，不靠提高汇率掩盖漏洞。"""
     from engine.models import Entity, StatusEffect
     e = _engine("dianjin_refund_cycle")
     p = e.state.player
@@ -116,15 +124,52 @@ def test_confirmed_balance_risk_dianjin_with_ally_purification_repeats_for_shard
     e.state.friends = [ally]
     mana_before = ally.current_mana
     shards_before = e.state.shards
-    for _ in range(2):
-        gain = e.execute_action("use_daowen", {"daowen_name": "点金", "x": 1})
-        assert gain["success"], gain
-        assert "杀伐" not in p.dao_wen
-        refund = e.execute_action("use_daowen", {
-            "daowen_name": "净化", "x": 1, "actor_ref": "friend:0", "target_ref": "player:0",
-            "cost_choices": [{"type": "失忆"}],
-        })
-        assert refund["success"], refund
-        assert "杀伐" in p.dao_wen
-    assert e.state.shards == shards_before + 160
-    assert ally.current_mana == mana_before - 4
+    gain = e.execute_action("use_daowen", {"daowen_name": "点金", "x": 1})
+    assert gain["success"], gain
+    assert "杀伐" not in p.dao_wen
+    refund = e.execute_action("use_daowen", {
+        "daowen_name": "净化", "x": 1, "actor_ref": "friend:0", "target_ref": "player:0",
+        "cost_choices": [{"type": "失忆"}],
+    })
+    assert not refund["success"], refund
+    assert "杀伐" not in p.dao_wen
+    assert e.state.shards == shards_before + 80
+    assert ally.current_mana == mana_before
+    assert ally.actions_used_this_round == 0
+
+
+@pytest.mark.parametrize("kind", ["流血", "失忆", "冷却", "唯一", "法力"])
+def test_non_numeric_cost_types_are_rejected_by_calculator(kind):
+    with pytest.raises(ValueError, match="仅支持数值类代价"):
+        DaoWenEngine.resolve("净化", 1, cost_choices=[{"type": kind}])
+
+
+def test_purification_cost_is_twenty_mana_per_layer():
+    e = _engine("purification_20x")
+    p = e.state.player
+    _give(p, "净化")
+    m = _monster(e, "靶", hp=100)
+    m.mutation_count = 5
+    params = {"daowen_name": "净化", "x": 3, "target": m.name,
+              "cost_choices": [{"type": "异变"}]}
+    p.current_mana = 59
+    rejected = e.execute_action("use_daowen", params)
+    assert not rejected["success"], rejected
+    assert p.current_mana == 59
+    assert m.mutation_count == 5
+    assert p.actions_used_this_round == 0
+    p.current_mana = 60
+    accepted = e.execute_action("use_daowen", params)
+    assert accepted["success"], accepted
+    assert accepted["calculation"]["cost"] == 60
+    assert p.current_mana == 0
+    assert m.mutation_count == 2
+    assert p.actions_used_this_round == 1
+
+
+def test_stale_amnesia_calculation_cannot_bypass_scope_restriction():
+    e = _engine("stale_amnesia_calc")
+    with pytest.raises(ValueError, match="仅允许减少一种数值类代价"):
+        e.combat.apply_daowen_effect("净化", {
+            "x": 1, "cost": 2, "cost_reductions": {"失忆": 1},
+        }, e.state.player, e.state.player)
