@@ -108,10 +108,11 @@ def test_single_fourteen_node_core_loop():
 
 def test_region_loops_present():
     """正常路径：所有已登记的副本闭环必须存在"""
-    # 2026-10-03：扭曲都市删【爆裂】、龙心谷删【活血】，这两条闭环 8 → 7 条边；罪孽都市不变。
+    # 2026-10-03：扭曲都市删【爆裂】、龙心谷删【活血】，这两条闭环 8 → 7 条边。
+    # 2026-10-27：罪孽都市移除【消灾】，闭环压缩为7条边。
     # 2026-10-11：龙心谷删【嫁祸】（效果与遗物【贪婪契约】重复），由【裂变】直连【背负】，7 → 6 条边。
     # 2026-10-14：扭曲都市删【搏命】（并入【透支】），该格留成空占位符（镇尸先例），仍 7 条边。
-    expected = {"扭曲都市闭环": 7, "罪孽都市闭环": 8, "龙心谷闭环": 6, "沉沦海闭环": 8}
+    expected = {"扭曲都市闭环": 7, "罪孽都市闭环": 7, "龙心谷闭环": 6, "沉沦海闭环": 8}
     for loop, n in expected.items():
         assert loop in R.CLOSED_LOOPS, f"缺少 {loop}"
         assert len(R.CLOSED_LOOPS[loop]) == n, f"{loop} 应有{n}条边"
@@ -129,6 +130,14 @@ def test_monster_daowen_now_transformable():
 
 
 # ---------- 边界条件 ----------
+
+def test_disaster_ward_is_removed_from_sin_city_loop():
+    edges = R.CLOSED_LOOPS["罪孽都市闭环"]
+    assert len(edges) == 7
+    assert not any(src == "消灾" or dst == "消灾" for src, _, dst in edges)
+    assert R.get_available_resonance("消灾") == []
+    assert R.find_transformation("？？", "曲解", target_daowen="点金") == "点金"
+
 
 def test_region_loops_are_closed():
     """边界：副本闭环必须真正合拢（每个节点入度=出度=1）"""
