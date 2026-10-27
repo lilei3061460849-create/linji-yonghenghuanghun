@@ -363,7 +363,7 @@ for region in REGION_EXCLUSIVE_DAOWEN:
     section(f"{region}专属（{len(ns)}）", list(ns), note_lines=notes,
             loop=f"{region}闭环", loop_title=region)
     if region == "龙心谷":
-        A("> 原龙心谷专属道纹【加害】已转换为消耗品【灼罪钉】，固定使指定目标每次受到伤害+1，持续2回合；详见[物品索引](物品索引.md#灼罪钉)。")
+        A("> 原龙心谷专属道纹【加害】已正式转换为消耗品【灼罪钉】，固定使指定目标每次受到伤害+1，持续2回合；详见[物品索引](物品索引.md#灼罪钉)。")
         A("")
 
 for race, pool in RACE_EXCLUSIVE_DAOWEN.items():
