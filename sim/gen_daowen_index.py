@@ -26,6 +26,8 @@ from engine.gamedata import (  # noqa: E402
     SHAFA_LOOP_DAOWEN,
     UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN,
     FIRST_EMBRACE_DAOWEN,
+    RACE_EXCLUSIVE_DAOWEN,
+    BLOODLINE_EXCLUSIVE_DAOWEN,
 )
 from engine.dungeons import load_dungeon_documents  # noqa: E402
 
@@ -126,7 +128,7 @@ def region_daowen_order(region: str) -> list:
 CATEGORY = {}
 for n in SHAFA_LOOP_DAOWEN:
     CATEGORY[n] = "shaifa"
-CATEGORY["血契"] = "shaifa"
+CATEGORY["血契"] = "other"
 for n in ORIGINAL_MONSTER_DAOWEN:
     CATEGORY[n] = "original"
 for n in MONSTER_TRANSFORM_DAOWEN:
@@ -134,6 +136,11 @@ for n in MONSTER_TRANSFORM_DAOWEN:
 for region in REGION_EXCLUSIVE_DAOWEN:
     for n in region_daowen_order(region):
         CATEGORY[n] = region
+for race, pool in RACE_EXCLUSIVE_DAOWEN.items():
+    for n in pool:
+        CATEGORY[n] = race
+for n in BLOODLINE_EXCLUSIVE_DAOWEN:
+    CATEGORY[n] = "bloodline"
 for n in FIRST_EMBRACE_DAOWEN:
     CATEGORY[n] = "first_embrace"
 for n, region in UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.items():
@@ -174,10 +181,12 @@ A = L.append
 A("# 全道纹索引")
 A("")
 A(f"本文件是**当前版本全部道纹（{len(DaoWenEngine._registry)}种）的完整索引**。道纹条目按归属分类：")
-A(f"杀伐闭环（通用核心）{len(SHAFA_LOOP_DAOWEN)} ｜ 原始怪物道纹 {len(ORIGINAL_MONSTER_DAOWEN)} ｜ "
+A(f"杀伐闭环（通用核心）{len(SHAFA_LOOP_DAOWEN)} ｜ 其他通用道纹 1 ｜ 原始怪物道纹 {len(ORIGINAL_MONSTER_DAOWEN)} ｜ "
   f"怪物转化道纹 {len(MONSTER_TRANSFORM_DAOWEN)} ｜ 副本专属 "
-  f"{'/'.join(str(len(region_daowen_order(r))) for r in ('扭曲都市', '罪孽都市', '龙心谷', '乱葬岗'))} ｜ "
-  f"初拥专属 {len(FIRST_EMBRACE_DAOWEN)} ｜ 未实现 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。")
+  f"{'/'.join(str(len(region_daowen_order(r))) for r in REGION_EXCLUSIVE_DAOWEN)} ｜ "
+  f"鲛族专属 {sum(len(pool) for pool in RACE_EXCLUSIVE_DAOWEN.values())} ｜ "
+  f"血族专属 {len(BLOODLINE_EXCLUSIVE_DAOWEN)} ｜ 初拥专属 {len(FIRST_EMBRACE_DAOWEN)} ｜ "
+  f"未实现 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。")
 A("")
 A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余道纹取 `engine/daowen.py` `calculate_*` docstring。公式以实际引擎结算为准。")
 A("- **归属与残韵闭环**：`engine/gamedata.py` + `engine/daowen.py`（`CLOSED_LOOPS`）；与规则正文的闭环图一致。\n"
@@ -198,11 +207,15 @@ A("")
 A("## 目录")
 A("")
 A("- [总览表](#总览表)")
-A("- [杀伐闭环（通用核心·11）](#杀伐闭环通用核心11)")
+A(f"- [杀伐闭环（通用核心·{len(SHAFA_LOOP_DAOWEN)}）](#杀伐闭环通用核心{len(SHAFA_LOOP_DAOWEN)})")
+A("- [其他通用道纹（1）](#其他通用道纹1)")
 A(f"- [原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）](#原始怪物道纹{len(ORIGINAL_MONSTER_DAOWEN)})")
 A(f"- [怪物转化道纹（{len(MONSTER_TRANSFORM_DAOWEN)}）](#怪物转化道纹{len(MONSTER_TRANSFORM_DAOWEN)})")
-for _r in ("扭曲都市", "罪孽都市", "龙心谷", "乱葬岗"):
+for _r in REGION_EXCLUSIVE_DAOWEN:
     A(f"- [{_r}专属（{len(region_daowen_order(_r))}）](#{_r}专属{len(region_daowen_order(_r))})")
+for _race, _pool in RACE_EXCLUSIVE_DAOWEN.items():
+    A(f"- [{_race}专属（{len(_pool)}）](#{_race}专属{len(_pool)})")
+A(f"- [血族专属（{len(BLOODLINE_EXCLUSIVE_DAOWEN)}）](#血族专属{len(BLOODLINE_EXCLUSIVE_DAOWEN)})")
 A(f"- [初拥专属（{len(FIRST_EMBRACE_DAOWEN)}）](#初拥专属{len(FIRST_EMBRACE_DAOWEN)})")
 A("- [未实现（荒疫古城·1）](#未实现荒疫古城1)")
 A("- [道纹归属与学习规则](#道纹归属与学习规则)")
@@ -218,13 +231,16 @@ A("| --- | --- | --- | --- | --- | --- |")
 CAT_LABEL = {
     "shaifa": "通用核心", "original": "原始", "transform": "转化",
     "扭曲都市": "扭曲专属", "罪孽都市": "罪孽专属", "龙心谷": "龙心专属",
-    "乱葬岗": "乱葬专属", "first_embrace": "初拥专属", "unimpl": "未实现",
+    "乱葬岗": "乱葬专属", "沉沦海": "沉沦海专属", "鲛族": "鲛族专属",
+    "bloodline": "血族专属", "other": "其他通用", "first_embrace": "初拥专属", "unimpl": "未实现",
 }
 for name in sorted(DaoWenEngine._registry, key=lambda n: (list(CATEGORY).index(n), n)):
     pass
-order = (list(SHAFA_LOOP_DAOWEN) + sorted(ORIGINAL_MONSTER_DAOWEN)
+order = (list(SHAFA_LOOP_DAOWEN) + ["血契"] + sorted(ORIGINAL_MONSTER_DAOWEN)
          + sorted(MONSTER_TRANSFORM_DAOWEN)
-         + [n for r in ("扭曲都市", "罪孽都市", "龙心谷", "乱葬岗") for n in region_daowen_order(r)]
+         + [n for r in REGION_EXCLUSIVE_DAOWEN for n in region_daowen_order(r)]
+         + [n for pool in RACE_EXCLUSIVE_DAOWEN.values() for n in sorted(pool)]
+         + sorted(BLOODLINE_EXCLUSIVE_DAOWEN)
          + sorted(FIRST_EMBRACE_DAOWEN)
          + list(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN))
 for name in order:
@@ -260,10 +276,13 @@ def section(title, names, note_lines=(), loop=None, loop_title=None):
             A(f"> 注：{NOTES[name]}")
         A("")
 
-section("杀伐闭环（通用核心·11）", list(SHAFA_LOOP_DAOWEN),
+section(f"杀伐闭环（通用核心·{len(SHAFA_LOOP_DAOWEN)}）", list(SHAFA_LOOP_DAOWEN),
         note_lines=["开局【发现】初始道纹只从本闭环抽（随机列出3种未持有候选，显式选1；杀伐不是默认起手）。",
                     "通用核心道纹为人类侧基础概念，局外可经学习/残韵获得。"],
         loop="杀伐闭环")
+
+section("其他通用道纹（1）", ["血契"],
+        note_lines=["该类道纹不属于杀伐闭环，但属于当前可用通用道纹。"])
 
 section(f"原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）", sorted(ORIGINAL_MONSTER_DAOWEN),
         note_lines=[
@@ -288,13 +307,21 @@ section(f"怪物转化道纹（{len(MONSTER_TRANSFORM_DAOWEN)}）", sorted(MONST
                     "该道纹永久变为转化道纹，施法者同时永久获得；对持有转化道纹的角色发动同种残韵，"
                     "亦可把它反向变回原始道纹。转化道纹不可由局外【学习】直接习得，只能经此路径取得。"])
 
-for region in ("扭曲都市", "罪孽都市", "龙心谷", "乱葬岗"):
+for region in REGION_EXCLUSIVE_DAOWEN:
     ns = region_daowen_order(region)
     tier = REGION_TIERS[region]
-    section(f"{region}专属（{len(ns)}）", list(ns),
-            note_lines=[f"副本阶级：{'一二三四'[tier-1]}阶。学习门禁：先经残韵从本副本怪物处"
-                        f"转化获得至少一种本副本道纹，此后才可学习本副本其它专属道纹；其它副本专属道纹不可学习。"],
+    notes = [f"副本阶级：{'一二三四'[tier-1]}阶。学习门禁：先经残韵从本副本怪物处转化获得至少一种本副本道纹，此后才可学习本副本其它专属道纹；其它副本专属道纹不可学习。"]
+    if region == "沉沦海":
+        notes.append("闭环网络另含【唤潮】【蜃景】两个鲛族专属节点；归属迁移不删除怪物面板上的既有配置。")
+    section(f"{region}专属（{len(ns)}）", list(ns), note_lines=notes,
             loop=f"{region}闭环", loop_title=region)
+
+for race, pool in RACE_EXCLUSIVE_DAOWEN.items():
+    section(f"{race}专属（{len(pool)}）", sorted(pool),
+            note_lines=[f"仅通过{race}专属机制获得；不计入任何副本专属学习池。"])
+
+section(f"血族专属（{len(BLOODLINE_EXCLUSIVE_DAOWEN)}）", sorted(BLOODLINE_EXCLUSIVE_DAOWEN),
+        note_lines=["仅通过血族专属机制获得；不计入任何副本专属学习池。"])
 
 section(f"初拥专属（{len(FIRST_EMBRACE_DAOWEN)}）", sorted(FIRST_EMBRACE_DAOWEN),
         note_lines=["初拥之夜专属道纹：仅由对应初拥选项授予，不可通过局外学习、【典当】发现或残韵获得。"])
@@ -312,10 +339,11 @@ A("1. **杀伐闭环（通用核心）**：开局发现初始道纹的来源；�
 A("2. **副本专属**：学习门槛=先经残韵从本副本怪物转化获得至少一种；其它副本专属不可学。")
 A("3. **怪物转化**：只能由自身已持有道纹经残韵变化获得（施法者同时获得）；原始⇄转化双向，反向可把转化道纹变回原始道纹。")
 A("4. **原始怪物**：可经残韵（含转化道纹反向）永久获得，局外【学习】亦可习得；怪物发动按条目支付代价（全力／减速／疯狂异变5X、必中异变X，冷却类X≤1）；可经【原初X】临时借用。")
-A("5. **初拥专属**：【真理】仅由初拥之夜选项5授予，不可通过局外学习、【典当】发现或残韵获得。")
-A("6. **角色道纹唯一**：同名道纹不重复存在；通过残韵获得的道纹X按自由规则（自由控X）自定义。")
-A("7. **道纹默认局内发动**；局外发动须条文明示，当前明示项为【消灾】与【真理】。")
-A("8. **自由控X（自由规则的下属条文，不单独成规）**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】【血契】的X还受合法目标数封顶（玩家schema上限按当前存活目标数封顶）。")
+A("5. **血族专属**：【消灾】仅能通过血族专属机制获得，不进入任何副本专属学习池。")
+A("6. **初拥专属**：【真理】仅由初拥之夜选项5授予，不可通过局外学习、【典当】发现或残韵获得。")
+A("7. **角色道纹唯一**：同名道纹不重复存在；通过残韵获得的道纹X按自由规则（自由控X）自定义。")
+A("8. **道纹默认局内发动**；局外发动须条文明示，当前明示项为【消灾】【真理】【唤潮】【蜃景】；【唤潮】【蜃景】仅作用于开放地图。")
+A("9. **自由控X（自由规则的下属条文，不单独成规）**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】【血契】的X还受合法目标数封顶（玩家schema上限按当前存活目标数封顶）。")
 A("")
 
 out = ROOT / "全道纹索引.md"
