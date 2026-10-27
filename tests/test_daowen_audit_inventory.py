@@ -34,7 +34,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertEqual({r['name'] for r in self.rows if r.get('example')}, examples)
 
     def test_each_review_has_traceable_evidence_and_explicit_conclusion(self):
-        allowed = {'暂未发现结构违规', '明确重审', '语义待定', '边界复核'}
+        allowed = {'暂未发现结构违规', '明确重审', '语义待定', '边界复核', '待按统一定义复核'}
         for row in self.rows:
             with self.subTest(name=row['name']):
                 self.assertEqual(len(row['name']), 2)
@@ -49,12 +49,21 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
                     # 源句变化须人工重审；行号仅供导航，不因上方增删行误报。
                     self.assertIn(source['text'], path.read_text(encoding='utf-8'))
 
-    def test_known_event_rewriters_are_not_silently_marked_clean(self):
+    def test_persistent_relations_are_not_misclassified_as_triggers(self):
         by_name = {r['name']: r for r in self.rows}
-        # 是债务记录，不是批准这些设计继续扩张；修复时须同步更新审查证据。
-        for name in ('血契', '波及', '永生', '回响', '出土', '篡改'):
-            self.assertEqual(by_name[name]['review'], '明确重审')
-            self.assertIn('后续事件触发/改写', by_name[name]['tags'])
+        for name in ('血契', '波及', '坏死', '勾魂'):
+            self.assertEqual(by_name[name]['review'], '暂未发现结构违规')
+            self.assertNotIn('后续事件触发/改写', by_name[name]['tags'])
+
+    def test_rule_boundary_and_examples_remain_explicit(self):
+        rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
+        for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
+                       '疑义处理', '坏死禁止回复', '勾魂禁止获得法力',
+                       '血契分担代价', '波及平分道纹效果',
+                       '回终回复生命', '受击后获得法力', '状态结束时再生效'):
+            self.assertIn(phrase, rules)
+        self.assertNotIn('在事件发生时改写结算的效果，不符合道纹定义', rules)
+        # 文本护栏只防止已裁定边界漂移，不是任意效果的自动语义判定器。
 
 
 if __name__ == '__main__':
