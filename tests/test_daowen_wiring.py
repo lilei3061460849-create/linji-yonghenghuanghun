@@ -174,6 +174,9 @@ def test_jiahai_status_consumable_guzhi_and_anger_consumable():
     engine = _engine("hooks")
     assert "加害" not in DaoWenEngine._registry
     assert "愤怒" not in DaoWenEngine._registry
+    from engine.rule_engine import DAOWEN_RULES, STATUS_DAMAGE_RULES
+    assert "加害" not in DAOWEN_RULES
+    assert any(rule.status_name == "加害" for rule in STATUS_DAMAGE_RULES)
     p = engine.state.player
     _give(p, "固执")
     m = _monster(engine, ap=10)
