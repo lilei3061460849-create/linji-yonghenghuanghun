@@ -608,10 +608,7 @@ def apply_final_life_loss_cap(amount: int, recipient: Any, damage_type: str) -> 
     """
     amount = validate_damage_amount(
         amount, "final_life_loss_cap.amount", allow_negative=False)
-    definition = DAOWEN_RULES.get("固执")
-    if definition is None:
-        raise RuleError("缺少【固执】的最终失血上限定义")
-    cap = int(definition.rules[0].operator.operand)
+    cap = int(GUZHI_RULE.operator.operand)
     if (amount > cap and recipient is not None
             and callable(getattr(recipient, "has_status", None))
             and recipient.has_status("固执")):
@@ -1096,12 +1093,9 @@ GUZHI_RULE = _damage_rule(
     missing_status_value=None,
 )
 
-DAOWEN_RULES: dict[str, DaoWenRuleDefinition] = {
-    "固执": DaoWenRuleDefinition(
-        daowen_id="daowen.guzhi", name="固执", cost_type="冷却",
-        cost_multiplier=Fraction(1), duration=DurationSpec(DurationKind.FINITE_X_ROUNDS),
-        rules=(GUZHI_RULE,), default_subject="自身"),
-}
+# 固执只作为消耗品【定命丸】施加的状态，不再是可发动道纹。
+STATUS_DAMAGE_RULES = (JIAHAI_RULE, GUZHI_RULE)
+DAOWEN_RULES: dict[str, DaoWenRuleDefinition] = {}
 
 RULES_BY_ID: dict[str, DamageRuleDefinition] = {
     rule.rule_id: rule

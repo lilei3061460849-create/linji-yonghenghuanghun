@@ -39,10 +39,10 @@ def test_deleted_sunken_sea_daowen_and_panel_tags_are_gone():
     assert "映照" not in index
     assert "扩散" not in index
     assert "道纹数量5" in dungeon
-    assert "当前索引收录道纹（42种）" in index
+    assert "当前索引收录道纹（41种）" in index
     assert "流动】【遗忘】【回响】尚未接入运行时" in index
-    assert "杀伐闭环（通用核心）10" in index
+    assert "杀伐闭环（通用核心）9" in index
     assert "沉沦海专属（5）" in index
     assert "鲛族专属（2）" in index
-    assert "褪鳞蟹（264/18/3，唤潮，庇护，固执，遗物【减速】）" in dungeon
-    assert "珊瑚囚徒（276/20/3，唤潮，蜃景，固执，连击，庇护）" in dungeon
+    assert "褪鳞蟹（264/18/3，唤潮，庇护，遗物【减速】）" in dungeon
+    assert "珊瑚囚徒（276/20/3，唤潮，蜃景，连击，庇护）" in dungeon

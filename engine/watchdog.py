@@ -145,9 +145,9 @@ class CombatWatchdog:
                 recommendations.append(f"对策方案：使用【贯穿】（无视格挡）或高代数【杀伐】破盾！")
 
             # 6. 龙鳞减伤判定
-            if state._relic_active(m, "龙鳞"):
-                findings.append(f"敌方【{m.name}】持有遗物【龙鳞】，每笔伤害减少1点；1伤连击无法穿透。")
-                recommendations.append("对策方案：改用单笔大于1的伤害；残韵不能改写遗物龙鳞。")
+            if state._relic_active(m, "叠鳞甲"):
+                findings.append(f"敌方【{m.name}】持有遗物【叠鳞甲】，每笔伤害减少1点；1伤连击无法穿透。")
+                recommendations.append("对策方案：改用单笔大于1的伤害；残韵不能改写遗物叠鳞甲。")
 
         if not findings:
             findings.append("施法者法力或代数配置不足，未能击穿敌方护盾或产生足够伤害。")

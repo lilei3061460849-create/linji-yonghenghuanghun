@@ -16,7 +16,7 @@ from engine.daowen import DaoWenEngine, ResonanceEngine
 from engine.dice import DiceEngine
 from engine.models import Entity, GameState, StatusEffect
 from engine.rule_engine import (
-    DAOWEN_RULES,
+    DAOWEN_RULES, STATUS_DAMAGE_RULES, GUZHI_RULE,
     CompareOperator,
     ConditionGroup,
     ConditionGroupMode,
@@ -72,40 +72,26 @@ def _combat_target(*statuses: tuple[str, int]):
     return state, target, attacker, CombatEngine(state, DiceEngine(seed=17))
 
 
-def test_three_rules_have_stable_ids_and_complete_metadata():
-    rule_ids = []
-    for daowen in DAOWEN_RULES.values():
-        assert daowen.daowen_id.startswith("daowen.")
-        assert daowen.rules
-        for rule in daowen.rules:
-            rule_ids.append(rule.rule_id)
-            assert rule.event.value == "damage_received"
-            assert rule.stage.value == "post_block_pre_life_loss_multiplier"
-            assert rule.target_role.value == "recipient"
-            assert rule.reads == rule.writes == ValueRef.CURRENT_DAMAGE
-            assert rule.read_semantics.value == "latest_value"
-            assert rule.conditions is not None
-    assert len(rule_ids) == len(set(rule_ids)) == 1
+def test_item_status_rules_have_stable_ids_and_complete_metadata():
+    assert DAOWEN_RULES == {}
+    ids = [rule.rule_id for rule in STATUS_DAMAGE_RULES]
+    assert len(ids) == len(set(ids)) == 2
+    for rule in STATUS_DAMAGE_RULES:
+        assert rule.event.value == "damage_received"
+        assert rule.stage.value == "post_block_pre_life_loss_multiplier"
+        assert rule.target_role.value == "recipient"
+        assert rule.reads == rule.writes == ValueRef.CURRENT_DAMAGE
+        assert rule.read_semantics.value == "latest_value"
+        assert rule.conditions is not None
 
 
-def test_calculation_summaries_are_rendered_from_the_runtime_rule_definitions():
+def test_retired_calculators_are_not_activatable_but_guzhi_status_retains_cap():
     DaoWenEngine.register_all()
-    for name, x, kwargs in (
-        ("固执", 2, {}),
-    ):
-        result = DaoWenEngine._registry[name](x, **kwargs)
-        definition = DAOWEN_RULES[name]
-        expected_target = kwargs["target"].name if "target" in kwargs else None
-        assert result["summary"] == definition.summary(x, target_name=expected_target)
-        assert DaoWenEngine.migration_status(name)["status"] == "migrated"
-
-    guzhi = DaoWenEngine.calculate_guzhi(2)
-    assert guzhi["max_current_damage_per_hit"] == 1
-    # 兼容键代表最终实际失血上限；新键代表倍率前的当前受击伤害上限。
-    assert guzhi["max_life_loss_per_hit"] == 1
-    assert guzhi["max_current_damage_per_hit"] == 1
-    assert "龙鳞" not in DaoWenEngine.list_all()
-    assert "加害" not in DaoWenEngine.list_all()
+    assert not {"固执", "龙鳞", "加害"} & set(DaoWenEngine.list_all())
+    assert GUZHI_RULE.operator.operand == 1
+    target = _target(("固执", 1))
+    from engine.rule_engine import apply_final_life_loss_cap
+    assert apply_final_life_loss_cap(50, target, "代价") == 1
 
 
 def test_zaisheng_merges_self_feeding_as_an_alternate_attack_cost():
@@ -127,7 +113,7 @@ def test_zaisheng_merges_self_feeding_as_an_alternate_attack_cost():
 
 def test_migration_status_keeps_unmigrated_daowen_on_the_legacy_path():
     DaoWenEngine.register_all()
-    assert set(DAOWEN_RULES) == {"固执"}
+    assert DAOWEN_RULES == {}
     assert daowen_migration_status("杀伐") == {
         "status": "legacy", "reason": UNMIGRATED_REASON,
     }
@@ -139,12 +125,12 @@ def test_generated_rule_descriptions_match_the_authoritative_documents():
     dungeon = (ROOT / "副本" / "龙心谷.md").read_text(encoding="utf-8")
     index = (ROOT / "全道纹索引.md").read_text(encoding="utf-8")
 
-    guzhi = render_rule_description("固执", "X")
-    assert guzhi in common_rules
-    assert guzhi in index
-    assert "### 龙鳞" in (ROOT / "物品索引.md").read_text(encoding="utf-8")
+    items = (ROOT / "物品索引.md").read_text(encoding="utf-8")
+    assert "### 定命丸" in items
+    assert "### 叠鳞甲" in items
+    assert "消耗品【定命丸】" in common_rules
     assert "龙鳞X：支付：法力2X" not in dungeon
-    assert "| 龙鳞 |" not in index
+    assert "| 龙鳞 |" not in index and "| 固执 |" not in index
 
 
 def test_generic_numeric_operators_are_composable_and_explainable():

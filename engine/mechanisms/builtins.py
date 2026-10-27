@@ -97,7 +97,7 @@ def _rule_effect(rule):
 
 
 def _numeric_rule_mechanism(name: str) -> Mechanism:
-    if name == "加害":
+    if name in ("加害", "固执"):
         # 【加害】不再是道纹；只保留由消耗品【灼罪钉】施加的状态结算。
         rule = next(rule for rule in STATUS_DAMAGE_RULES if rule.status_name == name)
     else:
@@ -121,9 +121,9 @@ def _numeric_rule_mechanism(name: str) -> Mechanism:
 JIAHAI = _numeric_rule_mechanism("加害")
 # 【龙鳞】已转为固定遗物。旧同名状态不再提供可叠加的X点减伤。
 LONGLIN = Mechanism(
-    name="龙鳞", when=Trigger.phase(Phase.INCOMING_ADJUST), target=TARGET,
+    name="叠鳞甲", when=Trigger.phase(Phase.INCOMING_ADJUST), target=TARGET,
     condition=lambda ctx: (ctx.target is not None and ctx.damage_type != "代价"
-                           and getattr(ctx.state, "_relic_active", lambda *_: False)(ctx.target, "龙鳞")),
+                           and getattr(ctx.state, "_relic_active", lambda *_: False)(ctx.target, "叠鳞甲")),
     effect=lambda ctx, targets: {"amount": max(0, ctx.amount - 1) if ctx.amount > 0 else ctx.amount},
     priority=30, before_status_rules=True,
 )

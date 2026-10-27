@@ -16,7 +16,7 @@ def arena():
     m = Entity("敌人", "怪物", blood_limit=100, current_hp=100)
     state.player = p
     state.enemies = [m]
-    state.relics = [Relic("龙鳞", "")]
+    state.relics = [Relic("叠鳞甲", "")]
     return state, CombatEngine(state, DiceEngine()), p, m
 
 
@@ -40,7 +40,7 @@ def test_real_lianji_is_blocked_per_hit():
     p = e.state.player
     _give(p, "连击")
     target = _monster(e, "鳞甲靶", hp=100)
-    target.relics.append(Relic("龙鳞", ""))
+    target.relics.append(Relic("叠鳞甲", ""))
     r = e.execute_action("use_daowen", {"daowen_name": "连击", "x": 10,
         "lianji_cost": "法力", "target": target.name, "dodge": False, "blood_shadow": False})
     assert r["success"], r
@@ -54,7 +54,7 @@ def test_enabled_and_sealed_relic_rules_are_respected():
     combat._apply_hostile_damage(p, 2, source=m)
     assert p.current_hp == 98
     state.relics[0].enabled = True
-    state.sealed_relics["龙鳞"] = 1
+    state.sealed_relics["叠鳞甲"] = 1
     combat._apply_hostile_damage(p, 2, source=m)
     assert p.current_hp == 96
 
@@ -91,10 +91,10 @@ def test_panel_retypes_longlin_as_relic_and_retains_other_daowen():
     entity = make_monster_entity(bear)
     assert "龙鳞" not in entity.dao_wen
     assert "庇护" in entity.dao_wen
-    assert any(r.name == "龙鳞" for r in entity.relics)
+    assert any(r.name == "叠鳞甲" for r in entity.relics)
 
 
 def test_discovery_pool_contains_relic_not_daowen():
     e = _engine("longlin_discovery")
-    assert any(r.name == "龙鳞" for r in e.state.relics_pool)
+    assert any(r.name == "叠鳞甲" for r in e.state.relics_pool)
     assert "龙鳞" not in DaoWenEngine.list_all()

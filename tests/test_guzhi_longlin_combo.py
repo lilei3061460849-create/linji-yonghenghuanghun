@@ -17,7 +17,7 @@ def _arena(hp: int = 10_000, sequence: tuple[str, str] = ("龙鳞", "固执")) -
                                    activation_x=999, daowen_order=order["固执"]))
     target.add_status(StatusEffect("龙鳞", value=1, remaining_rounds=-1, source="test",
                                    activation_x=1, daowen_order=order["龙鳞"]))
-    state.relics.append(Relic("龙鳞", ""))
+    state.relics.append(Relic("叠鳞甲", ""))
     state.player = target
     state.enemies = [source]
     return target, source, CombatEngine(state, DiceEngine(seed=20261009))

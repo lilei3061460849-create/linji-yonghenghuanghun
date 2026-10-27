@@ -3926,7 +3926,7 @@ class GameEngine:
     # 2026-10-13 用户令：【买路财】改制为轮回者【逃跑】行动，【三相残韵盘】删除
     # （发现侧由道纹【典当】承接），两件均移出遗物池。
     RELIC_DEFS = [
-        ("龙鳞", "你受到的所有伤害-1，最低为0。"),
+        ("叠鳞甲", "你受到的所有伤害-1，最低为0。"),
         ("血誓戒", "[回始]首次主动支付流血代价时，获得等同于本次流血的格挡；若支付后生命≤30%，改为获得等量生命"),
         ("同魂笔", "当你对[目标]发动残韵时，可以选择另一个[目标]，使其拥有的一种道纹受到同种残韵影响。"),
         ("回锋刀", "每失去1点速度后，对[目标]造成3点伤害；[回始]，对[目标]造成3×（你的[速限]-你的当前速度）的伤害。"),
@@ -6537,7 +6537,7 @@ class GameEngine:
         # 正文具名消耗品：全部在扣耐久前完成参数校验；未实现项不得“成功但只扣耐久”。
         # 2026-10-14 审计F4：镇魂铁钉处理器补齐（此前发而无用）；替死鬼/赶尸铃/黄符见下。
         if item.name in {"绝息淤泥", "活性土壤", "假钞贴", "穿甲弹", "洗劫面具", "赤泉囊", "龙血瓶",
-                          "镇魂铁钉", "赶尸铃", "黄符", "逆命筹", "怒火针", "灼罪钉"}:
+                          "镇魂铁钉", "赶尸铃", "黄符", "逆命筹", "怒火针", "灼罪钉", "定命丸"}:
             return self._consume_named_event_item(item, params)
 
         # 自定义消耗品（2026-10-23）：声明里的 effects 由 verbs 执行，不占出手。
@@ -6667,7 +6667,16 @@ class GameEngine:
             return {"success": False, "error": "没有玩家"}
         name = item.name
         result: dict[str, Any] = {"item": name}
-        if name == "灼罪钉":
+        if name == "定命丸":
+            if self.state.phase != GamePhase.IN_COMBAT.value or not player.is_alive:
+                return {"success": False, "error": "定命丸只能由存活角色在战斗中使用"}
+            if params.get("target_ref") not in (None, "", "player:0"):
+                return {"success": False, "error": "定命丸仅对使用者自身生效"}
+            item.use()
+            player.status_effects[:] = [s for s in player.status_effects if s.name != "固执"]
+            player.add_status(StatusEffect(name="固执", value=1, remaining_rounds=1, source=name))
+            result.update({"target": player.name, "duration": 1, "max_life_loss": 1})
+        elif name == "灼罪钉":
             target = refs.get(params.get("target_ref", ""))
             if target is None or not target.is_alive:
                 return {"success": False, "error": "灼罪钉必须显式指定合法存活target_ref"}
@@ -8088,6 +8097,7 @@ class GameEngine:
             if migrated is not None:
                 e.spells.append(migrated)
         for relic in d.get("relics", []):
+            relic = {**relic, "name": "叠鳞甲" if relic.get("name") == "龙鳞" else relic.get("name")}
             e.relics.append(Relic(name=relic["name"], effect=relic.get("effect", ""),
                                   tags=list(relic.get("tags") or []),
                                   enabled=bool(relic.get("enabled", True))))
@@ -9786,6 +9796,16 @@ class GameEngine:
             entry.get("monster") for entry in (getattr(state, "delayed_monster_reentries", []) or [])
             if isinstance(entry, dict)
         )
+        # 旧遗物【龙鳞】更名为物品【叠鳞甲】，不把旧龙鳞道纹/状态误转为遗物。
+        for relic in list(getattr(state, "relics", [])) + list(getattr(state, "relics_pool", [])):
+            if relic.name == "龙鳞":
+                relic.name = "叠鳞甲"
+        for entity in entities:
+            for relic in getattr(entity, "relics", []):
+                if relic.name == "龙鳞":
+                    relic.name = "叠鳞甲"
+        if "龙鳞" in state.sealed_relics:
+            state.sealed_relics["叠鳞甲"] = state.sealed_relics.pop("龙鳞")
         unique_entities = []
         seen = set()
         for entity in entities:

@@ -21,7 +21,7 @@ RELICIZED_SLOT = "？？"
 PLACEHOLDER_SLOTS = frozenset({RESERVED_SLOT, RELICIZED_SLOT})
 RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞",
+    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执",
 )}
 
 
@@ -143,22 +143,6 @@ class DaoWenEngine:
             "summary": f"支付：{x}法力，使{target_name}获得{shield}点格挡（可抵消等量伤害，保留到被打掉或战终）"
         }
     
-    @staticmethod
-    def calculate_guzhi(x: int) -> dict:
-        """固执X：支付：冷却X。最终实际失血最高为1，失血倍率后仍封顶。"""
-        definition = get_daowen_rule("固执")
-        cap = int(definition.rules[0].operator.operand)
-        return {
-            "dao_wen": "固执",
-            "x": x,
-            "cost_type": definition.cost_type,
-            "cost": definition.cost(x),
-            "duration": definition.duration.value(x),
-            "max_current_damage_per_hit": cap,
-            "max_life_loss_per_hit": cap,
-            "summary": definition.summary(x),
-        }
-
     # 连击六通道价格（2026-10-22 用户令：与【透支】同类多代价道纹，价格与效果全表同乘五）：
     # 流血5X／法力5X／衰老X／枯竭X／碎片5X／假碎片50X；效果 选择[目标]5X次、每次1点伤害。
     # 比率锚现有体系：消耗品【逆命筹】承接重投效果；【假钞】1法力=10假碎片、
@@ -813,7 +797,6 @@ class DaoWenEngine:
             "杀伐": cls.calculate_shaifa,
             "再生": cls.calculate_zaisheng,
             "庇护": cls.calculate_bihu,
-            "固执": cls.calculate_guzhi,
             "连击": cls.calculate_lianji,
             "波及": cls.calculate_boba,
             "血契": cls.calculate_xueqi,
@@ -957,8 +940,8 @@ class ResonanceEngine:
         "杀伐闭环": [
             ("杀伐", "反转", "再生"),
             ("再生", "曲解", "庇护"),
-            ("庇护", "曲解", "固执"),
-            ("固执", "反转", "连击"),
+            ("庇护", "曲解", RELICIZED_DAOWEN_SLOTS["固执"]),
+            (RELICIZED_DAOWEN_SLOTS["固执"], "反转", "连击"),
             # 2026-10-27：波及迁入沉沦海；原位直连，沿用前一条边的残韵类型。
             ("连击", "转换", "增殖"),
             # 删除慈悲/切割/缓慢后直连（2026-08-21）；贯穿→(曲解)束缚：概念腐化。
