@@ -589,9 +589,37 @@ class WorldState:
         path.reverse()
         return path
 
+    def _move_mirage_illusions(self) -> None:
+        """每次世界行动先让蜃景分流，即使施术者此刻进入遭遇也不取消这次移动。"""
+        for actor_id in sorted(self.actors):
+            actor = self.actors[actor_id]
+            if not actor.alive or not actor.is_illusion:
+                continue
+            directions = [(actor.x, actor.y - 1), (actor.x + 1, actor.y),
+                          (actor.x, actor.y + 1), (actor.x - 1, actor.y)]
+            directions = [pos for pos in directions if self.map.is_passable(pos, actor)]
+            if not directions:
+                continue
+            route = next((entry for entry in actor.memory
+                          if entry.get("kind") == "mirage_route"), None)
+            direction_index = int(route.get("direction_index", 0)) if route else 0
+            preferred_index = (direction_index + self.clock.turn) % len(directions)
+            ordered = directions[preferred_index:] + directions[:preferred_index]
+            non_backtracking = [pos for pos in ordered if pos != actor.last_position]
+            destination = (non_backtracking or ordered)[0]
+            origin = actor.position
+            actor.last_position = origin
+            actor.x, actor.y = destination
+            actor.visited_cells.add(self.map.key(destination))
+            self.record("actor_moved", actor_id, origin=list(origin),
+                        destination=list(destination), autonomous=True, mirage=True)
+            self._dispel_illusions_at(destination, by_actor_id=actor_id,
+                                      reason="illusion_touched_character")
+
     def _run_autonomous_units(self) -> list[dict[str, Any]]:
         """推进当前世界回合的NPC行动；每个单位只使用自己的可见信息。"""
         generated: list[dict[str, Any]] = []
+        self._move_mirage_illusions()
         # 临时同盟按世界回合到期；即使一次等待跨过多个回合，也不会额外多持续。
         for actor in self.actors.values():
             alliance = next((item for item in actor.memory
@@ -626,28 +654,6 @@ class WorldState:
             if not actor.alive:
                 continue
             if actor.is_illusion:
-                # 蜃景幻象作为地图伪装目标自主分流；同一批幻象按不同方向偏移，
-                # 每个世界回合继续移动，不参与遭遇/战斗。
-                directions = [(actor.x, actor.y - 1), (actor.x + 1, actor.y),
-                              (actor.x, actor.y + 1), (actor.x - 1, actor.y)]
-                directions = [pos for pos in directions if self.map.is_passable(pos, actor)]
-                if not directions:
-                    continue
-                route = next((entry for entry in actor.memory
-                              if entry.get("kind") == "mirage_route"), None)
-                direction_index = int(route.get("direction_index", 0)) if route else 0
-                preferred_index = (direction_index + self.clock.turn) % len(directions)
-                ordered = directions[preferred_index:] + directions[:preferred_index]
-                non_backtracking = [pos for pos in ordered if pos != actor.last_position]
-                destination = (non_backtracking or ordered)[0]
-                origin = actor.position
-                actor.last_position = origin
-                actor.x, actor.y = destination
-                actor.visited_cells.add(self.map.key(destination))
-                self.record("actor_moved", actor_id, origin=list(origin),
-                            destination=list(destination), autonomous=True, mirage=True)
-                self._dispel_illusions_at(destination, by_actor_id=actor_id,
-                                          reason="illusion_touched_character")
                 continue
             if actor.kind == "player" or actor.mode != "autonomous":
                 continue
