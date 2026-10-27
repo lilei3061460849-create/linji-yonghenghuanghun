@@ -278,7 +278,6 @@ class WorldActorState:
     alive: bool = True
     faction: str = "neutral"
     mode: str = "autonomous"
-    species: str = ""  # 地形通行种族标记；鲛族可进入【水流】格
     # 造物行为模式：explore=自主探索，follow=跟随主人，guard=守卫指定格。
     behavior: str = "explore"
     owner_actor_id: str = ""
@@ -290,6 +289,7 @@ class WorldActorState:
     known_cells: set[str] = field(default_factory=set)
     visited_cells: set[str] = field(default_factory=set)
     memory: list[dict[str, Any]] = field(default_factory=list)
+    species: str = ""  # 地形通行种族标记；鲛族可进入【水流】格
 
     @property
     def position(self) -> Coord:
@@ -465,7 +465,7 @@ class WorldState:
             # 2026-10-24：若该格四邻全是墙/已被圈层吞掉，它已经无处可撤——
             # 此时必须给一条生路，否则单位会被永久封死在 void 里，
             # 跟随的同伴也就永远跟不上玩家（实跑发现）。
-            if any(self.map.is_passable(neighbor) for neighbor in (
+            if any(self.map.is_passable(neighbor, actor) for neighbor in (
                     (actor.x + 1, actor.y), (actor.x - 1, actor.y),
                     (actor.x, actor.y + 1), (actor.x, actor.y - 1))):
                 continue
