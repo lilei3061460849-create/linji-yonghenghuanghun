@@ -2,7 +2,7 @@
 """生成 全道纹索引.md（一次性工具：道纹数据源变更后重跑即可）。
 
 数据源（全部取当前版本引擎/文档事实，不抄旧数据）：
-- 效果正文/支付方式：已迁移数值规则取 engine/rule_engine.py 的统一定义，其余取 engine/daowen.py DaoWenEngine.calculate_* docstring
+- 效果正文/支付方式：运行时道纹取 engine/rule_engine.py 或 DaoWenEngine.calculate_*；沉沦海3个未接入运行时节点暂由 DRAFT_DAOWEN 提供索引定义
 - 归属分类：engine/gamedata.py（通用核心 / ORIGINAL / TRANSFORM / REGION_EXCLUSIVE / RACE_EXCLUSIVE / BLOODLINE_EXCLUSIVE / UNIMPLEMENTED）
 - 残韵闭环：engine/daowen.py DaoWenEngine.CLOSED_LOOPS
 - 承载怪物：已实现副本文档及沉沦海专属网络草案的全部面板行（怪物池 + 事件/雇佣面板）
@@ -210,7 +210,7 @@ L = []
 A = L.append
 A("# 全道纹索引")
 A("")
-A(f"本文件是**当前版本全部道纹（{len(DaoWenEngine._registry)}种）的完整索引**。道纹条目按归属分类：")
+A(f"本文件是**当前索引收录道纹（{len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)}种）的完整索引**（含{len(DRAFT_DAOWEN)}种尚未接入运行时的沉沦海草案节点）。道纹条目按归属分类：")
 A(f"杀伐闭环（通用核心）{len(SHAFA_LOOP_DAOWEN)} ｜ 其他通用道纹 1 ｜ 原始怪物道纹 {len(ORIGINAL_MONSTER_DAOWEN)} ｜ "
   f"怪物转化道纹 {len(MONSTER_TRANSFORM_DAOWEN)} ｜ 副本专属 "
   f"{'/'.join(str(len(region_daowen_order(r))) for r in REGION_EXCLUSIVE_DAOWEN)} ｜ "
