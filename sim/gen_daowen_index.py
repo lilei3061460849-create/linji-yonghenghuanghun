@@ -3,7 +3,7 @@
 
 数据源（全部取当前版本引擎/文档事实，不抄旧数据）：
 - 效果正文/支付方式：已迁移数值规则取 engine/rule_engine.py 的统一定义，其余取 engine/daowen.py DaoWenEngine.calculate_* docstring
-- 归属分类：engine/gamedata.py（SHAFA_LOOP_DAOWEN / ORIGINAL / TRANSFORM / REGION_EXCLUSIVE / UNIMPLEMENTED）
+- 归属分类：engine/gamedata.py（通用核心 / ORIGINAL / TRANSFORM / REGION_EXCLUSIVE / RACE_EXCLUSIVE / BLOODLINE_EXCLUSIVE / UNIMPLEMENTED）
 - 残韵闭环：engine/daowen.py DaoWenEngine.CLOSED_LOOPS
 - 承载怪物：副本/*.md 全部怪物面板行（怪物池 + 事件/雇佣面板）
 """
