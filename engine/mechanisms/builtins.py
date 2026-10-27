@@ -264,42 +264,19 @@ XIJIE_PASSIVE = Mechanism(
 )
 
 def _silent_mask_effect(ctx: TriggerContext, targets: list) -> str:
-    """【缄默面具】2026-09-17 用户令改版：[战终][法限]+X。
-
-    旧效果为「[战始]获得 20×X 点法力」（X=event_modifiers.silent_mask_x，
-    来自事件「献出声音：失忆X」）。属性模型统一后法力=攻击力，[战始]一次性
-    给 20X 法力等于同时白送攻击力，强度跳变；且法力每场都会回满，[战始]给蓝
-    的边际价值很低。故改为**战终永久成长**：[战终][法限]+X。
-
-    注意：缄默面具的【无法发动附带代价的道纹】是 api.py 的静态校验规则
-    （另一字面规则），不在本机制范围，保持不变。
-
-    X=0（未登记 silent_mask_x）时不发放，保持与旧块一致的无操作语义。
-    2026-10-23 起固定 +2，不再读 silent_mask_x（遗物无 X 变量）。
-    """
-    # 2026-10-23 用户令：遗物不得有 X 变量，改为固定 +2。
-    # 事件「献出声音」里的失忆X 仍然计入玩家当场支付的代价，但不再驱动本遗物数值。
-    x = 2
+    """缄默面具：今后每次获得[法限]时，实际增加量翻倍。"""
     player = ctx.target
-    if x > 0:
-        player.mana_limit += x
-    # X=0 时旧块仍会执行钳制（+=0 后无条件 clamp），此处保持逐字等价：
-    # 法限提高不连带回血/回蓝，但当前法力不得超过（新）上限——全局钳制规则。
-    ctx.combat.clamp_immortal_body(player)
-    if x <= 0:
-        return "缄默面具：+0法限"
-    return f"缄默面具：[法限]+{x}（现为{player.mana_limit}）"
+    object.__setattr__(player, "_silent_mask_active", True)
+    return "缄默面具：后续法限增加量翻倍"
 
 
 SILENT_MASK = Mechanism(
     name="缄默面具",
-    when=Trigger.phase(Phase.BATTLE_END),
+    when=Trigger.phase(Phase.BATTLE_START),
     effect=_silent_mask_effect,
     target=SELF,
     condition=relic_active("缄默面具", of="target"),
-    # 2026-09-17 改版：由 BATTLE_START(priority=5) 移到 BATTLE_END；
-    # 新相位首个注册者，取 10 留出入位空间
-    priority=10,
+    priority=5,
 )
 
 
