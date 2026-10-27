@@ -1036,14 +1036,14 @@ class WorldState:
 
     def start_encounter(self, participant_ids: list[str], location: Coord) -> EncounterState:
         unique = list(dict.fromkeys(participant_ids))
-        player_participants = [self.actors[aid] for aid in unique
-                               if aid in self.actors and self.actors[aid].kind == "player"]
-        for player_actor in player_participants:
-            self._clear_illusions_for_owner(player_actor.actor_id, reason="combat_started")
         if len(unique) < 2:
             raise ValueError("遭遇至少需要两个不同单位")
         for actor_id in unique:
             self._living_actor(actor_id)
+        player_participants = [self.actors[aid] for aid in unique
+                               if self.actors[aid].kind == "player"]
+        for player_actor in player_participants:
+            self._clear_illusions_for_owner(player_actor.actor_id, reason="combat_started")
         if not self.map.in_bounds(location):
             raise ValueError("遭遇地点超出地图")
         is_final_duel = (self.final_duel_search
