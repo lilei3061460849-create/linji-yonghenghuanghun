@@ -5204,6 +5204,7 @@ class GameEngine:
                 player_actor = next((a for a in world.actors.values() if a.kind == "player"), None)
             if player_actor is None:
                 return {"success": False, "error": "开放地图中找不到轮回者位置"}
+            player_actor.species = "鲛族" if self._entity_is_merfolk(actor) else ""
             cells = params.get("illusion_cells")
             if not isinstance(cells, list) or len(cells) != x:
                 return {"success": False, "error": f"蜃景X={x}必须提交恰好{x}个illusion_cells坐标"}
