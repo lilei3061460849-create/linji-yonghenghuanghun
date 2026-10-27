@@ -779,7 +779,7 @@ class GameEngine:
                     **({"zaisheng_cost": ["法力", "攻击力"]} if name == "再生" else {}),
                     **({"lianji_cost": ["流血", "法力", "衰老", "枯竭", "碎片", "假碎片"]}
                        if name == "连击" else {}),
-                    **({"status_name": "目标身上要延长的有限持续状态名（凝滞必填）"} if name == "凝滞" else {}),
+                    **({"cost_choices": "净化：施法者自选，格式为[{type: 衰老/枯竭/萎缩/疲惫/异变, layers: 非负整数}]，总层数≤X"} if name == "净化" else {}),
                     "cost_share_target_ref": (
                         [{"ref": ref, "name": entity.name}
                          for ref, entity in self.combat.blood_pact_targets().items()]
@@ -5393,6 +5393,8 @@ class GameEngine:
             daowen_y = 1
         try:
             resolve_kw = {"target": target, "caster": actor}
+            if name == "净化":
+                resolve_kw["cost_choices"] = params.get("cost_choices")
             if name == "凝滞":
                 resolve_kw["status_name"] = params.get("status_name", "")
             resolve_kw["y"] = daowen_y
