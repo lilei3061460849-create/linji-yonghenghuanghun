@@ -83,7 +83,7 @@ def test_wave_is_sunken_sea_exclusive():
     known = {"波及"}
     rejected = learnability_error("波及", owned=set(), region="龙心谷", known=known)
     assert "沉沦海专属道纹" in rejected
-    allowed = learnability_error("波及", owned={"凝滞"}, region="沉沦海", known=known)
+    allowed = learnability_error("波及", owned={"沉溺"}, region="沉沦海", known=known)
     assert allowed is None
 
 
