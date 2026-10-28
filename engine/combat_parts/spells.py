@@ -609,29 +609,7 @@ class SpellReactionMixin:
 
     def pay_daowen_shard_cost(self, actor: Entity, name: str, calc: dict,
                               x: int) -> Optional[str]:
-        """消灾X 的碎片类代价：足够则支付并返回 None，不足返回错误文本。"""
-        if name == "消灾":
-            in_combat = self.state.phase == "in_combat"
-            mult = 1 if in_combat else 2
-            fake_need = calc.get("fake_cost", 50 * x) * mult
-            real_need = calc.get("real_cost", 5 * x) * mult
-            if actor is self.state.player:
-                have_fake, have_real = self.state.fake_shards, self.state.shards
-            else:
-                have_fake, have_real = getattr(actor, "fake_shards", 0), actor.shards
-            if have_fake >= fake_need:
-                if actor is self.state.player:
-                    self.state.fake_shards -= fake_need
-                else:
-                    actor.fake_shards -= fake_need
-            elif have_real >= real_need:
-                if actor is self.state.player:
-                    self.state.lose_shards(real_need)
-                else:
-                    actor.lose_shards(real_need)
-            else:
-                return (f"碎片不足：消灾X需{fake_need}假碎片或{real_need}碎片"
-                        f"（局外×{mult}），当前假{have_fake}/真{have_real}")
+        """现役道纹的碎片类代价：足够则支付并返回 None，不足返回错误文本。"""
         if name == "连击":
             # 2026-10-22：碎片/假碎片是两个独立通道，只扣各自池子，
             # 不走 lose_shards 的「假碎片优先」合并失去（双价在 calc 里分开声明）。
@@ -885,7 +863,7 @@ class SpellReactionMixin:
                 reason=InterruptReason.MANA_INSUFFICIENT, detail=err,
                 trigger_spell_logs=trigger_logs, iteration=iteration)
 
-        # --- 碎片代价（消灾X） ---
+        # --- 碎片代价（连击真/假碎片独立通道） ---
         shard_error = self.pay_daowen_shard_cost(caster, daowen, calc, x)
         if shard_error:
             return StepResult(

@@ -501,7 +501,7 @@ def test_cast_kind_daowen_unchanged():
 # ---------------------------------------------------------------------------
 # 2026-09-29 用户裁定：法术本质上就是依次发动多种道纹。
 # 瞬发的每一步都与 use_daowen 走同一套"发动道纹"环节：
-# 敌方「目标发动道纹前」反应、无神、缄默面具、消灾碎片代价；
+# 敌方「目标发动道纹前」反应、无神、缄默面具、连击假碎片通道；
 # 施法失败（中途中断）出手照扣，不退。
 # ---------------------------------------------------------------------------
 
@@ -603,28 +603,29 @@ def test_instant_silence_mask_interrupts_cost_daowen_step():
     assert foe.current_hp < hp_foe0          # 第一步保留
 
 
-def test_instant_xiaozai_shards_insufficient_is_normal_interrupt():
-    engine = _setup("p2_xiaozai")
+def test_instant_lianji_fake_shards_insufficient_is_normal_interrupt():
+    engine = _setup("p2_lianji_shards")
     player, foe = engine.state.player, engine.state.enemies[0]
-    _give(player, "消灾")
+    _give(player, "连击")
     engine.state.fake_shards = 0
     engine.state.shards = 0
     used0 = player.actions_used_this_round
-    resp = _cast(engine, "发动消灾X于自身", [{"x": 1}], target=foe)
+    resp = _cast(engine, "发动连击X于目标",
+                 [{"x": 1, "cost_channel": "假碎片", "dodge": False}], target=foe)
     assert resp["success"], resp
     assert resp["result"]["step_results"][0]["reason"] == REASON_SHARDS_INSUFFICIENT
     assert resp["result"]["execution_status"] == EXECUTION_INTERRUPTED
-    assert engine.dice.rerolls_pending == 0
     assert player.actions_used_this_round == used0 + 1  # 施法失败出手照扣
 
 
-def test_instant_xiaozai_pays_fake_shards_like_use_daowen():
-    engine = _setup("p2_xiaozai_ok")
+def test_instant_lianji_pays_fake_shards_like_use_daowen():
+    engine = _setup("p2_lianji_shards_ok")
     player, foe = engine.state.player, engine.state.enemies[0]
-    _give(player, "消灾")
+    _give(player, "连击")
     engine.state.fake_shards = 60
-    resp = _cast(engine, "发动消灾X于自身", [{"x": 1}], target=foe)
+    resp = _cast(engine, "发动连击X于目标",
+                 [{"x": 1, "cost_channel": "假碎片", "dodge": False}], target=foe)
     assert resp["success"], resp
     assert resp["result"]["execution_status"] == EXECUTION_COMPLETED
     assert engine.state.fake_shards == 10
-    assert engine.dice.rerolls_pending == 1
+    assert foe.current_hp == foe.blood_limit - 5

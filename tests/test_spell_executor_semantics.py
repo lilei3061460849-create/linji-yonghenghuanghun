@@ -234,29 +234,30 @@ def test_event_path_applies_silence_mask_to_step():
     assert player.current_hp == 60  # 没有流血代价
 
 
-def test_event_path_pays_xiaozai_shard_cost_and_interrupts_when_short():
-    """消灾X 的碎片代价在事件型法术步骤里同样支付/拦截。"""
+def test_event_path_pays_lianji_fake_shard_cost_and_interrupts_when_short():
+    """连击假碎片通道在事件型法术步骤里同样支付/拦截。"""
     state, combat, player, enemy = _state(player_hp=60, mana=20)
     state.fake_shards = 0
     state.shards = 0
-    _give(player, "消灾")
-    player.spells.append(Spell(name="消灾", required_daowen=["消灾"],
-                               trigger_condition="失去生命后", effect_flow="发动消灾X于自身"))
+    _give(player, "连击")
+    player.spells.append(Spell(name="连击", required_daowen=["连击"],
+                               trigger_condition="失去生命后", effect_flow="发动连击X于攻击者"))
     refs = combat._combat_entity_refs()
+    decision = {"use": True, "steps": [{
+        "x": 1, "target_ref": "enemy:0", "cost_channel": "假碎片", "dodge": False,
+    }]}
     logs = combat._resolve_spell_reactions(
-        "失去生命后", player, enemy,
-        {"消灾": {"use": True, "steps": [{"x": 1, "target_ref": "player:0"}]}}, refs)
-    entry = next(lg for lg in logs if lg.get("spell") == "消灾")
+        "失去生命后", player, enemy, {"连击": decision}, refs)
+    entry = next(lg for lg in logs if lg.get("spell") == "连击")
     assert entry["interrupted"] == InterruptReason.SHARDS_INSUFFICIENT.value
-    assert combat.dice.rerolls_pending == 0
+    assert enemy.current_hp == 100
 
     state.fake_shards = 60
     logs2 = combat._resolve_spell_reactions(
-        "失去生命后", player, enemy,
-        {"消灾": {"use": True, "steps": [{"x": 1, "target_ref": "player:0"}]}}, refs)
-    assert any(lg.get("spell") == "消灾" and lg.get("execution") for lg in logs2)
+        "失去生命后", player, enemy, {"连击": decision}, refs)
+    assert any(lg.get("spell") == "连击" and lg.get("execution") for lg in logs2)
     assert state.fake_shards == 10
-    assert combat.dice.rerolls_pending == 1
+    assert enemy.current_hp == 95
 
 
 def test_event_path_flight_blocks_step_with_explicit_reason():
@@ -348,11 +349,13 @@ def test_same_interruption_reason_and_detail_as_use_daowen():
     engine.state.relics.clear()
     engine.state.fake_shards = 0
     engine.state.shards = 0
-    _give(player, "消灾")
+    _give(player, "连击")
     direct2 = engine.execute_action("use_daowen", {
-        "daowen_name": "消灾", "x": 1, "target_ref": "player:0"})
+        "daowen_name": "连击", "x": 1, "target_ref": "enemy:0",
+        "lianji_cost": "假碎片", "dodge": False})
     assert not direct2["success"] and "碎片不足" in direct2["error"]
     execution2 = _cast(engine.combat, player, engine.state.enemies[0],
-                       "发动消灾X于自身", [{"x": 1}], target=None)
+                       "发动连击X于目标",
+                       [{"x": 1, "cost_channel": "假碎片", "dodge": False}], target=None)
     assert execution2.results[0].reason == InterruptReason.SHARDS_INSUFFICIENT
     assert "碎片不足" in execution2.results[0].detail

@@ -85,19 +85,20 @@ def test_r01_r10_normal_setup_debt_and_zero_attack_employee(tmp_path):
     assert engine.state.blacklist_level == before_blacklist
 
 
-def test_r01_r10_boundary_xiaozai_is_only_out_of_combat_daowen(tmp_path):
+def test_r01_r10_boundary_converted_xiaozai_is_not_out_of_combat_daowen(tmp_path):
     engine = _full_setup(_engine(tmp_path))
     player = engine.state.player
-    _dw(player, "消灾")
+    _dw(player, "消灾")  # 模拟旧存档残留；不得因此恢复已转换的道纹入口
     engine.state.shards = 10
-    ok = engine.execute_action("use_daowen", {"daowen_name": "消灾", "x": 1})
-    assert ok["success"]
-    assert engine.state.shards == 0  # 局外为5X×2
+    retired = engine.execute_action("use_daowen", {"daowen_name": "消灾", "x": 1})
+    assert not retired["success"]
+    assert engine.state.shards == 10
 
-    _dw(player, "固执")
-    denied = engine.execute_action("use_daowen", {"daowen_name": "固执", "x": 1})
-    # 2026-10-23 用户裁定：默认局内，局外须条文明示——【消灾】仍是唯一明示项。
+    _dw(player, "杀伐")
+    denied = engine.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 1})
+    # 默认局内，局外须条文明示；逆命筹消耗品不再占用道纹白名单。
     assert not denied["success"] and "局外发动须条文明示" in denied["error"]
+    assert engine.state.shards == 10
 
 
 def test_r01_r10_illegal_phase_and_missing_target_are_atomic(tmp_path):
