@@ -903,13 +903,16 @@ class SpellReactionMixin:
                     reason=InterruptReason.SPEED_INSUFFICIENT,
                     detail="目标速度不足以闪避",
                     trigger_spell_logs=trigger_logs, iteration=iteration)
+            missed_cost=self.pay_daowen_numeric_cost(daowen,calc,caster,
+                dragon_heart_use=entry_dict.get("dragon_heart_use",0),
+                cost_share_target_ref=entry_dict.get("cost_share_target_ref",""))
             self._spend_dodge_speed(target, dodge_relic)
             self.pay_daowen_cooldown(daowen,calc,caster)
             self.consume_tamper(caster, tamper_rule)
             return StepResult(
                 status=StepStatus.DODGED, daowen=daowen, x=x,
                 target_ref=target_ref, target_name=target.name,
-                cost_paid=cost_paid, trigger_spell_logs=trigger_logs, iteration=iteration)
+                cost_paid=cost_paid,execution={"effects":[missed_cost] if missed_cost else []}, trigger_spell_logs=trigger_logs, iteration=iteration)
 
         # --- 真正执行道纹效果 ---
         self.pay_daowen_cooldown(daowen,calc,caster)

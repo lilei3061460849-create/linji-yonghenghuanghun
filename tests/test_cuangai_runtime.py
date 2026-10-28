@@ -127,3 +127,35 @@ def test_truth_special_api_also_obeys_target_control_and_consumes_one():
     assert result['success'],result
     assert e._pending_interrupts[0].context['target']==b.name
     assert not p.has_status('篡改')
+
+
+def test_dodged_tampering_still_pays_its_declared_bleed_cost():
+    e,p,a,b=setup('dodged');before=p.current_hp
+    result=e.execute_action('use_daowen',{'daowen_name':'篡改','x':2,'target_ref':'enemy:0',
+        'dodge':True,'blood_shadow':False})
+    assert result['success'],result
+    assert p.current_hp==before-6 and not a.has_status('篡改')
+
+
+def test_dodged_spell_tampering_uses_same_cost_bus_once():
+    e,p,a,b=setup('spell_dodged');before=p.current_hp
+    execution=e.combat.build_instant_execution(p,'发动篡改X于目标',a,
+        [{'x':2,'dodge':True}],e.combat._combat_entity_refs())
+    execution.run_all()
+    assert p.current_hp==before-6 and not a.has_status('篡改')
+
+
+def test_monster_dodged_tampering_pays_bleed_too():
+    e,p,a,b=setup('monster_dodged');_give(a,'篡改');a.dao_wen['篡改'].x_value=2
+    hp=a.current_hp
+    result=e.combat._resolve_monster_daowen_choice(a,
+        {'name':'篡改','target_ref':'player:0','dodge':True},
+        e.combat._combat_entity_refs(),set(),{})
+    assert result['dodged'] and a.current_hp==hp-6 and not p.has_status('篡改')
+
+
+def test_tamper_counts_successful_activation_even_if_controller_target_dodges():
+    e,p,a,b=setup('count_dodged');apply_rule(e,a,p,1)
+    result=use(e,a,tamper=command(a,'enemy:1'),dodge=True)
+    assert result['success'] and not p.has_status('篡改')
+    assert b.current_hp==100

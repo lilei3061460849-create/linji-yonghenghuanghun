@@ -24,6 +24,42 @@ from ..models import MONSTER_MANA_RELIC
 
 
 class CostPaymentMixin:
+    def pay_daowen_numeric_cost(self,name,calc,caster,*,dragon_heart_use=0,cost_share_target_ref=""):
+        """同一份数值代价结算：正常效果与被闪避/血影免去效果的发动共用，不双付。"""
+        cost_spec = None
+        if "cost_hp" in calc:
+            cost_spec = ("流血", calc["cost_hp"], "bleed_cost")
+        elif "cost_blood_limit" in calc:
+            cost_spec = ("衰老", calc["cost_blood_limit"], "aging_cost")
+        elif "cost_mana_limit" in calc:
+            # 2026-10-14：【透支】多代价（枯竭通道）。此前没有道纹用枯竭作代价，
+            # 本分支是第一条；走代价总线（【苍白之花】豁免/【共罪】平分照常）。
+            cost_spec = ("枯竭", calc["cost_mana_limit"], "exhaust_cost")
+        elif "cost_speed" in calc:
+            cost_spec = ("疲惫", calc["cost_speed"], "fatigue_cost")
+        elif "cost_mutation" in calc and caster.entity_type != "怪物":
+            # 怪物原始道纹在两阶段怪物流程中已先支付异变5X；此处只补轮回者/同伴的同类代价。
+            cost_spec = ("异变", calc["cost_mutation"], "mutation_cost")
+        if cost_spec is not None:
+            cost_type, amount, effect_type = cost_spec
+            timing = "monster_action" if caster.entity_type == "怪物" else "player_action"
+            payment = self.pay_numeric_cost(
+                caster, cost_type, amount,
+                cost_share_target_ref=cost_share_target_ref,
+                dragon_heart_use=dragon_heart_use,
+                cost_context={"timing": timing, "source": name, "source_type": "daowen", "tags": {"active_payment"}},
+            )
+            cost_effect = {"type": effect_type, **payment}
+            if cost_type == "流血":
+                # 保留既有公开字段，同时以owner/shared_with暴露共罪拆分详情。
+                cost_effect["actual_damage"] = payment["actual_paid"]
+                cost_effect["hp_after"] = caster.current_hp
+            return cost_effect
+        elif cost_share_target_ref:
+            raise ValueError("该道纹没有可由【共罪】共同承担的数值代价")
+        return None
+
+
     def pay_daowen_cooldown(self, name, calc, caster):
         """冷却是发动代价，目标闪避也已支付；重复记账幂等，不清空原冷却。"""
         if calc.get("cost_type") != "冷却":

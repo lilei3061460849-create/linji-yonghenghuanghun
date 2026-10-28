@@ -610,6 +610,7 @@ class MonsterPhaseMixin:
                 if self.bizhong_remaining(monster) > 0:
                     self.consume_bizhong(monster)
             elif blood_shadow:
+                self.pay_daowen_numeric_cost(effective_name,calc,monster)
                 self.pay_numeric_cost(
                     target, "流血", 10,
                     cost_share_target_ref=choice.get("cost_share_target_ref", ""),
@@ -618,6 +619,7 @@ class MonsterPhaseMixin:
                         "resolves_as": effective_name, "target": target.name, "blood_shadow": True,
                         "trigger_spell_logs": trigger_logs}
             elif dodge:
+                self.pay_daowen_numeric_cost(effective_name,calc,monster)
                 self._spend_dodge_speed(target, choice.get("dodge_relic_target_ref"))
                 return {"monster": monster.name, "daowen_activated": name,
                         "resolves_as": effective_name, "target": target.name, "dodged": True,

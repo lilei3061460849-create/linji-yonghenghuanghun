@@ -5585,6 +5585,9 @@ class GameEngine:
             calc["blood_pact_target_ids"] = [str(entity.runtime_id)
                                                 for entity in (aoe_targets_override or [])]
         if dodge_log.get("fully_dodged"):
+            missed_numeric_cost=self.combat.pay_daowen_numeric_cost(name,calc,actor,
+                dragon_heart_use=params.get("dragon_heart_use",0),
+                cost_share_target_ref=params.get("cost_share_target_ref",""))
             self.combat.consume_tamper(actor, tamper_rule)
             self._advance_duel_turn()
             if self.state.in_final_duel and not self._duel_side_can_act("player_side") and not self._duel_side_can_act("opponent_side"):
@@ -5594,6 +5597,7 @@ class GameEngine:
                 "success": True,
                 "action": f"发动道纹【{name}X={x}】" + (f"（{actor.name}听从指令发动）" if is_command else ""),
                 "calculation": calc,
+                "numeric_cost":missed_numeric_cost,
                 "execution": {"daowen": name, "effects": [], "dodged": dodge_log},
                 "dodge": dodge_log,
                 "trigger_spell_logs": trigger_logs,
