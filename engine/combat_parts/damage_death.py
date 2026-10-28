@@ -1118,6 +1118,8 @@ class DamageDeathMixin:
         for holder_list, holder_stolen, sealed_attr in (
             (self.state.relics, self.state.stolen_relics, self.state.sealed_relics),
         ):
+            if self.chenni_round_blocked(self.state.player):
+                break
             # 封印递减
             expired_seals = []
             for name in list(sealed_attr.keys()):
@@ -1154,7 +1156,7 @@ class DamageDeathMixin:
                     returned.append(name)
         # —— 每个非玩家实体：递减其自身 sealed_relics / stolen_relics ——
         for entity in self._combat_entity_refs().values():
-            if entity is self.state.player:
+            if entity is self.state.player or self.chenni_round_blocked(entity):
                 continue
             for attr in ("sealed_relics", "stolen_relics"):
                 d = getattr(entity, attr, None) or {}

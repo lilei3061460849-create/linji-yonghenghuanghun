@@ -126,6 +126,10 @@ class MonsterPhaseMixin:
             if not monster.is_alive or monster.removed_without_kill:
                 continue
             actor_ref = f"enemy:{index}"
+            if self.chenni_round_blocked(monster):
+                skipped.append({"actor_ref": actor_ref, "monster": monster.name,
+                                "reason": "沉溺：本次回合已中断"})
+                continue
             if not self.can_act(monster):
                 skipped.append({"actor_ref": actor_ref, "monster": monster.name, "reason": "无法行动"})
                 continue

@@ -635,6 +635,18 @@ class DaoWenEngine:
         }
 
     @staticmethod
+    def calculate_chenni(x: int, target: Entity = None) -> dict:
+        """沉溺X：支付：法力10X。使[目标]无法经历X个回合。"""
+        if target is None:
+            raise ValueError("沉溺必须显式选择目标")
+        return {
+            "dao_wen": "沉溺", "x": x, "cost_type": CostType.MANA.value,
+            "cost": 10 * x, "duration": -1 if x > 0 else 0,
+            "block_target_rounds": x,
+            "summary": f"支付：{10*x}法力，使{target.name}无法经历{x}个回合",
+        }
+
+    @staticmethod
     def calculate_huixiang(x: int, target: Entity = None, status_index: int = None) -> dict:
         """回响X：支付：法力5X。使[目标]的一种“持续Y”变为“持续Y＋X”。"""
         return {"dao_wen": "回响", "x": x, "cost_type": CostType.MANA.value,
@@ -805,6 +817,7 @@ class DaoWenEngine:
             "唤潮": cls.calculate_chao,
             "蜃景": cls.calculate_shenjing,
             "大梦": cls.calculate_dameng,
+            "沉溺": cls.calculate_chenni,
             "回响": cls.calculate_huixiang,
             # ---- 乱葬岗（二阶）----
             "分裂": cls.calculate_fenlie,
@@ -981,6 +994,10 @@ class ResonanceEngine:
             ("遗忘", "曲解", "大梦"),
             ("大梦", "曲解", "回响"),
             ("回响", "转换", "流动"),
+        ],
+        # 大梦的反转分支不进五节点主环；双向查询仍由统一边表展开。
+        "沉沦海分叉": [
+            ("大梦", "反转", "沉溺"),
         ],
         # ---- 原始怪物道纹 → 转化道纹（规则正文）----
         # 非闭环，是以原始道纹为根的分支树；怪物面板上的道纹多属此类，

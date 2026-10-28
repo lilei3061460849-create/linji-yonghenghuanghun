@@ -990,7 +990,9 @@ class Entity:
         expired = []
         remaining = []
         for s in self.status_effects:
-            if s.name in skip_names:
+            if s.name in skip_names or s.effect_data.get("manual_round_countdown"):
+                # 【沉溺】等次数型状态只在目标真正即将进入回合时由战斗管线消费；
+                # 普通回终不再额外递减一次，施加后的当前回合也不会误扣次数。
                 remaining.append(s)
                 continue
             if not s.tick():
@@ -1019,7 +1021,7 @@ class Entity:
             }
             debuffs = {
                 "弱化", "无力", "减速", "全速", "束缚", "封印",
-                "坏死", "退化", "定型", "畸变", "加害", "伤痕",
+                "坏死", "退化", "定型", "畸变", "加害", "伤痕", "沉溺",
                 "寄生", "蒙蔽", "手雷减攻", "被背负",   # 2026-10-11 删【衰败】
             }
             if effect.name in buffs:

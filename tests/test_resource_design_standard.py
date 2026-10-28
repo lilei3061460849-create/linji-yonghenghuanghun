@@ -132,7 +132,7 @@ def test_daowen_x_scales_strength_or_duration():
     flat = []
     for name in sorted(DaoWenEngine._registry):
         kwargs = {"cost_choices": [{"type": "异变"}]} if name == "净化" else {}
-        if name == "大梦":
+        if name in {"大梦", "沉溺"}:
             from engine.models import Entity
             kwargs["target"] = Entity("审查靶", "怪物", blood_limit=100, current_hp=100)
         low, high = DaoWenEngine.resolve(name, 1, **kwargs), DaoWenEngine.resolve(name, 3, **kwargs)

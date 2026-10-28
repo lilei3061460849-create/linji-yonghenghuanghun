@@ -64,23 +64,25 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('| A09 | 馈赠、受击次数供法力', scraps)
         self.assertIn('使目标受击时获得X点法力，持续∞', scraps)
 
-    def test_round_blocking_moves_to_unnamed_sea_reversal(self):
+    def test_round_blocking_is_implemented_sea_reversal(self):
         sea = (ROOT / '副本/沉沦海.md').read_text(encoding='utf-8')
         night = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
         self.assertIn('大梦X ⇄（反转）【沉溺X】', sea)
+        self.assertIn('6.沉溺X（大梦反转分支）：支付：法力10X。', sea)
         self.assertIn('使[目标]无法经历X个回合。', sea)
         self.assertIn('中断该次回合，并使剩余阻断次数-1', sea)
         self.assertIn('普通回合与大梦产生的额外回合均适用', sea)
-        self.assertIn('名称已定为沉溺，支付待定', sea)
+        self.assertNotIn('沉溺尚未接入', sea)
+        self.assertNotIn('沉溺，支付待定', sea)
         self.assertIn('3.长夜X：效果待重做', night)
         self.assertNotIn('使[目标]无法经历回合，持续X', night)
-        row = next(r for r in self.rows if r['name'] == '长夜')
-        self.assertEqual(row['review'], '语义待定')
-        design = json.loads(AUDIT.read_text(encoding='utf-8'))['pending_designs'][0]
-        self.assertEqual(design['name'], '沉溺')
-        self.assertIsNone(design['cost'])
-        self.assertFalse(design['runtime'])
-        self.assertIn(design['effect'], sea)
+        long_night = next(r for r in self.rows if r['name'] == '长夜')
+        self.assertEqual(long_night['review'], '语义待定')
+        row = next(r for r in self.rows if r['name'] == '沉溺')
+        self.assertTrue(row['runtime'])
+        self.assertEqual(row['review'], '暂未发现结构违规')
+        pending = json.loads(AUDIT.read_text(encoding='utf-8'))['pending_designs']
+        self.assertNotIn('沉溺', {design['name'] for design in pending})
 
     def test_undying_draft_uses_cooldown_and_life_floor(self):
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')

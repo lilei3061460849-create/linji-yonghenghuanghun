@@ -1289,6 +1289,13 @@ class DaowenEffectMixin:
                     result["effects"].append({"type": "status_added", "target": et.name,
                                               "status": status_name, "duration": duration, "value": x})
 
+        if name == "沉溺":
+            # 次数只在目标即将进入普通/额外回合时消费；不能随本次施加后的
+            # 当前回终或普通状态递减再自动扣一次。
+            for et in wave_status_targets:
+                for status in et.get_status_effects("沉溺"):
+                    status.effect_data["manual_round_countdown"] = True
+
         if name == "回响":
             amounts = wave_pieces.get("extend_duration", [calc["extend_duration"]])
             for recipient, amount in zip(wave_status_targets, amounts):

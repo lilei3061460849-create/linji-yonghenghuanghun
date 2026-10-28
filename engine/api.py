@@ -456,6 +456,22 @@ class GameEngine:
                     existing_note = available.get("note", "")
                     available["note"] = "；".join(
                         part for part in (existing_note, available["binding_restriction"]) if part)
+            if player and self.combat.chenni_round_blocked(player):
+                allowed_by_subphase = {
+                    CombatSubphase.PLAYER_ACTIONS.value: {
+                        "resolve_ally_phases", "prepare_monster_phase"},
+                    CombatSubphase.AWAIT_ROUND_START.value: {"round_start"},
+                    CombatSubphase.AWAIT_ROUND_END.value: {"round_end"},
+                }
+                allowed = allowed_by_subphase.get(self.state.combat_subphase, set())
+                available["actions"] = [
+                    action for action in available.get("actions", [])
+                    if action.get("action_type") in allowed
+                ]
+                available["chenni_restriction"] = (
+                    "【沉溺】已中断你的本次回合；只能推进其他角色的自主阶段与战斗流程。")
+                available["note"] = "；".join(part for part in (
+                    available.get("note", ""), available["chenni_restriction"]) if part)
             return available
         elif phase == "battle_end":
             return self._get_battle_end_actions()
@@ -4955,6 +4971,9 @@ class GameEngine:
         return None，怪物的 actions_used_this_round 永不增长，配合
         _duel_side_can_act 的「存活即有余手」就成了事实上的无限出手。
         """
+        if self.combat.chenni_round_blocked(entity):
+            return {"success": False,
+                    "error": f"{entity.name}的本次回合已被【沉溺】中断"}
         if entity.entity_type == "怪物" and not self.state.in_final_duel:
             return None
         if not self.combat.can_act(entity):
@@ -4979,6 +4998,9 @@ class GameEngine:
         """原子消耗多次出手；X阶法术/逃跑必须一次付清X次出手机会。"""
         if not isinstance(count, int) or isinstance(count, bool) or count < 1:
             return {"success": False, "error": "出手消耗必须是正整数"}
+        if self.combat.chenni_round_blocked(entity):
+            return {"success": False,
+                    "error": f"{entity.name}的本次回合已被【沉溺】中断"}
         if entity.entity_type == "怪物" and not self.state.in_final_duel:
             return None
         if not self.combat.can_act(entity, action_type=action_type):
@@ -7296,6 +7318,8 @@ class GameEngine:
                     continue
                 if prefix == "employee" and not ally.is_deployed:
                     continue
+                if self.combat.chenni_round_blocked(ally):
+                    continue
                 if ally.actions_used_this_round >= ally.action_count:
                     continue
                 enemies = [e for e in self.state.enemies if e.is_alive]
@@ -7517,6 +7541,8 @@ class GameEngine:
             self.state.get_all_player_side() + self.state.get_all_enemy_side()
             + list(getattr(self.state, "temp_friends", []) or []))}.values()
         for entity in round_entities:
+            if self.combat.chenni_round_blocked(entity):
+                continue
             for instance in entity.dao_wen.values():
                 if getattr(instance, "cooldown_rounds_remaining", 0) > 0:
                     instance.cooldown_rounds_remaining -= 1
@@ -9262,6 +9288,7 @@ class GameEngine:
             "_jisu_dodges", "_dongcha_pending", "_bizhong_left", "_nilin",
             "_beifu_left", "_beifu_target",   # 2026-10-11：_jiahuo_* 随【嫁祸】删除
             "_death_triggers_emitted", "_shouyedeng_granted", "_huifeng_target_ref",
+            "_chenni_blocked_world_round",
         )
         for entity in all_characters:
             entity.clear_shield()

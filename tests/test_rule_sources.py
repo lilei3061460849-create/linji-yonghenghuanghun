@@ -18,9 +18,9 @@ def test_project_rules_are_extracted_from_their_authoritative_documents():
     sync = _sync()
     facts = sync.extract_project_rules()
     assert [entry["name"] for entry in facts["event_daowen"]] == ["真理"]
-    # 当前通用正文13条；增殖迁入扭曲都市后，副本抽取37条并保留各行状态。
+    # 当前通用正文13条；沉溺接入并列入沉沦海定义后，副本抽取38条。
     assert len(facts["common_daowen"]) == 13
-    assert len(facts["dungeon_daowen"]) == 37
+    assert len(facts["dungeon_daowen"]) == 38
     assert len(facts["spells"]) == 10  # 2026-09-16：删「血溅五步」（无引擎流程的空名字）
     assert len(facts["dungeons"]) == 8
     assert len(facts["monsters"]) == 48  # 36 + 乱葬岗12(已实现)

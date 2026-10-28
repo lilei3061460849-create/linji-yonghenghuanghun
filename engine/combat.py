@@ -175,6 +175,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         INCOMING_ADJUST（Hook 路径）与 ROUND_START（本方法）。
         """
         results = []
+        if self._chenni_skips_phase(target, phase):
+            return results
         mechanisms = MECHANISMS.phase_mechanisms(phase)
         for mechanism in sorted(mechanisms, key=lambda item: item.ordering_key(target)):
             ctx = TriggerContext(combat=self, state=self.state, phase=phase,
@@ -209,6 +211,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         ]
         pending.sort(key=lambda row: (*row[0].ordering_key(row[1]), row[2]))
         for mechanism, entity, _ in pending:
+            if self._chenni_skips_phase(entity, phase):
+                continue
             ctx = TriggerContext(combat=self, state=self.state, phase=phase, target=entity)
             if mechanism.condition is not None and not mechanism.condition(ctx):
                 continue
@@ -924,6 +928,78 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
     # ========== 回合管理 ==========
 
+    def chenni_round_blocked(self, entity: Entity | None) -> bool:
+        """目标当前这次回合是否已被【沉溺】标记为中断。"""
+        # 标记在下一次回始统一清除，因此回始递增世界回合数前后的同一批
+        # 目标循环都能识别本次阻断；无需把 world round 当成个人回合计数。
+        return bool(entity is not None
+                    and getattr(entity, "_chenni_blocked_world_round", 0))
+
+    def _chenni_skips_phase(self, target: Entity | None, phase: str) -> bool:
+        return bool(target is not None and self.chenni_round_blocked(target)
+                    and phase in {
+                        Phase.ROUND_START_PREPARE, Phase.ROUND_START,
+                        Phase.ROUND_START_SETTLE, Phase.ROUND_INCREASE,
+                        Phase.ROUND_END, Phase.ROUND_END_POST_MEDIOCRITY,
+                        Phase.ROUND_END_RECONCILE, Phase.ROUND_END_TRACKING,
+                    })
+
+    def chenni_will_block_next_round(self, entity: Entity | None) -> bool:
+        """回始提交前预测下一次阻断；只读状态，不提前消费。"""
+        return bool(entity is not None and entity.is_alive and any(
+            status.name == "沉溺" and status.value > 0
+            for status in entity.status_effects
+        ))
+
+    def _consume_chenni_round(self, target: Entity, *, source: str,
+                              round_number: int | None = None) -> dict | None:
+        """在目标即将进入回合时消费一次阻断；归零的本次仍被中断。"""
+        status = next((item for item in target.status_effects
+                       if item.name == "沉溺" and item.value > 0), None)
+        if status is None:
+            return None
+        status.effect_data["manual_round_countdown"] = True
+        # 与篡改等次数型状态同构：remaining_rounds=-1只表示不按普通回终
+        # 递减，真实剩余次数在 value；永恒的偏爱不会把次数字段永久化抹掉。
+        status.value -= 1
+        if status.value <= 0:
+            target.status_effects.remove(status)
+        remaining = sum(item.value for item in target.status_effects
+                        if item.name == "沉溺" and item.value > 0)
+        effect = {"type": "chenni_round_blocked", "target": target.name,
+                  "interrupted_round": source, "remaining": remaining}
+        if round_number is not None:
+            effect["round"] = round_number
+        return effect
+
+    def _begin_chenni_world_round(self, entities: list[Entity]) -> list[dict]:
+        """标记本世界回合被中断的角色；其他角色和世界回合计数不受影响。"""
+        unique = list({entity.runtime_id: entity for entity in entities
+                       if entity is not None}.values())
+        next_round = self.state.current_round + 1
+        # 旧标记对全场及暂离队列一律清零；只有场上 unique 会在下面消费新次数。
+        # 否则「上轮被沉溺→随后封印→本轮回场」会把上轮阻断错误地带回来。
+        all_known = (
+            ([self.state.player] if self.state.player is not None else [])
+            + list(self.state.friends) + list(self.state.employees)
+            + list(self.state.temp_friends) + list(self.state.enemies)
+            + [entry.get("monster") for entry in
+               getattr(self.state, "delayed_monster_reentries", []) or []]
+        )
+        for entity in all_known:
+            if entity is not None:
+                entity._chenni_blocked_world_round = 0
+        effects = []
+        for entity in unique:
+            if not entity.is_alive:
+                continue
+            effect = self._consume_chenni_round(
+                entity, source="普通回合", round_number=next_round)
+            if effect is not None:
+                entity._chenni_blocked_world_round = next_round
+                effects.append(effect)
+        return effects
+
     def settle_deferred_damage(self, entity: Entity, entries: list[dict]) -> list[dict]:
         """将上回合延后的数值作为普通伤害结算，允许再次触发沙漏。"""
         effects = []
@@ -946,13 +1022,16 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         2. 结算回始类效果
         3. 返回需要决策的信息
         """
-        effects = []
-        # 先取出本回合应造成的伤害；本次新延后的部分留给下一回合。
+        effects = self._begin_chenni_world_round(
+            self.state.get_all_player_side() + self.state.get_all_enemy_side())
+        # 先取出本回合应造成的伤害；被沉溺中断者整笔留到下一次真正经历的回合。
         deferred_due = []
         seen_due = set()
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
             if id(entity) not in seen_due:
                 seen_due.add(id(entity))
+                if self.chenni_round_blocked(entity):
+                    continue
                 deferred_due.append((entity, list(getattr(entity, "deferred_damage", []))))
                 entity.deferred_damage = []
         player = self.state.player
@@ -966,6 +1045,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             if id(e) in seen_entities:
                 continue
             seen_entities.add(id(e))
+            if self.chenni_round_blocked(e):
+                continue
             # 窥隙法匣：成功闪避时记下的法力只在下一回始领取，不与当次闪避即时结算。
             # 它使用独立 pending；绝不能清理洞察状态的 _dongcha_pending。
             pending_kuixi = int(getattr(e, "_kuixi_pending_mana", 0) or 0)
@@ -1029,6 +1110,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
         # 结算回始效果
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
+            if self.chenni_round_blocked(entity):
+                continue
             # 蓄锐（2026-09-28）：上回合施放蓄锐积攒的 pending 转成【蓄锐·增】1回 buff（+1出手）。
             pending = int(getattr(entity, "_xurui_pending", 0) or 0)
             if pending > 0:
@@ -1131,11 +1214,20 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             if hasattr(target, field_name):
                 value = getattr(target, field_name)
                 saved_fields[field_name] = list(value) if isinstance(value, list) else value
+        # 普通世界回合的阻断标记不能泄漏进大梦额外回合；额外回合只按自身
+        # 进入前的沉溺次数决定。结束后恢复原标记，当前普通回终仍按原口径跳过。
+        saved_chenni_marker = getattr(target, "_chenni_blocked_world_round", None)
+        target._chenni_blocked_world_round = 0
 
         try:
             for index in range(rounds):
                 if not target.is_alive or self.state.battle_over():
                     break
+                blocked = self._consume_chenni_round(target, source=source)
+                if blocked is not None:
+                    blocked.update({"index": index + 1, "total": rounds})
+                    effects.append(blocked)
+                    continue
 
                 # 这些字段属于单个角色经历的回合，不是世界时间。每次额外经历都从
                 # 独立的周期记录开始；不运行全场 ROUND_START_SETTLE，因为其中包含
@@ -1195,6 +1287,11 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         finally:
             for field_name, value in saved_fields.items():
                 setattr(target, field_name, value)
+            if saved_chenni_marker is None:
+                if hasattr(target, "_chenni_blocked_world_round"):
+                    delattr(target, "_chenni_blocked_world_round")
+            else:
+                target._chenni_blocked_world_round = saved_chenni_marker
 
         return effects
 
@@ -1209,6 +1306,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         mediocrity_ready: list[tuple[Entity, str]] = []
 
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
+            if self.chenni_round_blocked(entity):
+                continue
             # 蚀界残钟：场上有持有者时，每个角色在回终第一拍失去「当前法力×当前速度」的血限。
             # 保持旧【畸变】的回终锚点，走统一血限变化/命零管线，不手改 current_hp。
             if entity.is_alive and self._any_active_relic("蚀界残钟"):
@@ -1252,6 +1351,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             effects.extend(self._apply_mediocrity(entity, why))
 
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
+            if self.chenni_round_blocked(entity):
+                continue
             # 凡庸之后的原第二实体循环；保持实体优先，不能提前到 ROUND_END。
             effects.extend(self._dispatch_phase(
                 Phase.ROUND_END_POST_MEDIOCRITY, target=entity,
@@ -1270,6 +1371,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         
         # 持续效果递减。
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
+            if self.chenni_round_blocked(entity):
+                continue
             expired = entity.tick_status_effects()
             if expired:
                 # 【增殖】到期后恢复基础血限；若当前生命超出基础血限，按恢复后的血限封顶。
@@ -1428,6 +1531,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     def validate_round_start_relic_choices(self, choices: dict) -> None:
         if not isinstance(choices, dict):
             raise ValueError("relic_choices必须是对象")
+        if (self.chenni_round_blocked(self.state.player)
+                or self.chenni_will_block_next_round(self.state.player)):
+            return
         active = {r.name for r in self.state.relics if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0}
         player = self.state.player
         damage = 3 * max(0, player.speed_limit - player.current_speed) if player else 0
@@ -1465,6 +1571,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         relics = {r.name for r in self.state.relics if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0}
 
         if trigger == "round_start":
+            if self.chenni_round_blocked(player):
+                return logs
             choices = ctx.get("relic_choices", {})
             self.validate_round_start_relic_choices(choices)
             if "回锋刀" in relics:
@@ -1622,6 +1730,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """
         return (entity.is_alive
                 and not self.state.is_sealed_away(entity)
+                and not self.chenni_round_blocked(entity)
                 and (not entity.has_status("束缚")
                      or action_type in {"cast", "define_spell"}))
 

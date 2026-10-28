@@ -1149,11 +1149,17 @@ class SpellReactionMixin:
                 if entity.is_alive
                 and (entity.spells or self._builtin_spell_flows(entity))}
 
+    def _chenni_blocks_global_trigger(self, holder: Entity, trigger: str) -> bool:
+        return bool(trigger in {"回始", "回终", "敌回始", "敌回终", "自身回合结束"}
+                    and self.chenni_round_blocked(holder))
+
     def prepare_global_trigger_spells(self, trigger: str) -> dict:
         """列出当前时点全部持有者的可发动全局法术及其决策槽位。"""
         refs = self._combat_entity_refs()
         result: dict[str, list[dict]] = {}
         for holder_ref, holder in self._global_trigger_holders(refs).items():
+            if self._chenni_blocks_global_trigger(holder, trigger):
+                continue
             flows = self._eligible_spell_flows(holder, trigger)
             if not flows:
                 continue
@@ -1259,7 +1265,8 @@ class SpellReactionMixin:
         logs = []
         for holder_ref, choices in (submitted or {}).items():
             holder = refs.get(holder_ref)
-            if holder is None or not holder.is_alive:
+            if (holder is None or not holder.is_alive
+                    or self._chenni_blocks_global_trigger(holder, trigger)):
                 continue
             flows = self._eligible_spell_flows(holder, trigger)
             subject_of = self._global_subject_of(holder)

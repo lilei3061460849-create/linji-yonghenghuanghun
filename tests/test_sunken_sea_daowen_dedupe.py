@@ -31,6 +31,7 @@ def test_wave_moves_from_generic_loop_to_sunken_sea():
         ("大梦", "曲解", "回响"),
         ("回响", "转换", "流动"),
     ]
+    assert loops["沉沦海分叉"] == [("大梦", "反转", "沉溺")]
 
 
 def test_deleted_sunken_sea_daowen_and_panel_tags_are_gone():
@@ -40,13 +41,13 @@ def test_deleted_sunken_sea_daowen_and_panel_tags_are_gone():
     assert "扩散" not in dungeon
     assert "映照" not in index
     assert "扩散" not in index
-    assert "道纹数量5" in dungeon
+    assert "道纹数量6" in dungeon
     indexed_count = len(re.findall(r"^### [\u4e00-\u9fff]{2}$", index, re.M))
     assert f"当前索引收录道纹（{indexed_count}种）" in index
     assert "流动】【遗忘】尚未接入运行时" in index
     assert "杀伐闭环（通用核心）7" in index
     assert "扭曲都市专属（5）" in index
-    assert "沉沦海专属（5）" in index
+    assert "沉沦海专属（6）" in index
     assert "鲛族专属（2）" in index
     assert "褪鳞蟹（264/18/3，唤潮，庇护，遗物【减速】）" in dungeon
     assert "珊瑚囚徒（276/20/3，唤潮，蜃景，连击，庇护）" in dungeon
