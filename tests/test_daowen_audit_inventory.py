@@ -103,6 +103,14 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertFalse(row['runtime'])
         self.assertEqual(row['review'], '语义待定')
 
+    def test_shared_sin_is_a_symmetric_selected_group(self):
+        dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
+        self.assertIn('6.共罪X：支付：流血5X。选择X个[目标]，其中任意一个目标支付代价时，组内其他目标同步支付相同代价，持续X。', dungeon)
+        self.assertNotIn('使[目标]在施法者付出代价时，同步支付', dungeon)
+        row = next(r for r in self.rows if r['name'] == '共罪')
+        self.assertFalse(row['runtime'])
+        self.assertEqual(row['review'], '语义待定')
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
