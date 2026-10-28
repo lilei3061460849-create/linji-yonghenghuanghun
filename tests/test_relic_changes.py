@@ -4,13 +4,14 @@ from pathlib import Path
 from engine.api import GameEngine, TWISTED_TOOL_LIBRARY
 from engine.combat import CombatEngine
 from engine.dice import DiceEngine
+from engine.mechanisms import Phase
 from engine.models import Consumable, Entity, GameState, Relic
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_shouyedeng_grants_mana_equal_to_current_round_at_round_end():
-    """2026-10-25 用户令：守夜灯改为[回终]获得等同于当前回合数的法力。"""
+def test_shouyedeng_grants_mana_at_each_round_increase():
+    """守夜灯按经历回合在[回增]获得当前世界回合数的法力。"""
     state = GameState()
     player = Entity(
         name="测试者", entity_type="轮回者",
@@ -21,11 +22,11 @@ def test_shouyedeng_grants_mana_equal_to_current_round_at_round_end():
     combat = CombatEngine(state, DiceEngine())
 
     state.current_round = 1
-    assert combat._grant_shouyedeng(player)["gained"] == 1
+    combat._dispatch_phase(Phase.ROUND_INCREASE, target=player)
     assert player.current_mana == 1
 
     state.current_round = 7
-    assert combat._grant_shouyedeng(player)["gained"] == 7
+    combat._dispatch_phase(Phase.ROUND_INCREASE, target=player)
     assert player.current_mana == 8
 
 

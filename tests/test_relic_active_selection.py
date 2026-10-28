@@ -8,6 +8,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
+from engine.mechanisms import Phase
 from engine.models import Relic
 from tests.setup_support import finish_initial_daowen
 
@@ -128,13 +129,16 @@ def test_disabled_relic_does_not_trigger_its_effect():
     player = e.state.player
     e.state.relics = [Relic("守夜灯", "", enabled=False)]
 
+    player.current_mana = 0
     assert e.combat._relic_active(player, "守夜灯") is False
-    assert e.combat._shouyedeng_grant_amount(player) == 0, "停用遗物不得结算效果"
+    e.combat._dispatch_phase(Phase.ROUND_INCREASE, target=player)
+    assert player.current_mana == 0, "停用遗物不得结算效果"
 
     e.state.current_round = 3
     e.state.relics[0].enabled = True
     assert e.combat._relic_active(player, "守夜灯") is True
-    assert e.combat._shouyedeng_grant_amount(player) == 3, "启用后按当前回合数授予"
+    e.combat._dispatch_phase(Phase.ROUND_INCREASE, target=player)
+    assert player.current_mana == 3, "启用后按当前世界回合数授予"
 
 
 def test_disabled_stacks_with_sealed_not_replacing_it():
