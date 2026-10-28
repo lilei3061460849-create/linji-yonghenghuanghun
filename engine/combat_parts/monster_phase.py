@@ -241,6 +241,7 @@ class MonsterPhaseMixin:
                                              else ("single_if_hostile" if requires_target else "none")),
                         "dodge_target_options": dodge_target_options,
                         "trigger_spell_options": self.prepare_daowen_trigger_spells(monster),
+                        "extra_choice_schema":self.daowen_extra_choice_schema(monster,effective_name,refs),
                     })
             attack_targets = (list(ffa_rivals) if ffa_rivals else [
                 target for target in player_refs

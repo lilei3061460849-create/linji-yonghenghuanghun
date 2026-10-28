@@ -139,3 +139,36 @@ def test_truth_catalysis_preview_does_not_pollute_interrupt_queue_or_source_inst
         'dodge':False,'catalysis_steps':[step('真理',x=1,ref='enemy:0',statement='一句陈述。')]})
     assert_runtime_unchanged(before,snapshot_runtime_state(e),context='催化真理预演')
     assert not e._pending_interrupts and not e.state.pending_daowen_interrupts
+
+
+def test_public_action_schema_lists_required_catalysis_candidates_without_mutating_instances():
+    e,p,a=setup('schema')
+    before={name:dict(inst.__dict__) for name,inst in p.dao_wen.items()}
+    actions=e.get_available_actions()['actions']
+    action=next(row for row in actions if row['action_type']=='use_daowen'
+        and row['params_schema'].get('daowen_name')=='催化')
+    schema=action['params_schema']['catalysis_steps']
+    assert schema['required'] and {row['name'] for row in schema['holders']['player:0']}=={'不死','全速'}
+    assert {name:dict(inst.__dict__) for name,inst in p.dao_wen.items()}==before
+
+
+def test_monster_prepare_exposes_same_catalysis_and_control_submission_contract():
+    from tests.test_cuangai_runtime import apply_rule
+    e,p,a=setup('monster_schema');_give(a,'催化');a.dao_wen['催化'].x_value=1
+    _give(a,'不死');a.dao_wen['不死'].cooldown_remaining=4
+    apply_rule(e,p,a,1)
+    prepared=e.combat.prepare_monster_phase()
+    option=next(row for row in prepared['actors'][0]['daowen_options'] if row['name']=='催化')
+    schema=option['extra_choice_schema']
+    assert schema['tamper']['controller_id']==p.runtime_id
+    assert schema['catalysis_steps']['required']
+
+
+def test_nested_extra_choices_are_preserved_for_catalysed_step():
+    e,p,a=setup('nested_extra');_give(p,'透支');p.dao_wen['透支'].cooldown_remaining=3
+    from engine.models import Relic
+    e.state.relics.append(Relic('不朽之躯',''))
+    hp=p.current_hp
+    result=call(e,[step('透支',x=1,extra={'cost_channel':'衰老'})])
+    assert result['success'],result
+    assert p.current_hp==hp  # 若丢弃extra而退回流血，会扣4生命。

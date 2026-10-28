@@ -159,3 +159,19 @@ def test_tamper_counts_successful_activation_even_if_controller_target_dodges():
     result=use(e,a,tamper=command(a,'enemy:1'),dodge=True)
     assert result['success'] and not p.has_status('篡改')
     assert b.current_hp==100
+
+
+def test_public_action_schema_exposes_controller_identity_and_required_decision():
+    e,p,a,b=setup('schema');apply_rule(e,a,p,2)
+    action=next(row for row in e.get_available_actions()['actions']
+        if row['action_type']=='use_daowen' and row['params_schema'].get('daowen_name')=='杀伐')
+    assert action['params_schema']['tamper']['controller_id']==a.runtime_id
+    assert action['params_schema']['tamper']['required']
+
+
+def test_purification_schema_uses_explicit_owned_cost_probe_not_zero_availability():
+    e,p,a,b=setup('purification_schema');_give(p,'净化')
+    p.mana_limit=p.current_mana=60;a.mutation_count=2
+    action=next(row for row in e.get_available_actions()['actions']
+        if row['action_type']=='use_daowen' and row['params_schema'].get('daowen_name')=='净化')
+    assert action['available'] and action['params_schema']['x']['maximum']==3

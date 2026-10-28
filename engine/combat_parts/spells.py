@@ -450,6 +450,7 @@ class SpellReactionMixin:
                 entry["target_ref"] = None
             else:
                 entry["target_ref"] = reverse.get(id(entity))
+            entry["extra_choice_schema"]=self.daowen_extra_choice_schema(holder,self._step_daowen(step),refs)
             out.append(entry)
         return out
 

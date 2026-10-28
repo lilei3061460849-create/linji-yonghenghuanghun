@@ -79,6 +79,38 @@ class DaowenEffectMixin:
             result["effects"].append({"type": "diandang_granted", "caster": caster.name,
                                       "granted": granted_now})
 
+    def daowen_extra_choice_schema(self, actor, name, refs=None):
+        """只公布决策需求与候选，不替角色选X/目标，也不给实例写入选择token。"""
+        refs=refs or self._combat_entity_refs()
+        schema={}
+        rule=next((status for status in actor.status_effects
+                   if status.name=="篡改" and not status.is_expired and status.value>0),None)
+        if rule is not None:
+            schema["tamper"]={"required":True,"controller_id":getattr(rule,"controller_runtime_id",None),
+                "target_ref":"由控制者选择本次道纹范围内的合法目标引用",
+                "target_refs":"波及/共罪须提交全部目标引用，且与防御提交对应"}
+        if name=="催化":
+            candidates={}
+            for ref,holder in refs.items():
+                options=[]
+                for called,inst in holder.dao_wen.items():
+                    if (called not in DaoWenEngine.list_all() or inst.is_frozen or inst.spent_unique
+                            or max(inst.cooldown_remaining,getattr(inst,"cooldown_rounds_remaining",0))<=0):
+                        continue
+                    targets=[target_ref for target_ref,target in refs.items()
+                             if target.is_alive and self.is_targetable(holder,target)
+                             and (self._daowen_requires_target(called) or called=="变形" or target is holder)]
+                    options.append({"name":called,"x":"持有者提交合法正整数；不改变固定X及怪物冷却道纹X上限",
+                        "target_refs":targets,"cooldown_battles":inst.cooldown_remaining,
+                        "cooldown_rounds":getattr(inst,"cooldown_rounds_remaining",0),
+                        "statement":"真理必须提交正好X句" if called=="真理" else None})
+                candidates[ref]=options
+            schema["catalysis_steps"]={"required":True,"holders":candidates,
+                "entry":{"name":"所选冷却道纹名","x":"本次X","target_ref":"本次目标",
+                         "dodge":"目标的普通防御选择","extra":"普通支付/反应/篡改等决策"},
+                "format":"单持有者提交X项列表；波及时按持有者ref提交有序候选列表，平分种数"}
+        return schema
+
     def prepare_catalysis(self, calc, caster, target, choices, refs):
         """完整预选后才支付催化；执行仍复用普通道纹单步，不另造支付规则。"""
         requested = choices.get("catalysis_steps")
@@ -109,6 +141,10 @@ class DaowenEffectMixin:
                 raise ValueError("催化必须选择互不重复的道纹种类")
             selected=[]
             for entry in entries:
+                nested=entry.get("extra") or {}
+                if not isinstance(nested,dict):
+                    raise ValueError("催化步骤extra必须为对象")
+                entry={**nested,**{key:value for key,value in entry.items() if key!="extra"}}
                 name=entry["name"];inst=holder.dao_wen.get(name);x=entry.get("x")
                 if (inst is None or name not in DaoWenEngine.list_all() or inst.is_frozen or inst.spent_unique
                         or max(inst.cooldown_remaining,getattr(inst,"cooldown_rounds_remaining",0))<=0):

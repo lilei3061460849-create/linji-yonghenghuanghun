@@ -802,6 +802,7 @@ class GameEngine:
                                   "dodge": "敌对目标可选布尔值",
                                   "blood_shadow": "可选布尔值"},
                     }
+            params_schema.update(self.combat.daowen_extra_choice_schema(player,name,refs))
             actions.append({
                 "action_type": "use_daowen", "available": max_x >= 1,
                 "params_schema": params_schema,
@@ -829,7 +830,8 @@ class GameEngine:
                                 "params_schema": {"actor_ref": actor_ref, "daowen_name": name,
                                                   "x": fixed_x, "target_ref": target_options,
                                                   "dodge": "boolean", "blood_shadow": "boolean",
-                                                  "trigger_spell_choices": "complete object"}})
+                                                  "trigger_spell_choices": "complete object",
+                                                  **self.combat.daowen_extra_choice_schema(actor,name,refs)}})
         # 法术大全中的预定义法术也通过统一的自定义施法入口定义；没有额外状态。
         known = {sp.name: sp for sp in player.spells}
         available_builtin = set(self.combat.buildable_spells(player))
@@ -993,10 +995,19 @@ class GameEngine:
             return 10
         upper = max(1, actor.current_mana, actor.current_hp, actor.blood_limit,
                     actor.current_speed, self.state.shards, self.state.fake_shards, 50)
+        probe_kwargs={"target":actor}
+        if name=="净化":
+            owned=next(((target,kind) for target in self.combat._combat_entity_refs().values()
+                if target.is_alive and self.combat.is_targetable(actor,target)
+                for kind in ("衰老","枯竭","萎缩","疲惫","异变")
+                if (target.mutation_count if kind=="异变" else target.reversible_cost_layers.get(kind,0))>0),None)
+            if owned is None:
+                return 0
+            probe_kwargs={"target":owned[0],"cost_choices":[{"type":owned[1]}]}
         legal = 0
         for x in range(1, upper + 1):
             try:
-                calc = DaoWenEngine.resolve(name, x, y=y, target=actor, caster=actor)
+                calc = DaoWenEngine.resolve(name, x, y=y, caster=actor,**probe_kwargs)
             except Exception:
                 continue
             ctype = calc.get("cost_type")
