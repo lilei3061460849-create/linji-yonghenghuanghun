@@ -3,9 +3,9 @@
 规则：怪物与轮回者、微光者同口径持有[法限]（2026-09-16 用户令废止了旧条文
 「怪物不持有法力、发动道纹不支付法力」）；本文件聚焦**代价类**道纹（代价类型
 非【消耗】，不走法力制），发动时必须照常支付对应代价：
-- 发动【冷却X】道纹（如固执/束缚/全速/畸变/飞行）后立即进入冷却，同场内禁止复读；
+- 发动【冷却X】道纹（如束缚/全速）后立即进入冷却，同场内禁止复读；
   怪物使用冷却代价类的道纹 X 值只能≤1（2026-10-05 用户令，面板更大也按X=1结算）；
-- 发动【流血X】（如连击/慈悲）扣除自身生命，生命不足无法发动；
+- 发动【流血X】（如连击）扣除自身生命，生命不足无法发动；
 - 发动【衰老X】扣除血限，发动【疲惫X】扣除速度，发动【异变5X】累加异变。
 """
 import pytest
@@ -23,11 +23,13 @@ def _setup_engine(tmp_path):
     e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
     s = e.execute_action("setup_choose_region", {"region": "龙心谷"})
     e.execute_action("choose_discovered_relic", {"relic_name": s["result"]["relic_choices"][0]})
+    # 开局随机遗物与支付断言无关；setup 完成后清空，避免千荆甲反噬混入流血成本。
+    e.state.relics.clear()
     return e
 
 
 def test_monster_cooldown_daowen_sets_cooldown_and_cannot_repeat(tmp_path):
-    """正常路径：怪物发动固执后，道纹进入冷却，后续回合不再列出，禁止复读。"""
+    """正常路径：怪物发动全速后，道纹进入冷却，后续回合不再列出，禁止复读。"""
     e = _setup_engine(tmp_path)
     p = e.state.player
     while e.state.energy > 0:
@@ -55,9 +57,9 @@ def test_monster_cooldown_daowen_sets_cooldown_and_cannot_repeat(tmp_path):
     })
     e.execute_action("round_end", {})
 
-    # 第2回合：怪物获得固执（2026-09-15 删除白板后，怪物持有道纹即当回合可发动）
-    m.dao_wen["固执"] = DaoWenInstance(
-        DaoWen(name="固执", formula="", cost_type="冷却", cost_formula="X", effect_formula=""),
+    # 第2回合：怪物获得全速（2026-09-15 删除白板后，怪物持有道纹即当回合可发动）
+    m.dao_wen["全速"] = DaoWenInstance(
+        DaoWen(name="全速", formula="", cost_type="冷却", cost_formula="X", effect_formula=""),
         x_value=3
     )
     e.execute_action("round_start", {"relic_choices": {}})
@@ -65,14 +67,14 @@ def test_monster_cooldown_daowen_sets_cooldown_and_cannot_repeat(tmp_path):
     pmp2 = e.execute_action("prepare_monster_phase", {})
     actor2 = pmp2["result"]["actors"][0]
     daowen_names = [opt["name"] for opt in actor2["daowen_options"]]
-    assert "固执" in daowen_names
+    assert "全速" in daowen_names
 
-    # 提交发动固执
+    # 提交发动全速
     e.execute_action("resolve_monster_phase", {
         "token": pmp2["result"]["token"],
         "choices": [{
             "actor_ref": actor2["actor_ref"],
-            "daowen": {"name": "固执", "dodge": False, "blood_shadow": False},
+            "daowen": {"name": "全速", "target_ref": "player:0", "dodge": False, "blood_shadow": False},
             "attack_actions": [{"hits": [{"target_ref": "player:0", "dodge": False, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}}] * actor2["base_hits_per_attack"]}] * actor2["base_attack_actions"]
         }]
     })
@@ -80,16 +82,16 @@ def test_monster_cooldown_daowen_sets_cooldown_and_cannot_repeat(tmp_path):
 
     # 验证（2026-10-05 用户令口径）：怪物使用冷却代价类道纹 X 值只能≤1——
     # 面板即便写 X=3，也一律按 X=1 结算，进入冷却1场；can_use 为 False
-    assert m.dao_wen["固执"].cooldown_remaining == 1
-    assert m.dao_wen["固执"].can_use() is False
+    assert m.dao_wen["全速"].cooldown_remaining == 1
+    assert m.dao_wen["全速"].can_use() is False
 
-    # 下一回合（第3回合）：prepare 不应再列出固执（防复读）
+    # 下一回合（第3回合）：prepare 不应再列出全速（防复读）
     e.execute_action("round_start", {"relic_choices": {}})
     e.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 1, "target": m.name})
     pmp3 = e.execute_action("prepare_monster_phase", {})
     actor3 = pmp3["result"]["actors"][0]
     daowen_names3 = [opt["name"] for opt in actor3["daowen_options"]]
-    assert "固执" not in daowen_names3, "冷却中的道纹不得再次列为可用选项，严禁复读"
+    assert "全速" not in daowen_names3, "冷却中的道纹不得再次列为可用选项，严禁复读"
 
 
 def test_monster_bleed_cost_daowen_deducts_monster_hp(tmp_path):
