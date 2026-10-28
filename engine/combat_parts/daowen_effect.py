@@ -122,6 +122,7 @@ class DaowenEffectMixin:
                     raise ValueError("催化调用必须选择合法目标")
                 if not self._daowen_requires_target(name) and name!="变形" and called_target is not holder:
                     raise ValueError("催化不扩大被调用道纹的目标范围")
+                called_target,_=self.resolve_tampered_target(holder,called_target,name,entry,refs)
                 calc_step=DaoWenEngine.resolve(name,x,target=called_target,caster=holder)
                 if holder.entity_type=="怪物" and calc_step.get("cost_type")=="冷却" and x>1:
                     raise ValueError("怪物冷却道纹仍受普通X上限约束")

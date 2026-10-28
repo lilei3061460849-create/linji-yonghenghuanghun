@@ -116,3 +116,14 @@ def test_control_identity_survives_full_snapshot_without_name_matching():
     owner=e._deserialize_entity_full(e._serialize_entity_full(a))
     assert restored.runtime_id==p.runtime_id and owner.runtime_id==a.runtime_id
     assert restored.get_status_effects('篡改')[0].controller_runtime_id==owner.runtime_id
+
+
+def test_truth_special_api_also_obeys_target_control_and_consumes_one():
+    e,p,a,b=setup('truth');_give(p,'真理');apply_rule(e,a,p,1)
+    bad=e.execute_action('use_daowen',{'daowen_name':'真理','x':1,'target_ref':'enemy:0','statement':'一句陈述。'})
+    assert not bad['success'] and p.get_status_value('篡改')==1
+    result=e.execute_action('use_daowen',{'daowen_name':'真理','x':1,'target_ref':'enemy:0',
+        'statement':'一句陈述。','tamper':command(a,'enemy:1')})
+    assert result['success'],result
+    assert e._pending_interrupts[0].context['target']==b.name
+    assert not p.has_status('篡改')

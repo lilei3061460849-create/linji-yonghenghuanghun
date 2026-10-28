@@ -8600,6 +8600,10 @@ class GameEngine:
             return {"success": False,
                     "error": f"X={x}要求正好{x}句陈述，实际给出{len(sentences)}句"
                              f"（以。！？；或换行分句）"}
+        try:
+            target,tamper_rule=self.combat.resolve_tampered_target(actor,target,"真理",params,refs)
+        except ValueError as exc:
+            return {"success":False,"error":str(exc)}
         subject = target.name if target is not None else target_name
 
         # 保持初拥旧行动口径：发动不消耗出手，不另加资源代价或普通道纹反应链。
@@ -8617,6 +8621,7 @@ class GameEngine:
             state_snapshot=self.state.to_dict(),
         )
         self._pending_interrupts.append(interrupt)
+        self.combat.consume_tamper(actor,tamper_rule)
         return {"success": True, "action": f"真理X={x}",
                 "result": {"interrupt": interrupt.to_dict(), "cooldown_battles": 2,
                            "sentences": sentences, "silence_rounds": x}}
