@@ -45,25 +45,18 @@ def _give(entity, name, cost_type="消耗"):
 
 # ---------- 正常路径 ----------
 
-def test_guanchuan_cast_when_enemy_shielded(tmp_path):
-    """贯穿（buff）：敌方有格挡时应被发动——旧版死码0发动"""
-    e = _engine(tmp_path)
-    _give(e.state.player, "贯穿")
-    e.state.enemies[0].shield = 10
-    ai = TacticalAI(e)
-    r = ai.try_buff()
-    assert r is not None, "敌方有格挡时贯穿应被发动"
-    assert ai.used.get(f"buff:贯穿:{e.state.current_battle}") == 1
+def test_retired_guanchuan_is_not_cast_even_when_enemy_shielded(tmp_path):
+    """贯穿已转破障晶；不能让AI为旧道纹制造发动路径。"""
+    e=_engine(tmp_path);_give(e.state.player,"贯穿");e.state.enemies[0].shield=10
+    ai=TacticalAI(e)
+    assert ai._probe("贯穿") is None
+    assert ai.try_buff() is None
 
 
-def test_longlin_cast_early_for_permanent_dr(tmp_path):
-    """龙鳞（buff）：法力足够时应尽早挂上永久减伤"""
-    e = _engine(tmp_path)
-    _give(e.state.player, "龙鳞")
-    e.state.player.current_mana = 20
-    ai = TacticalAI(e)
-    r = ai.try_buff()
-    assert r is not None, "法力充足时龙鳞应被发动"
+def test_relicized_longlin_is_not_an_active_daowen_buff(tmp_path):
+    """龙鳞是固定遗物，不再由AI主动发动同名道纹。"""
+    e=_engine(tmp_path);_give(e.state.player,"龙鳞")
+    assert TacticalAI(e)._probe("龙鳞") is None
 
 
 def test_shufu_cooldown_debuff_casts_at_x1(tmp_path):
@@ -79,36 +72,21 @@ def test_shufu_cooldown_debuff_casts_at_x1(tmp_path):
 
 
 
-def test_wajie_classified_by_preview_not_by_label(tmp_path):
-    """瓦解：类别由预演事实归纳（引擎结算即真理），不得靠人工标签查表。
-
-    2026-10-03：【尸爆】删除，本用例改用同为副本专属、成本同为 3X 的【瓦解】
-    （使一个[目标]的[血限]减少10X%）。实测该场面下预演归纳为 damage。
-    """
-    e = _engine(tmp_path)
-    _give(e.state.player, "瓦解")
-    # DM裁定 2026-09-10 加点降价后（2属性点=1法限），夹具的 10 法点只换到法限5，
-    # 而瓦解 X=1 就要 3 法力——抬到法限10（修行后的合法值）才能测到
-    # "分类来自预演"这件事本身。
-    e.state.player.mana_limit = 10
-    e.state.player.current_mana = 10
-    ai = TacticalAI(e)
-    probe = ai._probe("瓦解")
-    assert probe is not None, "瓦解应可被预演归纳"
-    assert probe["kind"] in ("damage", "tactician", "buff"), "分类须来自预演事件流"
-    assert probe["cost_per_x"] == 3            # 瓦解消耗3X
+def test_retired_wajie_has_no_preview_or_ai_cast_path(tmp_path):
+    e=_engine(tmp_path);_give(e.state.player,"瓦解")
+    assert TacticalAI(e)._probe("瓦解") is None
 
 
 # ---------- 边界条件 ----------
 
-def test_guzhi_recastable_across_battles(tmp_path):
-    """固执标记按场次隔离：上一场用过不封锁下一场"""
+def test_quansu_recast_marker_is_battle_local(tmp_path):
+    """全速标记按场次隔离：上一场用过不封锁下一场"""
     e = _engine(tmp_path)
-    _give(e.state.player, "固执", cost_type="冷却")
+    _give(e.state.player, "全速", cost_type="冷却")
     ai = TacticalAI(e)
-    ai.used[f"buff:固执:{e.state.current_battle - 1}"] = 1  # 模拟上一场已用
+    ai.used[f"buff:全速:{e.state.current_battle - 1}"] = 1  # 模拟上一场已用
     r = ai.try_buff()
-    assert r is not None, "固执的每场一次标记不得跨场封锁"
+    assert r is not None, "全速的每场一次标记不得跨场封锁"
 
 
 def test_buff_not_cast_without_enemies(tmp_path):
@@ -124,13 +102,13 @@ def test_buff_not_cast_without_enemies(tmp_path):
 def test_buff_once_per_battle(tmp_path):
     """每张增益每场至多一次"""
     e = _engine(tmp_path)
-    _give(e.state.player, "贯穿")
+    _give(e.state.player, "全速")
     e.state.enemies[0].shield = 10
     ai = TacticalAI(e)
     assert ai.try_buff() is not None
     e.state.enemies[0].shield = 10
     again = ai.try_buff()
-    assert again is None or "贯穿" not in str(again), "同场不得重复挂贯穿"
+    assert again is None or "全速" not in str(again), "同场不得重复挂全速"
 
 
 # ---------- 错误输入 ----------

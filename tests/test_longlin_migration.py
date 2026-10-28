@@ -1,14 +1,4 @@
-"""【龙鳞】迁移验证：LonglinHook → Mechanism 声明层。
-
-本阶段验证目标（不是简单搬代码）：
-  1. 同一 Trigger Phase（INCOMING_ADJUST）可同时存在多个 Mechanism；
-  2. priority 稳定决定顺序：加害=20 → 龙鳞=30；
-  3. 加害 → 龙鳞 的原有伤害调整顺序完全不变；
-  4. 龙鳞 max(0, amount-X) 语义保持；
-  5. "代价"伤害排除条件保持；
-  6. amount_positive() / damage_type_not() 等已有 Condition 复用；
-  7. 只触发一次——旧 LonglinHook 已删除，不存在第二条分发路径。
-"""
+"""龙鳞转遗物后：固定减伤、持有判定、单路径执行与事件链验证。"""
 from __future__ import annotations
 
 import itertools
@@ -25,7 +15,7 @@ from engine.combat_events import CombatEventType
 from engine.combat_hooks import CombatHookManager
 from engine.dice import DiceEngine
 from engine.mechanisms import MECHANISMS, MechanismHookAdapter, Phase
-from engine.models import Entity, GameState, StatusEffect
+from engine.models import Entity, GameState, StatusEffect, Relic
 from engine.validator import check_migrated_mechanism_guards
 
 
@@ -48,34 +38,38 @@ def _target(*statuses):
     t = Entity("T", "怪物", blood_limit=50, current_hp=50)
     for name, value in statuses:
         t.add_status(StatusEffect(name=name, remaining_rounds=-1, value=value, source="x"))
+    if any(name == "龙鳞" and value > 0 for name, value in statuses):
+        t.relics.append(Relic("叠鳞甲", ""))
     return t
 
 
 class _State:
+    def _relic_active(self, entity, name):
+        return any(r.name == name and r.enabled for r in entity.relics)
+
     def side_has(self, entity, name):
         return False
 
 
 class _OldLonglinReference:
-    """迁移前 LonglinHook 语义的测试内参考实现（仅用于等价对照，不是生产代码）。"""
+    """固定遗物语义的测试内参考实现（仅用于等价对照，不是生产代码）。"""
     priority = 30
 
     def on_incoming_adjust(self, target, amount, damage_type, source, state):
-        if amount > 0 and damage_type != "代价" and hasattr(target, "has_status") and target.has_status("龙鳞"):
-            val = target.get_status_value("龙鳞") or 0
-            return max(0, amount - val)
+        if amount > 0 and damage_type != "代价" and state._relic_active(target, "叠鳞甲"):
+            return max(0, amount - 1)
         return amount
 
 
 def _longlin_adapter(manager):
     return next(h for h in manager.hooks()
-                if isinstance(h, MechanismHookAdapter) and h.mechanism.name == "龙鳞")
+                if isinstance(h, MechanismHookAdapter) and h.mechanism.name == "叠鳞甲")
 
 
 # ==================== 1. 声明层形态 ====================
 
 def test_longlin_is_registered_mechanism():
-    mech = MECHANISMS.get("龙鳞")
+    mech = MECHANISMS.get("叠鳞甲")
     assert mech is not None
     assert mech.when.matches_phase(Phase.INCOMING_ADJUST)
     assert mech.priority == 30, "priority 必须保持原值 30（顺序即规则）"
@@ -92,13 +86,13 @@ def test_old_longlin_hook_fully_removed():
 def test_same_phase_hosts_both_mechanisms_in_priority_order():
     from engine.mechanisms.registry import MECHANISMS as REG
     phase_mechs = REG.phase_mechanisms(Phase.INCOMING_ADJUST)
-    assert [m.name for m in phase_mechs] == ["加害", "龙鳞", "固执"]
+    assert [m.name for m in phase_mechs] == ["加害", "叠鳞甲", "固执"]
     assert [m.priority for m in phase_mechs] == [20, 30, 40]
 
     manager = CombatHookManager()
     adapters = [h for h in manager.hooks() if isinstance(h, MechanismHookAdapter)
                 and h.mechanism.when.matches_phase(Phase.INCOMING_ADJUST)]
-    assert [a.mechanism.name for a in adapters] == ["加害", "龙鳞", "固执"]
+    assert [a.mechanism.name for a in adapters] == ["加害", "叠鳞甲", "固执"]
     assert [a.priority for a in adapters] == [20, 30, 40]
 
 
@@ -109,10 +103,10 @@ def test_longlin_numeric_equivalence():
     state = _State()
 
     big = _target(("龙鳞", 15))
-    assert manager.apply_incoming_adjust(big, 10, "普通", None, state) == 0, "max(0,10-15)=0"
+    assert manager.apply_incoming_adjust(big, 10, "普通", None, state) == 9, "固定减1，不读取旧状态15"
 
     mid = _target(("龙鳞", 8))
-    assert manager.apply_incoming_adjust(mid, 10, "普通", None, state) == 2, "max(0,10-8)=2"
+    assert manager.apply_incoming_adjust(mid, 10, "普通", None, state) == 9, "固定减1，不读取旧状态8"
 
     assert manager.apply_incoming_adjust(mid, 8, "代价", None, state) == 8, "代价不受减免"
     assert manager.apply_incoming_adjust(mid, 0, "普通", None, state) == 0, "amount<=0 不改"
@@ -125,12 +119,12 @@ def test_longlin_numeric_equivalence():
     assert manager.apply_incoming_adjust(zero_value, 10, "普通", None, state) == 10, "value缺省按0"
 
     # 幂等：同一份管理器重复调用不叠加（机制无隐藏全局状态）
-    assert manager.apply_incoming_adjust(mid, 10, "普通", None, state) == 2
-    assert manager.apply_incoming_adjust(mid, 10, "普通", None, state) == 2
+    assert manager.apply_incoming_adjust(mid, 10, "普通", None, state) == 9
+    assert manager.apply_incoming_adjust(mid, 10, "普通", None, state) == 9
 
 
 def test_longlin_reference_sweep_zero_mismatch():
-    """行为等价：旧 LonglinHook 语义 vs 新 Mechanism 适配器，全场景对照 0 差异。"""
+    """行为等价：固定遗物减伤参考实现 vs 新 Mechanism 适配器，全场景对照 0 差异。"""
     manager = CombatHookManager()
     adapter = _longlin_adapter(manager)
     old = _OldLonglinReference()
@@ -144,6 +138,8 @@ def test_longlin_reference_sweep_zero_mismatch():
         t = Entity("T", "怪物", blood_limit=500, current_hp=500)
         for n, v in statuses:
             t.add_status(StatusEffect(name=n, remaining_rounds=-1, value=v, source="x"))
+        if any(n == "龙鳞" and v > 0 for n, v in statuses):
+            t.relics.append(Relic("叠鳞甲", ""))
         before = old.on_incoming_adjust(t, amount, dtype, None, state)
         after = adapter.on_incoming_adjust(t, amount, dtype, None, state)
         if before != after:
@@ -158,22 +154,22 @@ def test_jiahai_then_longlin_combo_order_unchanged():
     manager = CombatHookManager()
     target = _target(("加害", 2), ("龙鳞", 8))
     # 现行顺序：max(0, (8 + 2) - 8) = 2 —— 加害先于龙鳞
-    assert manager.apply_incoming_adjust(target, 8, "普通", None, _State()) == 2
+    assert manager.apply_incoming_adjust(target, 8, "普通", None, _State()) == 9
 
 
 # ==================== 5. 只触发一次 ====================
 
 def test_longlin_executes_exactly_once_through_engine():
     state, combat, player, enemy = _arena()
-    enemy.add_status(StatusEffect(name="龙鳞", remaining_rounds=-1, value=3, source="x"))
+    enemy.relics.append(Relic("叠鳞甲", ""))
     detail = combat._apply_hostile_damage(enemy, 10, source=player)
     # raw_damage 是加减区前的原始输入；actual_damage 才是龙鳞结算后的落地值。
     assert detail["raw_damage"] == 10
-    assert detail["actual_damage"] == 7
-    assert enemy.current_hp == 93
+    assert detail["actual_damage"] == 9
+    assert enemy.current_hp == 91
 
     longlin_adapters = [h for h in combat.hook_manager.hooks()
-                        if isinstance(h, MechanismHookAdapter) and h.mechanism.name == "龙鳞"]
+                        if isinstance(h, MechanismHookAdapter) and h.mechanism.name == "叠鳞甲"]
     assert len(longlin_adapters) == 1, "龙鳞的执行壳在分发列表里只能出现一次"
 
 
@@ -181,15 +177,15 @@ def test_jiahai_and_longlin_each_execute_once():
     """加害+龙鳞同时存在：每个机制恰好执行一次，组合结果正确。"""
     state, combat, player, enemy = _arena()
     enemy.add_status(StatusEffect(name="加害", remaining_rounds=-1, value=2, source="x"))
-    enemy.add_status(StatusEffect(name="龙鳞", remaining_rounds=-1, value=3, source="x"))
+    enemy.relics.append(Relic("叠鳞甲", ""))
     detail = combat._apply_hostile_damage(enemy, 10, source=player)
     # (10+2)-3 = 9；任何重复触发都会偏离（如加害双触发=11-3=8、龙鳞双触发=12-6=6）
-    assert detail["actual_damage"] == 9
-    assert enemy.current_hp == 91
+    assert detail["actual_damage"] == 11
+    assert enemy.current_hp == 89
     adapters = [h for h in combat.hook_manager.hooks()
                  if isinstance(h, MechanismHookAdapter)
                  and h.mechanism.when.matches_phase(Phase.INCOMING_ADJUST)]
-    assert [h.mechanism.name for h in adapters] == ["加害", "龙鳞", "固执"]
+    assert [h.mechanism.name for h in adapters] == ["加害", "叠鳞甲", "固执"]
 
 
 # ==================== 6. EffectContext 传递 ====================
@@ -197,7 +193,7 @@ def test_jiahai_and_longlin_each_execute_once():
 def test_longlin_ctx_flow_unchanged():
     """迁移不得扰动伤害链路的 EffectContext / 事件记录。"""
     state, combat, player, enemy = _arena()
-    enemy.add_status(StatusEffect(name="龙鳞", remaining_rounds=-1, value=4, source="x"))
+    enemy.relics.append(Relic("叠鳞甲", ""))
 
     detail = combat._apply_hostile_damage(enemy, 8, source=player, ctx={
         "timing": "player_action", "source": "杀伐", "source_type": "daowen",
@@ -209,7 +205,7 @@ def test_longlin_ctx_flow_unchanged():
     assert detail["ctx"]["source"] == "杀伐"
     assert detail["ctx"]["mechanic"] == "damage"
     assert detail["ctx"]["event_id"] == "LL-1"
-    assert detail["actual_damage"] == 4, "龙鳞在 ctx 链路中照常生效（8-4）"
+    assert detail["actual_damage"] == 7, "固定减1且不重复结算"
 
     damage_events = _events(combat, CombatEventType.DAMAGE_APPLIED)
     assert len(damage_events) == 1
@@ -227,7 +223,7 @@ def test_migration_guard_covers_longlin_and_is_clean():
 
 def test_migration_guard_detects_planted_longlin_hardcode(tmp_path):
     planted = tmp_path / "combat.py"
-    planted.write_text('if entity.has_status("龙鳞"):\n    amount -= 1\n', encoding="utf-8")
+    planted.write_text('if entity.has_status("叠鳞甲"):\n    amount -= 1\n', encoding="utf-8")
     violations = check_migrated_mechanism_guards([str(planted)])
     assert len(violations) == 1
-    assert violations[0]["context"]["mechanism"] == "龙鳞"
+    assert violations[0]["context"]["mechanism"] == "叠鳞甲"

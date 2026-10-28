@@ -1,4 +1,4 @@
-"""【血契】、再生6X与显式效果作用域账本的契约测试。"""
+"""【共罪】、再生6X与显式效果作用域账本的契约测试。"""
 from __future__ import annotations
 
 import pytest
@@ -27,11 +27,11 @@ def _state_with_blood_pact() -> tuple[GameState, CombatEngine, Entity, Entity]:
     )
     state.player = player
     state.friends.append(ally)
-    state.relics.append(Relic("血契", "数值代价共同承担"))
+    state.relics.append(Relic("共罪", "数值代价共同承担"))
     return state, CombatEngine(state, DiceEngine()), player, ally
 
 
-# 2026-10-12 用户令：【血契】删掉与道纹【透支】重合的「[回始]流血4X换X法力」，
+# 2026-10-12 用户令：【共罪】删掉与道纹【透支】重合的「[回始]流血4X换X法力」，
 # 只保留平分。原先此处有 3 条测试专测那个回始付费决策，驱动已被删除，
 # 按「唯一驱动是已删机制的测试应删除而非改写」处理；平分功能的覆盖仍在
 # test_blood_pact_shares_every_supported_numeric_cost /
@@ -108,7 +108,7 @@ def test_blood_pact_rejects_invalid_or_unpayable_share_atomically():
     assert player.current_hp == 100
 
     state.relics.clear()
-    with pytest.raises(ValueError, match="血契"):
+    with pytest.raises(ValueError, match="共罪"):
         combat.pay_numeric_cost(
             player, "流血", 5, cost_share_target_ref="friend:0")
     assert player.current_hp == 100 and ally.current_hp == 80
@@ -121,7 +121,7 @@ def test_blood_pact_rejects_invalid_or_unpayable_share_atomically():
 
 
 def test_event_and_daowen_costs_use_blood_pact_bus(tmp_path):
-    """正常路径：事件与道纹代价均接入同一血契总线，不只覆盖遗物自身。"""
+    """正常路径：事件与道纹代价均接入同一共罪总线，不只覆盖遗物自身。"""
     state, combat, player, ally = _state_with_blood_pact()
     engine = GameEngine(db_path=str(tmp_path / "rulings.db"))
     engine.state = state
@@ -146,48 +146,51 @@ def test_event_and_daowen_costs_use_blood_pact_bus(tmp_path):
 
 
 def test_blood_pact_daowen_binds_x_targets_who_split_costs(tmp_path):
-    """血契X：支付10X法力；X个目标组成无限期分担组，代价只在目标间平分。"""
+    """共罪X：支付流血5X；X个目标组成无限期分担组，代价只在目标间平分。"""
     state, combat, player, first = _state_with_blood_pact()
     state.relics.clear()  # 新能力来自道纹绑定，不靠遗物资格
     second = Entity("第二同伴", "朋友", blood_limit=80, current_hp=80,
                     mana_limit=20, current_mana=20, speed_limit=14, current_speed=14)
     state.friends.append(second)
-    player.dao_wen["血契"] = DaoWenInstance(DaoWen(
-        name="血契", formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
+    player.dao_wen["共罪"] = DaoWenInstance(DaoWen(
+        name="共罪", formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
     before_mana = player.current_mana
 
     engine = GameEngine(db_path=str(tmp_path / "blood-pact-daowen.db"))
     engine.state = state
     engine.combat.state = state
     result = engine.execute_action("use_daowen", {
-        "daowen_name": "血契", "x": 2,
+        "daowen_name": "共罪", "x": 2,
         "dodge_targets": [
             {"target_ref": "friend:0", "dodge": False, "blood_shadow": False},
             {"target_ref": "friend:1", "dodge": False, "blood_shadow": False},
         ],
     })
     assert result["success"] is True, result
-    assert player.current_mana == before_mana - 20
-    assert result["execution"]["effects"][0]["targets"] == [first.name, second.name]
+    assert player.current_mana == before_mana
+    assert player.current_hp == 90, "建立共罪组前支付流血10"
+    assert any(effect.get("targets") == [first.name, second.name]
+               for effect in result["execution"]["effects"])
     assert combat._blood_pact_group(player) == [first, second]
 
     receipt = combat.pay_numeric_cost(player, "流血", 9)
-    assert player.current_hp == 100, "代价由血契目标组承担，施法者不计入平分"
+    assert player.current_hp == 90, "后续代价由共罪目标组承担，不再扣施法者生命"
     assert sorted([80 - first.current_hp, 80 - second.current_hp]) == [4, 5]
     assert receipt["owner"]["paid"] == 0
     assert receipt["actual_paid"] == 9
 
 
 def test_regeneration_is_four_x_and_old_contracts_are_removed():
-    """再生为4X；血契属于道纹，不在遗物池。"""
+    """再生为4X；共罪属于道纹，不在遗物池。"""
     target = Entity("目标", "朋友", blood_limit=100, current_hp=10)
     assert DaoWenEngine.resolve("再生", 4, target=target)["target_heal"] == 16
     names = {name for name, _ in GameEngine.RELIC_DEFS}
-    assert "血契" not in names
+    assert "共罪" not in names
     assert "鲜血契约" not in names
     assert "卖身契" not in names
     assert "钱袋" not in names  # 钱袋已删除（其效果一度并入【第一杯】，2026-09-23【第一杯】重做时废止）
-    assert len(names) == 27  # 血契已转为道纹
+    # 遗物池数量会因其他资源迁移变化；此处只锁定本机制的资源类型。
+    assert "共罪" in DaoWenEngine._registry
 
 
 def test_scoped_ledger_rolls_back_battle_effects_but_keeps_costs(tmp_path):
@@ -298,10 +301,10 @@ def test_status_scope_and_polarity_are_explicit():
     assert entity.get_status_effects("坏死")[0].polarity == EffectPolarity.DEBUFF.value
 
 def test_blood_pact_is_no_longer_a_round_start_active_relic():
-    """2026-10-12 用户令：血契的回始付费半已删，它不再是回始主动遗物。
+    """2026-10-12 用户令：共罪的回始付费半已删，它不再是回始主动遗物。
 
     与【透支】（流血4X 换 X 法力）重合的那半功能移除后：
-      · 回始决策里不得再出现 `血契` 键（提交它也不该被接受）；
+      · 回始决策里不得再出现 `共罪` 键（提交它也不该被接受）；
       · 平分作为其主要功能必须照常可用——走代价提交处的 cost_share_target_ref。
     """
     from engine.ai_rules import round_start_relic_choices
@@ -317,7 +320,7 @@ def test_blood_pact_is_no_longer_a_round_start_active_relic():
     setup = e.execute_action("setup_choose_region", {"region": "龙心谷"})
     e.execute_action("choose_discovered_relic",
                      {"relic_name": setup["result"]["relic_choices"][0]})
-    e.state.relics.append(_Relic("血契", "数值型代价可与朋友/员工平分"))
+    e.state.relics.append(_Relic("共罪", "数值型代价可与朋友/员工平分"))
     ally = Entity("同伴", "朋友", blood_limit=80, current_hp=80)
     e.state.friends.append(ally)
     e.state.energy = 0
@@ -325,7 +328,7 @@ def test_blood_pact_is_no_longer_a_round_start_active_relic():
 
     # ① 不再是回始主动遗物
     choices = round_start_relic_choices(e)
-    assert "血契" not in choices, f"血契已无回始主动效果：{choices}"
+    assert "共罪" not in choices, f"共罪已无回始主动效果：{choices}"
     r = e.execute_action("round_start", {"relic_choices": choices})
     assert r.get("success"), r
 
@@ -338,9 +341,9 @@ def test_blood_pact_is_no_longer_a_round_start_active_relic():
 
 
 def test_blood_pact_share_still_requires_holding_the_relic():
-    """平分仍由【血契】授权：没有它就不得提交 cost_share_target_ref。"""
+    """平分仍由【共罪】授权：没有它就不得提交 cost_share_target_ref。"""
     state, combat, player, _ally = _state_with_blood_pact()
-    state.relics = [r for r in state.relics if r.name != "血契"]
-    with pytest.raises(ValueError, match="血契"):
+    state.relics = [r for r in state.relics if r.name != "共罪"]
+    with pytest.raises(ValueError, match="共罪"):
         combat.validate_numeric_cost(player, "流血", 5,
                                      cost_share_target_ref="friend:0")

@@ -33,10 +33,11 @@ EVENT_RELICS = {
 }
 
 EVENT_CONSUMABLES = {
+    "定命丸": (2, "你每次失去的生命不会超过1，持续1回合"),
     "绝息淤泥": (1, "使用后屏蔽自身灵魂位置，使本次[战终]立刻逃脱"),
     "活性土壤": (1, "[战始]可失去X法力，以X点属性点打造一名[朋友]"),
     "假钞贴": (2, "使用后获得20[假碎片]"),
-    "穿甲弹": (2, "对[目标]造成15点忽略格挡与闪避的伤害"),
+    "破障晶": (2, "发射：对目标造成15点忽略格挡与闪避的伤害；破障：自身伤害无视格挡持续1回合"),
     "灼罪钉": (1, "对[目标]施加加害状态，使其每次受到伤害+1，持续2回合"),
     "怒火针": (1, "对一名存活目标施加愤怒，使其法力消耗减半，持续2回合"),
     "洗劫面具": (2, "使自身下2次攻击附带【必中】"),
@@ -195,7 +196,7 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
     except ValueError as exc:
         return str(exc)
     if cost_share_ref and not any(numeric_costs.values()):
-        return "该事件选项没有可由【血契】共同承担的数值代价"
+        return "该事件选项没有可由【共罪】共同承担的数值代价"
 
     shard_cost = sum(int(v) for v in re.findall(r"(?:失去|消耗)\s*(\d+)\s*\[?碎片\]?", text))
     if params.get("_event_name") == "医生" and text.startswith("雇佣医生"):
@@ -500,7 +501,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             names = params.get("daowen_names")
             if not isinstance(names, list) or len(names) != memory_cost or names[0] not in player.dao_wen:
                 return {"applied": [], "instructions": [], "error": "失忆1必须用daowen_names指定1种持有的道纹"}
-            del player.dao_wen[names[0]]
+            player.forget_for_cost(names[0])
             applied.append(f"失忆1：失去{names[0]}")
             engine.state.resonance["反转"] = engine.state.resonance.get("反转", 0) + 1
             applied.append("获得残韵·反转×1")
@@ -612,14 +613,9 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             applied.append("失去10碎片")
             emp = Entity(name="追求者", entity_type="员工", blood_limit=96, current_hp=96,
                          attack_count=8, attack_power=2, is_deployed=False)
-            for dw_name in ("逆鳞", "固执"):
-                # 2026-09-17：面板不写死 X（与 副本/龙心谷.md 的「96/2/8，逆鳞，固执」一致）
-                # 2026-10-03：【活血】道纹删除，面板同步去掉
-                emp.dao_wen[dw_name] = DaoWenInstance(
-                    DaoWen(name=dw_name, formula="", cost_type="消耗", cost_formula="X", effect_formula=""),
-                    x_value=0, x_free=True)
+            # 当前副本文档仅保留96/2/8面板；旧逆鳞/固执道纹已退役，不凭空补替代资产。
             engine.state.employees.append(emp)
-            applied.append("获得追求者(96/2/8，逆鳞，固执)作为员工，默认待命，需deploy_employee派遣")
+            applied.append("获得追求者(96/2/8)作为员工，默认待命，需deploy_employee派遣")
             return {"applied": applied, "instructions": instructions}
         elif text.startswith("拿走口粮"):
             engine.state.shards += 50
@@ -627,7 +623,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             engine.state.forced_monsters_next_battle.append({
                 "name": "追求者", "attack_count": 8, "attack_power": 2, "blood_limit": 96,
                 # x=None → x_free，与雇佣分支一致
-                "dao_wen": {"逆鳞": None, "固执": None},
+                "dao_wen": {},
             })
             applied.append("已登记：下一场战斗追求者将作为怪物额外出现"
                             "(记录于 state.forced_monsters_next_battle，出怪流程本身另行接入时读取)")
@@ -707,7 +703,6 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
     elif event_name == "断桥余烬" and text.startswith("接过伤者"):
         friend = Entity("岩行者", "朋友", blood_limit=54, current_hp=54,
                         attack_count=2, attack_power=4)
-        _grant_daowen(friend, "背负", 1)
         _pay_numeric("流血", 10)
         applied.append("流血10")
         engine.state.friends.append(friend)
@@ -716,7 +711,6 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
     elif event_name == "逆行者" and text.startswith("让他同行"):
         friend = Entity("赴火者", "朋友", blood_limit=60, current_hp=60,
                         attack_count=3, attack_power=3)
-        _grant_daowen(friend, "逆鳞", 1)
         engine.state.shards = max(0, engine.state.shards - 10)
         applied.append("失去10碎片")
         engine.state.friends.append(friend)
@@ -846,7 +840,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         hurt(int(m.group(1)))
     if "流血X" in text:
         hurt(params["x"])
-    # 数值代价统一走代价总线，允许【血契】按显式引用共同承担。
+    # 数值代价统一走代价总线，允许【共罪】按显式引用共同承担。
     for m in re.finditer(r'衰老\s*(\d+)', text):
         x = int(m.group(1)); _pay_numeric("衰老", x)
         applied.append(f"衰老{x}(血限-{x})")
@@ -866,7 +860,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
     if memory_cost:
         forgotten = params['daowen_names']
         for name in forgotten:
-            del player.dao_wen[name]
+            player.forget_for_cost(name)
         applied.append(f"失忆{memory_cost}：失去{'、'.join(forgotten)}")
     # 失去精力
     if '失去1次精力' in text or '精力-1' in text:

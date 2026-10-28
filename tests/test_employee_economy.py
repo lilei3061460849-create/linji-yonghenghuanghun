@@ -58,7 +58,7 @@ def _hire(engine, params):
 def _start_battle(engine):
     engine.state.energy = 0
     choices = {}
-    relic = engine.state.relics[0].name
+    engine.state.relics.clear()  # 工资/派遣夹具不受随机沉重枷锁改动出手预算影响。
     # 2026-10-13：【三相残韵盘】删除，战始显式决策预填不再需要。
     result = engine.execute_action("battle_start", {"relic_choices": choices})
     engine.state.enemies.clear()  # 本文件只测员工经济，不保留随机怪物。

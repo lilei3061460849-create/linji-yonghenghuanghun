@@ -1,25 +1,8 @@
-"""【固执】+【龙鳞】组合：结算顺序与「无限伤害免疫」边界。
-
-用户问题（2026-10-09）：固执加龙鳞能否免疫无限伤害？
-
-真实管线是：
-
-    incoming_adjust：龙鳞 max(0, 原伤害 - X)
-        → Entity.take_damage：格挡 → 固执 min(剩余伤害, 1)
-        → 扣生命
-
-因此两者并不是「固执先把大伤害压成 1，再由龙鳞减 1」：龙鳞先运行。结果为：
-- 每一笔普通/无视格挡伤害 ≤ 龙鳞 X：减为 0；
-- 每一笔普通/无视格挡伤害 > 龙鳞 X：固执仍让其**只掉 1 点**，而非 0；
-- 任意多笔独立大伤害会各掉 1 点；【固执】持续 X 回合且付冷却 X 场，不是永久；
-- 【代价】既不走龙鳞，也不受固执压帽。
-
-这组断言钉住顺序，防止将来重构时误把组合变成无限免伤，或误把龙鳞挪到固执之后。
-"""
+"""龙鳞遗物固定先减1，再结算固执；道纹序列不能重排固定遗物减伤。"""
 from engine.api import GameEngine
 from engine.combat import CombatEngine
 from engine.dice import DiceEngine
-from engine.models import DaoWen, DaoWenInstance, Entity, GameState, StatusEffect
+from engine.models import DaoWen, DaoWenInstance, Entity, GameState, StatusEffect, Relic
 
 
 def _arena(hp: int = 10_000, sequence: tuple[str, str] = ("龙鳞", "固执")) -> tuple[Entity, Entity, CombatEngine]:
@@ -34,6 +17,7 @@ def _arena(hp: int = 10_000, sequence: tuple[str, str] = ("龙鳞", "固执")) -
                                    activation_x=999, daowen_order=order["固执"]))
     target.add_status(StatusEffect("龙鳞", value=1, remaining_rounds=-1, source="test",
                                    activation_x=1, daowen_order=order["龙鳞"]))
+    state.relics.append(Relic("叠鳞甲", ""))
     state.player = target
     state.enemies = [source]
     return target, source, CombatEngine(state, DiceEngine(seed=20261009))
@@ -50,12 +34,12 @@ def test_guzhi_and_longlin_follow_daowen_sequence_not_x_or_application_order():
     assert target.current_hp == 9_999
 
 
-def test_reversing_daowen_sequence_reverses_incoming_adjustment_order():
-    """固执→龙鳞时，先封顶再减龙鳞，单击可归零；序列位置是唯一排序依据。"""
+def test_reversing_legacy_sequence_cannot_reverse_relic_adjustment_order():
+    """龙鳞已不是道纹；固定减伤不能排在固执之后制造无限免伤。"""
     target, source, combat = _arena(sequence=("固执", "龙鳞"))
     detail = combat._apply_hostile_damage(target, 5, source=source)
-    assert detail["actual_damage"] == 0
-    assert target.current_hp == 10_000
+    assert detail["actual_damage"] == 1
+    assert target.current_hp == 9_999
 
 
 def test_daowen_sequence_position_survives_entity_seal_roundtrip():

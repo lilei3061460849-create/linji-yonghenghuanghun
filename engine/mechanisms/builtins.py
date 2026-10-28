@@ -1,17 +1,17 @@
-"""已迁移到声明层的机制（当前注册表共22项，以下为原16项历史说明：灼罪钉施加的加害状态、龙鳞、帮派令、畸变·结算、
+"""已迁移到声明层的机制（以下包含历史迁移说明，已注销的机制以注册表为准：灼罪钉施加的加害状态、龙鳞、帮派令、畸变·结算、
 焦黑发丝、洞察·结算、狂暴·标记、畸变·标记、洗劫·夺碎片、缄默面具、龙爪、
-清算·结算、灾厄轮盘·结算（遗物被动）、清算·对账；2026-10-13 用户令删【逼债】，
+灾厄轮盘·结算（遗物被动）；清算结算/对账已于2026-10-27随道纹删除；2026-10-13 用户令删【逼债】，
 【逼债·结算/对账】与【三相残韵盘·战终】随道纹/遗物删除一并移除；缄默面具现为法限增量翻倍）。
 
 迁移协议（迁移前后必须同时满足）：
-  1. 规则语义与旧实现完全一致（加害：amount+状态值；龙鳞：max(0, amount-状态值)；
+  1. 规则语义与旧实现完全一致（加害：amount+状态值；龙鳞已改为遗物固定减1、不读状态值；
      帮派令：[战始]获得【洗劫3】；
      衰败：[回始]对自己造成 ceil(当前生命×10X/100) 点伤害，走完整伤害管线；
      畸变·结算：[回终]失去(攻击力×攻击次数)点血限，血限压 0 连带命零统一判定；
      焦黑发丝：怪物命零 → 玩家速度+2（经统一速度入口）；
      洞察·结算：[回始]待结算法力经 mana 动词获得（含不朽之躯钳制）；
      畸变·标记：纯报告条目，无动词；狂暴·标记随【狂暴】道纹删除）；
-  2. priority 保持原值或按旧代码位置固化：加害=20、龙鳞=30（伤害加减区）；
+  2. priority 保持原值或按旧代码位置固化：加害=20、龙鳞遗物=30（固定减伤先于道纹状态链）；
      衰败=10、洞察·结算=20、畸变·标记=60（狂暴·标记随道纹删除）
      （勾魂=40 已于 2026-08-30 随【勾魂】改版移除：不再回始扣法力）
      （回始效果循环，现已全部声明化）；帮派令=10（战始遗物段）；
@@ -36,7 +36,6 @@ from .conditions import (
     not_, relic_active,
 )
 from .registry import MECHANISMS, Mechanism
-from .ledger import clear_ledger, ledger_of
 from .targets import RANDOM_ALL, SELF, TARGET, roll_pick
 from .triggers import Phase, Trigger, TriggerContext
 from .verbs import apply_verb
@@ -97,7 +96,7 @@ def _rule_effect(rule):
 
 
 def _numeric_rule_mechanism(name: str) -> Mechanism:
-    if name == "加害":
+    if name in ("加害", "固执"):
         # 【加害】不再是道纹；只保留由消耗品【灼罪钉】施加的状态结算。
         rule = next(rule for rule in STATUS_DAMAGE_RULES if rule.status_name == name)
     else:
@@ -119,7 +118,14 @@ def _numeric_rule_mechanism(name: str) -> Mechanism:
 # 道纹数值事实共用 engine.rule_engine.DAOWEN_RULES；【加害】只桥接消耗品施加的同名状态。
 # 这里仅保留 MechanismHookAdapter 兼容壳，不另写条件、运算或组合配方。
 JIAHAI = _numeric_rule_mechanism("加害")
-LONGLIN = _numeric_rule_mechanism("龙鳞")
+# 【龙鳞】已转为固定遗物。旧同名状态不再提供可叠加的X点减伤。
+LONGLIN = Mechanism(
+    name="叠鳞甲", when=Trigger.phase(Phase.INCOMING_ADJUST), target=TARGET,
+    condition=lambda ctx: (ctx.target is not None and ctx.damage_type != "代价"
+                           and getattr(ctx.state, "_relic_active", lambda *_: False)(ctx.target, "叠鳞甲")),
+    effect=lambda ctx, targets: {"amount": max(0, ctx.amount - 1) if ctx.amount > 0 else ctx.amount},
+    priority=30, before_status_rules=True,
+)
 GUZHI = _numeric_rule_mechanism("固执")
 
 def _gangpailing_effect(ctx: TriggerContext, targets: list) -> str:
@@ -376,33 +382,7 @@ JIAOHHEIFASI = Mechanism(
 )
 
 # ==========================================================================
-# 罪孽都市·账本三机制（2026-10-03 迁移）
-# 旧实现：combat.py 回始效果循环后的内嵌 for（2026-10-03 迁移时为逼债→清算→赌命三段；
-# 2026-10-13 用户令删【逼债】后剩清算→赌命两段）；2026-10-14 原道纹【赌命】改为遗物【灾厄轮盘】，
-# 仍复用该回始锚点但不再由道纹状态或道纹序列驱动。清算对账仍在回终「状态消失即清账」块。
-# 共用一份账本存储（engine/mechanisms/ledger.py）与一个碎片动词（shards）。
-# 结算顺序服从各状态来源道纹在施法者道纹序列中的位置；
-# priority 仅作为缺少序列锚点时的后备。
-# ==========================================================================
-
-def _qingsuan_effect(ctx: TriggerContext, targets: list) -> dict | None:
-    """【清算·结算】[回始]目标失去[施法者当前碎片]点格挡（每回始重读施法者碎片）。"""
-    entity = ctx.target
-    entries = list(ledger_of(entity, "清算"))
-    if not entries:
-        return None
-    results = []
-    for entry in entries:
-        caster = entry.get("caster")
-        if caster is None:
-            continue
-        drain = max(0, ctx.combat._shards_of(caster))
-        lost = min(entity.shield, drain)
-        entity.shield -= lost
-        results.append({"type": "qingsuan", "entity": entity.name,
-                        "lost_shield": lost, "drain": drain})
-    return results or None
-
+# 罪孽都市遗物【灾厄轮盘】回始结算；原逼债、清算账本机制均已删除。
 
 def _duming_effect(ctx: TriggerContext, targets: list) -> dict | None:
     """遗物【灾厄轮盘】（原道纹【赌命】）的[回始]被动：按场上存活角色（玩家侧在前）投随机数，
@@ -432,16 +412,6 @@ def _duming_effect(ctx: TriggerContext, targets: list) -> dict | None:
 
 # 2026-10-13 用户令删【逼债】：BIZHAI_SETTLE（【逼债·结算】）一并移除。
 
-QINGSUAN_SETTLE = Mechanism(
-    name="清算·结算",
-    when=Trigger.phase(Phase.ROUND_START_SETTLE),
-    effect=_qingsuan_effect,
-    target=SELF,
-    status_name="清算",
-    condition=None,  # 旧实现按“是否有账”判定，账在状态在；无账即无报告条目
-    priority=20,
-)
-
 DUMING_SETTLE = Mechanism(
     name="灾厄轮盘·结算",
     when=Trigger.phase(Phase.ROUND_START_SETTLE),
@@ -451,26 +421,6 @@ DUMING_SETTLE = Mechanism(
     condition=all_(relic_active("灾厄轮盘", of="target"),
                    entity_type("轮回者", of="target"), is_alive(of="target")),
     priority=30,
-)
-
-
-def _qingsuan_reconcile_effect(ctx: TriggerContext, targets: list) -> None:
-    """【清算·对账】持续X到期（状态被 tick 掉）后清账，防止多结算一轮。"""
-    if not ctx.target.has_status("清算"):
-        clear_ledger(ctx.target, "清算")
-    return None
-
-
-# 2026-10-13 用户令删【逼债】：BIZHAI_RECONCILE（【逼债·对账】）一并移除。
-
-QINGSUAN_RECONCILE = Mechanism(
-    name="清算·对账",
-    when=Trigger.phase(Phase.ROUND_END_RECONCILE),
-    effect=_qingsuan_reconcile_effect,
-    target=SELF,
-    status_name="清算",
-    condition=None,
-    priority=20,
 )
 
 
@@ -485,9 +435,7 @@ MECHANISMS.register(JIBIAN_MARKER)
 MECHANISMS.register(XIJIE_PASSIVE)
 MECHANISMS.register(SILENT_MASK)
 MECHANISMS.register(DRAGON_CLAW)
-MECHANISMS.register(QINGSUAN_SETTLE)
 MECHANISMS.register(DUMING_SETTLE)
-MECHANISMS.register(QINGSUAN_RECONCILE)
 
 
 # 2026-10-13：挂起机制的原位迁移。后段锚点不能合并到已有的前段相位。

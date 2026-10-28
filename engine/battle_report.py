@@ -182,8 +182,10 @@ def format_round_start(round_no: int, rs_result: dict, player: Any, enemies: lis
     return lines
 
 
-def _render_effect(eff: dict) -> str:
-    """把引擎的 effect 字典转成文字，不添加引擎未给出的数值。"""
+def _render_effect(eff: dict | str) -> str:
+    """把引擎的结构化效果或已有机制日志转成文字，不另造数值。"""
+    if isinstance(eff,str):
+        return eff
     t = eff.get("type", "")
     # DM裁定 2026-09-09：法力改一池制（[战始]给满、[回始]不回填、[敌回终]不清空），
     # mana_refill / mana_clear 两种条目已无产出，对应渲染分支一并删除（不留死接线）。

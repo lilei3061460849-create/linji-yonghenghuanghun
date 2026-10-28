@@ -117,7 +117,7 @@ def test_diandang_x2_forgets_4_and_pends_2_groups_with_capacity_gate():
     engine = _new_engine("dd2")
     player = engine.state.player
     assert player.daowen_capacity == 2   # 血限66 → 2种
-    _grant(engine, ["典当", "庇护", "再生", "贯穿"])   # 连初始杀伐共5种
+    _grant(engine, ["典当", "庇护", "再生", "束缚"])   # 连初始杀伐共5种
     assert len(player.dao_wen) == 5
     m = Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100)
     engine.state.enemies.append(m)

@@ -241,6 +241,7 @@ class MonsterPhaseMixin:
                                              else ("single_if_hostile" if requires_target else "none")),
                         "dodge_target_options": dodge_target_options,
                         "trigger_spell_options": self.prepare_daowen_trigger_spells(monster),
+                        "extra_choice_schema":self.daowen_extra_choice_schema(monster,effective_name,refs),
                     })
             attack_targets = (list(ffa_rivals) if ffa_rivals else [
                 target for target in player_refs
@@ -312,7 +313,7 @@ class MonsterPhaseMixin:
             return True
         for key, capacity in (
                 ("cost_hp", getattr(caster, "current_hp", 0)),
-                ("cost_blood_limit", getattr(caster, "blood_limit", 0)),
+                ("cost_blood_limit", caster.effective_blood_limit()),
                 ("cost_speed", getattr(caster, "current_speed", 0)),
         ):
             amount = calc.get(key, 0)
@@ -392,6 +393,8 @@ class MonsterPhaseMixin:
                 raise ValueError(f"道纹【{effective_name}】不接受target_ref")
             target = monster
 
+        target, tamper_rule = self.resolve_tampered_target(monster, target, effective_name, choice, refs)
+
         # 2026-09-16 用户令：面板未写死 X（x_free）时，X 由发动方在提交里自选，
         # 「上限只受法限或者代价限制」——这里按 prepare 同一口径重新探一次上限并校验，
         # 防止提交方给出此刻已付不起的 X（资源在 prepare 之后可能已被消耗）。
@@ -435,6 +438,10 @@ class MonsterPhaseMixin:
 
         # 先完成完整闪避提交的静态校验，再支付任何代价或改变激活状态。
         calc = DaoWenEngine.resolve(effective_name, effective_x, target=target, caster=monster)
+        if effective_name == "催化":
+            self.prepare_catalysis(calc,monster,target,choice,refs)
+        if effective_name == "回响":
+            self.prepare_huixiang(calc, monster, target, choice, refs)
         # 动态代价校验：残韵改写/状态变化后怪物可能付不起代价（如速度归零后
         # 【洞察】(疲惫3)）——本次视为无法发动并跳过，不硬报错、不占出手。
         if not self._monster_can_pay_calc_cost(monster, calc):
@@ -444,8 +451,6 @@ class MonsterPhaseMixin:
         # 付不起的情况已由上一闸门挡掉，这里只做实际支付。
         # 注意：法力同时就是[攻击力]，此刻支付会削弱本回合**之后**的普攻——
         # 攻击与道纹的先后顺序由提交方（AI/操作者）决定，这正是"先攻后纹还是先纹后攻"的取舍。
-        if calc.get("cost_type") == "消耗" and calc.get("cost", 0) > 0:
-            monster.spend_mana(calc["cost"])
         hostile = self.state.on_player_side(target) != self.state.on_player_side(monster)
         dodge = choice.get("dodge")
         blood_shadow = choice.get("blood_shadow", False)
@@ -524,9 +529,14 @@ class MonsterPhaseMixin:
         # 执行阶段：守夜灯法力已在[敌回始]实际授予，无需预计算（extra_mana 默认0）。
         self.validate_daowen_trigger_spells(monster, trigger_choices, refs)
         trigger_logs = self.resolve_daowen_trigger_spells(monster, trigger_choices, refs)
-        if not monster.is_alive:
+        if not monster.is_alive or self.state.is_sealed_away(monster) or monster.is_departed or monster.has_retreated:
             return {"monster": monster.name, "daowen_activated": name,
                     "interrupted_by_spell": True, "trigger_spell_logs": trigger_logs}
+        if not self._monster_can_pay_calc_cost(monster,calc):
+            return {"monster":monster.name,"daowen_skipped":name,"reason":"反应后无法支付代价",
+                    "trigger_spell_logs":trigger_logs}
+        if calc.get("cost_type")=="消耗" and calc.get("cost",0)>0:
+            monster.spend_mana(calc["cost"])
 
         # 残韵改写只替换本次结算：不支付源道纹代价，也不将源道纹记为已激活。
         if rewritten_as:
@@ -564,6 +574,8 @@ class MonsterPhaseMixin:
             # 2026-09-16 用户令：道纹递增（升级）机制已废止。X 恒为面板/借用时写定的值，
             # 重复发动按同一 X 计费，不再随发动次数累加。
         monster.actions_used_this_round += 1
+        self.consume_tamper(monster,tamper_rule)
+        self.pay_daowen_cooldown(effective_name,calc,monster)
 
         aoe_targets_override = None
         if effective_name == "波及":
@@ -599,6 +611,7 @@ class MonsterPhaseMixin:
                 if self.bizhong_remaining(monster) > 0:
                     self.consume_bizhong(monster)
             elif blood_shadow:
+                self.pay_daowen_numeric_cost(effective_name,calc,monster)
                 self.pay_numeric_cost(
                     target, "流血", 10,
                     cost_share_target_ref=choice.get("cost_share_target_ref", ""),
@@ -607,6 +620,7 @@ class MonsterPhaseMixin:
                         "resolves_as": effective_name, "target": target.name, "blood_shadow": True,
                         "trigger_spell_logs": trigger_logs}
             elif dodge:
+                self.pay_daowen_numeric_cost(effective_name,calc,monster)
                 self._spend_dodge_speed(target, choice.get("dodge_relic_target_ref"))
                 return {"monster": monster.name, "daowen_activated": name,
                         "resolves_as": effective_name, "target": target.name, "dodged": True,
@@ -653,6 +667,7 @@ class MonsterPhaseMixin:
                 raise ValueError(f"道纹【{effective_name}】不接受target_ref")
             target = monster
 
+        target, _ = self.resolve_tampered_target(monster, target, effective_name, choice, refs)
         hostile = self.state.on_player_side(target) != self.state.on_player_side(monster)
         dodge = choice.get("dodge")
         blood_shadow = choice.get("blood_shadow", False)
@@ -1090,5 +1105,10 @@ class MonsterPhaseMixin:
                         break
                 if not monster.is_alive:
                     break
+        # Only after all submitted attacks/casts: automatic items cannot invalidate
+        # their explicit target/hit/budget snapshots. Still inside the transaction.
+        from ..npc_consumables import auto_use_consumables
+        for actor_ref in submitted:
+            results.extend(auto_use_consumables(self, refs.get(actor_ref)))
         return results
 

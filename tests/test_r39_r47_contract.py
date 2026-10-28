@@ -392,12 +392,12 @@ def test_r45_all_current_named_consumable_handlers(tmp_path):
     engine = _engine(tmp_path); player, enemy = _combat(engine)
     player.current_hp = 80; enemy.shield = 20
     items = [
-        Consumable("穿甲弹", "", 2, 2), Consumable("洗劫面具", "", 2, 2),
+        Consumable("破障晶", "", 2, 2), Consumable("洗劫面具", "", 2, 2),
         Consumable("龙血瓶", "", 10, 10), Consumable("绝息淤泥", "", 1, 1),
         Consumable("活性土壤", "", 1, 1),
     ]
     engine.state.consumables = items
-    shot = engine.execute_action("consume_item", {"name": "穿甲弹", "target_ref": "enemy:0"})
+    shot = engine.execute_action("consume_item", {"name": "破障晶", "mode": "发射", "target_ref": "enemy:0"})
     assert shot["success"] and enemy.current_hp == 85 and enemy.shield == 20
     mask = engine.execute_action("consume_item", {"name": "洗劫面具"})
     assert mask["success"] and engine.combat.bizhong_remaining(player) == 2
@@ -464,7 +464,7 @@ def test_r46_normal_event_relic_battle_start_matrix(tmp_path):
 
 def test_r46_event_relic_round_and_battle_end_effects(tmp_path):
     # 2026-10-14：【余火印】整段删除（extra 方案废弃），回始段只剩【皮衣】；
-    # 【猩红果实】重做为被动，战终段改由道纹【增殖】的战终待决覆盖。
+    # 【猩红果实】重做为被动；增殖已改为临时无限血限，不再有战终增益。
     engine = _engine(tmp_path); player, _ = _combat(engine)
     engine.state.relics = [Relic("皮衣", "")]
     player.hp_lost_this_round = 7
@@ -478,8 +478,9 @@ def test_r46_event_relic_round_and_battle_end_effects(tmp_path):
     before = (player.blood_limit, engine.state.energy)
     ended = engine.execute_action("battle_end", {})
     assert ended["success"]
-    assert ended["result"]["zengzhi_settled"] == [{"target": player.name, "increase": 4}]
-    assert (player.blood_limit, engine.state.energy) == (before[0] + 4, before[1])
+    assert ended["result"]["zengzhi_settled"] == []
+    assert "zengzhi_pending" not in engine.state.event_modifiers
+    assert (player.blood_limit, engine.state.energy) == before
 
 
 def test_r46_boundary_death_dodge_dragon_and_might_triggers(tmp_path):

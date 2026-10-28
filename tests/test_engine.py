@@ -23,7 +23,7 @@ def _choose_region(engine, region):
     result = engine.execute_action("setup_choose_region", {"region": region})
     if result.get("success") and engine.state.pending_relic_choices:
         # 通用流程测试不覆盖需要额外显式选择的遗物；相关遗物有独立测试。
-        optional = {"回锋刀", "血契"}   # 2026-10-13：【三相残韵盘】删除
+        optional = {"回锋刀", "共罪"}   # 2026-10-13：【三相残韵盘】删除
         choice = next((n for n in engine.state.pending_relic_choices if n not in optional),
                       engine.state.pending_relic_choices[0])
         engine.execute_action("choose_discovered_relic", {"relic_name": choice})
@@ -393,8 +393,8 @@ def test_full_flow():
     round_relic_choices = {}
     if any(relic.name == "回锋刀" for relic in engine.state.relics):
         round_relic_choices["回锋刀"] = {"enemy_index": 0}
-    if any(relic.name == "血契" for relic in engine.state.relics):
-        round_relic_choices["血契"] = {"use": False}
+    if any(relic.name == "共罪" for relic in engine.state.relics):
+        round_relic_choices["共罪"] = {"use": False}
     result = engine.execute_action("round_start", {"relic_choices": round_relic_choices})
     assert result["success"], result
     # 回始获得等同当前法限的法力；战始已清零，无遗物时恰好等于法限。

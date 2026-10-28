@@ -4,6 +4,7 @@
 快照类断言写法：断言「当前已知集合」相等——修了必须同步改测试，防悄悄漂移。
 """
 import inspect
+import json
 import os
 import re
 import sys
@@ -54,8 +55,10 @@ COST_AMOUNT_KEYS = ("cost", "cost_shards", "cost_hp", "cost_blood_limit", "cost_
 def test_daowen_registry_every_daowen_has_positive_cost_channel():
     """现行道纹 X=1 时必有金额>0 的代价通道（法力/失忆/异变/疲惫/流血/衰老/碎片/枯竭/冷却）。"""
     DaoWenEngine.register_all()
-    # 2026-10-26 用户令：【血契】转为通用道纹 → 39 → 40。
-    assert len(DaoWenEngine._registry) == 40
+    inventory = json.loads((Path(__file__).resolve().parents[1] /
+        "docs/全道纹标准审查清单-2026-10-28.json").read_text(encoding="utf-8"))
+    expected = {row["name"] for row in inventory["rows"] if row["runtime"]}
+    assert set(DaoWenEngine._registry) == expected  # 比较确切名称，不以旧数量40冒充覆盖
     # 删除/遗物化边界必须是硬约束，防止后续注册时意外复活旧道纹。
     assert "坠落" not in DaoWenEngine._registry
     assert "眩晕" not in DaoWenEngine._registry
@@ -63,9 +66,12 @@ def test_daowen_registry_every_daowen_has_positive_cost_channel():
     for name, fn in sorted(DaoWenEngine._registry.items()):
         kw = {}
         if "target" in inspect.signature(fn).parameters:
-            kw["target"] = None
+            kw["target"] = Entity("代价审计靶", "轮回者", blood_limit=100,current_hp=50,
+                reversible_cost_layers={"衰老":2})
         if "caster" in inspect.signature(fn).parameters:
             kw["caster"] = None
+        if "cost_choices" in inspect.signature(fn).parameters:
+            kw["cost_choices"]=[{"type":"衰老"}]
         calc = DaoWenEngine.resolve(name, 1, **kw)
         amounts = [(k, calc[k]) for k in COST_AMOUNT_KEYS if k in calc]
         assert amounts, f"{name}：无代价金额键（疑似免费道纹？）"
@@ -86,8 +92,8 @@ def test_use_daowen_in_combat_costs_exactly_one_action():
     assert engine.state.player.actions_used_this_round == 1
 
 
-def test_use_daowen_out_of_combat_only_xiaozai_pays_double_no_action():
-    """局外仅消灾可发动（×2 资源，不耗出手）；其余拒绝（O1 预期行为）。"""
+def test_retired_xiaozai_is_not_an_out_of_combat_daowen():
+    """消灾已转换为逆命筹，不能保留旧局外×2施放通道。"""
     engine = _setup()
     _grant(engine, ["假钞", "消灾"])
     engine.state.phase = "pre_battle"
@@ -100,8 +106,8 @@ def test_use_daowen_out_of_combat_only_xiaozai_pays_double_no_action():
     r = engine.execute_action("use_daowen", {"daowen_name": "消灾", "x": 1,
                                              "dodge": False, "blood_shadow": False,
                                              "trigger_spell_choices": {}})
-    assert r["success"], r
-    assert engine.state.fake_shards == 0, "局外消灾假碎片代价×2"
+    assert not r["success"] and "局外发动须条文明示" in r["error"]
+    assert engine.state.fake_shards == 100
     assert engine.state.player.actions_used_this_round == 0
 
 
@@ -212,14 +218,17 @@ def test_scarlet_fruit_is_pure_passive_hp_may_exceed_blood_limit():
 
 
 def test_pool_relic_text_snapshot():
-    """遗物池文本快照：27 件、无持续X/自选X；含「可」的遗物集合固定（F3 池内子集）。
+    """遗物池文本快照：按明确名称比对、无持续X/自选X；含「可」的遗物集合固定（F3 池内子集）。
 
-    2026-10-26：【血契】转为道纹，遗物池 28 → 27。
+    共罪转为道纹，疯狂/减速已遗物化；不能拿过时数量替代确切名称集合。
     """
     defs = GameEngine.RELIC_DEFS
-    assert len(defs) == 27
     names = [n for n, _ in defs]
-    assert len(set(names)) == 27
+    expected={"缓厄沙漏","叠鳞甲","血誓戒","同魂笔","回锋刀","避风铃","守夜灯","无所求","忘忧香",
+        "承露盏","千荆甲","癫狂之脑","活血衣","增生药剂","灾厄轮盘","逆血龙鳞","蚀命刻尺",
+        "噬伤血囊","倍速齿轮","沉重枷锁","失速冥灯","寂灭面具","衰变沙漏","蚀界残钟",
+        "窥隙法匣","逐影胫骨","共生血囊","疯狂","减速"}
+    assert set(names)==expected and len(names)==len(expected)
     # 2026-10-25：引擎早有实现的【共生血囊】补登记；【万魂幡】改归法器并退出本池。
     assert "共生血囊" in names and "万魂幡" not in names
     for n, fx in defs:
@@ -227,7 +236,7 @@ def test_pool_relic_text_snapshot():
         assert "自选" not in fx, f"{n}：遗物数值不得自选"
     with_ke = {n for n, fx in defs if "可" in fx}
     assert with_ke == {"同魂笔"}, with_ke
-    assert "血契" not in names
+    assert "共罪" not in names
 
 
 def test_pool_relics_all_in_index():

@@ -50,7 +50,7 @@ def _dungeon_daowen(region: str) -> set[str]:
 MISSING_RULE_TEXT_DEFINITIONS = {
     "罪孽都市": {"典当", "假钞", "勒索"},   # 2026-10-13：删【逼债】→【典当】顶替；2026-10-14：+【勒索】（定义只在副本文档）
     "扭曲都市": set(),
-    "龙心谷": {"背负"},
+    "龙心谷": set(),
 }
 
 

@@ -118,8 +118,7 @@ class Relic:
     name: str
     effect: str
     tags: list[str] = field(default_factory=list)
-    # 启用归类（2026-10-22 用户令）：持有不再受[血限]承载拦截，改为
-    # 「持有不限、生效数受承载约束」——enabled=False 的遗物仍持有，只是不生效。
+    # 启用归类仍保留：enabled=False 的遗物仍持有并占页，只是不生效；不再另限生效数。
     # 这是既有遗物对象上的一个状态，不是新品类；旧档缺此键一律默认 True。
     enabled: bool = True
 
@@ -207,7 +206,16 @@ class StatusEffect:
     activation_x: Optional[int] = None  # 旧版兼容字段，不参与排序
     application_sequence: int = 0  # 旧版兼容字段，不生成新排序序号
     daowen_order: Optional[int] = None  # 发动该状态的道纹在持有者序列中的位置，越小越先
+    effect_sequence: int = 0  # 仅相反输出约束覆盖使用，不参与自然窗口排序
+    effect_data: dict = field(default_factory=dict)  # 明确约束所需快照；非历史状态回滚
+    controller_runtime_id: Optional[str] = None  # 篡改目标选择权的持有者，稳定身份而非名字
     
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.__dict__.setdefault("effect_data", {})
+        self.__dict__.setdefault("effect_sequence", 0)
+        self.__dict__.setdefault("controller_runtime_id", None)
+
     def __post_init__(self):
         # 即使调用方直接append而不经过Entity.add_status，代价标记也不能被战终误清。
         if (self.name in {"流血", "衰老", "枯竭", "萎缩", "疲惫", "异变", "迷失"}
@@ -223,6 +231,8 @@ class StatusEffect:
 
     def refresh_order_from(self, other: 'StatusEffect') -> None:
         """刷新状态来源与道纹序列位置；施加时间和 X 不影响结算顺序。"""
+        self.effect_sequence = getattr(other, "effect_sequence", 0)
+        self.effect_data = dict(getattr(other, "effect_data", {}))
         self.daowen_order = other.daowen_order
         self.source = other.source
 
@@ -315,6 +325,10 @@ class Entity:
     attack_count: int = 0        # 攻击次数
     attack_power: int = 0        # 攻击力
     
+    deferred_damage: list[dict] = field(default_factory=list)  # 缓厄沙漏：下回合要造成的普通伤害；没有禁止再次延期的特殊结算。
+    death_page_count: int = 10  # 四类资源共用，一页承载一种；与血限无关。
+    artifacts: list[str] = field(default_factory=list)
+
     # 道纹与法术
     dao_wen: dict[str, DaoWenInstance] = field(default_factory=dict)
     spells: list[Spell] = field(default_factory=list)
@@ -324,6 +338,7 @@ class Entity:
     # 早期版本残韵只挂在 State（仅玩家侧），导致守擂者同为轮回者却无残韵可用。
     # 现下放为实体级，使挑战者/守擂者共用同一套残韵机制（玩家侧仍经 State.resonance 兼容）。
     resonance: dict[str, int] = field(default_factory=dict)
+    consumables: list[Consumable] = field(default_factory=list)  # 死者之页承载的消耗品持有记录；不新增容量规则。
     relics: list[Relic] = field(default_factory=list)  # 由正文明确授予该角色的随身物品（如防弹插板）
     # 统一 AI 的当前轮回记忆：只属于活着的实体；命零前压缩成遗言后清空。
     # 这是主观叙事，不是规则事实，不能改变引擎数值或合法性。
@@ -363,10 +378,6 @@ class Entity:
     is_proliferated: bool = False  # 已被癌变吸收进死者之书（旧名 增生，已统一为 癌变；保留字段名兼容）
     is_debt_bound: bool = False  # 已因还债成为员工
 
-    # ---- 罪孽都市专属道纹的回始记账（F2 全量） ----
-    # 清算：目标侧挂账 [{x, caster}]，[回始]逐条结算，状态消失即清账
-    # （2026-10-13 用户令删【逼债】：_bizhai 字段与【逼债·结算/对账】机制一并移除）
-    _qingsuan: list = field(default_factory=list)
     # 抵扣（旧）：被封印的遗物 {遗物名: 剩余回合}，[回终]-1，归零解封
     sealed_relics: dict = field(default_factory=dict)
     # 豪夺：从他人处夺取的遗物临时持有
@@ -405,7 +416,23 @@ class Entity:
         self.is_proliferated = value
 
     # 异变计数：非怪物角色达到迷失阈值时交由战斗层处理；怪物照常累计但不触发迷失。
+    forgotten_cost_daowen: list[DaoWenInstance] = field(default_factory=list)
+    reversible_cost_layers: dict[str, int] = field(default_factory=dict)
     mutation_count: int = 0
+
+    def forget_for_cost(self, name: str):
+        """Only amnesia payments are refundable; resonance/removal is not amnesia."""
+        inst = self.dao_wen.pop(name, None)
+        if inst is not None:
+            if not hasattr(self, "forgotten_cost_daowen"):
+                self.forgotten_cost_daowen = []
+            self.forgotten_cost_daowen.append(inst)
+        return inst
+
+    def refundable_daowen(self):
+        # Do not duplicate an independently reacquired rune or reset its cooldown.
+        return [inst for inst in getattr(self, "forgotten_cost_daowen", [])
+                if inst.dao_wen.name not in self.dao_wen]
 
     # 存活
     is_alive: bool = True
@@ -495,6 +522,12 @@ class Entity:
     # _hp_engine_ref 为可选弱引用（非字段，不参与序列化/深拷贝判定）。
     def __setattr__(self, name, value):
         old = self.__dict__.get(name, None)
+        # 不死只限制存活角色的当前生命下降，不回复、不复活，不豁免独立离场事件。
+        if (name == "current_hp" and old is not None and old >= 1 and value < 1
+                and self.__dict__.get("is_alive", False)
+                and any(status.name == "不死" and not status.is_expired
+                        for status in self.__dict__.get("status_effects", ()))):
+            value = 1
         # 缄默面具：已有实体获得法限时实际增量翻倍；初始化/读档时旧值为None，不重复放大。
         if (name == "mana_limit" and isinstance(old, int) and isinstance(value, int)
                 and value > old and self.__dict__.get("_silent_mask_active", False)):
@@ -519,7 +552,7 @@ class Entity:
             if etype is not None and etype != "轮回者":
                 # **增量**写穿（而非把上限设成绝对值）：attack_power/attack_count 与
                 # 法限/速限在战始是相等的，但战斗中两者会被不同来源各自位移
-                # （血契分摊、疲惫代价、弱化…），用绝对值会抹掉那些真实消耗。
+                # （共罪分摊、疲惫代价、弱化…），用绝对值会抹掉那些真实消耗。
                 # 上限同步位移以维持「当前值永远落在 0~上限 闭区间」这条封顶规则。
                 d = value - (old if isinstance(old, int) else 0)
                 if name == "attack_power":
@@ -566,53 +599,56 @@ class Entity:
         【手雷减攻】只减普攻次数，不减速度、也不减出手预算（2026-10-25 起对全体同口径：
         怪物阶段不再单独读旧面板字段 attack_count 算击数，击数一律走本方法）。
         """
-        if self.get_status_value("全速"):
-            hits = self.speed_limit
-        else:
-            hits = self.current_speed
-        return max(0, hits - self.get_status_value("手雷减攻"))
+        from .effect_overrides import resolve
+        hits = resolve(self, "attack_count", self.current_speed, {
+            "全速": lambda status, old: self.speed_limit,
+            "手雷减攻": lambda status, old: old-status.value,
+            "定型": lambda status, old: status.effect_data.setdefault("attack_count", old),
+        })
+        return max(0, hits)
 
     def effective_attack_power(self) -> int:
         """攻击力＝ 当前法力。
 
         实时读取当前法力，不做快照：法力掉到 0 时每击 0 点，法力被补回来
-        （守夜灯/承露盏/血契/透支/再生等任何回蓝、怪物的[回始]回满）后攻击力**同步回升**，
+        （守夜灯/承露盏/共罪/透支/再生等任何回蓝、怪物的[回始]回满）后攻击力**同步回升**，
         并非单调下降。花蓝前要先算清这一笔对后续每击的连带影响。
 
         两处覆盖（均走状态层，故对轮回者/怪物/朋友/员工同口径生效）：
         - 【龙族利爪】：攻击力 = 当前法力×2。
-        - 【全力】：攻击力锁定 = [法限]，覆盖上一步的结果，
-          不再随当前法力下降。顺序上"全力"最后生效，故它压过龙族利爪的倍率。
+        - 【全力】：攻击力锁定 = [法限]，不再随当前法力下降。
+        同域相反约束按实际后生效覆盖，不以名字、X、资源种类或∞固定优先级。
+        【定型】锁定其生效时的攻击力/攻击次数；费用仍正常改变法力/速度资源。
         """
-        power = self.current_mana
-        if self.get_status_value("龙族利爪"):
-            power *= 2
-        if self.get_status_value("全力"):
-            # 锁定为法限：花法力不再掉攻击力
-            power = self.mana_limit
+        from .effect_overrides import resolve
+        power = resolve(self, "attack_power", self.current_mana, {
+            "龙族利爪": lambda status, old: self.current_mana*2,
+            "全力": lambda status, old: self.mana_limit,
+            "定型": lambda status, old: status.effect_data.setdefault("attack_power", old),
+        })
         return max(0, power)
 
     @property
     def load_capacity(self) -> int:
-        """可承载的道纹/遗物**种类**上限 = [血限] // 30（2026-10-12 用户令）。
+        """死者之页总数；旧存档默认十页，不随血限变化。"""
+        return max(0, int(getattr(self, "death_page_count", 10)))
 
-        原文口径：**30X[血限] = 允许拥有 X 种道纹和 X 种遗物**。
-        两个额度各自独立计数、同为 X，不互相挤占；不足 30[血限] 的余数不折算。
-        血限被【衰老】等压低时额度同步收紧——已超出新额度的部分不会被自动没收
-        （正文没有写剥夺条款），但**再获得**会被 `GameEngine` 的获得入口拒绝。
-        道纹按"种"计（`dao_wen` 的键数），遗物也按"种"计（同名不重复计入）。
-        """
-        return max(0, self.blood_limit // 30)
+    @property
+    def pages_used(self) -> int:
+        from .death_pages import resource_keys
+        return len(resource_keys(self))
+
+    def _kind_capacity(self, kind: str) -> int:
+        from .death_pages import resource_keys
+        return max(0, self.load_capacity - sum(k != kind for k, _ in resource_keys(self)))
 
     @property
     def daowen_capacity(self) -> int:
-        """道纹种类上限（= `load_capacity`，单列出来是为了在报错文案里说清楚）。"""
-        return self.load_capacity
+        return self._kind_capacity("道纹")
 
     @property
     def relic_capacity(self) -> int:
-        """遗物种类上限（= `load_capacity`）。"""
-        return self.load_capacity
+        return self._kind_capacity("遗物")
 
     @property
     def action_count(self) -> int:
@@ -637,7 +673,8 @@ class Entity:
     
     def take_damage(self, amount: int, damage_type: str = "普通", *,
                     life_loss_multiplier: int = 1,
-                    status_adjuster: Optional[Callable[[int], int]] = None) -> dict:
+                    status_adjuster: Optional[Callable[[int], int]] = None,
+                    damage_deferrer: Optional[Callable[[int], int]] = None) -> dict:
         """
         受到伤害，返回结算详情。
 
@@ -703,6 +740,12 @@ class Entity:
                 detail["life_loss_multiplier"] = life_loss_multiplier
             detail["damage_after_life_loss_multiplier"] = remaining
 
+            # 缓厄沙漏只改变承受时间；先应用本次防御/倍率，再拆分，最终封顶仍各自生效。
+            if remaining > 0 and damage_type != "代价" and damage_deferrer is not None:
+                before_defer = remaining
+                remaining = damage_deferrer(remaining)
+                detail["deferred_damage"] = before_defer - remaining
+
             # 【固执】是最终失血边界，位于所有倍率之后。
             before_final_cap = remaining
             remaining = apply_final_life_loss_cap(remaining, self, damage_type)
@@ -715,6 +758,9 @@ class Entity:
             self.shield = shield_before
             raise
 
+        if self.is_alive and self.has_status("不死"):
+            # 同时修正实际伤害/代价账本，而不只在写HP时封顶。
+            remaining = min(remaining, max(0, self.current_hp - 1))
         # 扣除生命；actual_damage 是经过倍率的待扣数值，actual_life_loss 是
         # HP 实际下降量，过量伤害时二者可不同。
         hp_before = self.current_hp
@@ -818,6 +864,10 @@ class Entity:
             "lost": lost,             # 非怪物触发"迷失"，等待战斗层处理
         }
     
+    def effective_blood_limit(self):
+        """当前生效血限：增殖是真正无穷约束，blood_limit保留既有基础账本。"""
+        return math.inf if self.has_status("无限血限") else self.blood_limit
+
     def heal(self, amount: int, allow_overflow: bool = False) -> dict:
         """回复生命。allow_overflow=True 时当前生命可超出[血限]（遗物【猩红果实】）。"""
         before = self.current_hp
@@ -960,9 +1010,20 @@ class Entity:
                 effect.polarity = EffectPolarity.BUFF.value
             elif effect.name in debuffs:
                 effect.polarity = EffectPolarity.DEBUFF.value
-        for existing in self.status_effects:
-            if existing.merge_with(effect):
-                return
+        from .effect_overrides import crossed_opposition
+        if effect.name == "定型":
+            effect.effect_data = {"attack_power": self.effective_attack_power(),
+                                  "attack_count": self.effective_attack_count()}
+        self._effect_sequence = max(getattr(self, "_effect_sequence", 0), len(self.status_effects),
+            max((getattr(status, "effect_sequence", 0) for status in self.status_effects), default=0)) + 1
+        effect.effect_sequence = self._effect_sequence
+        for existing in reversed(self.status_effects):
+            if existing.name == effect.name:
+                # 相反效果之间不能把早先已被覆盖的数值并入后来新施加的一次，造成旧效果复活。
+                if crossed_opposition(self, existing, effect):
+                    break
+                if existing.merge_with(effect):
+                    return
         self.status_effects.append(effect)
     
     def to_dict(self) -> dict:
@@ -1012,6 +1073,11 @@ class Entity:
             "hp_ratio": round(self.hp_ratio, 2),
             "ai_memory": self.ai_memory,
             "dao_wen": {k: v.dao_wen.name for k, v in self.dao_wen.items()},
+            "reversible_cost_layers": dict(getattr(self, "reversible_cost_layers", {})),
+            "death_page_count": self.load_capacity, "pages_used": self.pages_used,
+            "deferred_damage": [dict(entry) for entry in getattr(self, "deferred_damage", [])],
+            "consumables": [item.to_dict() for item in getattr(self, "consumables", [])],
+            "amnesia_refundable": [inst.dao_wen.name for inst in self.refundable_daowen()],
             "daowen_cooldowns": {
                 k: {"battles": int(getattr(v, "cooldown_remaining", 0)),
                     "rounds": int(getattr(v, "cooldown_rounds_remaining", 0))}
@@ -1021,7 +1087,10 @@ class Entity:
             "relics": [r.to_dict() for r in self.relics],
             "status_effects": [
                 {"name": s.name, "value": s.value, "rounds": s.remaining_rounds,
-                 "source": s.source, "scope": s.scope, "polarity": s.polarity}
+                 "source": s.source, "scope": s.scope, "polarity": s.polarity,
+                 "controller_runtime_id": getattr(s, "controller_runtime_id", None),
+                 "effect_sequence": getattr(s, "effect_sequence", 0),
+                 "effect_data": dict(getattr(s, "effect_data", {}))}
                 for s in self.status_effects
             ]
         }
@@ -1054,6 +1123,7 @@ class ScopedStatDelta:
 class GameState:
     """完整游戏状态"""
     # 游戏元数据
+    pending_daowen_interrupts: list = field(default_factory=list)  # 特殊道纹提交给API的DM中断，随状态回滚/存档
     game_id: str = ""
     phase: str = "setup"
     # 战斗内强制顺序；正式战始会置为 await_round_start。
@@ -1392,6 +1462,11 @@ class GameState:
                     tags=heal_ctx.tags, event_id=heal_ctx.event_id,
                     parent_event_id=heal_ctx.parent_event_id,
                 )
+        # 坏死封锁所有来源的回复，包括消耗品；不累计治疗、不产生溢出收益。
+        if entity.has_status("坏死"):
+            return {"heal_amount": amount, "actual_heal": 0,
+                    "hp_before": entity.current_hp, "hp_after": entity.current_hp,
+                    "overheal": 0, "blocked_by": "坏死", "heal_ctx": heal_ctx.to_dict()}
         # 2026-10-14：【猩红果实】持有者当前生命可超出[血限]，回复不再封顶
         # （溢出量归零，【忘忧香】/【龙血瓶】无溢出可吃——没有溢出，只有实打实的血）。
         detail = entity.heal(
@@ -1565,23 +1640,13 @@ class GameState:
         return {r.name for r in self.relics if getattr(r, "enabled", True)}
 
     def note_relic_gained(self, relic: Relic) -> None:
-        """新获得遗物时的启用归类：生效数未满承载则默认启用，满了则持有但不生效。
-
-        持有本身不再受承载拦截（2026-10-22 用户令）；玩家可在[战始]用
-        battle_start 的 active_relics 参数、或局外 set_active_relics 自定义启用。
-        """
-        player = self.player
-        if player is None:
-            relic.enabled = True
-            return
-        enabled_count = len({r.name for r in self.relics if getattr(r, "enabled", True) and r is not relic})
-        relic.enabled = enabled_count < player.relic_capacity
+        """页数限制持有；合法获得的遗物默认启用，不再另限生效数。"""
+        relic.enabled = True
 
     def set_active_relics(self, names) -> tuple:
         """把本局遗物的启用集合设为 names（战始/局外自定义启用）。
 
-        返回 (True, None) 或 (False, 错误文案)。启用数不得超过当前
-        [血限]承载；未列名的已持有遗物一律置为停用（仍持有，不丢弃）。
+        返回 (True, None) 或 (False, 错误文案)。启用数量不另限；未列名的已持有遗物一律置为停用（仍持有，不丢弃）。
         """
         player = self.player
         if player is None:
@@ -1595,10 +1660,6 @@ class GameState:
         unknown = [n for n in names if n not in owned]
         if unknown:
             return False, f"未持有遗物：{'、'.join(unknown)}"
-        cap = player.relic_capacity
-        if len(names) > cap:
-            return False, (f"生效遗物超出承载：[血限]{player.blood_limit} 只允许{cap}件生效"
-                           f"（30[血限]=1件），提交了{len(names)}件")
         wanted = set(names)
         for relic in self.relics:
             relic.enabled = relic.name in wanted
@@ -1608,7 +1669,7 @@ class GameState:
         """切换单件遗物的启用/停用（2026-10-22 用户令）。
 
         返回 (True, 现在是否启用) 或 (False, 错误文案)。停用永远允许；
-        启用时若生效数已满承载则拒绝（先停用一件，或改用 set_active_relics 整组改选）。
+        启用不再受血限或独立生效额度限制。
         """
         player = self.player
         if player is None:
@@ -1621,11 +1682,6 @@ class GameState:
         if getattr(relic, "enabled", True):
             relic.enabled = False
             return True, False
-        enabled_count = len({r.name for r in self.relics if getattr(r, "enabled", True)})
-        cap = player.relic_capacity
-        if enabled_count >= cap:
-            return False, (f"生效遗物已满承载：[血限]{player.blood_limit} 只允许{cap}件生效"
-                           f"（30[血限]=1件），先停用一件再启用【{name}】")
         relic.enabled = True
         return True, True
 
@@ -1808,9 +1864,7 @@ class GameState:
         """授予一件遗物；tag 用于标记 血族/龙族 等来源。"""
         r = Relic(name=name, effect=effect, tags=[tag] if tag else [])
         self.relics.append(r)
-        # 注意：授予口不走 note_relic_gained 的自动停用——初拥/龙族等「选了即授予」
-        # 的项目旧口径本就绕过承载拦截，默认启用；启用归类的自动停用只管
-        # 发现/自选/交易/拾取这些「遇到遗物」的获得入口（各自调用 note_relic_gained）。
+        # 默认启用；正式行动由事务层统一检查死者之页，失败时整体回滚。
         return r
 
     def remove_relic(self, name: str) -> bool:

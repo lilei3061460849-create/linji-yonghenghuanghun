@@ -50,8 +50,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     # 副本专属道纹
     REGION_EXCLUSIVE_DAOWEN = {
         "扭曲都市": {"变形","定型","超频","坏死"},  # 【畸变】【退化】已遗物化
-        "罪孽都市": {"点金","典当","豪夺","清算","抢劫","假钞","消灾","勒索"},   # 2026-10-13 删【逼债】【典当】顶替；2026-10-14 +【勒索】
-        "龙心谷":   {"加害","龙鳞","裂变","背负"},  # 【逆鳞】【伤痕】已遗物化
+        "罪孽都市": {"点金","典当","豪夺","抢劫","假钞","消灾","勒索"},   # 2026-10-13 删【逼债】【典当】顶替；2026-10-14 +【勒索】
+        "龙心谷":   set(),  # 【逆鳞】【伤痕】已遗物化
     }
     
     # 原始怪物道纹（道纹归属规则：各组起点）——【原初X】可借用范围
@@ -67,9 +67,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     WAVE_NUMERIC_KEYS = (
         "target_damage", "total_damage", "hits", "aoe_damage", "hp_percent_loss",
         "target_heal", "heal_percent", "mutation_reduction",
-        "target_shield", "shield_drain",
+        "target_shield", "shield_drain", "extend_duration", "tamper_activations",
         "blood_limit_reduction", "hp_reduction", "blood_limit_increase", "blood_limit_penalty",
-        "zengzhi_battle_end",  # 2026-10-14：【增殖】重做，战终血限增长参与波及平分
         "attack_boost", "attack_reduction",
         "speed_boost", "speed_penalty",
         "self_attack_count", "invalid_damage_hits",
@@ -271,11 +270,14 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                     or entity.has_status("飞行"))
 
     def _wanjunyin_holder(self, target: Entity) -> bool:
-        """己方被攻击角色是否有剩余耐久的【万钧印】消耗品。"""
-        if target is None or not self.state.on_player_side(target):
+        """被攻击角色实际持有的【万钧印】；敌我同规则。"""
+        if target is None:
             return False
         return any(item.name == "万钧印" and not item.is_depleted
-                   for item in self.state.consumables)
+                   for item in self._held_consumables(target))
+
+    def _held_consumables(self, entity):
+        return self.state.consumables if entity is self.state.player else entity.consumables
 
     def _incoming_adjust(self, target: Entity, amount: int, damage_type: str = "普通") -> int:
         if amount <= 0 or damage_type == "代价" or target is None:
@@ -413,7 +415,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         entity.current_speed = min(entity.current_speed, entity.speed_limit)
         # 2026-10-14：【猩红果实】持有者当前生命可超出[血限]，与法力侧镜像。
         if not self.state.hp_overflow_exempt(entity):
-            entity.current_hp = min(entity.current_hp, entity.blood_limit)
+            entity.current_hp = min(entity.current_hp, entity.effective_blood_limit())
 
     def _note_dodge(self, entity: Entity, relic_target_ref: Optional[str] = None) -> dict:
         """闪避专属句：正文写「每次闪避后」的效果。失速/归零不在这里。"""
@@ -706,13 +708,13 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             "hp_lost": 0,
             "target_died": False,
         }
-        # 万钧印（消耗品）：己方角色被选为攻击目标时自动触发并消耗1点耐久，
+        # 万钧印（消耗品）：持有者被选为攻击目标时自动触发并消耗1点耐久，
         # 将攻击改为攻击者对自己发动。显式传 wanjunyin=False 可拒绝本次；
         # 被改道的一次自攻不会再被改道（_wanjunyin_converted 防 A→B→A 递归）。
         if (not _wanjunyin_converted and wanjunyin is not False
                 and attacker is not target and attacker.is_alive
                 and self._wanjunyin_holder(target)):
-            item = next(item for item in self.state.consumables
+            item = next(item for item in self._held_consumables(target)
                         if item.name == "万钧印" and not item.is_depleted)
             item.use()
             # 原受击者的反应提交随改道失效；自攻目标按自身可用反应法术生成
@@ -880,32 +882,11 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 result.setdefault("spell_logs", []).extend(slogs_life_before)
             if not attacker.is_alive:
                 damage = 0
-        # 裂变：受到伤害分X次结算；依全局整数规则，每次除法向上取整。
-        if target.has_status("裂变") and damage > 0:
-            xv = target.get_status_value("裂变") or 1
-            if xv > 1:
-                per = math.ceil(damage / xv)
-                ta = ts = 0; died = False
-                for _ in range(xv):
-                    dr = self._apply_hostile_damage(
-                        target, per, "普通" if not ignore_shield else "无视格挡", attacker,
-                        ctx={"timing": self._current_context_timing(), "source": "普通攻击", "source_type": "attack",
-                             "actor": attacker, "target": target, "mechanic": "damage", "subtype": "attack",
-                             "amount": per, "tags": {"attack", "split_hit"}})
-                    ta += dr["actual_damage"]; ts += dr["shield_absorbed"]; died = died or dr["died"]
-                damage_result = {"actual_damage": ta, "shield_absorbed": ts, "hp_after": target.current_hp, "died": died, "split": xv}
-            else:
-                damage_result = self._apply_hostile_damage(
-                    target, damage, "普通" if not ignore_shield else "无视格挡", attacker,
-                    ctx={"timing": self._current_context_timing(), "source": "普通攻击", "source_type": "attack",
-                         "actor": attacker, "target": target, "mechanic": "damage", "subtype": "attack",
-                         "amount": damage, "tags": {"attack"}})
-        else:
-            damage_result = self._apply_hostile_damage(
-                target, damage, "普通" if not ignore_shield else "无视格挡", attacker,
-                ctx={"timing": self._current_context_timing(), "source": "普通攻击", "source_type": "attack",
-                     "actor": attacker, "target": target, "mechanic": "damage", "subtype": "attack",
-                     "amount": damage, "tags": {"attack"}})
+        damage_result = self._apply_hostile_damage(
+            target, damage, "普通" if not ignore_shield else "无视格挡", attacker,
+            ctx={"timing": self._current_context_timing(), "source": "普通攻击", "source_type": "attack",
+                 "actor": attacker, "target": target, "mechanic": "damage", "subtype": "attack",
+                 "amount": damage, "tags": {"attack"}})
         result["damage_dealt"] = damage_result["actual_damage"]
         result["shield_absorbed"] = damage_result["shield_absorbed"]
         result["hp_lost"] = damage_result["actual_damage"]
@@ -943,6 +924,21 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
     # ========== 回合管理 ==========
 
+    def settle_deferred_damage(self, entity: Entity, entries: list[dict]) -> list[dict]:
+        """将上回合延后的数值作为普通伤害结算，允许再次触发沙漏。"""
+        effects = []
+        for entry in entries:
+            if not entity.is_alive:
+                break
+            detail = self._apply_hostile_damage(entity, entry["amount"], "普通", ctx={
+                "timing": "round_start", "source": "缓厄沙漏", "source_type": "relic",
+                "actor": None, "owner": entity, "target": entity, "mechanic": "damage",
+                "subtype": "relic_damage", "amount": entry["amount"],
+                "tags": {"relic"}})
+            effects.append({"type": "relic", "relic": "缓厄沙漏",
+                            "entity": entity.name, "detail": detail})
+        return effects
+
     def round_start(self, relic_choices: Optional[dict] = None) -> dict:
         """
         回始结算
@@ -951,6 +947,14 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         3. 返回需要决策的信息
         """
         effects = []
+        # 先取出本回合应造成的伤害；本次新延后的部分留给下一回合。
+        deferred_due = []
+        seen_due = set()
+        for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
+            if id(entity) not in seen_due:
+                seen_due.add(id(entity))
+                deferred_due.append((entity, list(getattr(entity, "deferred_damage", []))))
+                entity.deferred_damage = []
         player = self.state.player
         if player is not None:
             effects.extend(self._dispatch_phase(Phase.ROUND_START_PREPARE, target=player))
@@ -1014,6 +1018,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         # 战斗内已有多个法力来源（聚能/储能电池/守夜灯/承露盏/
         # 透支/法术），效果重新有对象。判定位见 models.py::gain_mana。
 
+        # 延后的部分就是普通伤害：正常格挡、减伤、倍率，也正常再次触发沙漏。
+        for entity, entries in deferred_due:
+            effects.extend(self.settle_deferred_damage(entity, entries))
+
         # 遗物：回始触发（回锋刀按速限缺口造伤）。
         relic_logs = self.process_relics(TriggerTiming.ROUND_START, {"relic_choices": relic_choices or {}})
         effects.extend({"type": "relic", "log": l} for l in relic_logs)
@@ -1039,11 +1047,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             # 机制的报告条目并入 effects，战报格式与迁移前一致。
             effects.extend(self._dispatch_phase(Phase.ROUND_START, target=entity))
 
-        # ---- 罪孽【清算】与遗物【灾厄轮盘】的回始结算相位 ----
-        # 本位置只宣布相位时点（锚点 = 回始效果循环之后、current_round+1 之前）；
-        # 结算由声明层的 清算·结算/灾厄轮盘·结算 执行。原道纹【赌命】现为常驻遗物【灾厄轮盘】。
-        # 分发语义=统一状态排序：按各账本状态记录的来源道纹序列位置结算；不再保留旧的
-        # 清算账本结算在前；遗物灾厄轮盘机制随后按持有者触发。账本访问走 mechanisms.ledger。
+        # 遗物【灾厄轮盘】回始结算相位；原清算机制已删除。
         effects.extend(self._dispatch_phase_all(
             Phase.ROUND_START_SETTLE,
             self.state.get_all_player_side() + self.state.get_all_enemy_side()))
@@ -1104,7 +1108,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             "state": self._get_combat_state()
         }
     
-    def advance_target_rounds(self, target: Entity, rounds: int, source: str = "沉溺") -> list[dict]:
+    def advance_target_rounds(self, target: Entity, rounds: int, source: str = "大梦") -> list[dict]:
         """令单一目标额外经历若干回合。
 
         角色经历的回合数与世界回合数分离：这里不修改 state.current_round，也不执行
@@ -1114,7 +1118,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         effects: list[dict] = []
         rounds = max(0, int(rounds))
         # 额外回合需要自己的周期记录，但不能覆盖正在进行的世界回合记录。
-        # 例如目标已经在世界第10回合出手后再受到【沉溺】，其额外回合应按
+        # 例如目标已经在世界第10回合出手后再受到【大梦】，其额外回合应按
         # “没有在这个额外回合出手”推进凡庸；结算结束后，第10回合原始行动/伤害记录恢复。
         cycle_fields = (
             "hp_lost_this_round", "_hp_loss_events", "_speed_change_events",
@@ -1308,9 +1312,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                                     "current_speed": entity.current_speed,
                                     "current_mana": entity.current_mana})
                 # 干扰/手雷减攻到期自动由 tick 清理，无需额外
-            # F2：清算状态消失即清账（∞/持续X到期后不再逐回始结算）。
-            # 2026-10-03 迁移：判定与清账都在声明层（清算·对账）；2026-10-13 删【逼债】。
-            # 本行只宣布相位时点，位置必须在 status tick 之后（否则会多结算一轮）。
+            # 通用回终对账相位，保留锚点，不再注册清算对账。
             effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=entity))
             # F2：抵扣封印/豪夺夺取回合递减统一走 _tick_sealed_and_stolen_relics，
             # 不再在此处逐实体递减。
@@ -1442,9 +1444,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                     or index >= len(self.state.enemies) or not self.state.enemies[index].is_alive):
                 raise ValueError(f"回锋刀触发时必须显式提交合法relic_choices.回锋刀.enemy_index，可选{legal}")
         # 2026-10-14 用户令：【余火印】整段删除（extra 方案废弃）——回始 use 决策取消。
-        # 2026-10-12 用户令：【血契】删掉与道纹【透支】重合的「[回始]流血4X换X法力」，
+        # 2026-10-12 用户令：【共罪】删掉与道纹【透支】重合的「[回始]流血4X换X法力」，
         # 只保留「数值型代价可与朋友/员工平分」作为其主要功能。它因此不再是回始主动
-        # 遗物，`血契`/`对手血契` 两个回始决策键随之取消（平分仍在各代价提交处走
+        # 遗物，`共罪`/`对手共罪` 两个回始决策键随之取消（平分仍在各代价提交处走
         # cost_share_target_ref，不受影响）。
 
     def process_relics(self, trigger: str | TriggerTiming, ctx: dict = None) -> list:
@@ -1626,6 +1628,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
     def is_targetable(self, attacker: Entity, target: Entity) -> bool:
         """目标是否可被选中：非飞行者无法选中飞行目标。"""
+        if self.state.is_sealed_away(attacker) or self.state.is_sealed_away(target):
+            return False
         if self._is_flying(target):
             return self._is_flying(attacker)
         return True

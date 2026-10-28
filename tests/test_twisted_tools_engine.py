@@ -148,9 +148,11 @@ def test_normal_medkit():
     _grant_tool(engine, "急救箱")
     r = engine.execute_action("consume_item", {"name": "急救箱", "remove_status": "坏死"})
     assert r["success"]
-    assert r["result"]["healed"] == 25
-    assert p.current_hp == 55
-    assert r["result"]["removed_status"] in ("坏死", "蒙蔽")  # clears one negative
+    # 先回复、后清除：坏死尚在时本次回复为0，不可由工具绕过禁疗。
+    assert r["result"]["healed"] == 0
+    assert p.current_hp == 30
+    assert r["result"]["removed_status"] == "坏死"
+    assert not p.has_status("坏死") and p.has_status("蒙蔽")
 
 def test_normal_jammer():
     engine = _setup_engine()

@@ -94,7 +94,10 @@ class MonsterLifeMixin:
 
     def _execute_evolution_impl(self, monster: Entity, daowen_name: str, x: int) -> dict:
         """
-        特殊事件【进化】：怪物发动【原初X】（规则正文·特殊事件）。
+        旧特殊事件【进化】实现，尚未同步新原初定义。
+        当前用户规则：异变5X，借用目标身上自身未拥有的随机X种道纹。
+        下列指定一种、固定借用数值X的路径仅描述旧接口实际行为，不能当成新规则。
+        旧特殊事件【进化】：怪物发动【原初X】。
         原初X：代价：异变5X。选择一种**当前轮回者已持有**、且自身未持有的道纹，
         [战终]前视为持有该道纹（其数值固定为本次X），借用的道纹发动时照常支付其自身代价。
 
@@ -233,7 +236,7 @@ class MonsterLifeMixin:
         return math.ceil(monster.blood_limit * self.REDEMPTION_HP_RATIO)
 
     def check_redemption(self, monster: Entity, *, force: bool = False) -> Optional[dict]:
-        """救赎：通常要求残血且没有原始怪物道纹（全力／疯狂／减速／必中）；自由结晶可强制触发。"""
+        """救赎：通常要求残血且没有原始怪物道纹（全力／必中）；自由结晶可强制触发。"""
         if monster is None or monster.entity_type != "怪物" or not monster.is_alive:
             return None
         # 烬翼【熄事】本回合抑制所有落在该角色身上的特殊事件，救赎（含自由结晶强制救赎）也不例外。
@@ -314,7 +317,7 @@ class MonsterLifeMixin:
                 results.append(self._sculpture_monster(monster))
                 continue
 
-            # 2. 救赎：残血且没有原始怪物道纹（全力／疯狂／减速／必中）
+            # 2. 救赎：残血且没有原始怪物道纹（全力／必中）
             redemption = self.check_redemption(monster)
             if redemption:
                 results.append(redemption)
@@ -540,11 +543,12 @@ class MonsterLifeMixin:
         }
 
     def use_sculpture(self, consumable: Consumable, target: Entity = None,
-                      mode: str = "damage") -> dict:
+                      mode: str = "damage", actor: Entity = None) -> dict:
         """
         使用雕塑：消耗1点耐久，造成15伤害或获得20格挡
         mode: "damage"(对target造伤) / "shield"(自身格挡)
         """
+        actor = actor if actor is not None else self.state.player
         if consumable.kind != "sculpture":
             return {"success": False, "error": "非雕塑消耗品"}
         if consumable.is_depleted:
@@ -553,11 +557,11 @@ class MonsterLifeMixin:
             return {"success": False, "error": "雕塑mode必须是damage或shield"}
         if mode == "damage" and target is None:
             return {"success": False, "error": "伤害模式需指定目标"}
-        if mode == "shield" and self.state.player is None:
+        if mode == "shield" and actor is None:
             return {"success": False, "error": "没有玩家，无法获得格挡"}
         consumable.use()
         if mode == "shield":
-            player = self.state.player
+            player = actor
             player.gain_shield(self.SCULPTURE_SHIELD)
             return {
                 "success": True,
@@ -567,9 +571,9 @@ class MonsterLifeMixin:
                 "note": f"雕塑赋能：获得{self.SCULPTURE_SHIELD}点格挡",
             }
         else:
-            dmg = self._apply_hostile_damage(target, self.SCULPTURE_DAMAGE, source=self.state.player, ctx={
+            dmg = self._apply_hostile_damage(target, self.SCULPTURE_DAMAGE, source=actor, ctx={
                 "timing": self._current_context_timing(), "source": "雕塑", "source_type": "consumable",
-                "actor": self.state.player, "target": target, "mechanic": "damage", "subtype": "sculpture",
+                "actor": actor, "target": target, "mechanic": "damage", "subtype": "sculpture",
                 "amount": self.SCULPTURE_DAMAGE, "tags": {"consumable", "sculpture"},
             })
             return {

@@ -1,30 +1,10 @@
-"""账本（Ledger）：机制的「可累积私有账目」唯一访问入口。
-
-背景（2026-10-03 迁移【逼债】【清算】时新增；2026-10-13 用户令删【逼债】后仅剩【清算】）：
-    旧实现把账目直接挂在实体私有列表上，访问点散落三处——
-      * 写入：`combat_parts/daowen_effect.py`（发动时挂账）；
-      * 读取+清账：`combat.py` 回始结算块与回终清账块；
-      * 清账：`api.py` 战终统一重置。
-    迁移后所有访问都必须经过本模块（`ledger_of` / `clear_ledger`）。
-
-存储：
-    仍走 Entity 的既有字段（`_qingsuan`，dataclass 字段，随存档走），
-    不新造全局表、不改序列化口径——迁移只搬家访问入口，不搬家数据。
-    `_mechanism_state`（registry.Mechanism.state_of）留给不需要跨存档的机制状态。
-
-约定：
-    账目是**列表**（同一次战斗可叠加多笔，逐笔结算），不是计数器；
-    列表为空 = 无账。清理的时机由机制自己在声明层决定（见 builtins 的「对账」机制）。
-"""
+"""通用账本访问接口。逼债与清算均已删除，当前无生产账本登记。"""
 from __future__ import annotations
 
 from typing import Any
 
 # 机制名 → Entity 存储字段。新增账本制机制时在此登记一行即可。
-_STORAGE: dict[str, str] = {
-    # 2026-10-13 用户令删【逼债】：「逼债」→ `_bizhai` 登记项与 Entity._bizhai 字段一并移除。
-    "清算": "_qingsuan",
-}
+_STORAGE: dict[str, str] = {}
 
 
 def ledger_names() -> list[str]:

@@ -600,7 +600,7 @@ def validate_damage_amount(value: Any, field_name: str = "damage",
 def apply_final_life_loss_cap(amount: int, recipient: Any, damage_type: str) -> int:
     """应用位于所有失血倍率之后的最终生命损失边界。
 
-    2026-10-11 用户令：【固执】简化为「你每次失去的生命不会超过1，持续X」，
+    当前【固执】是消耗品【定命丸】施加的1回合状态：「你每次失去的生命不会超过1」，
     因此**代价路径与直接失血一并封顶**。旧口径（`damage_type != "代价"` 的排除，
     以及「格挡后仍有伤害待结算的非代价受击」这一触发前提）已废止。
     `damage_type` 参数保留是为了兼容既有调用点，本函数不再据它分流。
@@ -608,10 +608,7 @@ def apply_final_life_loss_cap(amount: int, recipient: Any, damage_type: str) -> 
     """
     amount = validate_damage_amount(
         amount, "final_life_loss_cap.amount", allow_negative=False)
-    definition = DAOWEN_RULES.get("固执")
-    if definition is None:
-        raise RuleError("缺少【固执】的最终失血上限定义")
-    cap = int(definition.rules[0].operator.operand)
+    cap = int(GUZHI_RULE.operator.operand)
     if (amount > cap and recipient is not None
             and callable(getattr(recipient, "has_status", None))
             and recipient.has_status("固执")):
@@ -1085,6 +1082,7 @@ JIAHAI_RULE = _damage_rule(
     OperatorSpec(RuleOperator.ADD), OperandSource.STATUS_VALUE, 20,
 )
 STATUS_DAMAGE_RULES = (JIAHAI_RULE,)
+# 旧减法规则仅保留给独立规则执行器的兼容/代数测试；不注册、不授予、不参与龙鳞遗物结算。
 LONG_LIN_RULE = _damage_rule(
     "daowen.longlin.incoming_damage.subtract", "daowen.longlin", "龙鳞", "龙鳞",
     OperatorSpec(RuleOperator.SUBTRACT, lower_bound=0), OperandSource.STATUS_VALUE, 30,
@@ -1095,16 +1093,9 @@ GUZHI_RULE = _damage_rule(
     missing_status_value=None,
 )
 
-DAOWEN_RULES: dict[str, DaoWenRuleDefinition] = {
-    "龙鳞": DaoWenRuleDefinition(
-        daowen_id="daowen.longlin", name="龙鳞", cost_type="消耗",
-        cost_multiplier=Fraction(2), duration=DurationSpec(DurationKind.PERMANENT),
-        rules=(LONG_LIN_RULE,), default_subject="目标"),
-    "固执": DaoWenRuleDefinition(
-        daowen_id="daowen.guzhi", name="固执", cost_type="冷却",
-        cost_multiplier=Fraction(1), duration=DurationSpec(DurationKind.FINITE_X_ROUNDS),
-        rules=(GUZHI_RULE,), default_subject="自身"),
-}
+# 固执只作为消耗品【定命丸】施加的状态，不再是可发动道纹。
+STATUS_DAMAGE_RULES = (JIAHAI_RULE, GUZHI_RULE)
+DAOWEN_RULES: dict[str, DaoWenRuleDefinition] = {}
 
 RULES_BY_ID: dict[str, DamageRuleDefinition] = {
     rule.rule_id: rule

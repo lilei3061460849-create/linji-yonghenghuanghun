@@ -40,15 +40,15 @@ def _new_engine(db_suffix: str, region: str = "罪孽都市") -> GameEngine:
 # 正常路径
 # ========================================================================
 
-def test_hire_discovers_three_distinct_transformed_daowen():
+def test_hire_discovers_distinct_choices_from_current_transformed_pool():
     """正常路径：雇佣后必须自动发现3个互不相同、且都属于19个转化道纹范畴的候选"""
     engine = _new_engine("discover_ok")
     r = engine.execute_action("pre_battle_action", {
         "sub_action": "雇佣", "name": "小赵", "blood_alloc": 17, "atk_bundles": 1,
     })
     choices = r["result"]["discovered_daowen_choices"]
-    assert len(choices) == 3
-    assert len(set(choices)) == 3, "3个候选必须互不相同"
+    assert len(choices) == min(3,len(DaoWenEngine.TRANSFORMED_DAOWEN))
+    assert len(set(choices)) == len(choices), "现行候选必须互不相同，不得复活废案补数"
     assert all(c in DaoWenEngine.TRANSFORMED_DAOWEN for c in choices)
 
 
@@ -83,7 +83,7 @@ def test_zhuiqiuzhe_event_option1_hires_real_employee_with_fixed_panel():
     assert (emp.attack_count, emp.attack_power, emp.blood_limit) == (8, 2, 96)
     assert emp.is_deployed is False, "与DIY雇佣一致，默认待命"
     # 2026-10-03：【活血】删除，追求者面板剩 逆鳞/固执
-    assert set(emp.dao_wen) == {"逆鳞", "固执"}
+    assert set(emp.dao_wen) == set()  # 两条旧道纹已移到遗物/消耗品，不伪造道纹恢复。
     # 面板不写死 X：x_free 且 x_value 归零，由发动时自选
     assert all(getattr(v, "x_free", False) and v.x_value == 0
                for v in emp.dao_wen.values())
@@ -101,7 +101,7 @@ def test_zhuiqiuzhe_event_option2_queues_forced_monster_next_battle():
     queued = engine.state.forced_monsters_next_battle[0]
     assert queued["name"] == "追求者"
     # 面板不写死 X：x=None → make_monster_entity 标记为 x_free
-    assert queued["dao_wen"] == {"逆鳞": None, "固执": None}
+    assert queued["dao_wen"] == {}  # 与当前副本文档一致，不复活退役道纹。
     # 不应同时创建一个"员工"版本的追求者(选项2是怪物版，二者互斥)
     assert not any(e.name == "追求者" for e in engine.state.employees)
 
@@ -134,8 +134,8 @@ def test_hire_multiple_employees_have_independent_discovery_pools():
     assert r2["success"] is True
     assert "甲员工" not in engine.state.pending_daowen_choices
     assert "乙员工" in engine.state.pending_daowen_choices
-    assert len(first_choices) == 3
-    assert len(r2["result"]["discovered_daowen_choices"]) == 3
+    assert len(first_choices) == min(3,len(DaoWenEngine.TRANSFORMED_DAOWEN))
+    assert len(r2["result"]["discovered_daowen_choices"]) == len(first_choices)
 
 
 # ========================================================================
@@ -149,7 +149,7 @@ def test_choose_hired_daowen_rejects_option_outside_discovered_choices():
         "sub_action": "雇佣", "name": "小孙", "blood_alloc": 17, "atk_bundles": 1,
     })
     choices = set(r["result"]["discovered_daowen_choices"])
-    illegal = next(d for d in DaoWenEngine.TRANSFORMED_DAOWEN if d not in choices)
+    illegal = "愤怒"  # 已退役的旧转化节点，即使池已全展示仍必须拒绝。
     r2 = engine.execute_action("choose_hired_daowen", {"name": "小孙", "daowen": illegal})
     assert r2["success"] is False
     emp = next(e for e in engine.state.employees if e.name == "小孙")
@@ -165,3 +165,21 @@ def test_choose_hired_daowen_rejects_unknown_employee():
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+def test_hire_with_one_available_transformed_choice_never_rolls_empty_pool(monkeypatch):
+    monkeypatch.setattr(DaoWenEngine,"TRANSFORMED_DAOWEN",["全速"])
+    engine=_new_engine("single_pool")
+    r=engine.execute_action("pre_battle_action",{"sub_action":"雇佣","name":"单候选",
+        "blood_alloc":17,"atk_bundles":1})
+    assert r["success"],r
+    assert r["result"]["discovered_daowen_choices"]==["全速"]
+
+
+def test_empty_hiring_pool_rejects_before_creating_employee_and_refunds_energy(monkeypatch):
+    monkeypatch.setattr(DaoWenEngine,"TRANSFORMED_DAOWEN",[])
+    engine=_new_engine("empty_pool");before=engine.state.energy
+    r=engine.execute_action("pre_battle_action",{"sub_action":"雇佣","name":"空候选",
+        "blood_alloc":17,"atk_bundles":1})
+    assert not r["success"] and engine.state.energy==before
+    assert not engine.state.employees and not engine.state.pending_daowen_choices

@@ -768,7 +768,7 @@ class WorldState:
                     entry for entry in actor.memory
                     if entry.get("kind") == "location_sighting"
                     and entry.get("active", False)
-                    and (entry.get("location_kind") == "relic"
+                    and (entry.get("location_kind") in {"relic", "consumable"}
                          or (entry.get("location_kind") == "resource"
                              and entry.get("resource_type") == "shards"))
                 ]

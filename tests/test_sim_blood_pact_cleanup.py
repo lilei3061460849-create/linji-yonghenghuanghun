@@ -1,4 +1,4 @@
-"""血契由遗物改为道纹；不得出现在回始主动遗物决策里。"""
+"""共罪由遗物改为道纹；不得出现在回始主动遗物决策里。"""
 from __future__ import annotations
 
 import ast
@@ -28,21 +28,23 @@ def _literal_constant(path: str, name: str):
 def test_discovery_filters_do_not_skip_blood_pact_as_an_active_relic():
     for path, name in FILTERS:
         interactive = _literal_constant(path, name)
-        assert "血契" not in interactive
-        assert "对手血契" not in interactive
+        assert "共罪" not in interactive
+        assert "对手共罪" not in interactive
         assert interactive == {"回锋刀", "无所求"}  # 2026-10-13：【三相残韵盘】删除
-        choices = ["血契", "回锋刀"]
-        assert next(candidate for candidate in choices if candidate not in interactive) == "血契"
+        choices = ["共罪", "回锋刀"]
+        assert next(candidate for candidate in choices if candidate not in interactive) == "共罪"
 
 
 def test_blood_pact_is_a_daowen_not_a_relic():
     from engine.api import GameEngine
     from engine.daowen import DaoWenEngine
-    assert "血契" not in {name for name, _ in GameEngine.RELIC_DEFS}
+    assert "共罪" not in {name for name, _ in GameEngine.RELIC_DEFS}
     DaoWenEngine.register_all()
-    assert "血契" in DaoWenEngine._registry
-    calc = DaoWenEngine.resolve("血契", 2)
-    assert calc["cost"] == 20 and calc["mark_targets"] == 2 and calc["duration"] == -1
+    assert "共罪" in DaoWenEngine._registry
+    calc = DaoWenEngine.resolve("共罪", 2)
+    assert calc["cost_type"] == "流血" and calc["cost_hp"] == 10
+    assert "cost" not in calc
+    assert calc["mark_targets"] == 2 and calc["duration"] == -1
 
 
 def _engine(relics, *, speed=4, speed_limit=4, alive_enemies=0, sealed=None):
@@ -60,16 +62,16 @@ def _engine(relics, *, speed=4, speed_limit=4, alive_enemies=0, sealed=None):
 
 
 def test_round_start_does_not_propose_blood_pact():
-    engine = _engine(["血契"], speed=1, speed_limit=4, alive_enemies=1)
+    engine = _engine(["共罪"], speed=1, speed_limit=4, alive_enemies=1)
     assert round_start_relic_choices(engine) == {}
 
 
 def test_round_start_preserves_huifeng_choice_and_ignores_blood_pact():
-    engine = _engine(["血契", "回锋刀"], speed=1, speed_limit=4, alive_enemies=2)
+    engine = _engine(["共罪", "回锋刀"], speed=1, speed_limit=4, alive_enemies=2)
     assert round_start_relic_choices(engine) == {"回锋刀": {"enemy_index": 0}}
 
 
 def test_round_start_respects_relic_sealing():
-    engine = _engine(["血契", "回锋刀"], speed=1, speed_limit=4,
+    engine = _engine(["共罪", "回锋刀"], speed=1, speed_limit=4,
                      alive_enemies=1, sealed={"回锋刀": 1})
     assert round_start_relic_choices(engine) == {}

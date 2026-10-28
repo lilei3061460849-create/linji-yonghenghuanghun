@@ -124,7 +124,7 @@ def test_spending_mana_weakens_the_basic_attack():
 
     普攻本身不消耗法力，所以衰减不是自动发生的，而是「用法力」的机会成本；
     攻力是**实时读取当前法力**，不是战始快照——法力补回来（守夜灯/承露盏/
-    血契/透支/再生等）攻击力同步回升，不存在「掉下去就永远回不来」。
+    共罪/透支/再生等）攻击力同步回升，不存在「掉下去就永远回不来」。
     """
     e = _engine("decay", blood_points=1, speed_points=8, mana_points=16)
     p = e.state.player

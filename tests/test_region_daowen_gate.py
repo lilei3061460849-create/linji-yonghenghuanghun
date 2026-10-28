@@ -85,18 +85,18 @@ def test_wave_is_sunken_sea_exclusive():
     known = {"波及"}
     rejected = learnability_error("波及", owned=set(), region="龙心谷", known=known)
     assert "沉沦海专属道纹" in rejected
-    allowed = learnability_error("波及", owned={"沉溺"}, region="沉沦海", known=known)
+    allowed = learnability_error("波及", owned={"大梦"}, region="沉沦海", known=known)
     assert allowed is None
 
 
 def test_can_learn_same_region_after_owning_one():
     """正常路径：已持有本副本一种专属道纹后，可学习该副本其他专属道纹"""
-    e = _engine("龙心谷")
-    # 模拟"经残韵从本副本怪物身上转化获得"
-    e.state.player.dao_wen["裂变"] = DaoWenInstance(
-        DaoWen(name="裂变", formula="", cost_type="消耗",
+    e = _engine("扭曲都市")
+    # 龙心谷旧测试样本裂变/龙鳞/背负均已退役，改用仍有效的同区道纹。
+    e.state.player.dao_wen["超频"] = DaoWenInstance(
+        DaoWen(name="超频", formula="", cost_type="消耗",
                cost_formula="X", effect_formula=""))
-    for dw in ("龙鳞", "背负"):
+    for dw in ("定型", "坏死"):
         assert _learn(e, dw)["success"], f"同副本专属道纹{dw}应可学习"
 
 
@@ -104,7 +104,7 @@ def test_transformed_monster_daowen_not_learnable_outside_battle():
     """正常路径：怪物转化道纹须以自身已持有的道纹为起点经残韵获得，
     不可通过局外【学习】直接习得（规则正文·局外系统·学习门槛）"""
     e = _engine("龙心谷")
-    for dw in ("蒙蔽", "弱化", "全速"):
+    for dw in ("弱化", "全速"):
         r = _learn(e, dw)
         assert not r["success"], f"转化道纹{dw}不应能被局外直接学习"
         assert "怪物转化道纹" in r["error"]
@@ -136,7 +136,8 @@ def test_rejected_monster_daowen_refunds_energy():
 def test_first_exclusive_cannot_be_learned_directly():
     """边界：未持有任何本副本专属道纹时，不能直接学习第一个"""
     e = _engine("龙心谷")
-    r = _learn(e, "龙鳞")
+    e = _engine("扭曲都市")
+    r = _learn(e, "定型")
     assert not r["success"]
     assert "残韵" in r["error"]
 
@@ -190,3 +191,14 @@ def test_pools_are_disjoint():
         for j in range(i + 1, len(regions)):
             a, b = REGION_EXCLUSIVE_DAOWEN[regions[i]], REGION_EXCLUSIVE_DAOWEN[regions[j]]
             assert not (a & b), f"{regions[i]}与{regions[j]}专属道纹重叠：{a & b}"
+
+
+def test_retired_dragon_and_monster_nodes_are_not_reintroduced():
+    from engine.daowen import DaoWenEngine
+    from engine.gamedata import learnability_error
+    DaoWenEngine.register_all()
+    known = set(DaoWenEngine._registry)
+    for name in ("裂变", "龙鳞", "背负", "蒙蔽"):
+        assert name not in known
+        assert "未知道纹" in learnability_error(
+            name, owned=set(), region="龙心谷", known=known)

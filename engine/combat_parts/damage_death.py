@@ -427,12 +427,12 @@ class DamageDeathMixin:
             # 血限压降导致的当前生命下降同样是失血；统一交给
             # Entity.__setattr__ 的「失去生命后」钩子触发，不再手工接线。
             # 「失去生命前」：血限压迫即将把当前生命压下来。
-            if entity.current_hp > entity.blood_limit and self._attack_after_window_target is not entity:
+            if entity.current_hp > entity.effective_blood_limit() and self._attack_after_window_target is not entity:
                 self._fire_before_life_lost(entity, bl_ctx or parent)
             self._hp_loss_ctx = bl_ctx or parent
             # 2026-10-14：【猩红果实】持有者豁免血限压顶（生命可超血限）。
             if not self.state.hp_overflow_exempt(entity):
-                entity.current_hp = min(entity.current_hp, entity.blood_limit)
+                entity.current_hp = min(entity.current_hp, entity.effective_blood_limit())
         died = self._check_hp_zero_death(entity, ctx=bl_ctx or parent) if lethal else False
         return {"applied": applied, "ctx": bl_ctx, "died": died}
 
@@ -488,6 +488,8 @@ class DamageDeathMixin:
         source: Optional[Entity], damage_ctx: EffectContext, legacy_ctx: bool,
     ) -> dict:
         original_damage = amount
+        defer_active = (damage_type != "代价"
+                        and self._relic_active(target, "缓厄沙漏"))
         # 逆血龙鳞：本回合实际失血累计转为本次造成伤害的固定加值。
         if source is not None and self._relic_active(source, "逆血龙鳞"):
             amount += max(0, int(getattr(source, "hp_lost_this_round", 0) or 0))
@@ -588,6 +590,8 @@ class DamageDeathMixin:
             if preview_after_shield > 0 and damage_type != "代价"
             else preview_after_shield
         )
+        if defer_active:
+            preview_adjusted //= 2
         preview_rule_context.post_rule_damage = preview_adjusted
         # LethalMitigationHook 自己按传入 type 处理格挡；normal 情况补回护盾
         # 即可让它看到同一份 post-shield/post-status 的剩余伤害。
@@ -690,10 +694,19 @@ class DamageDeathMixin:
                 target, remaining, apply_type, source, self.state,
                 resolution_context=committed_context)
 
+        def _defer_damage(remaining: int) -> int:
+            delayed = (remaining + 1) // 2
+            if not hasattr(target, "deferred_damage"):
+                target.deferred_damage = []
+            target.deferred_damage.append({"amount": delayed, "source": damage_ctx.source,
+                                           "created_round": self.state.current_round})
+            return remaining - delayed
+
         detail = target.take_damage(
             amount, apply_type,
             life_loss_multiplier=self.state.life_loss_multiplier(target),
-            status_adjuster=_commit_incoming_rules)
+            status_adjuster=_commit_incoming_rules,
+            damage_deferrer=_defer_damage if defer_active else None)
         self._attach_damage_context(detail, damage_ctx, legacy_ctx)
         actual = detail.get("actual_damage", 0)
         actual_life_loss = max(0, detail.get("hp_before", target.current_hp)

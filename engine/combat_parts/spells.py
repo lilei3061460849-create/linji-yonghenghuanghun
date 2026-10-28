@@ -450,6 +450,7 @@ class SpellReactionMixin:
                 entry["target_ref"] = None
             else:
                 entry["target_ref"] = reverse.get(id(entity))
+            entry["extra_choice_schema"]=self.daowen_extra_choice_schema(holder,self._step_daowen(step),refs)
             out.append(entry)
         return out
 
@@ -566,7 +567,9 @@ class SpellReactionMixin:
                 target_ref=entry.get("target_ref"),
                 dodge=bool(entry.get("dodge")),
                 dodge_relic_target_ref=entry.get("dodge_relic_target_ref"),
-                extra=dict(entry.get("extra") or {}),
+                extra={**dict(entry.get("extra") or {}),
+                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper", "catalysis_steps", "cost_channel", "cost_choices", "cost_share_target_ref", "dragon_heart_use", "y")
+                          if key in entry}},
             ))
         return out
 
@@ -680,6 +683,9 @@ class SpellReactionMixin:
 
         返回 (early: StepResult|None, trigger_logs: list[dict])。
         """
+        if self.state.is_sealed_away(caster) or caster.is_departed or caster.has_retreated:
+            return StepResult(status=StepStatus.INTERRUPTED,daowen=daowen,x=x,
+                reason=InterruptReason.CASTER_UNAVAILABLE,detail="施法者已暂离、离场或撤退"),[]
         if target is not None and target is not caster and not self.is_targetable(caster, target):
             return StepResult(
                 status=StepStatus.INTERRUPTED, daowen=daowen, x=x,
@@ -692,6 +698,19 @@ class SpellReactionMixin:
                 target_name=getattr(target, "name", ""),
                 reason=InterruptReason.DAOWEN_UNUSABLE,
                 detail="缄默面具：无法发动附带代价的道纹"), []
+        if daowen == "催化":
+            try:
+                self.prepare_catalysis(calc,caster,target,entry_extra,refs)
+                calc["catalysis_allow_reactions"]=policy.allow_trigger_reactions
+            except ValueError as exc:
+                return StepResult(status=StepStatus.FAILED,daowen=daowen,x=x,
+                                  reason=InterruptReason.INVALID_INPUT,detail=str(exc)),[]
+        if daowen == "回响":
+            try:
+                self.prepare_huixiang(calc, caster, target, entry_extra, refs)
+            except ValueError as exc:
+                return StepResult(status=StepStatus.FAILED, daowen=daowen, x=x,
+                                  reason=InterruptReason.INVALID_INPUT, detail=str(exc)), []
         logs: list[dict] = []
         if policy.allow_trigger_reactions:
             choices = (entry_extra or {}).get("trigger_spell_choices", {})
@@ -711,6 +730,10 @@ class SpellReactionMixin:
                     reason=InterruptReason.CASTER_DEAD,
                     detail=f"{caster.name}发动道纹前被反应法术命零",
                     trigger_spell_logs=logs), logs
+            if self.state.is_sealed_away(caster) or caster.is_departed or caster.has_retreated:
+                return StepResult(status=StepStatus.INTERRUPTED,daowen=daowen,x=x,
+                    reason=InterruptReason.CASTER_UNAVAILABLE,detail="发动前反应使施法者暂离或离场",
+                    trigger_spell_logs=logs),logs
         return None, logs
 
     def _execute_single_daowen_step(self, *, definition, step, entry, caster: Entity,
@@ -719,7 +742,8 @@ class SpellReactionMixin:
                                     target_resolver=None,
                                     skip_predicate=None,
                                     policy: Optional[SpellStepPolicy] = None,
-                                    step_key: str = "", iteration: int = 0) -> StepResult:
+                                    step_key: str = "", iteration: int = 0,
+                                    _cooldown_permission=None) -> StepResult:
         """执行法术中的单步道纹（=一次"发动道纹"），返回 StepResult。
 
         这是唯一的单步结算核心：反应法术 / 道纹前法术 / 全局时点法术 / 瞬发法术
@@ -779,6 +803,14 @@ class SpellReactionMixin:
                 detail=f"步骤target_ref={target_ref_in}与期望{expected_ref}不一致")
         target_ref = expected_ref if role != "any" else target_ref_in
 
+        try:
+            target, tamper_rule = self.resolve_tampered_target(caster, target, daowen, entry_dict, refs)
+            if tamper_rule is not None:
+                target_ref = reverse.get(id(target))
+        except ValueError as exc:
+            return StepResult(status=StepStatus.FAILED, daowen=daowen, x=x or 0,
+                              reason=InterruptReason.INVALID_INPUT, detail=str(exc))
+
         # --- 目标失效：跳过本步，不中断整个法术 ---
         if target is None or not getattr(target, "is_alive", False):
             return StepResult(
@@ -804,7 +836,9 @@ class SpellReactionMixin:
 
         # --- 道纹可用性 ---
         dw_inst = caster.dao_wen.get(daowen)
-        if dw_inst is None or not dw_inst.can_use():
+        allowed_by_catalysis=(dw_inst is not None and dw_inst is _cooldown_permission
+                              and not dw_inst.is_frozen and not dw_inst.spent_unique)
+        if dw_inst is None or not (dw_inst.can_use() or allowed_by_catalysis):
             return StepResult(
                 status=StepStatus.INTERRUPTED, daowen=daowen, x=x,
                 target_ref=target_ref, target_name=target.name,
@@ -822,7 +856,8 @@ class SpellReactionMixin:
 
         # --- 道纹计算 ---
         try:
-            calc = DaoWenEngine.resolve(daowen, x, target=target, caster=caster)
+            calc = DaoWenEngine.resolve(daowen, x, target=target, caster=caster,
+                **{key:entry_dict[key] for key in ("cost_channel","cost_choices","y") if key in entry_dict})
         except Exception as exc:
             return StepResult(
                 status=StepStatus.FAILED, daowen=daowen, x=x,
@@ -869,15 +904,23 @@ class SpellReactionMixin:
                     reason=InterruptReason.SPEED_INSUFFICIENT,
                     detail="目标速度不足以闪避",
                     trigger_spell_logs=trigger_logs, iteration=iteration)
+            missed_cost=self.pay_daowen_numeric_cost(daowen,calc,caster,
+                dragon_heart_use=entry_dict.get("dragon_heart_use",0),
+                cost_share_target_ref=entry_dict.get("cost_share_target_ref",""))
             self._spend_dodge_speed(target, dodge_relic)
+            self.pay_daowen_cooldown(daowen,calc,caster)
+            self.consume_tamper(caster, tamper_rule)
             return StepResult(
                 status=StepStatus.DODGED, daowen=daowen, x=x,
                 target_ref=target_ref, target_name=target.name,
-                cost_paid=cost_paid, trigger_spell_logs=trigger_logs, iteration=iteration)
+                cost_paid=cost_paid,execution={"effects":[missed_cost] if missed_cost else []}, trigger_spell_logs=trigger_logs, iteration=iteration)
 
         # --- 真正执行道纹效果 ---
+        self.pay_daowen_cooldown(daowen,calc,caster)
         try:
-            execution = self.apply_daowen_effect(daowen, calc, caster, target)
+            execution = self.apply_daowen_effect(daowen,calc,caster,target,
+                dragon_heart_use=entry_dict.get("dragon_heart_use",0),
+                cost_share_target_ref=entry_dict.get("cost_share_target_ref",""))
         except Exception as exc:
             return StepResult(
                 status=StepStatus.FAILED, daowen=daowen, x=x,
@@ -887,6 +930,7 @@ class SpellReactionMixin:
                 detail=f"道纹{daowen}执行失败: {exc}",
                 trigger_spell_logs=trigger_logs, iteration=iteration)
 
+        self.consume_tamper(caster, tamper_rule)
         return StepResult(
             status=StepStatus.COMPLETED, daowen=daowen, x=x,
             target_ref=target_ref, target_name=target.name,
@@ -1351,7 +1395,9 @@ class SpellReactionMixin:
                 dodge=dodge,
                 dodge_relic_target_ref=entry.get("dodge_relic_target_ref"),
                 # 每一步都是一次"发动道纹"：敌方「目标发动道纹前」反应的逐步提交
-                extra={"trigger_spell_choices": entry.get("trigger_spell_choices", {})},
+                extra={"trigger_spell_choices": entry.get("trigger_spell_choices", {}),
+                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper", "catalysis_steps", "cost_channel", "cost_choices", "cost_share_target_ref", "dragon_heart_use", "y")
+                          if key in entry}},
             ))
 
         required = sorted(collect_step_daowen(program))

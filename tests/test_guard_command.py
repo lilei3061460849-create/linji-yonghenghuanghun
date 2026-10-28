@@ -1,10 +1,6 @@
-"""命令朋友/员工替你扛伤（护卫命令）测试。
+"""通用护卫指令：不持有背负道纹也能替轮回者挡伤，且不消耗出手。
 
-引擎机制：背负X（龙心谷道纹）「选择目标，其下X次受到伤害由自身承担」；
-伤害重定向在 combat._apply_hostile_damage 实装（龙心谷 F2）。
-command_ally 支持「发动背负 打 轮回者/我」——道纹指令目标允许指向我方单位。
-
-覆盖：正常路径 / 别名 / 边界 / 错误输入
+背负道纹已删除；内部_beifu_*与状态名只承载护卫重定向，不是可学习资源。
 """
 import json
 import os
@@ -36,8 +32,6 @@ def _engine(suffix: str, region: str = "乱葬岗") -> GameEngine:
 def _friend_beifu(name="岩行者", x=1, hp=54, atk_count=2, atk_power=4) -> Entity:
     fr = Entity(name, "朋友", blood_limit=hp, current_hp=hp,
                 attack_count=atk_count, attack_power=atk_power)
-    fr.dao_wen["背负"] = DaoWenInstance(
-        DaoWen(name="背负", formula="", cost_type="", cost_formula="", effect_formula=""), x_value=x)
     return fr
 
 
@@ -65,7 +59,7 @@ def _resolve_monster_phase(engine):
 
 
 def test_command_guard_with_beifu_redirects_damage():
-    """正常路径：命令岩行者「发动背负 打 轮回者」，怪物打玩家的伤害转给岩行者。"""
+    """无需任何道纹：命令岩行者护卫，怪物对玩家伤害转给岩行者。"""
     e = _engine("guard_ok")
     fr = _friend_beifu()
     e.state.friends.append(fr)
@@ -77,7 +71,7 @@ def test_command_guard_with_beifu_redirects_damage():
     fr_hp_before = fr.current_hp
 
     r = e.execute_action("command_ally", {
-        "ally_ref": "friend:0", "instruction": "发动背负 打 轮回者"})
+        "ally_ref": "friend:0", "instruction": "护卫 1"})
     assert r["success"], r
     # 背负注册：岩行者._beifu_left >= 1 且目标=玩家
     assert getattr(fr, "_beifu_left", 0) >= 1
@@ -103,7 +97,7 @@ def test_command_guard_alias_me():
                attack_count=6, attack_power=9)
     _start_battle_with(e, m)
     r = e.execute_action("command_ally", {
-        "ally_ref": "friend:0", "instruction": "发动背负 打 我"})
+        "ally_ref": "friend:0", "instruction": "保护我 1"})
     assert r["success"], r
     assert getattr(fr, "_beifu_target", None) == e.state.player.runtime_id
 

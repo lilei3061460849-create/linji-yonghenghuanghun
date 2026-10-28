@@ -61,19 +61,15 @@ STALE_KNOWLEDGE_HEADING = re.compile(
     re.MULTILINE,
 )
 
-# 资源设计标准（2026-10-23 用户裁定）：四类资源的资格与结构，缺一条即视为规则丢失。
+# 类型定义统一由《规则正文·基础定义》维护；此处只检查知识库的资格/转换标准。
+# 不要求在知识库复制四类定义，更不能用旧版X措辞覆盖现行“目标数量”。
 RESOURCE_DESIGN_HEADING = "【二、资源设计标准】"
 RESOURCE_DESIGN_MARKERS = (
-    "现有任何资源都无法实现的效果，才有资格新增资源",
+    "现有资源无论如何组合都无法实现的效果",
     "消耗品不受此限制",
-    "名称仅二字",
-    "局外发动须",
-    "X 只能提升效果强度或持续时间",
-    "无 X 变量",
-    "必有触发时机及对应效果",
-    "不受限其他资源规则",
-    "主动与被动均可生效",
-    "不消耗出手",
+    "凡是不符合自身类型定义的资源，应转换为其他符合其自身定义的资源类型",
+    "效果强度过高时，优先转换为消耗品",
+    "效果强度过低时，优先转换为遗物",
     "当场设计",
 )
 
@@ -181,6 +177,9 @@ def validate_ai_knowledge_base(path: str | Path) -> dict:
         for marker in RESOURCE_DESIGN_MARKERS:
             if marker not in design.group("body"):
                 errors.append(f"资源设计标准缺少关键要求：{marker}")
+
+    if '《规则正文》「基础定义」' not in text:
+        errors.append('缺少资源类型定义指向《规则正文》「基础定义」的事实源声明')
 
     if errors:
         raise ValueError("AI知识库校验失败：\n" + "\n".join(errors))

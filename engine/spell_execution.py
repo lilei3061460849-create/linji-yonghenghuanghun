@@ -103,6 +103,7 @@ class InterruptReason(str, Enum):
     INVALID_INPUT = "invalid_input"
     SHARDS_INSUFFICIENT = "shards_insufficient"
     CASTER_DEAD = "caster_dead"
+    CASTER_UNAVAILABLE = "caster_unavailable"
     TRIGGER_CHOICES_INVALID = "trigger_choices_invalid"
     # 工程安全阀：循环次数超过 MAX_SPELL_LOOP_ITERATIONS。
     # 正常规则循环不会触达；触达说明程序不满足任何规则终止条件。

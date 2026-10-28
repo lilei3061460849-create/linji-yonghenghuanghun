@@ -174,7 +174,7 @@ def test_battle_end_does_not_grant_mana_to_non_reincarnator():
 # 版本史：旧版「[回始]失去2X法力，持续∞」→ 2026-08-30「持续X回合无法获得法力」
 #       → 2026-09-09 因法力改一池制、[回始]不再回填而一度改为「消耗翻倍」
 #       → 2026-10-08 用户令：恢复「无法获得[法力]」原意。此时战斗内已有多个
-#         法力来源（聚能／储能电池／守夜灯／承露盏／血契／透支／
+#         法力来源（聚能／储能电池／守夜灯／承露盏／共罪／透支／
 #         法术），效果重新有对象。判定位唯一：Entity.can_gain_mana()/gain_mana()。
 
 def test_gouhun_blocks_every_mana_gain_until_it_expires():
@@ -236,7 +236,7 @@ def test_gouhun_blocks_relic_and_action_mana_sources():
     p.current_mana = 0
     p.add_status(StatusEffect(name="勾魂", value=1, remaining_rounds=3, source="寄骨蝇"))
     for source, amount in (("守夜灯", 3), ("承露盏", 2), ("聚能", 5),
-                           ("储能电池", 12), ("血契", 1), ("透支", 4), ("法术", 7)):
+                           ("储能电池", 12), ("共罪", 1), ("透支", 4), ("法术", 7)):
         before = p.current_mana
         assert p.gain_mana(amount) == 0, f"{source} 的法力应被勾魂压死"
         assert p.current_mana == before, f"{source} 不得改变当前法力"

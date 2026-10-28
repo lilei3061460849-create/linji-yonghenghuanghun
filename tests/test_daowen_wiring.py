@@ -178,7 +178,6 @@ def test_jiahai_status_consumable_guzhi_and_anger_consumable():
     assert "加害" not in DAOWEN_RULES
     assert any(rule.status_name == "加害" for rule in STATUS_DAMAGE_RULES)
     p = engine.state.player
-    _give(p, "固执")
     m = _monster(engine, ap=10)
     engine.execute_action("round_start", {})
 
@@ -200,7 +199,10 @@ def test_jiahai_status_consumable_guzhi_and_anger_consumable():
         engine.state.consumables.remove(item)
 
     p.current_hp = 50
-    engine.execute_action("use_daowen", {"daowen_name": "固执", "x": 2})
+    pill = Consumable("定命丸", "每次失去生命最多1，持续1回合", 2, 2)
+    engine.state.consumables.append(pill)
+    assert engine.execute_action("consume_item", {"name": "定命丸"})["success"]
+    assert pill.current_uses == 1
     assert p.has_status("固执")
     d2 = p.take_damage(20)
     assert d2["actual_damage"] == 1
@@ -332,7 +334,7 @@ def test_flight_rule_line_matches_the_engine():
 
 
 def test_zengzhi_grants_temporary_infinite_blood_limit_and_bypasses_cancer():
-    """增殖X：支付流血10X，目标血限暂时视为无限；有限回复不触发癌变。"""
+    """增殖X：支付衰老X，目标血限暂时视为无限；有限回复不触发癌变。"""
     engine = _engine("zengzhi_infinite_blood")
     p = engine.state.player
     _give(p, "增殖")
@@ -360,17 +362,17 @@ def test_zengzhi_grants_temporary_infinite_blood_limit_and_bypasses_cancer():
 
 
 def test_chengni_advances_target_rounds_without_advancing_world_time():
-    """沉溺推进目标经历的回合，不推进世界回合；状态与凡庸按该回合结算。"""
+    """大梦推进目标经历的回合，不推进世界回合；状态与凡庸按该回合结算。"""
     engine = _engine("ningzhi_real_round")
-    _give(engine.state.player, "沉溺")
-    target = _monster(engine, "沉溺靶怪", hp=100)
+    _give(engine.state.player, "大梦")
+    target = _monster(engine, "大梦靶怪", hp=100)
     target.add_status(StatusEffect(name="测试增益", value=1, remaining_rounds=2, source="test"))
     target.actions_used_this_round = 1
     target.damage_dealt_this_round = 1
     engine.execute_action("round_start", {})
     before_round = engine.state.current_round
     result = engine.execute_action("use_daowen", {
-        "daowen_name": "沉溺", "x": 1, "target": target.name,
+        "daowen_name": "大梦", "x": 1, "target": target.name,
         "dodge": False, "blood_shadow": False,
     })
     assert result["success"], result
@@ -382,7 +384,7 @@ def test_chengni_advances_target_rounds_without_advancing_world_time():
 
 
 def test_chengni_triggers_nightwatch_per_extra_round_using_world_round():
-    """沉溺每让角色经历一个回合就触发守夜灯，但收益始终按世界回合数计算。"""
+    """大梦每让角色经历一个回合就触发守夜灯，但收益始终按世界回合数计算。"""
     engine = _engine("chengni_nightwatch")
     target = Entity(
         name="持灯轮回者", entity_type="轮回者",
@@ -399,7 +401,7 @@ def test_chengni_triggers_nightwatch_per_extra_round_using_world_round():
     engine.state.player.add_status(
         StatusEffect(name="玩家状态", value=1, remaining_rounds=3, source="test"))
 
-    effects = engine.combat.advance_target_rounds(target, 3, source="沉溺")
+    effects = engine.combat.advance_target_rounds(target, 3, source="大梦")
 
     assert engine.state.current_round == 10
     assert target.current_mana == 30
@@ -409,8 +411,8 @@ def test_chengni_triggers_nightwatch_per_extra_round_using_world_round():
     assert len([e for e in effects if isinstance(e, dict) and e.get("type") == "extra_target_round"]) == 3
 
 
-def test_jinghua_allows_caster_selected_reversible_cost_layers():
-    """净化由施法者自选可逆数值型代价，层数总和不能超过X。"""
+def test_jinghua_rejects_mixed_cost_layers():
+    """净化只能选择一种数值类代价，不能混选或拆分X。"""
     engine = _engine("jinghua_cost_choices")
     _give(engine.state.player, "净化")
     target = _monster(engine, "净化靶怪", hp=100)
@@ -422,7 +424,7 @@ def test_jinghua_allows_caster_selected_reversible_cost_layers():
         "cost_choices": [{"type": "衰老", "layers": 1}, {"type": "异变", "layers": 2}],
         "dodge": False, "blood_shadow": False,
     })
-    assert result["success"], result
-    assert target.blood_limit == 101
-    assert target.mutation_count == 2
+    assert not result["success"], result
+    assert target.blood_limit == 100
+    assert target.mutation_count == 4
 
