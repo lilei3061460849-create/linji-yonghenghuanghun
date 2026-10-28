@@ -567,7 +567,7 @@ class SpellReactionMixin:
                 dodge=bool(entry.get("dodge")),
                 dodge_relic_target_ref=entry.get("dodge_relic_target_ref"),
                 extra={**dict(entry.get("extra") or {}),
-                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper", "catalysis_steps")
+                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper", "catalysis_steps", "cost_channel", "cost_choices", "cost_share_target_ref", "dragon_heart_use", "y")
                           if key in entry}},
             ))
         return out
@@ -682,6 +682,9 @@ class SpellReactionMixin:
 
         返回 (early: StepResult|None, trigger_logs: list[dict])。
         """
+        if self.state.is_sealed_away(caster) or caster.is_departed or caster.has_retreated:
+            return StepResult(status=StepStatus.INTERRUPTED,daowen=daowen,x=x,
+                reason=InterruptReason.CASTER_UNAVAILABLE,detail="施法者已暂离、离场或撤退"),[]
         if target is not None and target is not caster and not self.is_targetable(caster, target):
             return StepResult(
                 status=StepStatus.INTERRUPTED, daowen=daowen, x=x,
@@ -726,6 +729,10 @@ class SpellReactionMixin:
                     reason=InterruptReason.CASTER_DEAD,
                     detail=f"{caster.name}发动道纹前被反应法术命零",
                     trigger_spell_logs=logs), logs
+            if self.state.is_sealed_away(caster) or caster.is_departed or caster.has_retreated:
+                return StepResult(status=StepStatus.INTERRUPTED,daowen=daowen,x=x,
+                    reason=InterruptReason.CASTER_UNAVAILABLE,detail="发动前反应使施法者暂离或离场",
+                    trigger_spell_logs=logs),logs
         return None, logs
 
     def _execute_single_daowen_step(self, *, definition, step, entry, caster: Entity,
@@ -848,7 +855,8 @@ class SpellReactionMixin:
 
         # --- 道纹计算 ---
         try:
-            calc = DaoWenEngine.resolve(daowen, x, target=target, caster=caster)
+            calc = DaoWenEngine.resolve(daowen, x, target=target, caster=caster,
+                **{key:entry_dict[key] for key in ("cost_channel","cost_choices","y") if key in entry_dict})
         except Exception as exc:
             return StepResult(
                 status=StepStatus.FAILED, daowen=daowen, x=x,
@@ -906,7 +914,9 @@ class SpellReactionMixin:
         # --- 真正执行道纹效果 ---
         self.pay_daowen_cooldown(daowen,calc,caster)
         try:
-            execution = self.apply_daowen_effect(daowen, calc, caster, target)
+            execution = self.apply_daowen_effect(daowen,calc,caster,target,
+                dragon_heart_use=entry_dict.get("dragon_heart_use",0),
+                cost_share_target_ref=entry_dict.get("cost_share_target_ref",""))
         except Exception as exc:
             return StepResult(
                 status=StepStatus.FAILED, daowen=daowen, x=x,
@@ -1382,7 +1392,7 @@ class SpellReactionMixin:
                 dodge_relic_target_ref=entry.get("dodge_relic_target_ref"),
                 # 每一步都是一次"发动道纹"：敌方「目标发动道纹前」反应的逐步提交
                 extra={"trigger_spell_choices": entry.get("trigger_spell_choices", {}),
-                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper", "catalysis_steps")
+                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper", "catalysis_steps", "cost_channel", "cost_choices", "cost_share_target_ref", "dragon_heart_use", "y")
                           if key in entry}},
             ))
 

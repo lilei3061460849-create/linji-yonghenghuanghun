@@ -5508,9 +5508,10 @@ class GameEngine:
                          "catalysis_steps": params.get("catalysis_steps")},
             policy=self.combat.CAST_STEP_POLICY)
         if early is not None:
-            if early.reason == _IR.CASTER_DEAD:
+            if early.reason in (_IR.CASTER_DEAD,_IR.CASTER_UNAVAILABLE):
                 note_action_targets(self.state, actor, _dw_selected)
-                return {"success": True, "action": f"{actor.name}发动道纹前被反应法术命零",
+                return {"success": True, "action": (f"{actor.name}发动道纹前被反应法术命零" if early.reason==_IR.CASTER_DEAD
+                                                     else f"{actor.name}发动道纹前被反应法术移出战场"),
                         "result": {"trigger_spell_logs": trigger_logs, "daowen_resolved": False}}
             return {"success": False, "error": early.detail}
 

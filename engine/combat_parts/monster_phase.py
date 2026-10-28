@@ -450,8 +450,6 @@ class MonsterPhaseMixin:
         # 付不起的情况已由上一闸门挡掉，这里只做实际支付。
         # 注意：法力同时就是[攻击力]，此刻支付会削弱本回合**之后**的普攻——
         # 攻击与道纹的先后顺序由提交方（AI/操作者）决定，这正是"先攻后纹还是先纹后攻"的取舍。
-        if calc.get("cost_type") == "消耗" and calc.get("cost", 0) > 0:
-            monster.spend_mana(calc["cost"])
         hostile = self.state.on_player_side(target) != self.state.on_player_side(monster)
         dodge = choice.get("dodge")
         blood_shadow = choice.get("blood_shadow", False)
@@ -530,9 +528,14 @@ class MonsterPhaseMixin:
         # 执行阶段：守夜灯法力已在[敌回始]实际授予，无需预计算（extra_mana 默认0）。
         self.validate_daowen_trigger_spells(monster, trigger_choices, refs)
         trigger_logs = self.resolve_daowen_trigger_spells(monster, trigger_choices, refs)
-        if not monster.is_alive:
+        if not monster.is_alive or self.state.is_sealed_away(monster) or monster.is_departed or monster.has_retreated:
             return {"monster": monster.name, "daowen_activated": name,
                     "interrupted_by_spell": True, "trigger_spell_logs": trigger_logs}
+        if not self._monster_can_pay_calc_cost(monster,calc):
+            return {"monster":monster.name,"daowen_skipped":name,"reason":"反应后无法支付代价",
+                    "trigger_spell_logs":trigger_logs}
+        if calc.get("cost_type")=="消耗" and calc.get("cost",0)>0:
+            monster.spend_mana(calc["cost"])
 
         # 残韵改写只替换本次结算：不支付源道纹代价，也不将源道纹记为已激活。
         if rewritten_as:

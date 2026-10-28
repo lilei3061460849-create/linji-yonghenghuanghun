@@ -1629,6 +1629,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
     def is_targetable(self, attacker: Entity, target: Entity) -> bool:
         """目标是否可被选中：非飞行者无法选中飞行目标。"""
+        if self.state.is_sealed_away(attacker) or self.state.is_sealed_away(target):
+            return False
         if self._is_flying(target):
             return self._is_flying(attacker)
         return True
