@@ -56,6 +56,8 @@ def _new_engine(db_suffix: str, speed_points: int = 8) -> GameEngine:
                                         blood_limit=10 ** 7, current_hp=10 ** 7,
                                         attack_count=1, attack_power=1))
     engine.execute_action("round_start", {})
+    # 本夹具测基础2出手，不能让随机发现的【沉重枷锁】把全场预算减1。
+    engine.state.relics.clear()
     engine.state.player.current_mana = 999
     return engine
 

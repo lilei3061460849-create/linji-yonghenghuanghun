@@ -172,6 +172,9 @@ def extract_daowen(root: Path, relpath: str) -> str:
         if j >= len(lines):
             continue
         effect = lines[j].strip()
+        meta = lines[j+1].strip() if j+1<len(lines) else ""
+        if "执行状态：" in meta and any(word in meta for word in FUTURE_WORDS):
+            continue
         if effect.startswith("X："):
             out.append(f"{heading.group(1)}：{effect[2:]}")
         elif effect.startswith("X（"):

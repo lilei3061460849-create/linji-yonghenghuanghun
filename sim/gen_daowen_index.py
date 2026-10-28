@@ -223,7 +223,7 @@ category_summary = (
 )
 if BLOODLINE_EXCLUSIVE_DAOWEN:
     category_summary += f" ｜ 血族专属 {len(BLOODLINE_EXCLUSIVE_DAOWEN)}"
-category_summary += f" ｜ 初拥专属 {len(FIRST_EMBRACE_DAOWEN)} ｜ 未实现 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。"
+category_summary += f" ｜ 初拥专属 {len(FIRST_EMBRACE_DAOWEN)} ｜ 已实现但副本未开放 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。"
 A(category_summary)
 A("")
 A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余已注册道纹取 `engine/daowen.py` `calculate_*` docstring；沉沦海2个未接入运行时节点取 `DRAFT_DAOWEN`。分裂按最新用户裁定覆盖旧计算器文案，注记明确运行时尚未同步。")
@@ -309,6 +309,8 @@ def section(title, names, note_lines=(), loop=None, loop_title=None):
         A(f"### {name}")
         A(f"X：{costs[name]}。{effects[name]}" if effects[name] else f"X：{costs[name]}。")
         meta = [f"[目标]：{target_label(name)}"]
+        if name in DRAFT_DAOWEN or name == "分裂":
+            meta.append("执行状态：当前定义尚未实现")
         if name == "共罪":
             meta.append("残韵路径：—（不属于残韵闭环）")
         elif out_edges[name]:
@@ -382,9 +384,9 @@ section(f"初拥专属（{len(FIRST_EMBRACE_DAOWEN)}）", sorted(FIRST_EMBRACE_D
 
 for owner in sorted(set(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.values())):
     names = [name for name, region in UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.items() if region == owner]
-    section(f"未实现副本（{owner}·{len(names)}）", names,
+    section(f"{owner}专属道纹（{len(names)}）", names,
             note_lines=["这些道纹计算/效果已接入，但所属副本尚未接入运行时，局外学习仍按所属副本门禁拒绝。"
-                        "草案中其余感染/篡改/催化/原初等节点是否实现，分别查当前裁定落地核查，不能据此批量视为已实现。"])
+                        "草案中其余感染/原初等节点是否实现，分别查当前裁定落地核查，不能据此批量视为已实现。"])
 
 A("---")
 A("")
