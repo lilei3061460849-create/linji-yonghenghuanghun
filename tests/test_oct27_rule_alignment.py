@@ -35,3 +35,12 @@ def test_drafts_are_not_runtime_implementations():
     pool = learnable_daowen_pool(owned={"大梦"}, region="沉沦海",
                                 known=set(DaoWenEngine._registry) | set(UNIMPLEMENTED_DAOWEN))
     assert not set(UNIMPLEMENTED_DAOWEN).intersection(pool)
+
+
+def test_retired_anger_is_not_granted_as_transformed_daowen():
+    from engine.gamedata import MONSTER_TRANSFORM_DAOWEN
+    DaoWenEngine.register_all()
+    assert set(DaoWenEngine.TRANSFORMED_DAOWEN) == MONSTER_TRANSFORM_DAOWEN
+    assert "愤怒" not in DaoWenEngine.TRANSFORMED_DAOWEN
+    assert "愤怒" not in DaoWenEngine._registry
+    assert "### 怒火针" in Path("物品索引.md").read_text()
