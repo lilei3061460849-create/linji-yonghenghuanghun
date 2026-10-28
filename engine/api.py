@@ -29,6 +29,10 @@ from .enums import (GamePhase, CombatSubphase, ActionPhase, TriggerTiming,
                     InterruptType, EntityType, EffectScope, EffectPolarity)
 from .dice import DiceEngine
 from .death_pages import can_accept as can_accept_page_resource
+from .yaoguai import (
+    BANNER_NAME, BANNER_CAPACITY, UNHOUSED_PAGE_COST,
+    find_owned_yaoguai, has_banner as has_yaoguai_banner, owned_yaoguai,
+)
 from .daowen import DaoWenEngine, ResonanceEngine
 from .combat import CombatEngine
 from .npc_consumables import (consume_tool, consume_named_combat_item,
@@ -499,12 +503,12 @@ class GameEngine:
                                 "speed_points": "nonnegative integer",
                                 "mana_points": "nonnegative integer",
                                 "constraint": "三者之和≤档位属性点+池内余点；1点=6血限，2点=1速限=1法限"},
-                "target": "player（默认）或已存在的朋友/员工/造物名称"}},
+                "target": "player（默认）或已存在的朋友/员工/妖怪名称"}},
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "学习", "sub": ["daowen"],
                 "tier": {"daowen": [1, 2]},
                 "names": "daowen必填，数量必须等于tier",
-                "recipient": "player（默认）、现存朋友/员工/造物名称，或pending暂存给未来朋友",
+                "recipient": "player（默认）、现存朋友/员工/妖怪名称，或pending暂存给未来朋友",
                 "note": "学习所得可分配给其他角色或暂存；法术已于2026-09-16改为无需学习：持所需道纹即可在战斗中用 "
                         "统一自定义施法（define_spell，消耗1次主动出手）"}},
             {"action_type": "pre_battle_action", "params_schema": {
@@ -533,15 +537,26 @@ class GameEngine:
         if pending_learned:
             actions.append({"action_type": "assign_learned_daowen",
                             "params_schema": {"name": pending_learned,
-                                              "recipient": "现存轮回者/朋友/员工/造物名称或runtime_id"},
+                                              "recipient": "现存轮回者/朋友/员工/妖怪名称或runtime_id"},
                             "note": "学习成果可以暂存，待未来结识朋友后再分配"})
-        has_ten_thousand_souls_banner = "万魂幡" in (self.state.artifacts_owned or [])
-        if (has_ten_thousand_souls_banner
+        if (has_yaoguai_banner(self.state)
                 and not any(action.get("params_schema", {}).get("sub_action") == "造生"
                             for action in actions)):
             actions.append({"action_type": "pre_battle_action",
-                            "params_schema": {"sub_action": "造生", "name": "optional string"},
-                            "note": "持有万魂幡，可在乱葬岗以外发动造生"})
+                            "params_schema": {
+                                "sub_action": "造生",
+                                "name": "创造新妖怪时可选；不得与target同传",
+                                "target": "培养现有妖怪时必填其名称或runtime_id"},
+                            "note": "持有煌妖幡可在乱葬岗以外造生；幡内最多6只妖怪"})
+        dormant_targets = [{"ref": entity.runtime_id, "name": entity.name,
+                            "current_hp": entity.current_hp, "blood_limit": entity.blood_limit}
+                           for entity in owned_yaoguai(self.state)
+                           if getattr(entity, "is_dormant", False)]
+        if dormant_targets:
+            actions.append({"action_type": "pre_battle_action",
+                            "params_schema": {"sub_action": "唤醒",
+                                              "target": dormant_targets},
+                            "note": "主动唤醒一只当前生命大于0的休眠妖怪；恢复本身不会自动唤醒"})
         if any(entity.name == "医生" and entity.is_alive for entity in self.state.employees):
             actions.append({"action_type": "upgrade_doctor",
                             "params_schema": {"mode": ["attack_count", "attack_power"]},
@@ -633,6 +648,7 @@ class GameEngine:
                                                                   "actor_id": "optional; defaults to player"}},
                 {"action_type": "world_command_created_being", "params_schema": {
                     "behavior": ["explore", "follow", "guard"],
+                    "target": "可选：妖怪名称或runtime_id；省略时保持原默认第一只存活妖怪",
                     "x": "guard模式可选整数坐标", "y": "guard模式可选整数坐标"}},
                 {"action_type": "world_suggest_ally", "params_schema": {
                     "target_actor_id": "相邻/近处友方单位的 actor_id（来自 world_status.allies）",
@@ -659,7 +675,8 @@ class GameEngine:
                 schema: dict[str, Any] = {
                     "world_encounter_id": encounter.encounter_id,
                     "relic_choices": "逐件显式提交可选战始遗物",
-                    "summon_created_being": "可选布尔值；true时召唤五格可通行路径内的造物助战，默认false",
+                    "summon_created_being": "可选布尔值；true时召唤五格可通行路径内的妖怪助战，默认false",
+                    "summon_created_being_target": "可选：要召唤的妖怪名称或runtime_id；省略保持原默认",
                 }
                 global_spells = self.combat.prepare_global_trigger_spells(TriggerTiming.BATTLE_START.value)
                 if global_spells:
@@ -696,8 +713,10 @@ class GameEngine:
             return [{"id": "炼心", "params_schema": {}}]
         if self.state.current_region == "乱葬岗":
             return [{"id": "造生", "params_schema": {
-                "name": "首次造生时可选；造物名字，须与场上其他角色不同"},
-                "note": "首次造生消耗10碎片并创造一个固定专属道纹、初始偏爱的造物；后续每次消耗25碎片，血限+6、法限+1、速限+1，视野范围+1格"}]
+                "name": "创造新妖怪时可选；须与其他角色不同，不得与target同传",
+                "target": "培养现有妖怪时必填其名称或runtime_id；省略target表示创造"},
+                "note": "创造消耗10碎片并获得固定专属道纹、初始偏爱；指定培养消耗25碎片，"
+                        "血限+6、法限+1、速限+1、视野+1格。未入幡妖怪每只占5张死者之页"}]
         return []
 
     def _get_battle_start_actions(self) -> dict:
@@ -1952,7 +1971,7 @@ class GameEngine:
                          winner_name=player.name, reason="sole_survivor")
             return {"active": False, "complete": True, "winner": player.runtime_id,
                     "sole_survivor": True}
-        # 最终死斗以剩余轮回者人数判定，不要求玩家先抛弃朋友/员工/造物；
+        # 最终死斗以剩余轮回者人数判定，不要求玩家先抛弃朋友/员工/妖怪；
         # 怪物仍然存在时，也会在两名轮回者自然会合期间继续构成威胁。
         eligible = (player is not None and player.is_alive
                     and len(living_rivals) == 1)
@@ -2330,7 +2349,7 @@ class GameEngine:
         return results
 
     def _share_created_being_vision(self, world: WorldState) -> None:
-        """把造物已探索的地形和最近目击记录报告给主人，不泄露实时全图。"""
+        """把妖怪已探索的地形和最近目击记录报告给主人，不泄露实时全图。"""
         for scout in world.actors.values():
             if (not scout.alive or scout.kind != "friend" or not scout.owner_actor_id
                     or scout.behavior not in {"explore", "follow", "guard"}):
@@ -2344,7 +2363,7 @@ class GameEngine:
                 owner.known_cells.update(new_cells)
                 world.record("created_being_map_report", owner.actor_id,
                              scout_actor_id=scout.actor_id, new_known_cells=new_cells)
-            # 造物看见的地点标记会报告给主人；未被玩家/造物视野触及的地点仍保持隐藏。
+            # 妖怪看见的地点标记会报告给主人；未被玩家/妖怪视野触及的地点仍保持隐藏。
             scout_known = set(scout.known_cells)
             for location_id, location in world.map.locations.items():
                 location_key = world.map.key((int(location.get("x", -1)),
@@ -2377,22 +2396,25 @@ class GameEngine:
             owner.memory = owner.memory[-50:]
 
     def _action_world_command_created_being(self, params: dict) -> dict:
-        """切换造物自主探索、跟随主人或守卫指定格。"""
+        """切换妖怪自主探索、跟随主人或守卫指定格。"""
         try:
             world = self._world_from_state()
             player_id = next((key for key, actor in world.actors.items()
                               if actor.kind == "player" and actor.alive), None)
             if player_id is None:
                 return {"success": False, "error": "地图上没有存活的轮回者"}
-            being = next((entity for entity in self.state.friends
-                          if getattr(entity, "is_created_being", False)
-                          and getattr(entity, "created_by_runtime_id", "") == player_id
-                          and entity.is_alive), None)
+            if "target" in params:
+                being = find_owned_yaoguai(self.state, params.get("target"))
+                if being is not None and not being.is_alive:
+                    return {"success": False, "error": "目标妖怪已离场或休眠，无法指挥"}
+            else:
+                being = next((entity for entity in owned_yaoguai(self.state, player_id)
+                              if entity.is_alive), None)
             if being is None:
-                return {"success": False, "error": "没有可指挥的存活造物"}
+                return {"success": False, "error": "没有可指挥的存活妖怪，或target未唯一指定你的妖怪"}
             actor = world.actors.get(being.runtime_id)
             if actor is None or not actor.alive:
-                return {"success": False, "error": "造物不在地图上"}
+                return {"success": False, "error": "妖怪不在地图上"}
             behavior = params.get("behavior")
             if behavior not in {"explore", "follow", "guard"}:
                 return {"success": False, "error": "behavior必须是explore、follow或guard"}
@@ -2415,13 +2437,13 @@ class GameEngine:
             self._share_created_being_vision(world)
             self._sync_world_entity_positions(world)
             self.state.world_state = world.to_dict()
-            return {"success": True, "action": "指挥造物",
+            return {"success": True, "action": "指挥妖怪",
                     "result": {"created_being": being.name, "behavior": behavior,
                                "guard_position": list(guard_position) if guard_position else None,
                                "known_cells_shared": len(actor.known_cells)},
-                    "instruction": {"explore": "造物会自主探索未知区域，并把地形和目击记录报告给主人",
-                                    "follow": "造物会沿可通行路径向主人靠近",
-                                    "guard": "造物会前往并守卫指定格"}[behavior]}
+                    "instruction": {"explore": "妖怪会自主探索未知区域，并把地形和目击记录报告给主人",
+                                    "follow": "妖怪会沿可通行路径向主人靠近",
+                                    "guard": "妖怪会前往并守卫指定格"}[behavior]}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
@@ -3538,11 +3560,12 @@ class GameEngine:
             "雇佣": lambda p: 1,
             "炼心": lambda p: 1,
             "造生": lambda p: 1,
+            "唤醒": lambda p: 1,
         }
         if action == "探索":
             return {"success": False, "error": "开放世界已删除独立探索行动；请移动到地图地点"}
         if action == "附煞":
-            return {"success": False, "error": "附煞已删除；请使用造生培养造物偏爱"}
+            return {"success": False, "error": "附煞已删除；请使用造生创造或培养妖怪"}
         if action not in durations:
             # 献祭等尚未裁定为耗时的条件性操作暂时保留即时结算。
             return self._execute_pre_battle_immediate(params, world_mode=True)
@@ -3771,7 +3794,7 @@ class GameEngine:
                                "required_turns": duration, "reward_applied": False,
                                "completion_error": result.get("error", "")}}
         if action == "造生":
-            # 新造物作为真实地图单位加入；再次造生只强化既有单位，不额外复制生命。
+            # 创造时把新妖怪加入地图；指定培养时同步既有单位的成长后视野。
             for being in self.state.friends:
                 if (not getattr(being, "is_created_being", False)
                         or getattr(being, "created_by_runtime_id", "") != player_id):
@@ -3827,6 +3850,7 @@ class GameEngine:
             "雇佣": self._pre_battle_guyong,
             "炼心": self._pre_battle_lianxin,
             "造生": self._pre_battle_zaosheng,
+            "唤醒": self._pre_battle_wake_yaoguai,
             "献祭": self._pre_battle_sacrifice,
         }
         # 2026-09-28：局外【忘忧】已删除，忘忧香效果为溢出回复转格挡。
@@ -3835,7 +3859,7 @@ class GameEngine:
         # 缺少该校验会让任意副本都能用他人专属行动，统计与平衡数据将失真。
         REGION_EXCLUSIVE = {"维修": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "造生": "乱葬岗"}
         need_region = REGION_EXCLUSIVE.get(action)
-        if action == "造生" and "万魂幡" in (self.state.artifacts_owned or []):
+        if action == "造生" and has_yaoguai_banner(self.state):
             need_region = None
         if need_region and self.state.current_region != need_region:
             if not world_mode:
@@ -4724,30 +4748,33 @@ class GameEngine:
         }
 
     def _pre_battle_zaosheng(self, params: dict) -> dict:
-        """造生：首次创造唯一造物并确定专属道纹/初始偏爱；后续提升三维与视野。"""
+        """造生：省略target创造新妖怪；显式target培养一只现有妖怪。"""
         player = self.state.player
         if player is None:
             return {"success": False, "error": "没有玩家"}
         if not self.state.world_state:
             return {"success": False, "error": "造生需要先初始化开放世界"}
-        has_banner = "万魂幡" in (self.state.artifacts_owned or [])
-        if self.state.current_region != "乱葬岗" and not has_banner:
-            return {"success": False, "error": "造生只能在乱葬岗发动；持有万魂幡时不受地点限制"}
-        from .monsters import MONSTER_PREFERENCE_POOL
-        from .gamedata import MONSTER_DAOWEN
-        from .models import MONSTER_MANA_RELIC, MONSTER_MANA_RELIC_EFFECT
-        owned_beings = [entity for entity in self.state.friends + self.state.employees
-                        if getattr(entity, "is_created_being", False)
-                        and getattr(entity, "created_by_runtime_id", "") == player.runtime_id]
-        existing = owned_beings[0] if owned_beings else None
-        if existing is not None and not existing.is_alive:
-            return {"success": False,
-                    "error": "本轮回已创造过的造物已经死亡；当前规则不允许用再次造生绕过唯一造物限制"}
-        if existing is not None:
+        banner = has_yaoguai_banner(self.state)
+        if self.state.current_region != "乱葬岗" and not banner:
+            return {"success": False, "error": "造生只能在乱葬岗发动；持有煌妖幡时不受地点限制"}
+
+        has_target = "target" in params
+        requested_name = params.get("name")
+        if has_target and requested_name not in (None, ""):
+            return {"success": False, "error": "创造与培养必须分开：target培养时不得同时传name"}
+        if requested_name is not None and not isinstance(requested_name, str):
+            return {"success": False, "error": "妖怪name必须是字符串"}
+
+        if has_target:
+            existing = find_owned_yaoguai(self.state, params.get("target"))
+            if existing is None:
+                return {"success": False, "error": "target必须唯一指定一只由你创造的妖怪（名称或runtime_id）"}
+            if getattr(existing, "is_dormant", False) or not existing.is_alive:
+                return {"success": False, "error": "休眠或已离场的妖怪不能培养；休眠者须先通过唤醒行动恢复"}
             cost = 25
             if self.state.shards < cost:
-                return {"success": False, "error": f"培养造物需要{cost}碎片"}
-            # 造生强化的是这只造物本身，而不是不断叠加偏爱让不同造物趋同。
+                return {"success": False, "error": f"培养妖怪需要{cost}碎片"}
+            # 指定培养只提升该妖怪本身，不新增偏爱，也不替换其专属道纹。
             existing.blood_limit += 6
             existing.current_hp = min(existing.blood_limit, existing.current_hp + 6)
             existing.mana_limit += 1
@@ -4757,12 +4784,12 @@ class GameEngine:
             vision_range = max(1, int(getattr(existing, "created_being_vision_range", 1))) + 1
             existing.created_being_vision_range = vision_range
             self.state.shards -= cost
-            # 同步地图单位的持久化视野范围；外层世界行动结算也会再同步一次。
-            world_data = self.state.world_state
-            actor_data = world_data.get("actors", {}).get(existing.runtime_id, {})
+            actor_data = self.state.world_state.get("actors", {}).get(existing.runtime_id, {})
             actor_data["vision_range"] = vision_range
-            return {"success": True, "action": "造生·培养造物",
-                    "result": {"created_being": existing.name,
+            return {"success": True, "action": "造生·培养妖怪",
+                    "result": {"mode": "cultivate", "yaoguai": existing.name,
+                               "created_being": existing.name,
+                               "created_being_id": existing.runtime_id,
                                "growth": {"blood_limit": 6, "mana_limit": 1,
                                           "speed_limit": 1, "vision_range": 1},
                                "vision_range": vision_range,
@@ -4772,37 +4799,55 @@ class GameEngine:
                                               "mana_limit": existing.mana_limit,
                                               "speed_limit": existing.speed_limit}}}
 
+        owned = owned_yaoguai(self.state)
+        if banner and len(owned) >= BANNER_CAPACITY:
+            return {"success": False,
+                    "error": f"煌妖幡最多收纳{BANNER_CAPACITY}只妖怪；请先指定target培养现有妖怪"}
+        if not banner:
+            from .death_pages import bind_resources
+            bind_resources(self.state)
+            if player.pages_used + UNHOUSED_PAGE_COST > player.load_capacity:
+                return {"success": False,
+                        "error": f"未入幡妖怪每只占{UNHOUSED_PAGE_COST}张死者之页；"
+                                 f"当前已用{player.pages_used}/{player.load_capacity}页，无法创造新妖怪"}
+
         cost = 10
         if self.state.shards < cost:
-            return {"success": False, "error": f"首次造生需要{cost}碎片"}
-        requested_name = params.get("name")
-        name = str(requested_name).strip() if requested_name else f"{player.name}的造物"
-        if not name:
-            return {"success": False, "error": "造物名称不能为空"}
-        all_entities = (([player] if player else []) + self.state.friends + self.state.employees
+            return {"success": False, "error": f"创造妖怪需要{cost}碎片"}
+        all_entities = ([player] + self.state.friends + self.state.employees
                         + self.state.temp_friends + self.state.enemies)
-        if any(entity.name == name for entity in all_entities):
-            return {"success": False, "error": f"角色名称【{name}】已被占用"}
+        used_names = {entity.name for entity in all_entities}
+        if requested_name is not None:
+            name = requested_name.strip()
+            if not name:
+                return {"success": False, "error": "妖怪名称不能为空"}
+            if name in used_names:
+                return {"success": False, "error": f"角色名称【{name}】已被占用"}
+        else:
+            base_name = f"{player.name}的妖怪"
+            name = base_name
+            suffix = 2
+            while name in used_names:
+                name = f"{base_name}{suffix}"
+                suffix += 1
 
-        # 造物的专属道纹只在首次造生时确定一次；后续造生提升三维与视野，不新增偏爱。
-        # 优先从当前副本真实怪物面板中抽取，确保这项能力确实属于该世界的怪物生态。
+        # 每只妖怪在创造时分别确定一次专属道纹与初始偏爱；指定培养不会重抽。
+        from .monsters import MONSTER_PREFERENCE_POOL
+        from .gamedata import MONSTER_DAOWEN
+        from .models import MONSTER_MANA_RELIC, MONSTER_MANA_RELIC_EFFECT
         signature_values: dict[str, int | None] = {}
         for monster_def in self.monster_pool.get(self.state.current_region, []):
             for daowen_name, x_value in (monster_def.get("dao_wen") or {}).items():
                 signature_values.setdefault(str(daowen_name), x_value)
         if not signature_values:
-            # 数据不完整的副本仍允许造生：回退到通用怪物专属道纹池，不把缺失数据变成软锁。
             signature_values = {str(daowen_name): None for daowen_name in MONSTER_DAOWEN}
         signature_name = str(self.dice.auto_roll(
-            "created_being_signature_daowen",
-            sorted(signature_values),
+            "created_being_signature_daowen", sorted(signature_values),
             context=f"{name}造生：抽取一次性专属道纹")["selected"])
         signature_x = signature_values[signature_name]
-
-        remaining = list(MONSTER_PREFERENCE_POOL)
-        roll = self.dice.auto_roll("created_being_initial_preference", remaining,
-                                   context=f"{name}诞生：随机获得一种固有偏爱")
-        preference = str(roll["selected"])
+        preference = str(self.dice.auto_roll(
+            "created_being_initial_preference", list(MONSTER_PREFERENCE_POOL),
+            context=f"{name}诞生：随机获得一种固有偏爱")["selected"])
         half = lambda value: max(0, math.ceil(int(value) / 2))
         being = Entity(
             name=name, entity_type="朋友",
@@ -4828,18 +4873,49 @@ class GameEngine:
                 tags=["怪物偏爱"]))
         self.state.friends.append(being)
         self.state.shards -= cost
-        return {"success": True, "action": "造生·创造造物",
-                "result": {"created_being": being.name,
+        from .death_pages import bind_resources
+        bind_resources(self.state)
+        return {"success": True, "action": "造生·创造妖怪",
+                "result": {"mode": "create", "yaoguai": being.name,
+                           "created_being": being.name,
                            "created_being_id": being.runtime_id,
                            "new_preference": preference,
                            "preferences": list(being.preferences),
                            "signature_daowen": signature_name,
                            "shard_cost": cost, "shards": self.state.shards,
+                           "banner_housed": banner,
+                           "banner_count": len(owned) + 1 if banner else 0,
+                           "owner_pages_used": player.pages_used,
                            "attributes": {"blood_limit": being.blood_limit,
                                           "mana_limit": being.mana_limit,
                                           "speed_limit": being.speed_limit,
                                           "attack_count": being.attack_count,
                                           "attack_power": being.attack_power}}}
+
+    def _pre_battle_wake_yaoguai(self, params: dict) -> dict:
+        """主动唤醒一只已恢复生命的休眠妖怪；恢复本身绝不调用此入口。"""
+        if not self.state.world_state:
+            return {"success": False, "error": "唤醒需要先初始化开放世界"}
+        being = find_owned_yaoguai(self.state, params.get("target"))
+        if being is None:
+            return {"success": False, "error": "target必须唯一指定一只由你创造的妖怪（名称或runtime_id）"}
+        if not getattr(being, "is_dormant", False):
+            return {"success": False, "error": "目标妖怪不在休眠状态"}
+        if being.current_hp <= 0:
+            return {"success": False, "error": "休眠妖怪当前生命为0，须先通过怪物死亡获得恢复"}
+        being.is_dormant = False
+        being.is_alive = True
+        being.is_summoned = False
+        for attr in ("_death_triggers_emitted", "_death_ctx"):
+            if hasattr(being, attr):
+                delattr(being, attr)
+        actor_data = self.state.world_state.get("actors", {}).get(being.runtime_id)
+        if actor_data is not None:
+            actor_data["alive"] = True
+        return {"success": True, "action": "唤醒妖怪",
+                "result": {"yaoguai": being.name, "created_being_id": being.runtime_id,
+                           "current_hp": being.current_hp, "blood_limit": being.blood_limit,
+                           "is_dormant": False, "is_alive": True}}
 
     # 旧附煞/煞气接口已删除；旧存档字段仅为兼容读取保留，不再参与结算。
 
@@ -5846,7 +5922,7 @@ class GameEngine:
         return payload
 
     def _redeem_attribute_points(self, allocations: dict, target: str = "player") -> dict:
-        """把属性点池兑给轮回者或指定的朋友/员工/造物。"""
+        """把属性点池兑给轮回者或指定的朋友/员工/妖怪。"""
         player = self.state.player
         if player is None:
             return {"success": False, "error": "尚未分配初始属性"}
@@ -5904,7 +5980,7 @@ class GameEngine:
                            "mana_limit": target_entity.mana_limit}}
 
     def _action_assign_learned_daowen(self, params: dict) -> dict:
-        """把暂存的学习成果分配给现在或后来结识的朋友/员工/造物。"""
+        """把暂存的学习成果分配给现在或后来结识的朋友/员工/妖怪。"""
         if self.state.phase != GamePhase.PRE_BATTLE.value:
             return {"success": False, "error": "待分配道纹只能在局外分配"}
         name = params.get("name")
@@ -7653,31 +7729,34 @@ class GameEngine:
             ]
             self.state.world_encounter_id = world_encounter_id
             self.state.world_encounter_entities = list(world_participant_enemies)
-        # 造物默认留在地图上，只有战始显式选择召唤且位于五格可通行路径内才参战。
-        created_beings = [entity for entity in self.state.friends
-                          if getattr(entity, "is_created_being", False)
-                          and getattr(entity, "created_by_runtime_id", "") ==
-                              (self.state.player.runtime_id if self.state.player else "")]
+        # 妖怪默认留在地图上，只有战始显式选择召唤且位于五格可通行路径内才参战。
+        created_beings = owned_yaoguai(self.state)
         for being in created_beings:
             being.is_summoned = False
         if params.get("summon_created_being", False):
             if not world_battle:
-                return {"success": False, "error": "造物召唤仅适用于开放世界地图遭遇"}
+                return {"success": False, "error": "妖怪召唤仅适用于开放世界地图遭遇"}
             if not created_beings:
-                return {"success": False, "error": "当前没有可召唤的存活造物"}
-            being = next((entity for entity in created_beings if entity.is_alive), None)
+                return {"success": False, "error": "当前没有可召唤的存活妖怪"}
+            if "summon_created_being_target" in params:
+                being = find_owned_yaoguai(
+                    self.state, params.get("summon_created_being_target"))
+            else:
+                being = next((entity for entity in created_beings if entity.is_alive), None)
             if being is None:
-                return {"success": False, "error": "造物已死亡，无法召唤"}
+                return {"success": False, "error": "召唤目标未唯一指定你的妖怪"}
+            if not being.is_alive:
+                return {"success": False, "error": "目标妖怪已离场或休眠，无法召唤"}
             player_actor = world.actors.get(player_id)
             being_actor = world.actors.get(being.runtime_id)
             if player_actor is None or being_actor is None or not being_actor.alive:
-                return {"success": False, "error": "造物不在地图上，无法召唤"}
+                return {"success": False, "error": "妖怪不在地图上，无法召唤"}
             path = world.map.find_path(player_actor.position, being_actor.position)
             if path is None or len(path) - 1 > 5:
-                return {"success": False, "error": "造物必须位于五格以内的可通行路径上才能召唤"}
+                return {"success": False, "error": "妖怪必须位于五格以内的可通行路径上才能召唤"}
             if any(encounter.active and being.runtime_id in encounter.participants
                    for encounter in world.encounters.values()):
-                return {"success": False, "error": "造物正在独立遭遇中，暂时无法召唤"}
+                return {"success": False, "error": "妖怪正在独立遭遇中，暂时无法召唤"}
             being.is_summoned = True
             world.record("created_being_summoned", player_id, created_being=being.name,
                          created_being_id=being.runtime_id, path_distance=len(path) - 1)
@@ -7884,6 +7963,11 @@ class GameEngine:
             "world_region": e.world_region, "world_x": e.world_x, "world_y": e.world_y,
             "is_neutral": e.is_neutral,
             "preferences": list(getattr(e, "preferences", [])),
+            "is_created_being": bool(getattr(e, "is_created_being", False)),
+            "created_by_runtime_id": getattr(e, "created_by_runtime_id", ""),
+            "created_being_vision_range": int(getattr(e, "created_being_vision_range", 1)),
+            "is_summoned": bool(getattr(e, "is_summoned", False)),
+            "is_dormant": bool(getattr(e, "is_dormant", False)),
             "blood_limit": e.blood_limit, "current_hp": e.current_hp,
             "mana_limit": e.mana_limit, "current_mana": e.current_mana,
             "speed_limit": e.speed_limit, "current_speed": e.current_speed,
@@ -7938,6 +8022,11 @@ class GameEngine:
                    is_alive=d.get("is_alive", True), shards=d.get("shards", 0),
                    shards_peak=d.get("shards_peak", max(0, int(d.get("shards", 0)))),
                    is_debt_bound=d.get("is_debt_bound", False))
+        e.is_created_being = bool(d.get("is_created_being", False))
+        e.created_by_runtime_id = d.get("created_by_runtime_id", "")
+        e.created_being_vision_range = max(1, int(d.get("created_being_vision_range", 1)))
+        e.is_summoned = bool(d.get("is_summoned", False))
+        e.is_dormant = bool(d.get("is_dormant", False))
         e.deferred_damage = [dict(entry) for entry in d.get("deferred_damage", [])]
         e.death_page_count = d.get("death_page_count", 10)
         e.artifacts = list(d.get("artifacts", []))
@@ -8691,7 +8780,7 @@ class GameEngine:
 
     # 乱葬岗「亡者的执念」三选一法器（副本/乱葬岗.md）。
     # 该副本终音尚未接入引擎：三件都只登记名字与效果，不发放。
-    DRAFT_ARTIFACTS = ("染血嫁衣", "燃魂灯", "万魂幡")
+    DRAFT_ARTIFACTS = ("染血嫁衣", "燃魂灯", BANNER_NAME)
 
     def _builtin_resource_names(self) -> set[str]:
         """内建资源名全集：自定义资源不得与其重名（命名唯一性）。"""
@@ -9210,9 +9299,10 @@ class GameEngine:
         )
         for entity in all_characters:
             entity.clear_shield()
-            if entity.healed_this_battle > 0:
+            if entity.healed_this_battle > 0 and not getattr(entity, "is_dormant", False):
                 entity.current_hp = (max(1, entity.current_hp - entity.healed_this_battle)
                                      if entity.is_alive else 0)
+            # 休眠妖怪的怪物死亡恢复是跨战斗保留的唤醒进度，不按普通局内回复扣除。
             entity.healed_this_battle = 0
             # 癌变累计回复量已裁定为局内减益追踪，每场必须归零。
             entity.total_healed = 0
@@ -9675,6 +9765,11 @@ class GameEngine:
     def _migrate_legacy_daowen_status_order(self) -> None:
         """迁移旧 pickle：补齐历史碎片峰值与道纹序列字段，优先从状态来源角色恢复道纹位置。"""
         state = self.state
+        # 【万魂幡】更名为【煌妖幡】：仅迁移旧存档持有名，不保留旧名作为新奖励。
+        for field_name in ("artifacts_owned", "artifacts", "opponent_artifacts_owned"):
+            values = list(getattr(state, field_name, []) or [])
+            setattr(state, field_name,
+                    [BANNER_NAME if name == "万魂幡" else name for name in values])
         # 旧版 pickle 没有历史碎片峰值；只能以读档时真实余额作为可恢复的基线。
         if "shards_peak" not in getattr(state, "__dict__", {}):
             state.shards_peak = max(0, int(getattr(state, "shards", 0)))
@@ -9694,6 +9789,9 @@ class GameEngine:
             if relic.name == "龙鳞":
                 relic.name = "叠鳞甲"
         for entity in entities:
+            if isinstance(entity, Entity):
+                entity.artifacts = [BANNER_NAME if name == "万魂幡" else name
+                                    for name in (getattr(entity, "artifacts", []) or [])]
             for relic in getattr(entity, "relics", []):
                 if relic.name == "龙鳞":
                     relic.name = "叠鳞甲"

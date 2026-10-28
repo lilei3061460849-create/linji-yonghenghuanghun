@@ -107,7 +107,7 @@ def test_dungeon_monster_pool_parsed():
 # ---------- 旧附煞行动已删除 ----------
 
 def test_fusha_action_is_removed_in_favor_of_creation_system():
-    """旧附煞菜单已删除；造生/造物承接其设计位置，不再给普通道纹附加煞气。"""
+    """旧附煞菜单已删除；造生/妖怪承接其设计位置，不再给普通道纹附加煞气。"""
     e = GameEngine(db_path="/tmp/test_lz_fusha_removed.db", rng_seed=1)
     e.execute_action("setup_attributes", {
         "name": "贾凡", "blood_points": 11, "speed_points": 8, "mana_points": 6,

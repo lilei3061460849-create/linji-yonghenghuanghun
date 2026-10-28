@@ -25,6 +25,7 @@ from ..resolution import (KIND_DEATH, KIND_DAMAGE, KIND_SPLIT,
                            note_delta, resolution_frame)
 from ..models import MONSTER_MANA_RELIC
 from ..rule_engine import DamageResolutionContext, validate_damage_amount
+from ..yaoguai import owned_yaoguai
 
 
 class DamageDeathMixin:
@@ -306,6 +307,33 @@ class DamageDeathMixin:
 
     # ========== 统一死亡判定 / 统一血限变化 ==========
 
+    def _enter_yaoguai_dormancy(
+        self, entity: Entity, ctx: Optional[EffectContext | dict] = None,
+    ) -> bool:
+        """妖怪命零转为休眠，不进入普通死亡触发、性格清除或尸体结算。"""
+        if not getattr(entity, "is_created_being", False):
+            return False
+        if getattr(entity, "is_dormant", False):
+            return True
+        parent = normalize_context(ctx)
+        dormant_ctx = make_context(
+            timing=parent.timing if parent else self._current_context_timing(),
+            source="妖怪休眠", source_type="rule",
+            actor=parent.actor if parent else None,
+            target=entity, owner=parent.owner if parent else None,
+            mechanic="death", subtype="yaoguai_dormant", amount=0,
+            tags=set(parent.tags) if parent else {"legacy_context"},
+            parent_event_id=parent.event_id if parent else None,
+        )
+        entity.current_hp = 0
+        entity.is_alive = False
+        entity.is_dormant = True
+        entity.is_summoned = False
+        self._emit(CombatEventType.YAOGUAI_DORMANT,
+                   actor=dormant_ctx.actor, target=entity, ctx=dormant_ctx.to_dict(),
+                   cause=dormant_ctx.subtype)
+        return True
+
     def _check_hp_zero_death(
         self, entity: Optional[Entity],
         ctx: Optional[EffectContext | dict] = None,
@@ -344,6 +372,8 @@ class DamageDeathMixin:
         finally:
             self._hp_loss_recording -= 1
         self._on_entity_death(entity, ctx=ctx)
+        if getattr(entity, "is_dormant", False):
+            return True
         # 【自愈X】目标死亡时（2026-10-14 用户裁定）：持有者本场出手选中过的目标死亡
         # 才结算（没打过的不算；命中与否不影响“选中”）。挂统一命零管线内（幂等，一尸一结）；
         # 离场/暂离不走本管线，天然排除。
@@ -792,8 +822,52 @@ class DamageDeathMixin:
 
         return detail
 
+    def _recover_dormant_yaoguai_on_monster_death(
+        self, monster: Entity, death_ctx: EffectContext,
+    ) -> list[dict]:
+        """以死亡怪物血限为总恢复池，整数平分给当前所有休眠妖怪。
+
+        每份恢复独立受目标血限封顶，溢出不二次分配；此过程只增加生命，
+        绝不清除 is_dormant 或 is_alive=False，唤醒只能走主人的主动行动。
+        """
+        dormant = [entity for entity in owned_yaoguai(self.state)
+                   if getattr(entity, "is_dormant", False)]
+        if not dormant:
+            return []
+        pool = max(0, int(monster.blood_limit))
+        shares = self._divide_flat(pool, len(dormant))
+        recovery = []
+        for being, amount in zip(dormant, shares):
+            detail = being.heal(amount)
+            # 防御性保持休眠不变量，即使未来 Entity.heal 增加其他生命逻辑。
+            being.is_alive = False
+            being.is_dormant = True
+            being.is_summoned = False
+            heal_ctx = make_context(
+                timing=death_ctx.timing, source="妖怪休眠", source_type="rule",
+                actor=death_ctx.actor, target=being, owner=death_ctx.owner,
+                mechanic="heal", subtype="monster_death_recovery", amount=amount,
+                tags={"yaoguai", "dormant_recovery"},
+                parent_event_id=death_ctx.event_id,
+            )
+            detail.update({"yaoguai": being.name, "runtime_id": being.runtime_id,
+                           "recovery_pool": pool, "dormant_count": len(dormant),
+                           "is_dormant": True, "heal_ctx": heal_ctx.to_dict()})
+            self.state.emit_combat_event(
+                CombatEventType.HEAL_APPLIED,
+                actor=death_ctx.actor, target=being, ctx=detail["heal_ctx"],
+                heal_amount=amount, actual_heal=detail["actual_heal"],
+                overheal=detail["overheal"], hp_before=detail["hp_before"],
+                hp_after=detail["hp_after"], dormant_recovery=True,
+                recovery_pool=pool, dormant_count=len(dormant),
+            )
+            recovery.append(detail)
+        return recovery
+
     def _on_entity_death(self, entity: Entity, ctx: Optional[EffectContext | dict] = None) -> None:
-        """统一死亡触发；重复通知通过实体标记幂等。"""
+        """统一死亡触发；妖怪命零改入休眠，重复通知通过实体标记幂等。"""
+        if self._enter_yaoguai_dormancy(entity, ctx):
+            return
         if getattr(entity, "_death_triggers_emitted", False):
             return
         parent = normalize_context(ctx)
@@ -839,6 +913,9 @@ class DamageDeathMixin:
             ember = note_ember_wing_monster_death(self.state, entity)
             if ember:
                 entity._death_ctx["ember_wing_recharge"] = ember
+            yaoguai_recovery = self._recover_dormant_yaoguai_on_monster_death(entity, death_ctx)
+            if yaoguai_recovery:
+                entity._death_ctx["yaoguai_recovery"] = yaoguai_recovery
         # 2026-09-17：【分裂】改为即时创生（见 _spawn_fenlie_clones），
         # 原「[命零]时按本体 20% 血限创造复制体」的分支已随重做删除。
 

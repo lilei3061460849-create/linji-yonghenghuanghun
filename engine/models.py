@@ -303,15 +303,18 @@ class Entity:
     world_x: Optional[int] = None
     world_y: Optional[int] = None
     is_neutral: bool = False  # 中立特殊角色不会自动进入任一战斗阵营
-    # 怪物/造物共用的固有偏爱；每种偏爱在同一实体上最多出现一次。
+    # 怪物/妖怪共用的固有偏爱；每种偏爱在同一实体上最多出现一次。
     preferences: list[str] = field(default_factory=list)
-    # 造物是具有专属身份的朋友，不是分裂道纹产生的临时朋友。
+    # 【造生】的妖怪是具有专属身份的朋友，不是分裂道纹产生的临时朋友。
+    # 字段名保留 created_being 以兼容既有存档与开放世界记录。
     is_created_being: bool = False
     created_by_runtime_id: str = ""
-    # 造物视野成长值会随存档保存；每次后续造生增加1格。
+    # 妖怪视野成长值会随存档保存；每次指定培养增加1格。
     created_being_vision_range: int = 1
-    # 造物只有在主人明确召唤时才加入战斗；世界地图上的独立行动不因此中断。
+    # 妖怪只有在主人明确召唤时才加入战斗；世界地图上的独立行动不因此中断。
     is_summoned: bool = False
+    # 命零后休眠：不是普通死亡；恢复生命不会自动唤醒，须由主人主动唤醒。
+    is_dormant: bool = False
 
     # 基础属性
     blood_limit: int = 0         # 血限
@@ -1040,6 +1043,7 @@ class Entity:
             "created_by_runtime_id": getattr(self, "created_by_runtime_id", ""),
             "created_being_vision_range": max(1, int(getattr(self, "created_being_vision_range", 1))),
             "is_summoned": bool(getattr(self, "is_summoned", False)),
+            "is_dormant": bool(getattr(self, "is_dormant", False)),
             "blood_limit": "∞" if self.has_status("无限血限") else self.blood_limit,
             "current_hp": self.current_hp,
             "mana_limit": self.mana_limit,

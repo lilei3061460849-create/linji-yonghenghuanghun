@@ -229,7 +229,7 @@ def test_pool_relic_text_snapshot():
         "噬伤血囊","倍速齿轮","沉重枷锁","失速冥灯","寂灭面具","衰变沙漏","蚀界残钟",
         "窥隙法匣","逐影胫骨","共生血囊","疯狂","减速"}
     assert set(names)==expected and len(names)==len(expected)
-    # 2026-10-25：引擎早有实现的【共生血囊】补登记；【万魂幡】改归法器并退出本池。
+    # 2026-10-25：引擎早有实现的【共生血囊】补登记；【煌妖幡】（旧名万魂幡）归法器并退出本池。
     assert "共生血囊" in names and "万魂幡" not in names
     for n, fx in defs:
         assert not re.search(r"持续\d*X", fx), f"{n}：遗物不得有持续X"

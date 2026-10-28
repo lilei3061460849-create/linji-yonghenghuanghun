@@ -236,7 +236,7 @@ def test_artifact_section_exists_and_entries_are_unique():
 
     relic_names = {n for n, _ in GameEngine.RELIC_DEFS}
     overlap = relic_names & set(names)
-    # 【万魂幡】2026-10-25 用户令归法器，已退出 RELIC_DEFS：法器与遗物池不得再有任何重名。
+    # 【煌妖幡】（旧名万魂幡）归法器，已退出 RELIC_DEFS：法器与遗物池不得再有任何重名。
     assert not overlap, f"法器与遗物池重名：{sorted(overlap)}"
 
 

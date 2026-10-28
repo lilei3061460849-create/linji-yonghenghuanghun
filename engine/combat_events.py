@@ -24,6 +24,7 @@ class CombatEventType(str, Enum):
     STATUS_EXPIRED = "status_expired"
     ENTITY_RETREATED = "entity_retreated"
     ENTITY_DIED = "entity_died"
+    YAOGUAI_DORMANT = "yaoguai_dormant"
     ROUND_END = "round_end"
     BATTLE_END = "battle_end"
     # 消耗品自愈X（2026-10-14 用户令通用化）：目标死亡时触发位在事件流里留痕。
