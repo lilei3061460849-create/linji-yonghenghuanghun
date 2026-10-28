@@ -124,6 +124,16 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertTrue(by_name['共罪']['runtime'])
         self.assertFalse(by_name['血契']['runtime'])
 
+    def test_retired_life_loss_daowen_does_not_delete_life_loss_rules(self):
+        self.assertNotIn('失血', {r['name'] for r in self.rows})
+        dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
+        self.assertNotRegex(dungeon, r'失血(?:X|\d)')
+        self.assertIn('血契X⇄（曲解）？？⇄（反转）饥饿X', dungeon)
+        self.assertIn('生命减少视为失血', dungeon)
+        scraps = (ROOT / '废稿汇总.md').read_text(encoding='utf-8')
+        self.assertIn('| A10 | 失血道纹、伤害来源自反噬', scraps)
+        self.assertIn('法力3X，使目标每次造成伤害时失去等量生命，持续X', scraps)
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
