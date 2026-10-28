@@ -4654,15 +4654,18 @@ class GameEngine:
         blood_limit = blood_alloc * 12
         attack_count = atk_bundles
         attack_power = atk_bundles * 2
+        remaining = [candidate for candidate in DaoWenEngine.TRANSFORMED_DAOWEN
+                     if candidate in DaoWenEngine.list_all()]
+        if not remaining:
+            self.state.energy += 1
+            return {"success":False,"error":"当前没有可供雇佣发现的转化道纹"}
         emp = Entity(name=name, entity_type="员工", blood_limit=blood_limit, current_hp=blood_limit,
                      attack_count=attack_count, attack_power=attack_power, is_deployed=False)
         self.state.employees.append(emp)
 
-        # diy后"发现并选择一种转化道纹"：从19个转化道纹中随机抽取3个未持有的(全部19个都未持有)，
-        # 引擎自动生成随机数抽取(DiceEngine.auto_roll)，玩家从3个候选里选1个，调用 choose_hired_daowen 完成
-        remaining = list(DaoWenEngine.TRANSFORMED_DAOWEN)
+        # 发现最多3种不同的现行转化道纹；删纹后池子可能不足3，不能抽空池或复活废案补数。
         discovered = []
-        for i in range(3):
+        for i in range(min(3,len(remaining))):
             roll = self.dice.auto_roll(f"hire_daowen_discovery_{name}_{i}", remaining,
                                         context=f"雇佣{name}-发现转化道纹")
             discovered.append(roll["selected"])
