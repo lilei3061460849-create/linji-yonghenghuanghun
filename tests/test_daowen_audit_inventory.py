@@ -225,6 +225,14 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('| A14 | 攻心、预测后接管一次行动目标',
                       (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
 
+    def test_retired_end_round_lifesteal_is_archived(self):
+        self.assertNotIn('嗜血', {r['name'] for r in self.rows})
+        dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
+        self.assertNotRegex(dungeon, r'嗜血(?:X|\d)')
+        self.assertIn('【？？】⇄（转换）？？', dungeon)
+        self.assertIn('| A15 | 嗜血原回终草案、延迟伤害兑换回复',
+                      (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
