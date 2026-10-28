@@ -171,6 +171,14 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertEqual(row['review'], '暂未发现结构违规')
         self.assertFalse(row['runtime'])
 
+    def test_tampering_retains_target_selection_rule(self):
+        dungeon = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
+        self.assertIn('4.篡改X：支付：流血3X。使[目标]接下来X次发动道纹的目标由你选择。', dungeon)
+        row = next(r for r in self.rows if r['name'] == '篡改')
+        self.assertEqual(row['review'], '暂未发现结构违规')
+        self.assertFalse(row['runtime'])
+        self.assertIn('合法目标范围', row['note'])
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
