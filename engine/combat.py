@@ -1520,8 +1520,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 logs.append("烙痕钉：已锁定目标")
             for ally in self.state.friends + self.state.employees:
                 logs.extend(self._dispatch_phase(Phase.BATTLE_START_AFTER_CHOICES, target=ally))
-        # 机制系统：BATTLE_END 相位分发。位置=战终遗物段顶部（2026-09-17 新增相位，
-        # 首个注册者是改版后的【缄默面具】：[战终]法限+X）。
+        # 机制系统：BATTLE_END 相位分发。位置=战终遗物段顶部；
         # process_relics 只宣布时点，具体机制条件/效果都在声明层。
         if trigger == "battle_end":
             logs.extend(self._dispatch_phase(Phase.BATTLE_END, target=player))

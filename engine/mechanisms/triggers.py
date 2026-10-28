@@ -29,8 +29,7 @@ class Phase:
     BEFORE_DAMAGE = "before_damage"                  # 受到伤害前（爆裂反噬）——未接线
     AFTER_DAMAGE = "after_damage"                    # 伤害落地后——未接线
     BATTLE_START = "battle_start"                    # 战始——已接线（process_relics 战始段）
-    BATTLE_END = "battle_end"                        # 战终——已接线（process_relics 战终遗物段，
-                                                     # 2026-09-17 为【缄默面具】改版新增）
+    BATTLE_END = "battle_end"                        # 战终——已接线（process_relics 战终遗物段）
     ROUND_START = "round_start"                      # 回始——已接线（combat.round_start 回始效果循环顶部）
     ROUND_INCREASE = "round_increase"                  # 回增：current_round 增加后、该回合正式开始前
     ROUND_START_SETTLE = "round_start_settle"        # 回始·全场结算（2026-10-03 接线）。

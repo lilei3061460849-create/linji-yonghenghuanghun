@@ -9,7 +9,7 @@ priority 10/20/30/40/50/60——回始循环已全部声明化；洞察/勾魂�
 （ENTITY_DIED 事件，首个生产事件订阅者）、【洗劫·夺碎片】（DAMAGE_APPLIED 事件，
 孤儿诊断字段 xijie_stolen 已正式废弃）、【帮派令】（BATTLE_START 相位 +
 relic_active 条件——证明 Relic 可以成为普通 Mechanism 声明）、【缄默面具】
-（BATTLE_START 相位 priority 5，经统一 mana 动词；其【禁代价】静态校验规则
+（BATTLE_START 相位 priority 5，激活后续法限增量翻倍；其【禁代价】静态校验规则
 保留在 api.py，属另一字面规则）、【灾厄轮盘·结算（遗物被动）】
 （ROUND_START_SETTLE 相位，relic_active 门控，使用 RNG 目标 roll_pick）。
 原逼债、清算结算与对账机制已随道纹删除。
