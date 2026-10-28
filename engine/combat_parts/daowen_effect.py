@@ -1054,8 +1054,24 @@ class DaowenEffectMixin:
                 caster.fake_shards = getattr(caster, "fake_shards", 0) + calc["fake_shards"]
             result["effects"].append({"type": "fake_shards", "gained": calc["fake_shards"]})
         if "cost_shards" in calc:
-            spent = self._lose_shards_of(self.state.player, calc["cost_shards"]) if caster is self.state.player else 0
+            # 怪物与玩家共用假碎片优先的真实现有入口；怪物真碎片不足时可扣成负债。
+            # 其他非玩家角色不在这里获得怪物的透支特权。
+            if caster is self.state.player or caster.entity_type == "怪物":
+                spent = self._lose_shards_of(caster, calc["cost_shards"])
+            else:
+                spent = 0
             result["effects"].append({"type": "cost_shards", "spent": spent})
+        if caster.entity_type == "怪物":
+            # 连击六通道的真/假碎片是两个独立池：真碎片允许透支，假碎片不足已在提交前拦截。
+            real_cost = int(calc.get("cost_real_shards", 0) or 0)
+            fake_cost = int(calc.get("cost_fake_shards", 0) or 0)
+            if real_cost > 0:
+                caster.shards -= real_cost
+            if fake_cost > 0:
+                caster.fake_shards -= fake_cost
+            if real_cost > 0 or fake_cost > 0:
+                result["effects"].append({"type": "cost_shards", "spent": real_cost,
+                                          "fake_spent": fake_cost})
 
         # ---- 数值代价：统一走代价总线；【共罪】可按显式引用共同承担 ----
         numeric_cost=self.pay_daowen_numeric_cost(name,calc,caster,

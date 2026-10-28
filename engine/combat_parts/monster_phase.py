@@ -329,6 +329,10 @@ class MonsterPhaseMixin:
         if calc.get("cost_type") == "消耗" and calc.get("cost", 0) > 0:
             if caster.current_mana < calc["cost"]:
                 return False
+        # 连击假碎片通道只扣独立假碎片池，不足不能发动；真碎片类代价按正文允许怪物透支。
+        fake_cost = int(calc.get("cost_fake_shards", 0) or 0)
+        if fake_cost > 0 and getattr(caster, "fake_shards", 0) < fake_cost:
+            return False
         return True
 
     # 2026-09-16 用户令：面板不再写死 X，改由怪物 AI 在发动时自选，
@@ -361,9 +365,6 @@ class MonsterPhaseMixin:
                             - getattr(monster, "mutation_count", 0))
                 if calc.get("cost_mutation", 0) >= headroom:
                     break
-            if effective_name == "消灾" and (monster.fake_shards < 50 * x
-                                             and monster.shards < 5 * x):
-                break
             best = x
         return best
 
@@ -556,17 +557,6 @@ class MonsterPhaseMixin:
                     "tags": {"daowen", "active_payment"}})
                 return {"monster": monster.name, "lost": name,
                         "note": "支付异变后触发【迷失】"}
-        elif name == "消灾":
-            fake_cost, real_cost = 50 * effective_x, 5 * effective_x
-            if monster.fake_shards >= fake_cost:
-                monster.fake_shards -= fake_cost
-            else:
-                # DM裁定2026-08-22（方案A）：怪物的真碎片类代价允许**透支成负债**——
-                # 余额不足不再拒绝发动，而是把 shards 扣成负数。负债是【还债】路径的
-                # 唯一产生入口；此前余额门禁让怪物碎片守恒≥0，还债在20万+局中零触发
-                # （_shards_of 早已设计"负债不抵消假碎片"语义，缺的就是产生入口）。
-                # 仅怪物适用：玩家/朋友/员工/api 侧维持余额不足拒绝发动。
-                monster.shards -= real_cost
 
         if not rewritten_as:
             activated.add(name)
