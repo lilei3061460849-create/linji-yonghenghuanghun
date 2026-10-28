@@ -177,7 +177,7 @@ def test_gongsheng_xuenang_uses_actual_life_loss_for_multi_target_damage():
     second = combat._apply_hostile_damage(target2, 9, source=clone)
 
     assert first["actual_damage"] == 3
-    assert second.get("actual_life_loss") == 4  # 超杀部分不计入复制体回复
+    assert second.get("actual_life_loss") == 4  # 超杀部分不计入造物回复
     assert clone.current_hp == 17
     assert creator.current_hp == 50
 

@@ -229,7 +229,7 @@ class ActionPreview:
         diff["shards_before"] = before.shards
         diff["shards_after"] = after.shards
 
-        # 队友（朋友/员工/临时朋友）按名字对齐对比
+        # 队友（朋友/员工/造物）按名字对齐对比
         def _ally_map(state):
             out = {}
             for group in (state.friends, state.employees, state.temp_friends):

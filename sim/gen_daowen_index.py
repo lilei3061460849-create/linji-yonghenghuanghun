@@ -80,10 +80,6 @@ for name, fn in DaoWenEngine._registry.items():
         effects[name] = (eff + "。") if eff and not eff.endswith("。") else eff
     params_of[name] = list(inspect.signature(fn).parameters)
 
-# 已裁定的新分裂尚未实现，不能让旧计算器覆盖现行定义。
-costs["分裂"] = "支付：流血X+Y"
-effects["分裂"] = "创造一个X（法限）/Y（血限）的造物为你而战。"
-
 for name, draft in DRAFT_DAOWEN.items():
     costs[name] = draft["cost"]
     effects[name] = draft["effect"]
@@ -186,11 +182,8 @@ assert set(CATEGORY) == (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)), (
 # 特殊注记（引擎机制，非数值）
 NOTES = {
     "封印": "玩家支付异变X，使一个显式选定的目标怪物延后X回合再入场；暂离仍阻塞战终，回场当回合沿用增援白板，最终命零正常进入死亡与碎片结算。",
-    # 2026-10-11 修正：旧注记「【命零】时触发」是废止口径。沿革见
-    # engine/daowen.py::calculate_fenlie —— 旧版[命零]触发（2026-09-17 废止）
-    # → 即时发动+代价【衰老】X×10Y → 2026-10-08 用户令改为代价【流血】X×10Y。
-    "分裂": "现行裁定为单个造物，X为法限、Y为血限；初始资源/速度/道纹配置及存续未定。运行时仍是旧流血X×10Y/复制X个，尚未实现新版；不可将旧版数量和继承规则套入新稿。",
-    "招魂": "唤回者为[临时朋友]，[战终]消失。",
+    "分裂": "每次发动只创造一个造物：X攻击力、Y血限/当前生命、1次普攻；无道纹，不继承施法者面板、偏爱或遗物，[战终]消散。",
+    "招魂": "唤回者为[造物]，[战终]消失。",
     "真理": "初拥之夜选项5授予的血族专属道纹。X=陈述句数：提出X句陈述，目标须逐句言明真理，任一句无法言明则无法开口，持续X回合；真伪由DM逐句裁定。冷却2场战斗。",
     "原初": "原初新定义：支付异变5X，借用目标身上自身未拥有的随机X种道纹；旧进化接口的指定借一种尚未同步，不可当作新规则已实现。",
 }
@@ -226,7 +219,7 @@ if BLOODLINE_EXCLUSIVE_DAOWEN:
 category_summary += f" ｜ 初拥专属 {len(FIRST_EMBRACE_DAOWEN)} ｜ 已实现但副本未开放 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。"
 A(category_summary)
 A("")
-A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余已注册道纹取 `engine/daowen.py` `calculate_*` docstring；沉沦海2个未接入运行时节点取 `DRAFT_DAOWEN`。分裂按最新用户裁定覆盖旧计算器文案，注记明确运行时尚未同步。")
+A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余已注册道纹取 `engine/daowen.py` `calculate_*` docstring；沉沦海2个未接入运行时节点取 `DRAFT_DAOWEN`。")
 A("- **归属与残韵闭环**：`engine/gamedata.py` + `engine/daowen.py`（`CLOSED_LOOPS`）；与规则正文的闭环图一致。\n"
   "  `CLOSED_LOOPS` 里的每条边为**无向边**（2026-10-07 用户令：残韵路径双向）——登记 `(a,类型,b)` 表示 a、b 互为相邻节点，\n"
   "  正反两向都走同一种残韵、同样消耗一次；双向由 `ResonanceEngine.find_transformations` 在查询时展开，边表不重复登记反向边。\n"
@@ -308,7 +301,7 @@ def section(title, names, note_lines=(), loop=None, loop_title=None):
         A(f"### {name}")
         A(f"X：{costs[name]}。{effects[name]}" if effects[name] else f"X：{costs[name]}。")
         meta = [f"[目标]：{target_label(name)}"]
-        if name in DRAFT_DAOWEN or name == "分裂":
+        if name in DRAFT_DAOWEN:
             meta.append("执行状态：当前定义尚未实现")
         if name == "共罪":
             meta.append("残韵路径：—（不属于残韵闭环）")

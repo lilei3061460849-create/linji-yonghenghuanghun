@@ -103,4 +103,13 @@ class EntityType(Enum):
     MONSTER = "怪物"
     FRIEND = "朋友"
     EMPLOYEE = "员工"
-    TEMP_FRIEND = "临时朋友"
+    CREATION = "造物"
+    # 兼容旧代码可能引用的枚举成员名；新实体与新文案统一使用 CREATION。
+    TEMP_FRIEND = "造物"
+
+    @classmethod
+    def _missing_(cls, value):
+        # 旧存档若以枚举值保存“临时朋友”，读入时归一为“造物”。
+        if value == "临时朋友":
+            return cls.CREATION
+        return None

@@ -1139,25 +1139,25 @@ class DaowenEffectMixin:
                                                   source=caster.name))
                 result["effects"].append({"type": "qianmo", "target": st_target.name,
                                           "duration": calc.get("duration", 1)})
-        if name == "分裂" and calc.get("split_clones"):
-            # 2026-09-17 用户令重做：分裂X/Y 改为**即时**创造 X 个 10Y 血限的
-            # 自身复制体（代价衰老＝X×10Y＝造出的总血限）。旧版把创造挂在
-            # [命零]上（_pending_split_clones），且血限按本体 20% 浮动——本体
-            # 血限越高白赚越多，代价【冷却】又与产出无关，可无限白嫖。
-            # 旧版还有 entity_type != "怪物" 的过滤，导致怪物永远不分裂，
-            # 与「乱葬岗·分裂」的设计不符；现对任意实体类型一视同仁。
-            clones = self._spawn_fenlie_clones(caster, calc["split_clones"],
-                                               calc.get("clone_hp", 10))
-            result["effects"].append({"type": "fenlie", "clones": len(clones),
-                                      "clone_hp": calc.get("clone_hp", 10),
-                                      "names": [c.name for c in clones]})
+        if name == "分裂" and calc.get("split_creations"):
+            # 每次发动只创造一个独立造物；X/Y 分别决定攻击力与血限，
+            # 不读取施法者的道纹、偏爱、遗物或面板。
+            creation = self._spawn_fenlie_creation(
+                caster, calc["creation_attack_power"], calc["creation_blood_limit"])
+            result["effects"].append({
+                "type": "fenlie", "creations": 1,
+                "attack_power": creation.effective_attack_power(),
+                "attack_count": creation.effective_attack_count(),
+                "blood_limit": creation.blood_limit,
+                "names": [creation.name],
+            })
         if name == "招魂" and calc.get("revive_temp_friend"):
-            # 唤回1具已击灭的怪物尸体作临时朋友（生命20X）
+            # 唤回1具已击灭的怪物尸体作造物（生命20X）
             dead = [e for e in self.state.dead_monsters if e.entity_type == "怪物"]
             if dead:
                 corpse = dead[-1]
                 from ..models import Entity
-                revived = Entity(name=f"{corpse.name}（魂）", entity_type="临时朋友",
+                revived = Entity(name=f"{corpse.name}（魂）", entity_type="造物",
                                  blood_limit=calc["temp_hp"], current_hp=calc["temp_hp"],
                                  attack_count=corpse.attack_count, attack_power=corpse.attack_power)
                 for dw_name, dw_inst in corpse.dao_wen.items():
@@ -1199,7 +1199,7 @@ class DaowenEffectMixin:
             # 暂离不写离场/死亡上下文，也不产生碎片分类。
             #
             # 2026-10-08 用户令：**任意目标**都可以被封印——敌人、[朋友]、[员工]、
-            # 临时朋友、敌对轮回者，以及施法者自己（延后 X 回合再入场）。
+            # 造物、敌对轮回者，以及施法者自己（延后 X 回合再入场）。
             # 校验随之放开：只要"还活着、还在场上、没处于暂离中"即可，
             # 不再要求 entity_type == "怪物"，也不再要求属于 enemies。
             # 但明确不允许封印已经永久离场/撤退的单位（那不是"暂离"的对象）。

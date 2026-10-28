@@ -316,7 +316,7 @@ def test_ganshi_bell_summons_two_and_dissolves_at_battle_end():
     assert r["success"], r
     assert [(t.blood_limit, t.attack_power, t.attack_count) for t in engine.state.temp_friends] == [
         (36, 1, 4), (36, 1, 4)]
-    assert all(t.entity_type == "临时朋友" for t in engine.state.temp_friends)
+    assert all(t.entity_type == "造物" for t in engine.state.temp_friends)
     engine.state.enemies[0].is_alive = False
     engine.state.enemies = []
     assert engine.execute_action("battle_end", {})["success"]

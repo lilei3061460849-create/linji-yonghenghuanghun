@@ -83,7 +83,7 @@ def resolve_entity(state: Any, character: CharacterRef):
 
 
 def _prune_orphaned(state: Any) -> None:
-    """清理已不被任何名单跟踪的 runtime_id（如战斗结束清场的临时朋友）。
+    """清理已不被任何名单跟踪的 runtime_id（如战斗结束清场的造物）。
 
     只在写入时顺带执行，读接口保持纯函数。键按实例隔离，本就不存在跨实例污染，
     这里只是防止长局运行时字典缓慢增长。

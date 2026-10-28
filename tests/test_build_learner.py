@@ -52,7 +52,7 @@ def test_starters_are_shafa_loop_not_forced_shaifa():
     from engine.gamedata import SHAFA_LOOP_DAOWEN
     assert bl.STARTERS == list(SHAFA_LOOP_DAOWEN)
     assert "连击" in bl.STARTERS and "再生" in bl.STARTERS
-    assert len(bl.STARTERS) == 8  # 当前杀伐闭环；波及属于沉沦海专属
+    assert len(bl.STARTERS) == 7  # 波及属沉沦海，增殖属扭曲都市；均不在通用开局池
 
 
 def test_play_does_not_inject_shaifa_when_not_discovered():

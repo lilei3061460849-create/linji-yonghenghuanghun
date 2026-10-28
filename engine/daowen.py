@@ -23,12 +23,16 @@ RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
     "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变", "背负", "蒙蔽", "清算", "瓦解",
 )}
+# 迁入其它闭环的原位也要独立命名，避免不同闭环的待补节点在残韵查询中互相碰撞。
+RELOCATED_DAOWEN_SLOTS = {name: f"（待补）〔{name}〕" for name in ("增殖",)}
 
 
 def is_reserved_slot(name) -> bool:
-    """该名字是否为闭环上的非道纹占位节点；带内部标识的遗物化空位也算占位。"""
+    """该名字是否为闭环上的非道纹占位节点；带内部标识的空位也算占位。"""
     return name in PLACEHOLDER_SLOTS or (
-        isinstance(name, str) and name.startswith("？？〔") and name.endswith("〕"))
+        isinstance(name, str)
+        and (name.startswith("？？〔") or name.startswith("（待补）〔"))
+        and name.endswith("〕"))
 
 
 # 道纹改名别名（旧档/旧面板读入时映射；引擎注册表只收新名，旧名提交照常报未知道纹）。
@@ -42,8 +46,12 @@ def normalize_daowen_name(name):
 
 
 def display_resonance_node(name):
-    """内部每个遗物化节点独立编号，玩家/索引统一显示为「？？」。"""
-    return RELICIZED_SLOT if isinstance(name, str) and name.startswith("？？〔") else name
+    """内部空位独立编号；玩家/索引统一显示为「？？」或「（待补）」。"""
+    if isinstance(name, str) and name.startswith("？？〔"):
+        return RELICIZED_SLOT
+    if isinstance(name, str) and name.startswith("（待补）〔"):
+        return RESERVED_SLOT
+    return name
 
 
 class DaoWenEngine:
@@ -208,7 +216,7 @@ class DaoWenEngine:
             "summary": f"支付：{2 * x}法力。选择{x}个目标，目标组彼此平分道纹效果，持续∞。"
         }
     
-    # ---- 杀伐10节点闭环后半（增殖至封印）----
+    # ---- 杀伐闭环后半（连击至封印）----
     
     @staticmethod
     def calculate_xueqi(x: int, target: Entity = None) -> dict:
@@ -288,7 +296,7 @@ class DaoWenEngine:
         """封印X：支付：异变X，使一个[目标]延后X回合再入场。
 
         2026-10-08 用户令：目标由"只限怪物"放开为**任意目标**——敌人、[朋友]、
-        [员工]、临时朋友、敌对轮回者，以及施法者自己都可以被封印。
+        [员工]、造物、敌对轮回者，以及施法者自己都可以被封印。
         暂离的语义不变：从场上摘走，X 回合后的[回始]回到它原本所在的阵营与位置
         （见 GameState.detach_from_field / reattach_to_field）。
         """
@@ -665,29 +673,26 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_fenlie(x: int, y: int = 1) -> dict:
-        """分裂X/Y：支付：流血X×10Y。创造X个10Y[血限]的自身复制体。
+        """分裂X/Y：支付：流血X+Y，创造一个X攻击力/Y血限的造物。
 
-        双参数道纹（引擎首个）：
-          X = 复制体**数量**
-          Y = 单个复制体的**规模档**，每个血限/生命 = 10Y
-        代价【流血】= X×10Y，恰好等于造出来的**总血限**——造多少血就流多少
-        血，不会凭空增殖，也不会因为本体血限高低而白赚或白亏。
-
-        代价轴沿革：旧版「支付：冷却X；[命零]时创造X个本体血限20%的复制体」
-        （触发时机绑死在[命零]、代价与产出无关、本体越壮越白赚，三项均已废止）
-        → 2026-09-17 改为「即时发动 + 代价【衰老】X×10Y（扣血限）」
-        → 2026-10-08 用户令：代价由【衰老】改为【流血】。数值不变，但付的是
-        **当前生命**而不是[血限]：血限是永久损耗、生命可再生，于是分裂从
-        「拿上限换数量」变成「拿血换数量」，付不起（生命不足）则不能发动。
+        造物当前生命等于血限 Y；当前法力与法限为 X，当前速度与速限为 1，
+        因而沿用统一面板换算得到 X 攻击力与 1 次普攻。每次发动只创造一个，
+        不携带道纹，也不继承施法者的面板、偏爱或遗物，[战终]消散。
 
         调用：DaoWenEngine.resolve("分裂", x, y=Y)；不传 y 时默认 1。
         """
-        clone_hp = 10 * y
+        # 提交端仍要求 X≥1；此处允许【退化】在 resolve 入口把有效 X 降为 0。
+        if not isinstance(x, int) or isinstance(x, bool) or x < 0:
+            raise ValueError("分裂X必须是非负整数")
+        if not isinstance(y, int) or isinstance(y, bool) or y < 1:
+            raise ValueError("分裂Y必须是正整数")
         return {
             "dao_wen": "分裂", "x": x, "y": y,
-            "cost_type": CostType.BLEED.value, "cost_hp": x * clone_hp,
-            "split_clones": x, "clone_hp": clone_hp,
-            "summary": f"流血{x * clone_hp}，创造{x}个{clone_hp}血限的自身复制体"
+            "cost_type": CostType.BLEED.value, "cost_hp": x + y,
+            "split_creations": 1,
+            "creation_attack_power": x, "creation_blood_limit": y,
+            "creation_attack_count": 1,
+            "summary": f"流血{x + y}，创造一个{x}攻击力/{y}血限的造物"
         }
 
 
@@ -725,12 +730,12 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_zhaohun(x: int) -> dict:
-        """招魂X：支付：法力3X。唤回1具已击灭的怪物尸体作为[临时朋友]，生命为20X。"""
+        """招魂X：支付：法力3X。唤回1具已击灭的怪物尸体作为[造物]，生命为20X。"""
         return {
             "dao_wen": "招魂", "x": x,
             "cost_type": CostType.MANA.value, "cost": 3 * x,
             "revive_temp_friend": True, "temp_hp": 20 * x,
-            "summary": f"支付：{3 * x}法力，唤回1具已灭怪物作为临时朋友（生命{20*x}）"
+            "summary": f"支付：{3 * x}法力，唤回1具已灭怪物作为造物（生命{20*x}）"
         }
 
     @staticmethod
@@ -907,10 +912,10 @@ class ResonanceEngine:
             ("再生", "曲解", "庇护"),
             ("庇护", "曲解", RELICIZED_DAOWEN_SLOTS["固执"]),
             (RELICIZED_DAOWEN_SLOTS["固执"], "反转", "连击"),
-            # 2026-10-27：波及迁入沉沦海；原位直连，沿用前一条边的残韵类型。
-            ("连击", "转换", "增殖"),
-            # 删除慈悲/切割/缓慢后直连（2026-08-21）；贯穿→(曲解)束缚：概念腐化。
-            ("增殖", "曲解", "透支"),
+            # 波及迁入沉沦海、增殖迁入扭曲都市后，原位保留待补节点，不直连。
+            ("连击", "转换", RELOCATED_DAOWEN_SLOTS["增殖"]),
+            # 删除慈悲/切割/缓慢后保留既有空位；贯穿→(曲解)束缚：概念腐化。
+            (RELOCATED_DAOWEN_SLOTS["增殖"], "曲解", "透支"),
             ("透支", "转换", RELICIZED_DAOWEN_SLOTS["贯穿"]),
             (RELICIZED_DAOWEN_SLOTS["贯穿"], "曲解", "束缚"),
             ("束缚", "曲解", "封印"),
@@ -921,11 +926,9 @@ class ResonanceEngine:
             ("变形", "转换", "定型"),
             ("定型", "反转", RELICIZED_DAOWEN_SLOTS["畸变"]),
             (RELICIZED_DAOWEN_SLOTS["畸变"], "曲解", "超频"),
-            # 2026-10-14 用户令删除【搏命】（并入【透支】）→ 该格留成空占位符
-            # （沿用 2026-10-08 删【镇尸】先例：不直连、不顶替，环仍为 7 条边；
-            # 用户 2026-10-14 拍板占位，否决直连方案）。
-            ("超频", "反转", RESERVED_SLOT),
-            (RESERVED_SLOT, "转换", "坏死"),
+            # 增殖由杀伐闭环迁入扭曲都市，占据超频与坏死之间的原待补位。
+            ("超频", "反转", "增殖"),
+            ("增殖", "转换", "坏死"),
             # 【退化】已遗物化：该节点保留独立「？？」占位。
             ("坏死", "曲解", RELICIZED_DAOWEN_SLOTS["退化"]),
             (RELICIZED_DAOWEN_SLOTS["退化"], "转换", "变形"),

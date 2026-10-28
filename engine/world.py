@@ -27,7 +27,7 @@ ALLY_SUGGESTIONS: dict[str, str] = {
     "hold": "guard",         # 原地待命（= 守卫当前格）
 }
 
-# 关系基础采纳率：临时朋友是被胁迫来的，听话程度最低。
+# 关系基础采纳率：造物是被胁迫来的，听话程度最低。
 ALLY_BASE_ACCEPTANCE: dict[str, int] = {
     "friend": 65,
     "employee": 55,
@@ -48,7 +48,7 @@ def suggestion_acceptance_percent(
 
     这是**建议**不是命令：玩家提交的只是意向，是否照做由本单位按自身处境判定。
     影响因素都是单位自己能感知的事实：
-      * 关系基础值（朋友 > 员工 > 临时朋友）；
+      * 关系基础值（朋友 > 员工 > 造物）；
       * 自身伤势：健康照做，重伤先自保；
       * 建议与其当前行为一致 → 顺水推舟；
       * 玩家的处境：队长快死了，跟着他没好处；
@@ -803,7 +803,7 @@ class WorldState:
                                 self.map.key(pos) in actor.visited_cells,
                                 pos[1], pos[0]))
                         break
-            # 2026-10-24：朋友/员工/临时朋友也上地图自主行动（此前 mode=manual 原地不动）。
+            # 2026-10-24：朋友/员工/造物也上地图自主行动（此前 mode=manual 原地不动）。
             # 玩家只能"建议"，是否照做由单位自己按 `suggestion_acceptance_percent` 判定。
             if (actor.kind in ALLY_KINDS and actor.owner_actor_id):
                 owner = self.actors.get(actor.owner_actor_id)

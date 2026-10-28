@@ -231,8 +231,8 @@ class AfterDamageEffectsHook:
             res.setdefault("血翼·噬血", []).append({
                 "holder": attacker.name, "requested": actual_damage, **healed})
 
-        # 遗物【共生血囊】：由持有该遗物的创建者所创造的分裂复制体造成伤害后，
-        # 复制体先回复等同实际失血的生命；超过复制体生命上限的部分再回复创建者。
+        # 遗物【共生血囊】：由持有该遗物的创建者所创造的分裂造物造成伤害后，
+        # 造物先回复等同实际失血的生命；超过造物生命上限的部分再回复创建者。
         # 以实际生命减少量为基数，避免把超过目标剩余生命的过量伤害计入。
         creator_id = getattr(attacker, "copy_creator_runtime_id", "") if attacker is not None else ""
         if creator_id and actual_damage > 0:

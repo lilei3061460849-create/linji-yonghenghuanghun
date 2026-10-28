@@ -655,7 +655,7 @@ class GameEngine:
                     "suggestion": sorted(ALLY_SUGGESTIONS),
                     "x": "suggestion=guard 时可选：守卫坐标x",
                     "y": "suggestion=guard 时可选：守卫坐标y"},
-                 "note": "只能建议，不能命令：朋友/员工/临时朋友会按自己的处境决定是否照做"},
+                 "note": "只能建议，不能命令：朋友/员工/造物会按自己的处境决定是否照做"},
                 {"action_type": "world_interact", "params_schema": {
                     "target_actor_id": "actor_id from visible_actors",
                     "choice": ["talk", "trade", "cooperate", "intimidate", "attack"],
@@ -2658,7 +2658,7 @@ class GameEngine:
                     raise ValueError("随机出生位置发生重叠，请重新初始化地图")
                 used.add(pos)
                 actor_id = getattr(entity, "runtime_id", "") or f"{kind}:{entity.name}:{len(used)}"
-                # 2026-10-24：只有轮回者本人是手动单位；朋友/员工/临时朋友自主行动，
+                # 2026-10-24：只有轮回者本人是手动单位；朋友/员工/造物自主行动，
                 # 玩家对它们只能提"建议"（world_suggest_ally），是否照做由它们自己判定。
                 mode = "manual" if kind == "player" else "autonomous"
                 owner = player_actor_id if kind in ALLY_KINDS else ""
@@ -3290,7 +3290,7 @@ class GameEngine:
                 return {"success": False, "error": "必须指定 world_status.allies 里的友方单位"}
             target = world.actors[target_id]
             if target.kind not in ALLY_KINDS:
-                return {"success": False, "error": "只能向朋友/员工/临时朋友提建议"}
+                return {"success": False, "error": "只能向朋友/员工/造物提建议"}
             if not target.alive:
                 return {"success": False, "error": "目标单位已离场"}
             if any(encounter.active and target_id in encounter.participants
@@ -4074,9 +4074,9 @@ class GameEngine:
         ("蚀界残钟", "每回终，所有角色各自失去等同于其当前法力×当前速度的血限"),
         ("窥隙法匣", "每次成功闪避后，下回合获得10点法力"),
         ("逐影胫骨", "每累计成功闪避两次，速度+1"),
-        # 2026-10-25 用户令：引擎早有实现（combat_hooks 的复制体吸血），此前漏登记，补进遗物池。
-        ("共生血囊", "由你创造的复制体造成伤害时，复制体按目标实际减少的生命回复；"
-                     "超出复制体生命上限的回复量改为回复创造者"),
+        # 2026-10-25 用户令：引擎早有实现（combat_hooks 的造物吸血），此前漏登记，补进遗物池。
+        ("共生血囊", "由你创造的造物造成伤害时，造物按目标实际减少的生命回复；"
+                     "超出造物生命上限的回复量改为回复创造者"),
         # 2026-10-25 用户令：两条原始怪物道纹遗物化，进通用遗物池。
         ("疯狂", "所有角色每回合出手次数+1"),
         ("减速", "［战始］所有敌人的当前速度减半"),
@@ -5531,7 +5531,7 @@ class GameEngine:
                         "error": f"{actor.name}本回合出手已用完({actor.actions_used_this_round}/{budget})"}
 
         # 调用道纹引擎计算
-        # 【分裂】是双参数道纹（X=数量、Y=规模档）；y 缺省 1，单参数道纹不受影响。
+        # 【分裂】是双参数道纹（X=攻击力、Y=血限）；y 缺省 1，单参数道纹不受影响。
         daowen_y = params.get("y")
         if not isinstance(daowen_y, int) or isinstance(daowen_y, bool) or daowen_y < 1:
             daowen_y = 1
@@ -6466,7 +6466,7 @@ class GameEngine:
 
         前置：非最终死斗；未持有生效中的【不离】（无法逃跑/撤退/被移出）；
         本轮剩余出手≥5（原子消费，不足则一次不扣）。
-        脱战清理口径沿用原【买路财】撤退：敌方清空、临时朋友解散、员工撤部署、
+        脱战清理口径沿用原【买路财】撤退：敌方清空、造物解散、员工撤部署、
         朋友/员工撤退标记重置、精力回满、阶段回 pre_battle；不产生击杀碎片奖励。
         """
         escaper = self.state.player
@@ -6840,16 +6840,16 @@ class GameEngine:
                 })
                 result.update({"zero_speed": True, "speed_lost": lost})
         elif name == "赶尸铃":
-            # 2026-10-14 审计F4：召唤2具【行尸】（1攻×4次/36血）为临时朋友；
+            # 2026-10-14 审计F4：召唤2具【行尸】（1攻×4次/36血）为造物；
             # 战终自动解体（temp_friends 战终清理）。行尸不可被命令/自主出手，
-            # 与道纹【招魂】的临时朋友一致（纯肉身，可被集火、可吃回始/回终结算）。
+            # 与道纹【招魂】的造物一致（纯肉身，可被集火、可吃回始/回终结算）。
             if self.state.phase != GamePhase.IN_COMBAT.value:
                 return {"success": False, "error": "赶尸铃只能在战斗中使用"}
             item.use()
             summoned = []
             base = len(self.state.temp_friends)
             for i in range(2):
-                corpse = Entity(name=f"行尸·{base + i + 1}", entity_type="临时朋友",
+                corpse = Entity(name=f"行尸·{base + i + 1}", entity_type="造物",
                                 blood_limit=36, current_hp=36,
                                 attack_count=4, attack_power=1)
                 self.state.temp_friends.append(corpse)
@@ -9328,7 +9328,7 @@ class GameEngine:
                 self.state.employees.remove(emp)
                 self._blacklist_departure("死亡离队")
 
-        # 临时朋友消失
+        # 造物消失
         self.state.temp_friends.clear()
 
         # 出战支援：每场战斗单独部署，战终后存活员工回到"待命"状态，下一场需重新派遣

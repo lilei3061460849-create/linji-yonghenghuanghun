@@ -233,12 +233,18 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('| A15 | 嗜血原回终草案、延迟伤害兑换回复',
                       (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
 
-    def test_split_index_keeps_new_ruling_and_runtime_warning(self):
+    def test_split_index_tracks_implemented_creation_rule(self):
         index = (ROOT / '全道纹索引.md').read_text(encoding='utf-8')
         entry = index.split('### 分裂\n', 1)[1].split('### ', 1)[0]
         self.assertIn('支付：流血X+Y', entry)
-        self.assertIn('创造一个X（法限）/Y（血限）的造物', entry)
-        self.assertIn('尚未实现新版', entry)
+        self.assertIn('创造一个X攻击力/Y血限的造物', entry)
+        self.assertIn('每次发动只创造一个造物', entry)
+        self.assertIn('1次普攻', entry)
+        self.assertIn('[战终]消散', entry)
+        self.assertNotIn('尚未实现', entry)
+        row = next(r for r in self.rows if r['name'] == '分裂')
+        self.assertTrue(row['runtime'])
+        self.assertEqual(row['review'], '暂未发现结构违规')
 
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')

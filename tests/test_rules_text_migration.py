@@ -66,8 +66,8 @@ def test_rule_sync_extracts_same_common_daowen_after_migration():
     """瘦身 README 后通用道纹同步仍完整，避免错误迁移成 0 条的静默退化。"""
     sync = RuleSync(db_path="data/test_rule_sources.db")
     names = {item["name"] for item in sync.extract_daowen_from_file(COMMON_RULES_FILE)}
-    # 当前通用正文14条；波及属于沉沦海草案，不得误并入通用道纹。
-    assert len(names) == 14
+    # 当前通用正文13条；波及属沉沦海，增殖属扭曲都市，不得误并入通用道纹。
+    assert len(names) == 13
     assert {"杀伐", "共罪", "封印"} <= names
     assert {"飞行", "寄生", "波及"}.isdisjoint(names)
     assert sync.extract_daowen_from_file(README_FILE) == []

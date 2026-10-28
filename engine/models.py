@@ -19,6 +19,14 @@ from .rule_engine import apply_final_life_loss_cap, validate_damage_amount
 from .rule_engine import apply_final_life_loss_cap
 
 
+# 只在旧实体/旧存档读入边界使用；新实体类型与新文案统一为“造物”。
+LEGACY_ENTITY_TYPE_ALIASES = {"临时朋友": "造物"}
+
+
+def normalize_entity_type(entity_type: str) -> str:
+    return LEGACY_ENTITY_TYPE_ALIASES.get(entity_type, entity_type)
+
+
 @dataclass
 class DaoWen:
     """道纹定义"""
@@ -296,7 +304,7 @@ class Entity:
     name: str
     entity_type: str
     runtime_id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    # 分裂复制体的创建者身份；供遗物被动追踪归属，不依赖可能重名的实体名称。
+    # 分裂造物的创建者身份；供遗物被动追踪归属，不依赖可能重名的实体名称。
     copy_creator_runtime_id: str = ""
     # 开放世界位置字段：所有角色共用；地图系统尚未分配位置时为None。
     world_region: str = ""
@@ -305,7 +313,7 @@ class Entity:
     is_neutral: bool = False  # 中立特殊角色不会自动进入任一战斗阵营
     # 怪物/妖怪共用的固有偏爱；每种偏爱在同一实体上最多出现一次。
     preferences: list[str] = field(default_factory=list)
-    # 【造生】的妖怪是具有专属身份的朋友，不是分裂道纹产生的临时朋友。
+    # 【造生】的妖怪是具有专属身份的朋友，不是分裂道纹产生的造物。
     # 字段名保留 created_being 以兼容既有存档与开放世界记录。
     is_created_being: bool = False
     created_by_runtime_id: str = ""
@@ -442,7 +450,7 @@ class Entity:
 
     # 出战支援（罪孽都市专属机制1，全局对所有[员工]生效）：
     # [员工]默认待命不占场；is_deployed=True 才计入战场与工资结算。
-    # 玩家/怪物/[朋友]/[临时朋友]与"还债"转化来的[员工]默认直接为True，保持既有行为不变。
+    # 玩家/怪物/[朋友]/[造物]与"还债"转化来的[员工]默认直接为True，保持既有行为不变。
     is_deployed: bool = True
     deployed_at_round: int = 0  # 派遣时 state.current_round 的原始值（用于结算"实际出场回合数"）
 
@@ -480,6 +488,8 @@ class Entity:
     is_chizu_of: str = ""
 
     def __post_init__(self):
+        # 旧面板、旧封存字典与直接构造共用的术语迁移；不追溯修改其它面板字段。
+        self.entity_type = normalize_entity_type(self.entity_type)
         # 每个实体的本局历史最高碎片余额至少包含其初始真实余额。
         # 不能只依赖 __setattr__：dataclass 构造与旧存档恢复路径都要满足同一不变量。
         self.shards_peak = max(0, int(self.shards_peak), int(self.shards))
@@ -585,6 +595,9 @@ class Entity:
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        # pickle 不经过 __post_init__，旧档在读入边界显式迁移实体类型。
+        self.__dict__["entity_type"] = normalize_entity_type(
+            self.__dict__.get("entity_type", ""))
         self.__dict__["_hp_engine_ref"] = None
 
     
@@ -845,9 +858,9 @@ class Entity:
 
         特殊事件【迷失】：
           * 怪物：照常增减异变层数，但无论累积多少层都不会触发【迷失】。
-          * 非怪物角色（轮回者/朋友/员工/临时朋友/赤族等）：达到阈值时不在模型层直接命零，
+          * 非怪物角色（轮回者/朋友/员工/造物/赤族等）：达到阈值时不在模型层直接命零，
             返回 `lost=True` 交由战斗层 _resolve_mutation_lost 判定——
-              - 己方还有其他存活角色（队友/朋友/员工/临时朋友/其他轮回者阵营角色）：
+              - 己方还有其他存活角色（队友/朋友/员工/造物/其他轮回者阵营角色）：
                 该角色异变为怪物，立刻与原队伍开战；
               - 否则：直接[命零]死亡。
         模型层只负责数值与阈值，"变谁的敌/是否命零"由战斗引擎处理。
@@ -1316,7 +1329,7 @@ class GameState:
     #   {"monster": Entity, "return_round": int, "delay_rounds": int,
     #    "home": str, "index": Optional[int]}
     # 暂离不是死亡/永久离场，仍阻塞战终；到达回合始时把原实体放回它原本所在的容器。
-    # 2026-10-08 用户令：【封印】放开到任意目标（含[朋友]/[员工]/临时朋友与施法者
+    # 2026-10-08 用户令：【封印】放开到任意目标（含[朋友]/[员工]/造物与施法者
     # 自己），因此队列不再只装怪物，home/index 记录原址——
     #   * "enemies"/"friends"/"employees"/"temp_friends" —— 从对应 list 摘走再插回原下标；
     #   * "player" —— state.player 是单字段，摘不走，改为就地打 `_delayed_by_seal`

@@ -1043,8 +1043,14 @@ class MonsterPhaseMixin:
                                 and self.state.on_enemy_side(target) and target is not monster)):
                         raise ValueError("怪物攻击target_ref必须是prepare列出的己方目标"
                                          "（养蛊场下可为其它怪物）")
+                    # 静态预校验后，同阶段先前的道纹可能已让预选目标暂离/失去可选资格
+                    # （例如怪物先封印玩家，再结算自己预选的玩家普攻）。这与预选目标
+                    # 已命零相同：该击跳过，不把整次合法阶段提交回滚成无效行动。
                     if not self.is_targetable(monster, target):
-                        raise ValueError(f"{target.name}当前不可被{monster.name}选中")
+                        results.append({"attacker": monster.name, "target": target.name,
+                                        "skipped": "预选目标已不可选中",
+                                        "hit_index": hit_index + 1})
+                        continue
                     if not target.is_alive:
                         results.append({"attacker": monster.name, "target": target.name,
                                         "skipped": "预选目标已命零", "hit_index": hit_index + 1})

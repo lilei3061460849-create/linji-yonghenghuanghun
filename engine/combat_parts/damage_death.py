@@ -916,44 +916,45 @@ class DamageDeathMixin:
             yaoguai_recovery = self._recover_dormant_yaoguai_on_monster_death(entity, death_ctx)
             if yaoguai_recovery:
                 entity._death_ctx["yaoguai_recovery"] = yaoguai_recovery
-        # 2026-09-17：【分裂】改为即时创生（见 _spawn_fenlie_clones），
-        # 原「[命零]时按本体 20% 血限创造复制体」的分支已随重做删除。
+        # 【分裂】只在主动发动时创造造物（见 _spawn_fenlie_creation），
+        # [命零]不再附带创生效果。
 
-    def _spawn_fenlie_clones(self, caster, count: int, clone_hp: int) -> list:
-        """【分裂】即时创造复制体：count 个 clone_hp 血限/生命的自身复制体。
-
-        复制体继承本体除【分裂】外的全部道纹（避免无限套娃），阵营与本体一致
-        （本体是怪物→进 enemies；否则→进 temp_friends）。返回新建的复制体列表。
-        """
+    def _spawn_fenlie_creation(self, caster, attack_power: int, blood_limit: int) -> Entity:
+        """【分裂】创造一个 X 攻击力、Y 血限、1 次普攻且无道纹的造物。"""
         with resolution_frame(self, KIND_SPLIT, "分裂",
-                              getattr(caster, "name", "?"), count):
-            return self._spawn_fenlie_clones_inner(caster, count, clone_hp)
+                              getattr(caster, "name", "?"), 1):
+            return self._spawn_fenlie_creation_inner(caster, attack_power, blood_limit)
 
-    def _spawn_fenlie_clones_inner(self, caster, count: int, clone_hp: int) -> list:
-        """分裂的实现体（对外契约见 _spawn_fenlie_clones）。"""
-        clones = []
-        for i in range(max(0, count)):
-            clone = Entity(name=f"{caster.name}·裂{i + 1}",
-                           entity_type=caster.entity_type,
-                           blood_limit=clone_hp, current_hp=clone_hp,
-                           attack_count=caster.attack_count,
-                           attack_power=caster.attack_power,
-                           copy_creator_runtime_id=caster.runtime_id)
-            clone.preferences = list(getattr(caster, "preferences", []))
-            if "痛苦的偏爱" not in clone.preferences:
-                clone.relics = [relic for relic in clone.relics
-                                if relic.name != MONSTER_MANA_RELIC]
-            for dw_name, dw_inst in caster.dao_wen.items():
-                if dw_name == "分裂":
-                    continue      # 复制体无分裂道纹，防止无限分裂
-                clone.dao_wen[dw_name] = dw_inst
-            self._bind_hp_hook(clone)
-            if caster.entity_type == "怪物":
-                self.state.enemies.append(clone)
-            else:
-                self.state.temp_friends.append(clone)
-            clones.append(clone)
-        return clones
+    def _spawn_fenlie_creation_inner(self, caster, attack_power: int,
+                                     blood_limit: int) -> Entity:
+        """分裂实现体；攻击力/攻击次数走当前法力/当前速度的统一换算。"""
+        existing_names = {
+            entity.name for entity in (
+                [self.state.player] + list(self.state.friends)
+                + list(self.state.employees) + list(self.state.temp_friends)
+                + list(self.state.enemies)
+            ) if entity is not None
+        }
+        base_name = f"{caster.name}·造物"
+        name = base_name
+        suffix = 2
+        while name in existing_names:
+            name = f"{base_name}{suffix}"
+            suffix += 1
+        creation = Entity(
+            name=name, entity_type="造物",
+            blood_limit=blood_limit, current_hp=blood_limit,
+            mana_limit=attack_power, current_mana=attack_power,
+            speed_limit=1, current_speed=1,
+            attack_count=1, attack_power=attack_power,
+            copy_creator_runtime_id=caster.runtime_id,
+        )
+        self._bind_hp_hook(creation)
+        if self.state.on_enemy_side(caster):
+            self.state.enemies.append(creation)
+        else:
+            self.state.temp_friends.append(creation)
+        return creation
 
     # ---- F2 全量：罪孽/扭曲专属道纹的公共辅助 ----
     def _resolve_reflect_aftermath(self, attacker: Entity, amount: int,

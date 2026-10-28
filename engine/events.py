@@ -556,7 +556,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             applied.append("流血12")
             _pay_numeric("疲惫", 2)
             applied.append("疲惫2")
-            _grant_item("赶尸铃", "召唤2具【行尸】1×4/36作为[临时朋友]加入本场战斗，战终尸体解体",
+            _grant_item("赶尸铃", "召唤2具【行尸】1×4/36作为[造物]加入本场战斗，战终尸体解体",
                         "consumable")
             return {"applied": applied, "instructions": instructions}
         if text.startswith("剥取黄符"):

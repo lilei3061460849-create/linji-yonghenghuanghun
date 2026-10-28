@@ -217,7 +217,7 @@ def test_monster_payload_does_not_advertise_a_fake_lost_clock():
     assert "迷失" not in BR.resource_line(monster)
 
 
-@pytest.mark.parametrize("entity_type", ["轮回者", "朋友", "员工", "临时朋友", "赤族"])
+@pytest.mark.parametrize("entity_type", ["轮回者", "朋友", "员工", "造物", "赤族"])
 def test_non_monster_lost_threshold_is_unchanged(entity_type):
     entity = _entity(entity_type, entity_type)
     entity.add_mutation(49)

@@ -206,7 +206,7 @@ def test_damage_plus_shield_keeps_shield_legal(tmp_path):
 
 
 def test_death_plus_revive_seal_reentry(tmp_path):
-    """死亡+复活：同一场里一边死人（复制体被击杀），一边有怪物回场（封印）。
+    """死亡+复活：同一场里一边死人（造物被击杀），一边有怪物回场（封印）。
 
     「复活」在本作里不是无代价起死回生，而是【封印】的延迟回场：目标必须
     活着且在场（`daowen_effect.py` 的公开路径有校验），暂离后按 X 回合再入场。
@@ -217,13 +217,14 @@ def test_death_plus_revive_seal_reentry(tmp_path):
     ctx = combat.resolution
     ctx.set_tracing(True)
     monster = next(e for e in engine.state.enemies if e.is_alive)
-    clone = combat._spawn_fenlie_clones(monster, 1, 5)[0]
+    creation = combat._spawn_fenlie_creation(monster, 3, 5)
     combat.round_start({})
     assert_battle_invariants(engine, context="分裂后")
 
-    # 死亡：击杀复制体
-    combat._apply_hostile_damage(clone, clone.current_hp + 1, source=engine.state.player)
-    assert not clone.is_alive
+    # 死亡：击杀造物
+    combat._apply_hostile_damage(creation, creation.current_hp + 1,
+                                 source=engine.state.player)
+    assert not creation.is_alive
     assert KIND_DEATH in [f.kind for f in ctx.history], "命零没有走结算帧"
 
     # 复活（回场）：把本体的下一次入场推迟 1 回合，再由回合始带回战场
@@ -236,22 +237,19 @@ def test_death_plus_revive_seal_reentry(tmp_path):
     assert_battle_invariants(engine, context="死亡+复活")
 
 
-def test_death_plus_split_keeps_clones_legal(tmp_path):
-    """死亡+分裂：先分裂出复制体，再击杀其中一只，另一只必须保持合法。"""
+def test_death_plus_split_keeps_creations_legal(tmp_path):
+    """死亡+分裂：两次发动各创造一个造物，击杀其中一个不影响另一个。"""
     engine = build_battle_engine(tmp_path, name="combo_split")
     combat = engine.combat
     combat.resolution.set_tracing(True)
     monster = next(e for e in engine.state.enemies if e.is_alive)
-    clones = combat._spawn_fenlie_clones(monster, 2, 5)
+    creations = [combat._spawn_fenlie_creation(monster, 3, 5) for _ in range(2)]
     assert KIND_SPLIT in [f.kind for f in combat.resolution.history], "分裂没有记账"
-    assert clones, "分裂没有产生复制体"
+    assert len(creations) == 2
     combat.round_start({})
-    for clone in list(clones):
-        if clone.is_alive:
-            combat._apply_hostile_damage(clone, clone.current_hp + 1,
-                                         source=engine.state.player)
-            break
-    assert any(not c.is_alive for c in clones), "复制体没有被击杀"
+    combat._apply_hostile_damage(creations[0], creations[0].current_hp + 1,
+                                 source=engine.state.player)
+    assert not creations[0].is_alive and creations[1].is_alive
     assert_battle_invariants(engine, context="死亡+分裂")
 
 
@@ -299,8 +297,8 @@ def test_evolution_plus_trigger(tmp_path):
     assert_battle_invariants(engine, context="进化+触发")
 
 
-def test_split_plus_trigger_fires_for_clones(tmp_path):
-    """分裂+触发：新生成的复制体必须能正常参与触发分发。"""
+def test_split_plus_trigger_fires_for_creations(tmp_path):
+    """分裂+触发：新生成的造物必须能正常参与触发分发。"""
     engine = build_battle_engine(tmp_path, name="combo_split_trigger")
     combat = engine.combat
     fired: list[str] = []
@@ -314,12 +312,12 @@ def test_split_plus_trigger_fires_for_clones(tmp_path):
     combat.mechanism_bus.register(mechanism)
     try:
         monster = next(e for e in engine.state.enemies if e.is_alive)
-        clones = combat._spawn_fenlie_clones(monster, 2, 8)
-        for clone in clones:
-            combat._apply_hostile_damage(clone, 1, source=engine.state.player)
+        creations = [combat._spawn_fenlie_creation(monster, 3, 8) for _ in range(2)]
+        for creation in creations:
+            combat._apply_hostile_damage(creation, 1, source=engine.state.player)
     finally:
         combat.mechanism_bus.unregister(mechanism)
-    assert len(fired) >= len(clones), f"复制体的伤害没有触发分发：{fired}"
+    assert len(fired) >= len(creations), f"造物的伤害没有触发分发：{fired}"
     assert_battle_invariants(engine, context="分裂+触发")
 
 
