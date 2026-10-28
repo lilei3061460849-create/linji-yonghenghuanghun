@@ -63,12 +63,12 @@ class DaoWenEngine:
     X_LIMITS = {
         "消耗": lambda state: float('inf'),     # 无上限，受法力限制
         "冷却": lambda state: 7,                 # 0≤X≤7
-        "流血": lambda state: state.get("current_hp", 999),    # 0≤X≤当前生命
-        "衰老": lambda state: state.get("blood_limit", 999),   # 0≤X≤当前血限
-        "枯竭": lambda state: state.get("mana_limit", 999),    # 0≤X≤当前法限
-        "萎缩": lambda state: state.get("speed_limit", 999),   # 0≤X≤当前速限
-        "疲惫": lambda state: state.get("current_speed", 999), # 0≤X≤当前速度
-        "失忆": lambda state: state.get("daowen_count", 999),  # 0≤X≤当前道纹数量
+        "流血": lambda state: state.get("current_hp", math.inf),    # 0≤X≤当前生命
+        "衰老": lambda state: state.get("blood_limit", math.inf),   # 0≤X≤当前血限
+        "枯竭": lambda state: state.get("mana_limit", math.inf),    # 0≤X≤当前法限
+        "萎缩": lambda state: state.get("speed_limit", math.inf),   # 0≤X≤当前速限
+        "疲惫": lambda state: state.get("current_speed", math.inf), # 0≤X≤当前速度
+        "失忆": lambda state: state.get("daowen_count", math.inf),  # 0≤X≤当前道纹数量
         "异变": lambda state: 50,                # 0≤X≤50
     }
     

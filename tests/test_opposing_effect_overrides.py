@@ -97,3 +97,8 @@ def test_pickle_legacy_status_adds_missing_override_metadata():
     assert restored.effective_attack_power()==10
     restored.add_status(st('龙族利爪'))
     assert restored.effective_attack_power()==6
+
+
+def test_legacy_positional_status_daowen_order_keeps_its_original_slot():
+    effect=StatusEffect('全力',2,1,'旧来源','battle','buff',None,0,7)
+    assert effect.daowen_order==7 and effect.effect_sequence==0

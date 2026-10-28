@@ -205,10 +205,10 @@ class StatusEffect:
     polarity: str = EffectPolarity.NEUTRAL.value
     activation_x: Optional[int] = None  # 旧版兼容字段，不参与排序
     application_sequence: int = 0  # 旧版兼容字段，不生成新排序序号
+    daowen_order: Optional[int] = None  # 发动该状态的道纹在持有者序列中的位置，越小越先
     effect_sequence: int = 0  # 仅相反输出约束覆盖使用，不参与自然窗口排序
     effect_data: dict = field(default_factory=dict)  # 明确约束所需快照；非历史状态回滚
     controller_runtime_id: Optional[str] = None  # 篡改目标选择权的持有者，稳定身份而非名字
-    daowen_order: Optional[int] = None  # 发动该状态的道纹在持有者序列中的位置，越小越先
     
     def __setstate__(self, state):
         self.__dict__.update(state)
@@ -864,6 +864,10 @@ class Entity:
             "lost": lost,             # 非怪物触发"迷失"，等待战斗层处理
         }
     
+    def effective_blood_limit(self):
+        """当前生效血限：增殖是真正无穷约束，blood_limit保留既有基础账本。"""
+        return math.inf if self.has_status("无限血限") else self.blood_limit
+
     def heal(self, amount: int, allow_overflow: bool = False) -> dict:
         """回复生命。allow_overflow=True 时当前生命可超出[血限]（遗物【猩红果实】）。"""
         before = self.current_hp

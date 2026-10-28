@@ -312,7 +312,7 @@ class MonsterPhaseMixin:
             return True
         for key, capacity in (
                 ("cost_hp", getattr(caster, "current_hp", 0)),
-                ("cost_blood_limit", getattr(caster, "blood_limit", 0)),
+                ("cost_blood_limit", caster.effective_blood_limit()),
                 ("cost_speed", getattr(caster, "current_speed", 0)),
         ):
             amount = calc.get(key, 0)

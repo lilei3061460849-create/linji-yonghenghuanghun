@@ -151,7 +151,7 @@ class CostPaymentMixin:
     def _cost_capacity(entity: Entity, cost_type: str) -> Optional[int]:
         return {
             "流血": entity.current_hp,
-            "衰老": entity.blood_limit,
+            "衰老": entity.effective_blood_limit(),
             "枯竭": entity.mana_limit,
             "萎缩": entity.speed_limit,
             "疲惫": entity.current_speed,
@@ -243,13 +243,13 @@ class CostPaymentMixin:
             # 血限压迫导致的当前生命下降同样是失血；统一交给
             # Entity.__setattr__ 的「失去生命后」钩子触发，不再手工接线。
             # 「失去生命前」：血限压迫即将把当前生命压下来。
-            if payer.current_hp > payer.blood_limit and self._attack_after_window_target is not payer:
+            if payer.current_hp > payer.effective_blood_limit() and self._attack_after_window_target is not payer:
                 self._fire_before_life_lost(payer, cost_context)
             self._hp_loss_ctx = cost_context
             # 2026-10-14：【猩红果实】持有者当前生命可超出[血限]，血限被压低时
             # 不连带削掉溢出部分——与【苍白之花】的【枯竭】处理镜像。
             if not self.state.hp_overflow_exempt(payer):
-                payer.current_hp = min(payer.current_hp, payer.blood_limit)
+                payer.current_hp = min(payer.current_hp, payer.effective_blood_limit())
             self._check_hp_zero_death(payer, ctx=cost_context)
         elif cost_type == "枯竭":
             payer.mana_limit = max(0, payer.mana_limit - amount)

@@ -427,12 +427,12 @@ class DamageDeathMixin:
             # 血限压降导致的当前生命下降同样是失血；统一交给
             # Entity.__setattr__ 的「失去生命后」钩子触发，不再手工接线。
             # 「失去生命前」：血限压迫即将把当前生命压下来。
-            if entity.current_hp > entity.blood_limit and self._attack_after_window_target is not entity:
+            if entity.current_hp > entity.effective_blood_limit() and self._attack_after_window_target is not entity:
                 self._fire_before_life_lost(entity, bl_ctx or parent)
             self._hp_loss_ctx = bl_ctx or parent
             # 2026-10-14：【猩红果实】持有者豁免血限压顶（生命可超血限）。
             if not self.state.hp_overflow_exempt(entity):
-                entity.current_hp = min(entity.current_hp, entity.blood_limit)
+                entity.current_hp = min(entity.current_hp, entity.effective_blood_limit())
         died = self._check_hp_zero_death(entity, ctx=bl_ctx or parent) if lethal else False
         return {"applied": applied, "ctx": bl_ctx, "died": died}
 

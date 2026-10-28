@@ -415,7 +415,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         entity.current_speed = min(entity.current_speed, entity.speed_limit)
         # 2026-10-14：【猩红果实】持有者当前生命可超出[血限]，与法力侧镜像。
         if not self.state.hp_overflow_exempt(entity):
-            entity.current_hp = min(entity.current_hp, entity.blood_limit)
+            entity.current_hp = min(entity.current_hp, entity.effective_blood_limit())
 
     def _note_dodge(self, entity: Entity, relic_target_ref: Optional[str] = None) -> dict:
         """闪避专属句：正文写「每次闪避后」的效果。失速/归零不在这里。"""
