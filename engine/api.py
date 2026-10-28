@@ -7889,6 +7889,8 @@ class GameEngine:
                              else getattr(e, "consumables", []))],
             "status_effects": [{"name": s.name, "value": s.value,
                                  "remaining_rounds": s.remaining_rounds,
+                                "effect_sequence": getattr(s, "effect_sequence", 0),
+                                "effect_data": dict(getattr(s, "effect_data", {})),
                                 "controller_runtime_id": getattr(s, "controller_runtime_id", None), "source": s.source,
                                  "scope": s.scope, "polarity": s.polarity,
                                  "daowen_order": s.daowen_order}
@@ -7963,6 +7965,8 @@ class GameEngine:
                                                   scope=st.get("scope", EffectScope.BATTLE.value),
                                                   polarity=st.get("polarity", EffectPolarity.NEUTRAL.value),
                                                   # 旧档 X/施加序号仅保留为兼容元数据，不参与结算顺序。
+                                                  effect_sequence=st.get("effect_sequence", 0),
+                                                  effect_data=dict(st.get("effect_data", {})),
                                                   controller_runtime_id=st.get("controller_runtime_id"),
                                                   activation_x=st.get("activation_x"),
                                                   application_sequence=st.get("application_sequence", 0),

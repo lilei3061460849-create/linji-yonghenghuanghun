@@ -205,9 +205,17 @@ class StatusEffect:
     polarity: str = EffectPolarity.NEUTRAL.value
     activation_x: Optional[int] = None  # 旧版兼容字段，不参与排序
     application_sequence: int = 0  # 旧版兼容字段，不生成新排序序号
+    effect_sequence: int = 0  # 仅相反输出约束覆盖使用，不参与自然窗口排序
+    effect_data: dict = field(default_factory=dict)  # 明确约束所需快照；非历史状态回滚
     controller_runtime_id: Optional[str] = None  # 篡改目标选择权的持有者，稳定身份而非名字
     daowen_order: Optional[int] = None  # 发动该状态的道纹在持有者序列中的位置，越小越先
     
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.__dict__.setdefault("effect_data", {})
+        self.__dict__.setdefault("effect_sequence", 0)
+        self.__dict__.setdefault("controller_runtime_id", None)
+
     def __post_init__(self):
         # 即使调用方直接append而不经过Entity.add_status，代价标记也不能被战终误清。
         if (self.name in {"流血", "衰老", "枯竭", "萎缩", "疲惫", "异变", "迷失"}
@@ -223,6 +231,8 @@ class StatusEffect:
 
     def refresh_order_from(self, other: 'StatusEffect') -> None:
         """刷新状态来源与道纹序列位置；施加时间和 X 不影响结算顺序。"""
+        self.effect_sequence = getattr(other, "effect_sequence", 0)
+        self.effect_data = dict(getattr(other, "effect_data", {}))
         self.daowen_order = other.daowen_order
         self.source = other.source
 
@@ -589,11 +599,13 @@ class Entity:
         【手雷减攻】只减普攻次数，不减速度、也不减出手预算（2026-10-25 起对全体同口径：
         怪物阶段不再单独读旧面板字段 attack_count 算击数，击数一律走本方法）。
         """
-        if self.get_status_value("全速"):
-            hits = self.speed_limit
-        else:
-            hits = self.current_speed
-        return max(0, hits - self.get_status_value("手雷减攻"))
+        from .effect_overrides import resolve
+        hits = resolve(self, "attack_count", self.current_speed, {
+            "全速": lambda status, old: self.speed_limit,
+            "手雷减攻": lambda status, old: old-status.value,
+            "定型": lambda status, old: status.effect_data.setdefault("attack_count", old),
+        })
+        return max(0, hits)
 
     def effective_attack_power(self) -> int:
         """攻击力＝ 当前法力。
@@ -604,15 +616,16 @@ class Entity:
 
         两处覆盖（均走状态层，故对轮回者/怪物/朋友/员工同口径生效）：
         - 【龙族利爪】：攻击力 = 当前法力×2。
-        - 【全力】：攻击力锁定 = [法限]，覆盖上一步的结果，
-          不再随当前法力下降。顺序上"全力"最后生效，故它压过龙族利爪的倍率。
+        - 【全力】：攻击力锁定 = [法限]，不再随当前法力下降。
+        同域相反约束按实际后生效覆盖，不以名字、X、资源种类或∞固定优先级。
+        【定型】锁定其生效时的攻击力/攻击次数；费用仍正常改变法力/速度资源。
         """
-        power = self.current_mana
-        if self.get_status_value("龙族利爪"):
-            power *= 2
-        if self.get_status_value("全力"):
-            # 锁定为法限：花法力不再掉攻击力
-            power = self.mana_limit
+        from .effect_overrides import resolve
+        power = resolve(self, "attack_power", self.current_mana, {
+            "龙族利爪": lambda status, old: self.current_mana*2,
+            "全力": lambda status, old: self.mana_limit,
+            "定型": lambda status, old: status.effect_data.setdefault("attack_power", old),
+        })
         return max(0, power)
 
     @property
@@ -993,9 +1006,20 @@ class Entity:
                 effect.polarity = EffectPolarity.BUFF.value
             elif effect.name in debuffs:
                 effect.polarity = EffectPolarity.DEBUFF.value
-        for existing in self.status_effects:
-            if existing.merge_with(effect):
-                return
+        from .effect_overrides import crossed_opposition
+        if effect.name == "定型":
+            effect.effect_data = {"attack_power": self.effective_attack_power(),
+                                  "attack_count": self.effective_attack_count()}
+        self._effect_sequence = max(getattr(self, "_effect_sequence", 0), len(self.status_effects),
+            max((getattr(status, "effect_sequence", 0) for status in self.status_effects), default=0)) + 1
+        effect.effect_sequence = self._effect_sequence
+        for existing in reversed(self.status_effects):
+            if existing.name == effect.name:
+                # 相反效果之间不能把早先已被覆盖的数值并入后来新施加的一次，造成旧效果复活。
+                if crossed_opposition(self, existing, effect):
+                    break
+                if existing.merge_with(effect):
+                    return
         self.status_effects.append(effect)
     
     def to_dict(self) -> dict:
@@ -1060,7 +1084,9 @@ class Entity:
             "status_effects": [
                 {"name": s.name, "value": s.value, "rounds": s.remaining_rounds,
                  "source": s.source, "scope": s.scope, "polarity": s.polarity,
-                 "controller_runtime_id": getattr(s, "controller_runtime_id", None)}
+                 "controller_runtime_id": getattr(s, "controller_runtime_id", None),
+                 "effect_sequence": getattr(s, "effect_sequence", 0),
+                 "effect_data": dict(getattr(s, "effect_data", {}))}
                 for s in self.status_effects
             ]
         }
