@@ -150,7 +150,7 @@ class GameEngine:
         self._rule_sync = None
 
         # 中断队列
-        self._pending_interrupts: list[Interrupt] = self.combat._pending_interrupts
+        self._pending_interrupts: list[Interrupt] = []
         # 体外心脏：记录[战始]翻倍前的血限基准，[战终]用于还原
         self._artifact_base_blood_limit = 0
 
@@ -1528,7 +1528,6 @@ class GameEngine:
             _scale = 1
         self.combat.resolution.begin_action(action_type, params, scale=_scale)
         try:
-            self.combat._pending_interrupts = self._pending_interrupts
             result = self._dispatch_action(action_type, params)
             if result.get("success", False):
                 page_error = growth_error(self.state, page_usage_before)
@@ -1558,6 +1557,8 @@ class GameEngine:
                                       "提交被拒绝且已整体回滚（零副作用），token仍有效；"
                                       "请修正选择后用同一token重新调用resolve_attack")
 
+            # 特殊道纹通过状态队列递交DM中断，不与CombatEngine共享可变别名。
+            self._collect_daowen_interrupts()
             # 记录行动历史
             self._action_history.append({
                 "action": action_type,
@@ -1630,6 +1631,12 @@ class GameEngine:
                 error_result["token"] = self.state.pending_attack.get("token")
             self._last_result = error_result
             return error_result
+
+    def _collect_daowen_interrupts(self):
+        queued=getattr(self.state,"pending_daowen_interrupts",None)
+        if queued:
+            self._pending_interrupts.extend(queued)
+            queued.clear()
 
     def _dispatch_action(self, action_type: str, params: dict) -> dict:
         """action 名 → 处理器：唯一的 action 路由表（执行实现见各 _action_*）。"""

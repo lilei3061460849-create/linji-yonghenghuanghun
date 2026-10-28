@@ -128,3 +128,14 @@ def test_truth_bad_statement_rejected_before_catalyst_is_paid():
     result=call(e,[step('真理',x=2,ref='enemy:0',statement='只有一句。')])
     assert not result['success'] and not e._pending_interrupts
     assert p.dao_wen['催化'].cooldown_remaining==0
+
+
+def test_truth_catalysis_preview_does_not_pollute_interrupt_queue_or_source_instance():
+    from engine.ai_preview import ActionPreview
+    from engine.pollution_guard import snapshot_runtime_state,assert_runtime_unchanged
+    e,p,a=setup('truth_preview');_give(p,'真理');p.dao_wen['真理'].cooldown_remaining=6
+    before=snapshot_runtime_state(e)
+    ActionPreview(e).preview('use_daowen',{'daowen_name':'催化','x':1,'target_ref':'player:0',
+        'dodge':False,'catalysis_steps':[step('真理',x=1,ref='enemy:0',statement='一句陈述。')]})
+    assert_runtime_unchanged(before,snapshot_runtime_state(e),context='催化真理预演')
+    assert not e._pending_interrupts and not e.state.pending_daowen_interrupts

@@ -1119,6 +1119,7 @@ class ScopedStatDelta:
 class GameState:
     """完整游戏状态"""
     # 游戏元数据
+    pending_daowen_interrupts: list = field(default_factory=list)  # 特殊道纹提交给API的DM中断，随状态回滚/存档
     game_id: str = ""
     phase: str = "setup"
     # 战斗内强制顺序；正式战始会置为 await_round_start。

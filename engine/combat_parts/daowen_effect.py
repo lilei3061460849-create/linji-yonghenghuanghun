@@ -167,7 +167,9 @@ class DaowenEffectMixin:
             options=[{"id":"truth","label":"属实","description":"按DM裁定的真实内容生效"},
                      {"id":"silence","label":"无法开口","description":"对方拒绝或无法说出真话，只能沉默"}],
             state_snapshot=self.state.to_dict())
-        self._pending_interrupts.append(interrupt)
+        if not hasattr(self.state,"pending_daowen_interrupts"):
+            self.state.pending_daowen_interrupts=[]
+        self.state.pending_daowen_interrupts.append(interrupt)
         return {"type":"catalysed_daowen","holder":actor.name,"daowen":"真理",
                 "result":{"interrupt":interrupt.to_dict(),"sentences":sentences,"silence_rounds":x}}
 
