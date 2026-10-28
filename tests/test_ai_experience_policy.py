@@ -117,3 +117,11 @@ def test_missing_writing_section_is_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="缺少“### 行文十诫”章节"):
         validate_ai_knowledge_base(path)
+
+
+def test_type_definitions_must_reference_canonical_rules_not_old_duplicates(tmp_path):
+    text = KNOWLEDGE.read_text(encoding="utf-8")
+    path = tmp_path / "AI_EXPERIENCE.md"
+    path.write_text(text.replace('《规则正文》「基础定义」', '其他材料'), encoding="utf-8")
+    with pytest.raises(ValueError, match="缺少资源类型定义指向"):
+        validate_ai_knowledge_base(path)
