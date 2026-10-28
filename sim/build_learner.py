@@ -460,11 +460,18 @@ def _resolve_monster_turn(engine):
         m = _re.search(r"(.+?)分配总伤害\d+超过上限(\d+)", err)
         if m:
             name, budget = m.group(1), int(m.group(2))
-            ref = next((a["actor_ref"] for a in actors
-                        if refs_all.get(a["actor_ref"]) is not None
-                        and refs_all[a["actor_ref"]].name == name), None)
-            if ref and damage_budget_overrides.get(ref) != budget:
-                damage_budget_overrides[ref] = budget
+            refs = [a["actor_ref"] for a in actors
+                    if refs_all.get(a["actor_ref"]) is not None
+                    and refs_all[a["actor_ref"]].name == name]
+            # 错误文本不含actor_ref；同名怪不能把另一actor的上限错写到首个同名者。
+            # 对同名提交组统一采用本次上限是合法保守分配，若实际故障者预算更低，
+            # 下一次报错还会继续下调，不会在多个同名actor之间循环错配。
+            changed = False
+            for ref in refs:
+                if damage_budget_overrides.get(ref) != budget:
+                    damage_budget_overrides[ref] = budget
+                    changed = True
+            if changed:
                 continue
         # 命中数/出手数漂移：按报错给出的实时 N 定向覆盖该 actor 后重试
         m = _re.search(r"(.+?)每个攻击出手必须提交(\d+)次命中选择", err)
