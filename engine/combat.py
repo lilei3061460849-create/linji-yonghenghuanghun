@@ -21,6 +21,7 @@ from .personality import remove_personality
 from .resolution import KIND_EFFECT, ResolutionContext, resolution_frame
 # 常量定义在 models（授予点在 Entity.__post_init__），此处只读取以判定效果。
 from .models import MONSTER_MANA_RELIC
+from .gamedata import REGION_EXCLUSIVE_DAOWEN as REGION_EXCLUSIVE_DAOWEN_DATA
 
 # 【凡庸】连续无所作为的回合阈值：连续 N 回合未出手、或连续 N 回合未能使敌对角色
 # 生命减少 → 凭空全身炸裂。这是**规则层**的反乌龟机制，必须优先于 sim 层的死锁
@@ -47,11 +48,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                    DaowenEffectMixin, SpellReactionMixin, MonsterPhaseMixin):
     """战斗计算引擎（门面；实现见 engine/combat_parts/*.py）"""
     
-    # 副本专属道纹
+    # 副本专属道纹：唯一事实源在 gamedata；复制集合避免调用方修改时污染全局配置。
+    # 不再单独维护含已退役【消灾】的第二份名单，战始碎片计算与学习到门禁保持同源。
     REGION_EXCLUSIVE_DAOWEN = {
-        "扭曲都市": {"变形","定型","超频","坏死"},  # 【畸变】【退化】已遗物化
-        "罪孽都市": {"点金","典当","豪夺","抢劫","假钞","消灾","勒索"},   # 2026-10-13 删【逼债】【典当】顶替；2026-10-14 +【勒索】
-        "龙心谷":   set(),  # 【逆鳞】【伤痕】已遗物化
+        region: set(names) for region, names in REGION_EXCLUSIVE_DAOWEN_DATA.items()
     }
     
     # 原始怪物道纹（道纹归属规则：各组起点）——【原初X】可借用范围
