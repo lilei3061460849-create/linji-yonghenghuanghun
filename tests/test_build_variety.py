@@ -69,12 +69,12 @@ def test_boba_marks_targets_after_start():
 # 2026-10-12：失忆 已回退为 点金；2026-10-13：【逼债】删除——【典当】不进本表：
 # 本用例只注入被测一条道纹，而典当代价失忆2X（单持付不起），「持有即发动」不变量
 # 对它不成立；其可发动性见 tests/test_escape_and_diandang.py。
-_REGION_OF = {"加害": "龙心谷", "裂变": "龙心谷", "背负": "龙心谷",
+_REGION_OF = {"超频": "扭曲都市", "勾魂": "乱葬岗",
               "坏死": "扭曲都市",
               "点金": "罪孽都市"}
 
 
-@pytest.mark.parametrize("dw", ["加害", "裂变", "背负", "坏死", "点金"])
+@pytest.mark.parametrize("dw", ["超频", "勾魂", "坏死", "点金"])
 def test_ai_uses_region_specific_daowen(dw, monkeypatch):
     """
     正常路径：各副本专属道纹只要持有就应被实际发动。

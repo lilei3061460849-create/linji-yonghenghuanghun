@@ -51,8 +51,8 @@ def test_starters_are_shafa_loop_not_forced_shaifa():
     """正常：可偏好的起手是整个杀伐闭环，不再写死只开杀伐。"""
     from engine.gamedata import SHAFA_LOOP_DAOWEN
     assert bl.STARTERS == list(SHAFA_LOOP_DAOWEN)
-    assert "波及" in bl.STARTERS and "再生" in bl.STARTERS
-    assert len(bl.STARTERS) == 11  # 冲击改名波及；删除缓慢、慈悲、切割
+    assert "连击" in bl.STARTERS and "再生" in bl.STARTERS
+    assert len(bl.STARTERS) == 8  # 当前杀伐闭环；波及属于沉沦海专属
 
 
 def test_play_does_not_inject_shaifa_when_not_discovered():
