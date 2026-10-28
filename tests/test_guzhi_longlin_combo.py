@@ -51,6 +51,7 @@ def test_daowen_sequence_position_survives_entity_seal_roundtrip():
             x_value=1,
         )
     engine = GameEngine.__new__(GameEngine)
+    engine.state = GameState(player=target)
     sealed = engine._serialize_entity_full(target)
     restored = engine._deserialize_entity_full(sealed)
     assert list(restored.dao_wen) == ["龙鳞", "固执"]

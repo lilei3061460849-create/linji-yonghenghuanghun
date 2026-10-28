@@ -542,6 +542,7 @@ def test_full_sealed_entity_roundtrip_preserves_mainline_sequence_metadata():
     entity.add_status(StatusEffect("龙鳞", value=2, remaining_rounds=-1,
                                    source="龙鳞", daowen_order=0))
     api = GameEngine.__new__(GameEngine)
+    api.state = GameState(player=entity)
 
     snapshot = api._serialize_entity_full(entity)
     restored = api._deserialize_entity_full(snapshot)
