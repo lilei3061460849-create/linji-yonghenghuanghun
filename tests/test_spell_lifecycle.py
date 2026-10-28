@@ -30,6 +30,8 @@ def _engine(suffix: str) -> GameEngine:
     e.execute_action("setup_choose_resonance", {"resonance_type": "转换"})
     setup = e.execute_action("setup_choose_region", {"region": "龙心谷"})
     e.execute_action("choose_discovered_relic", {"relic_name": setup["result"]["relic_choices"][0]})
+    # 本文件验证法术生命周期，不让随机【沉重枷锁】把二阶法术所需的两手预算降为一手。
+    e.state.relics = []
     return e
 
 
