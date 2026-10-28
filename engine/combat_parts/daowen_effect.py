@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import weakref
+import uuid
 from typing import Optional, Any
 from ..models import Entity, StatusEffect, GameState, DaoWenInstance, DaoWen, Spell, Consumable
 from ..daowen import DaoWenEngine, ResonanceEngine
@@ -78,6 +79,51 @@ class DaowenEffectMixin:
             result["effects"].append({"type": "diandang_granted", "caster": caster.name,
                                       "granted": granted_now})
 
+    def prepare_huixiang(self, calc: dict, caster: Entity, target: Entity,
+                         choices: Optional[dict] = None, refs: Optional[dict] = None) -> None:
+        """在支付前锁定每个受影响者的一种持续状态；歧义不得偷偷选择第一项。
+
+        status_index 是目标公开状态列表的零基索引；波及各目标可在
+        status_indices 中按稳定 target_ref 分别指定。只有唯一有效状态时才省略选择。
+        对象身份只在本次结算内使用，不作为存档或持续状态字段。
+        """
+        choices = choices or {}
+        refs = refs if refs is not None else self._combat_entity_refs()
+        indices = choices.get("status_indices", {})
+        if not isinstance(indices, dict) or any(ref not in refs for ref in indices):
+            raise ValueError("回响status_indices必须按当前合法target_ref指定状态索引")
+        explicit = {refs[ref].runtime_id: index for ref, index in indices.items()}
+        primary_index = choices.get("status_index", calc.get("status_index"))
+        recipients = [target]
+        waves = self._wave_targets(caster)
+        if waves:
+            recipients = ([target] if target is not caster and target.is_alive else []) + waves
+        selected = {}
+        for recipient in recipients:
+            if recipient is None or not recipient.is_alive:
+                raise ValueError("回响需要存活目标")
+            if recipient.runtime_id in selected:
+                continue
+            index = explicit.get(recipient.runtime_id,
+                                 primary_index if recipient is target else None)
+            if index is None:
+                candidates = [i for i, status in enumerate(recipient.status_effects)
+                              if not status.is_expired]
+                if len(candidates) != 1:
+                    raise ValueError(f"{recipient.name}有{len(candidates)}种有效持续状态，请明确status_index")
+                index = candidates[0]
+            if (isinstance(index, bool) or not isinstance(index, int)
+                    or not 0 <= index < len(recipient.status_effects)
+                    or recipient.status_effects[index].is_expired):
+                raise ValueError(f"{recipient.name}的回响status_index不是有效持续状态")
+            status = recipient.status_effects[index]
+            token = getattr(status, "_huixiang_token", None)
+            if token is None:
+                token = uuid.uuid4().hex
+                status._huixiang_token = token
+            selected[recipient.runtime_id] = token
+        calc["huixiang_selected"] = selected
+
     @staticmethod
     def _daowen_status(*, daowen_order: int, **kwargs) -> StatusEffect:
         """道纹施加持续状态的唯一构造口：记录来源道纹在序列中的位置。"""
@@ -111,6 +157,8 @@ class DaowenEffectMixin:
             kinds = set(calc.get("cost_reductions", {}))
             if len(kinds) != 1 or not kinds <= {"衰老", "枯竭", "萎缩", "疲惫", "异变"}:
                 raise ValueError("净化仅允许减少一种数值类代价，不支持失忆或冷却")
+        if name == "回响" and "huixiang_selected" not in calc:
+            self.prepare_huixiang(calc, caster, target)
         result = {"daowen": name, "effects": []}
         # 永恒的偏爱只延长该持有者本次发动后新增/刷新的持续状态，
         # 不会把其他角色施加给他的负面状态错误地永久化。
@@ -1037,6 +1085,24 @@ class DaowenEffectMixin:
                     et.add_status(self._daowen_status(daowen_order=daowen_order, name=status_name, remaining_rounds=duration, value=x, source=caster.name))
                     result["effects"].append({"type": "status_added", "target": et.name,
                                               "status": status_name, "duration": duration, "value": x})
+
+        if name == "回响":
+            amounts = wave_pieces.get("extend_duration", [calc["extend_duration"]])
+            for recipient, amount in zip(wave_status_targets, amounts):
+                selected_id = calc.get("huixiang_selected", {}).get(recipient.runtime_id)
+                status = None if selected_id is None else next(
+                    (s for s in recipient.status_effects
+                     if getattr(s, "_huixiang_token", None) == selected_id and not s.is_expired), None)
+                if status is None:
+                    result["effects"].append({"type": "duration_extension_missed",
+                                              "target": recipient.name})
+                    continue  # 前置反应若移除了原状态，不改投后来新增的其他状态。
+                before = status.remaining_rounds
+                if not status.is_permanent:
+                    status.remaining_rounds += amount
+                result["effects"].append({"type": "duration_extended", "target": recipient.name,
+                                          "status": status.name, "before": before,
+                                          "after": status.remaining_rounds, "amount": amount})
 
         if name == "大梦" and calc.get("extra_target_rounds"):
             # 大梦：目标额外经历回合，推进目标回合事件、凡庸与自身限时状态。

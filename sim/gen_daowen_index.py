@@ -2,7 +2,7 @@
 """生成 全道纹索引.md（一次性工具：道纹数据源变更后重跑即可）。
 
 数据源（全部取当前版本引擎/文档事实，不抄旧数据）：
-- 效果正文/支付方式：运行时道纹取 engine/rule_engine.py 或 DaoWenEngine.calculate_*；沉沦海3个未接入运行时节点暂由 DRAFT_DAOWEN 提供索引定义
+- 效果正文/支付方式：运行时道纹取 engine/rule_engine.py 或 DaoWenEngine.calculate_*；沉沦海2个未接入运行时节点暂由 DRAFT_DAOWEN 提供索引定义
 - 归属分类：engine/gamedata.py（通用核心 / ORIGINAL / TRANSFORM / REGION_EXCLUSIVE / RACE_EXCLUSIVE / BLOODLINE_EXCLUSIVE / UNIMPLEMENTED）
 - 残韵闭环：engine/daowen.py DaoWenEngine.CLOSED_LOOPS
 - 承载怪物：已实现副本文档及沉沦海专属网络草案的全部面板行（怪物池 + 事件/雇佣面板）
@@ -34,7 +34,7 @@ from engine.dungeons import load_dungeon_documents  # noqa: E402
 
 DaoWenEngine.register_all()
 
-# 沉沦海闭环中已有规则定义、但尚未注册运行时的三个草案节点。
+# 沉沦海闭环中已有规则定义、但尚未注册运行时的两个草案节点。
 # 继续出现在闭环与索引中，但不得当作可运行道纹授予或发动。
 DRAFT_DAOWEN = {
     "流动": {
@@ -45,11 +45,6 @@ DRAFT_DAOWEN = {
     "遗忘": {
         "cost": "支付：法力20X",
         "effect": "移除[目标]身上的X种“持续Y”。",
-        "params": ["target"],
-    },
-    "回响": {
-        "cost": "支付：法力5X",
-        "effect": "使[目标]的一种“持续Y”变为“持续Y＋X”。",
         "params": ["target"],
     },
 }
@@ -231,7 +226,7 @@ if BLOODLINE_EXCLUSIVE_DAOWEN:
 category_summary += f" ｜ 初拥专属 {len(FIRST_EMBRACE_DAOWEN)} ｜ 未实现 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。"
 A(category_summary)
 A("")
-A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余已注册道纹取 `engine/daowen.py` `calculate_*` docstring；沉沦海3个未接入运行时节点取 `DRAFT_DAOWEN`。分裂按最新用户裁定覆盖旧计算器文案，注记明确运行时尚未同步。")
+A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余已注册道纹取 `engine/daowen.py` `calculate_*` docstring；沉沦海2个未接入运行时节点取 `DRAFT_DAOWEN`。分裂按最新用户裁定覆盖旧计算器文案，注记明确运行时尚未同步。")
 A("- **归属与残韵闭环**：`engine/gamedata.py` + `engine/daowen.py`（`CLOSED_LOOPS`）；与规则正文的闭环图一致。\n"
   "  `CLOSED_LOOPS` 里的每条边为**无向边**（2026-10-07 用户令：残韵路径双向）——登记 `(a,类型,b)` 表示 a、b 互为相邻节点，\n"
   "  正反两向都走同一种残韵、同样消耗一次；双向由 `ResonanceEngine.find_transformations` 在查询时展开，边表不重复登记反向边。\n"
@@ -364,7 +359,7 @@ for region in REGION_EXCLUSIVE_DAOWEN:
     notes = [f"副本阶级：{'一二三四'[tier-1]}阶。学习门禁：先经残韵从本副本怪物处转化获得至少一种本副本道纹，此后才可学习本副本其它专属道纹；其它副本专属道纹不可学习。"]
     if region == "沉沦海":
         notes.append("【唤潮】【蜃景】不属于闭环，由鲛渊陵墓的两个独立选项获得；怪物面板既有配置保留。")
-        notes.append("【流动】【遗忘】【回响】尚未接入运行时；当前不可通过学习或残韵获得，也不能发动。")
+        notes.append("【流动】【遗忘】尚未接入运行时；当前不可通过学习或残韵获得，也不能发动。")
     section(f"{region}专属（{len(ns)}）", list(ns), note_lines=notes,
             loop=f"{region}闭环", loop_title=region)
     if region == "龙心谷":

@@ -5494,7 +5494,9 @@ class GameEngine:
         from .spell_execution import InterruptReason as _IR
         early, trigger_logs = self.combat._daowen_step_preflight(
             daowen=name, x=x, calc=calc, caster=actor, target=target, refs=refs,
-            entry_extra={"trigger_spell_choices": params.get("trigger_spell_choices", {})},
+            entry_extra={"trigger_spell_choices": params.get("trigger_spell_choices", {}),
+                         "status_index": params.get("status_index"),
+                         "status_indices": params.get("status_indices", {})},
             policy=self.combat.CAST_STEP_POLICY)
         if early is not None:
             if early.reason == _IR.CASTER_DEAD:

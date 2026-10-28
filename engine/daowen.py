@@ -626,6 +626,13 @@ class DaoWenEngine:
             "summary": f"支付：{5*x}法力，使{target.name}真实额外经历{x}回合",
         }
 
+    @staticmethod
+    def calculate_huixiang(x: int, target: Entity = None, status_index: int = None) -> dict:
+        """回响X：支付：法力5X。使[目标]的一种“持续Y”变为“持续Y＋X”。"""
+        return {"dao_wen": "回响", "x": x, "cost_type": CostType.MANA.value,
+                "cost": 5 * x, "extend_duration": x, "status_index": status_index,
+                "summary": f"支付：{5*x}法力，将目标一种持续时间增加{x}"}
+
     # ========== 乱葬岗（二阶）专属道纹 ==========
 
     @staticmethod
@@ -761,6 +768,7 @@ class DaoWenEngine:
             "唤潮": cls.calculate_chao,
             "蜃景": cls.calculate_shenjing,
             "大梦": cls.calculate_dameng,
+            "回响": cls.calculate_huixiang,
             # ---- 乱葬岗（二阶）----
             "分裂": cls.calculate_fenlie,
             "勾魂": cls.calculate_gouhun,

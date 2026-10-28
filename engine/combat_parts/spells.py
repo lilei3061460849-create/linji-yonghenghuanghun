@@ -566,7 +566,9 @@ class SpellReactionMixin:
                 target_ref=entry.get("target_ref"),
                 dodge=bool(entry.get("dodge")),
                 dodge_relic_target_ref=entry.get("dodge_relic_target_ref"),
-                extra=dict(entry.get("extra") or {}),
+                extra={**dict(entry.get("extra") or {}),
+                       **{key: entry[key] for key in ("status_index", "status_indices")
+                          if key in entry}},
             ))
         return out
 
@@ -692,6 +694,12 @@ class SpellReactionMixin:
                 target_name=getattr(target, "name", ""),
                 reason=InterruptReason.DAOWEN_UNUSABLE,
                 detail="缄默面具：无法发动附带代价的道纹"), []
+        if daowen == "回响":
+            try:
+                self.prepare_huixiang(calc, caster, target, entry_extra, refs)
+            except ValueError as exc:
+                return StepResult(status=StepStatus.FAILED, daowen=daowen, x=x,
+                                  reason=InterruptReason.INVALID_INPUT, detail=str(exc)), []
         logs: list[dict] = []
         if policy.allow_trigger_reactions:
             choices = (entry_extra or {}).get("trigger_spell_choices", {})
@@ -1351,7 +1359,9 @@ class SpellReactionMixin:
                 dodge=dodge,
                 dodge_relic_target_ref=entry.get("dodge_relic_target_ref"),
                 # 每一步都是一次"发动道纹"：敌方「目标发动道纹前」反应的逐步提交
-                extra={"trigger_spell_choices": entry.get("trigger_spell_choices", {})},
+                extra={"trigger_spell_choices": entry.get("trigger_spell_choices", {}),
+                       **{key: entry[key] for key in ("status_index", "status_indices")
+                          if key in entry}},
             ))
 
         required = sorted(collect_step_daowen(program))

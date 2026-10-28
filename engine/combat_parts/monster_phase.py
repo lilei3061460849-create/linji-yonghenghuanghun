@@ -435,6 +435,8 @@ class MonsterPhaseMixin:
 
         # 先完成完整闪避提交的静态校验，再支付任何代价或改变激活状态。
         calc = DaoWenEngine.resolve(effective_name, effective_x, target=target, caster=monster)
+        if effective_name == "回响":
+            self.prepare_huixiang(calc, monster, target, choice, refs)
         # 动态代价校验：残韵改写/状态变化后怪物可能付不起代价（如速度归零后
         # 【洞察】(疲惫3)）——本次视为无法发动并跳过，不硬报错、不占出手。
         if not self._monster_can_pay_calc_cost(monster, calc):

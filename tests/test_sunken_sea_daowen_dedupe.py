@@ -40,7 +40,7 @@ def test_deleted_sunken_sea_daowen_and_panel_tags_are_gone():
     assert "扩散" not in index
     assert "道纹数量5" in dungeon
     assert "当前索引收录道纹（35种）" in index
-    assert "流动】【遗忘】【回响】尚未接入运行时" in index
+    assert "流动】【遗忘】尚未接入运行时" in index
     assert "杀伐闭环（通用核心）8" in index
     assert "沉沦海专属（5）" in index
     assert "鲛族专属（2）" in index
