@@ -117,17 +117,17 @@ def test_tonghunbi_grants_caster_real_daowen_from_second_target():
     engine.execute_action("battle_start", {})
     engine.state.enemies.clear()
     enemy = Entity(name="怪甲", entity_type="怪物", blood_limit=100, current_hp=100)
-    _give_daowen(enemy, "固执", cost_type="冷却")
+    _give_daowen(enemy, "全力", cost_type="异变")
     engine.state.enemies.append(enemy)
     engine.execute_action("round_start", {})
 
     r = engine.execute_action("use_resonance", {
         "source_daowen": "杀伐", "resonance_type": "反转", "target_daowen": "再生",
-        "second_target_ref": "enemy:0", "second_source_daowen": "固执",
+        "second_target_ref": "enemy:0", "second_source_daowen": "全力",
     })
     assert r["success"] is True
-    assert "连击" in engine.state.player.dao_wen, "施法者应永久获得固执反转后的连击"
-    assert "固执" not in enemy.dao_wen and "连击" in enemy.dao_wen
+    assert "弱化" in engine.state.player.dao_wen, "施法者应永久获得全力反转后的弱化"
+    assert "全力" not in enemy.dao_wen and "弱化" in enemy.dao_wen
 
 
 def test_first_cup_doubles_heal_and_no_longer_blocks_cancer():
@@ -172,8 +172,10 @@ def test_wangyouxiang_registered_in_revised_relic_pool():
     engine = _new_engine("wangyou_registered")
     names = {n for n, _ in engine.RELIC_DEFS}
     assert "忘忧香" in names
-    # 2026-10-26：【共罪】转为道纹，遗物池 28 → 27。
-    assert len(engine.RELIC_DEFS) == 27   # 万钧印已改为消耗品；忘忧香属于现行遗物池
+    # 当前池另含【叠鳞甲】与【寂灭面具】，共29件；缄默面具仍是事件遗物。
+    assert len(engine.RELIC_DEFS) == 29
+    assert {"叠鳞甲", "寂灭面具"} <= names
+    assert "缄默面具" not in names
     assert "共罪" not in names
     assert "钱袋" not in names
 
