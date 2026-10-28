@@ -79,6 +79,135 @@ class DaowenEffectMixin:
             result["effects"].append({"type": "diandang_granted", "caster": caster.name,
                                       "granted": granted_now})
 
+    def prepare_catalysis(self, calc, caster, target, choices, refs):
+        """完整预选后才支付催化；执行仍复用普通道纹单步，不另造支付规则。"""
+        requested = choices.get("catalysis_steps")
+        waves = self._wave_targets(caster)
+        recipients = ([target] if target is not caster and target.is_alive else []) + waves if waves else [target]
+        recipients = list({entity.runtime_id: entity for entity in recipients if entity is not None}.values())
+        count = calc["catalysis_count"]
+        if not recipients:
+            raise ValueError("催化没有合法道纹持有者")
+        by_recipient = {}
+        if len(recipients) == 1 and isinstance(requested, list):
+            by_recipient[recipients[0].runtime_id] = requested
+        elif isinstance(requested, dict):
+            if any(ref not in refs for ref in requested):
+                raise ValueError("催化持有者引用无效")
+            by_recipient = {refs[ref].runtime_id: entries for ref, entries in requested.items()}
+        else:
+            raise ValueError("催化须提交catalysis_steps，逐一种类选择X/目标及反应决策")
+        maximum = (count + len(recipients)-1)//len(recipients)
+        pools = []
+        for holder in recipients:
+            entries = by_recipient.get(holder.runtime_id)
+            # 波及平分数量时，调用者按顺序预选最大可能份额；只执行实际分得的前N项。
+            if not isinstance(entries, list) or (len(entries) != count if len(recipients)==1 else len(entries)<maximum):
+                raise ValueError(f"{holder.name}须预选{count if len(recipients)==1 else maximum}种冷却道纹")
+            names = [entry.get("name") for entry in entries if isinstance(entry, dict)]
+            if len(names)!=len(entries) or len(set(names))!=len(names):
+                raise ValueError("催化必须选择互不重复的道纹种类")
+            selected=[]
+            for entry in entries:
+                name=entry["name"];inst=holder.dao_wen.get(name);x=entry.get("x")
+                if (inst is None or name not in DaoWenEngine.list_all() or inst.is_frozen or inst.spent_unique
+                        or max(inst.cooldown_remaining,getattr(inst,"cooldown_rounds_remaining",0))<=0):
+                    raise ValueError(f"{holder.name}的{name}不是可催化的冷却道纹")
+                if isinstance(x,bool) or not isinstance(x,int) or x<1:
+                    raise ValueError("催化所调用道纹的X必须由持有者明确提交正整数")
+                if inst.x_value>0 and not inst.x_free and x!=inst.x_value:
+                    raise ValueError("催化不改变被调用道纹的既有固定X")
+                called_target=refs.get(entry.get("target_ref"))
+                if called_target is None or not called_target.is_alive or not self.is_targetable(holder,called_target):
+                    raise ValueError("催化调用必须选择合法目标")
+                if not self._daowen_requires_target(name) and name!="变形" and called_target is not holder:
+                    raise ValueError("催化不扩大被调用道纹的目标范围")
+                calc_step=DaoWenEngine.resolve(name,x,target=called_target,caster=holder)
+                if holder.entity_type=="怪物" and calc_step.get("cost_type")=="冷却" and x>1:
+                    raise ValueError("怪物冷却道纹仍受普通X上限约束")
+                if name=="真理":
+                    self.prepare_truth_statement(holder,x,entry.get("statement",""))
+                if not isinstance(entry.get("dodge",False),bool):
+                    raise ValueError("催化调用的dodge必须为布尔值")
+                token=getattr(inst,"_catalysis_token",None)
+                if token is None:
+                    token=uuid.uuid4().hex;inst._catalysis_token=token
+                selected.append({"entry":dict(entry),"token":token})
+            pools.append({"holder_id":holder.runtime_id,"candidates":selected})
+        parts=self._divide_flat(count,len(pools)) if len(pools)>1 else [count]
+        calc["catalysis_plan"]=[dict(pool,steps=pool["candidates"][:part])
+                                for pool,part in zip(pools,parts)]
+
+    def prepare_truth_statement(self, actor, x, statement):
+        import re
+        if (actor is not self.state.player and not (
+                self.state.in_final_duel and actor.entity_type=="轮回者"
+                and actor in self.state.get_all_enemy_side())):
+            raise ValueError("只有持有初拥血脉的轮回者才能发动【真理】")
+        if not isinstance(statement,str) or not statement:
+            raise ValueError("真理必须给出陈述statement")
+        sentences=[part.strip() for part in re.split(r"[。！？；!?;\n]+",statement) if part.strip()]
+        if len(sentences)!=x:
+            raise ValueError(f"X={x}要求正好{x}句陈述，实际给出{len(sentences)}句")
+        return sentences
+
+    def catalyse_truth(self, actor, target, entry, inst):
+        x=entry["x"];statement=entry["statement"]
+        sentences=self.prepare_truth_statement(actor,x,statement)
+        if target is None or not target.is_alive or not self.is_targetable(actor,target):
+            raise ValueError("真理目标已失效")
+        if inst.is_frozen or inst.spent_unique:
+            raise ValueError("真理已被封印或无法发动")
+        inst.cooldown_remaining=max(inst.cooldown_remaining,2)
+        interrupt=Interrupt(interrupt_type=InterruptType.CUSTOM,
+            context={"ability":"真理","target":target.name,"statement":statement,
+                     "sentences":sentences,"silence_rounds":x},
+            description=f"对{target.name}发动【真理X={x}】，要求逐句言明真理；任一句无法言明则无法开口，持续{x}回合。请DM逐句裁定是否属实。",
+            options=[{"id":"truth","label":"属实","description":"按DM裁定的真实内容生效"},
+                     {"id":"silence","label":"无法开口","description":"对方拒绝或无法说出真话，只能沉默"}],
+            state_snapshot=self.state.to_dict())
+        self._pending_interrupts.append(interrupt)
+        return {"type":"catalysed_daowen","holder":actor.name,"daowen":"真理",
+                "result":{"interrupt":interrupt.to_dict(),"sentences":sentences,"silence_rounds":x}}
+
+    def execute_catalysis(self, calc, caster):
+        from ..spell_dsl import ActionStep
+        from ..spell_execution import StepStatus
+        logs=[]
+        refs=self._combat_entity_refs()
+        policy=self.CAST_STEP_POLICY if calc.get("catalysis_allow_reactions",True) else self.EVENT_STEP_POLICY
+        plans=calc.get("catalysis_plan",[])
+        if sum(len(pool["steps"]) for pool in plans)!=calc.get("catalysis_count",0):
+            parts=self._divide_flat(calc.get("catalysis_count",0),len(plans))
+            plans=[dict(pool,steps=pool["candidates"][:part]) for pool,part in zip(plans,parts)]
+        for pool in plans:
+            holder=next((entity for entity in refs.values() if entity.runtime_id==pool["holder_id"]),None)
+            if holder is None or not holder.is_alive:
+                logs.append({"type":"catalysis_interrupted","reason":"持有者已失效"});continue
+            for selected in pool["steps"]:
+                entry=selected["entry"];name=entry["name"];inst=holder.dao_wen.get(name)
+                if inst is None or getattr(inst,"_catalysis_token",None)!=selected["token"]:
+                    logs.append({"type":"catalysis_interrupted","reason":"选中的原道纹已变化"});return logs
+                if name=="真理":
+                    try:
+                        target=refs.get(entry["target_ref"])
+                        target,rule=self.resolve_tampered_target(holder,target,name,entry,refs)
+                        logs.append(self.catalyse_truth(holder,target,entry,inst))
+                        self.consume_tamper(holder,rule)
+                    except ValueError as exc:
+                        logs.append({"type":"catalysis_interrupted","reason":str(exc)})
+                        return logs
+                    continue
+                outcome=self._execute_single_daowen_step(
+                    definition=None,step=ActionStep(daowen=name,target="any"),entry=entry,
+                    caster=holder,attacker=None,refs=refs,policy=policy,
+                    _cooldown_permission=inst)
+                logs.append({"type":"catalysed_daowen","holder":holder.name,
+                             "daowen":name,"result":outcome.to_log()})
+                if outcome.status not in (StepStatus.COMPLETED,StepStatus.DODGED,StepStatus.SKIPPED):
+                    return logs
+        return logs
+
     def resolve_tampered_target(self, actor, target, name, choices, refs):
         rule = next((s for s in actor.status_effects
                      if s.name == "篡改" and not s.is_expired and s.value > 0), None)
@@ -188,6 +317,8 @@ class DaowenEffectMixin:
             kinds = set(calc.get("cost_reductions", {}))
             if len(kinds) != 1 or not kinds <= {"衰老", "枯竭", "萎缩", "疲惫", "异变"}:
                 raise ValueError("净化仅允许减少一种数值类代价，不支持失忆或冷却")
+        if name == "催化" and "catalysis_plan" not in calc:
+            raise ValueError("催化须在支付前通过共用前置入口准备完整调用计划")
         if name == "回响" and "huixiang_selected" not in calc:
             self.prepare_huixiang(calc, caster, target)
         result = {"daowen": name, "effects": []}
@@ -280,17 +411,7 @@ class DaowenEffectMixin:
         # 【冷却X】代价：规则正文「冷却X：使用后该道纹记为【X(0)/Y】，[战终]后已完成
         # 战斗场数+1，达到Y时才能再次使用」。此前从未写入 cooldown_remaining，
         # 导致 固执/束缚/畸变/全速 可在同一场里无限重复发动（束缚因此支配全局）。
-        if calc.get("cost_type") == "冷却":
-            inst = caster.dao_wen.get(name)
-            if inst is not None:
-                cooldown = max(0, int(calc.get("cost", 0)))
-                if "时间的偏爱" in getattr(caster, "preferences", []):
-                    inst.cooldown_rounds_remaining = max(
-                        inst.cooldown_rounds_remaining, cooldown)
-                    result["cooldown_rounds_set"] = inst.cooldown_rounds_remaining
-                else:
-                    inst.cooldown_remaining = max(inst.cooldown_remaining, cooldown)
-                    result["cooldown_set"] = inst.cooldown_remaining
+        result.update(self.pay_daowen_cooldown(name,calc,caster))
 
         # 【唯一】代价：规则正文「唯一：使用后，本次轮回中无法再次使用」。
         # 此前该代价种类只有一行名字映射、没有任何结算逻辑，等于空定义；
@@ -929,6 +1050,8 @@ class DaowenEffectMixin:
             result["effects"].append(cost_effect)
         elif cost_share_target_ref:
             raise ValueError("该道纹没有可由【共罪】共同承担的数值代价")
+        if name == "催化":
+            result["effects"].extend(self.execute_catalysis(calc,caster))
         if calc.get("tamper_activations", 0) > 0:
             amounts = wave_pieces.get("tamper_activations", [calc["tamper_activations"]])
             for recipient, amount in zip(wave_status_targets, amounts):

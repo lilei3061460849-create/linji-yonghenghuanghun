@@ -150,7 +150,7 @@ class GameEngine:
         self._rule_sync = None
 
         # 中断队列
-        self._pending_interrupts: list[Interrupt] = []
+        self._pending_interrupts: list[Interrupt] = self.combat._pending_interrupts
         # 体外心脏：记录[战始]翻倍前的血限基准，[战终]用于还原
         self._artifact_base_blood_limit = 0
 
@@ -1528,6 +1528,7 @@ class GameEngine:
             _scale = 1
         self.combat.resolution.begin_action(action_type, params, scale=_scale)
         try:
+            self.combat._pending_interrupts = self._pending_interrupts
             result = self._dispatch_action(action_type, params)
             if result.get("success", False):
                 page_error = growth_error(self.state, page_usage_before)
@@ -5503,7 +5504,8 @@ class GameEngine:
             daowen=name, x=x, calc=calc, caster=actor, target=target, refs=refs,
             entry_extra={"trigger_spell_choices": params.get("trigger_spell_choices", {}),
                          "status_index": params.get("status_index"),
-                         "status_indices": params.get("status_indices", {})},
+                         "status_indices": params.get("status_indices", {}),
+                         "catalysis_steps": params.get("catalysis_steps")},
             policy=self.combat.CAST_STEP_POLICY)
         if early is not None:
             if early.reason == _IR.CASTER_DEAD:
@@ -5567,6 +5569,7 @@ class GameEngine:
             wave_count=int(calc.get("mark_targets", x if name == "共罪" else 0)),
             activation_x=x,
         )
+        self.combat.pay_daowen_cooldown(name,calc,actor)
         if name == "共罪":
             calc["blood_pact_target_ids"] = [str(entity.runtime_id)
                                                 for entity in (aoe_targets_override or [])]

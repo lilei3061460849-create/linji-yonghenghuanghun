@@ -75,6 +75,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     )
     
     def __init__(self, state: GameState, dice: DiceEngine):
+        self._pending_interrupts = []  # API绑定其持久化DM中断队列，专用道纹不得伪造自动裁定
         self.state = state
         self.dice = dice
         self.combat_log: list[dict] = []  # 完整战斗日志

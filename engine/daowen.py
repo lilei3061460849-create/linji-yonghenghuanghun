@@ -654,6 +654,13 @@ class DaoWenEngine:
                 "cost_hp": 3*x, "tamper_activations": x,
                 "summary": f"流血{3*x}，接管目标接下来{x}次道纹的目标选择"}
 
+    @staticmethod
+    def calculate_cuihua(x: int, target: Entity = None) -> dict:
+        """催化X：支付：冷却2X。使自身或[目标]X种处于【冷却】状态的道纹立即发动一次。"""
+        return {"dao_wen": "催化", "x": x, "cost_type": CostType.COOLDOWN.value,
+                "cost": 2*x, "catalysis_count": x,
+                "summary": f"冷却{2*x}，使目标{x}种冷却中的道纹立即发动一次"}
+
     # ========== 乱葬岗（二阶）专属道纹 ==========
 
     @staticmethod
@@ -768,6 +775,7 @@ class DaoWenEngine:
             "净化": cls.calculate_jinghua,
             "出土": cls.calculate_chutu,
             "篡改": cls.calculate_cuangai,
+            "催化": cls.calculate_cuihua,
             "不死": cls.calculate_busi,
             "必中": cls.calculate_bizhong,
             # 怪物转化（2026-10-11 A14：无神/借力/衰败 已删）

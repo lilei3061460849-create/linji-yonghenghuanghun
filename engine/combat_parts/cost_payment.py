@@ -24,6 +24,21 @@ from ..models import MONSTER_MANA_RELIC
 
 
 class CostPaymentMixin:
+    def pay_daowen_cooldown(self, name, calc, caster):
+        """冷却是发动代价，目标闪避也已支付；重复记账幂等，不清空原冷却。"""
+        if calc.get("cost_type") != "冷却":
+            return {}
+        inst=caster.dao_wen.get(name)
+        if inst is None:
+            return {}
+        cooldown=max(0,int(calc.get("cost",0)))
+        if "时间的偏爱" in getattr(caster,"preferences",[]):
+            inst.cooldown_rounds_remaining=max(inst.cooldown_rounds_remaining,cooldown)
+            return {"cooldown_rounds_set":inst.cooldown_rounds_remaining}
+        inst.cooldown_remaining=max(inst.cooldown_remaining,cooldown)
+        return {"cooldown_set":inst.cooldown_remaining}
+
+
     def bizhong_remaining(self, entity: Entity) -> int:
         """必中X剩余可选目标次数。"""
         return max(0, int(getattr(entity, "_bizhong_left", 0) or 0))

@@ -187,7 +187,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('6.催化X：支付：冷却2X。使自身或[目标]X种处于【冷却】状态的道纹立即发动一次。', dungeon)
         row = next(r for r in self.rows if r['name'] == '催化')
         self.assertEqual(row['review'], '暂未发现结构违规')
-        self.assertFalse(row['runtime'])
+        self.assertTrue(row['runtime'])
 
     def test_origin_has_one_random_target_borrowing_definition(self):
         definition = '原初X：支付：异变5X。借用[目标]身上自身未拥有的随机X种道纹。'

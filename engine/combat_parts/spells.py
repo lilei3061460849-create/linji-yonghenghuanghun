@@ -567,7 +567,7 @@ class SpellReactionMixin:
                 dodge=bool(entry.get("dodge")),
                 dodge_relic_target_ref=entry.get("dodge_relic_target_ref"),
                 extra={**dict(entry.get("extra") or {}),
-                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper")
+                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper", "catalysis_steps")
                           if key in entry}},
             ))
         return out
@@ -694,6 +694,13 @@ class SpellReactionMixin:
                 target_name=getattr(target, "name", ""),
                 reason=InterruptReason.DAOWEN_UNUSABLE,
                 detail="缄默面具：无法发动附带代价的道纹"), []
+        if daowen == "催化":
+            try:
+                self.prepare_catalysis(calc,caster,target,entry_extra,refs)
+                calc["catalysis_allow_reactions"]=policy.allow_trigger_reactions
+            except ValueError as exc:
+                return StepResult(status=StepStatus.FAILED,daowen=daowen,x=x,
+                                  reason=InterruptReason.INVALID_INPUT,detail=str(exc)),[]
         if daowen == "回响":
             try:
                 self.prepare_huixiang(calc, caster, target, entry_extra, refs)
@@ -727,7 +734,8 @@ class SpellReactionMixin:
                                     target_resolver=None,
                                     skip_predicate=None,
                                     policy: Optional[SpellStepPolicy] = None,
-                                    step_key: str = "", iteration: int = 0) -> StepResult:
+                                    step_key: str = "", iteration: int = 0,
+                                    _cooldown_permission=None) -> StepResult:
         """执行法术中的单步道纹（=一次"发动道纹"），返回 StepResult。
 
         这是唯一的单步结算核心：反应法术 / 道纹前法术 / 全局时点法术 / 瞬发法术
@@ -820,7 +828,9 @@ class SpellReactionMixin:
 
         # --- 道纹可用性 ---
         dw_inst = caster.dao_wen.get(daowen)
-        if dw_inst is None or not dw_inst.can_use():
+        allowed_by_catalysis=(dw_inst is not None and dw_inst is _cooldown_permission
+                              and not dw_inst.is_frozen and not dw_inst.spent_unique)
+        if dw_inst is None or not (dw_inst.can_use() or allowed_by_catalysis):
             return StepResult(
                 status=StepStatus.INTERRUPTED, daowen=daowen, x=x,
                 target_ref=target_ref, target_name=target.name,
@@ -886,6 +896,7 @@ class SpellReactionMixin:
                     detail="目标速度不足以闪避",
                     trigger_spell_logs=trigger_logs, iteration=iteration)
             self._spend_dodge_speed(target, dodge_relic)
+            self.pay_daowen_cooldown(daowen,calc,caster)
             self.consume_tamper(caster, tamper_rule)
             return StepResult(
                 status=StepStatus.DODGED, daowen=daowen, x=x,
@@ -893,6 +904,7 @@ class SpellReactionMixin:
                 cost_paid=cost_paid, trigger_spell_logs=trigger_logs, iteration=iteration)
 
         # --- 真正执行道纹效果 ---
+        self.pay_daowen_cooldown(daowen,calc,caster)
         try:
             execution = self.apply_daowen_effect(daowen, calc, caster, target)
         except Exception as exc:
@@ -1370,7 +1382,7 @@ class SpellReactionMixin:
                 dodge_relic_target_ref=entry.get("dodge_relic_target_ref"),
                 # 每一步都是一次"发动道纹"：敌方「目标发动道纹前」反应的逐步提交
                 extra={"trigger_spell_choices": entry.get("trigger_spell_choices", {}),
-                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper")
+                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper", "catalysis_steps")
                           if key in entry}},
             ))
 

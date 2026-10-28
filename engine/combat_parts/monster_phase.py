@@ -437,6 +437,8 @@ class MonsterPhaseMixin:
 
         # 先完成完整闪避提交的静态校验，再支付任何代价或改变激活状态。
         calc = DaoWenEngine.resolve(effective_name, effective_x, target=target, caster=monster)
+        if effective_name == "催化":
+            self.prepare_catalysis(calc,monster,target,choice,refs)
         if effective_name == "回响":
             self.prepare_huixiang(calc, monster, target, choice, refs)
         # 动态代价校验：残韵改写/状态变化后怪物可能付不起代价（如速度归零后
@@ -450,7 +452,6 @@ class MonsterPhaseMixin:
         # 攻击与道纹的先后顺序由提交方（AI/操作者）决定，这正是"先攻后纹还是先纹后攻"的取舍。
         if calc.get("cost_type") == "消耗" and calc.get("cost", 0) > 0:
             monster.spend_mana(calc["cost"])
-        self.consume_tamper(monster, tamper_rule)
         hostile = self.state.on_player_side(target) != self.state.on_player_side(monster)
         dodge = choice.get("dodge")
         blood_shadow = choice.get("blood_shadow", False)
@@ -569,6 +570,8 @@ class MonsterPhaseMixin:
             # 2026-09-16 用户令：道纹递增（升级）机制已废止。X 恒为面板/借用时写定的值，
             # 重复发动按同一 X 计费，不再随发动次数累加。
         monster.actions_used_this_round += 1
+        self.consume_tamper(monster,tamper_rule)
+        self.pay_daowen_cooldown(effective_name,calc,monster)
 
         aoe_targets_override = None
         if effective_name == "波及":
