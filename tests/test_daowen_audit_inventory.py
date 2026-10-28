@@ -152,15 +152,18 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
             self.assertIn(phrase, rules)
         # 是规则文本护栏，不是相反状态覆盖运行时已实现的证明。
 
-    def test_infection_keeps_name_without_retired_effect(self):
+    def test_infection_replaces_daowen_and_library_restores_original(self):
         dungeon = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
-        self.assertIn('1.感染X（核心起点/终点）：保留名称及闭环位置，效果与支付待定', dungeon)
-        self.assertIn('【感染X】⇄（反转）净化X', dungeon)
-        self.assertNotRegex(dungeon, r'，感染[，）]')
+        self.assertIn('1.感染X（核心起点/终点）：支付待定。使[目标]的X种道纹变为感染。', dungeon)
+        self.assertIn('后续感染仍须主动发动并支付代价，不会自动传播', dungeon)
+        self.assertIn('2.辨认一龛：衰老10。选择自身一种被【感染】替换的道纹，使其恢复为被感染前的原版道纹。', dungeon)
+        self.assertNotIn('选择自身一种【尘封】', dungeon)
         self.assertNotIn('支付：法力3X。使[目标]获得X层【异变】', dungeon)
+        self.assertIn('5.尘封X：保留名称及闭环位置，效果与支付待定', dungeon)
+        self.assertNotRegex(dungeon, r'，尘封[，）]')
         row = next(r for r in self.rows if r['name'] == '感染')
-        self.assertEqual(row['review'], '语义待定')
         self.assertFalse(row['runtime'])
+        self.assertIn('新效果支付待定', row['tags'])
         self.assertIn('| A11 | 感染旧效、主动赋予异变',
                       (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
 
