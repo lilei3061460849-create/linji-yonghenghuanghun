@@ -26,6 +26,7 @@ from engine.combat_hooks import (
     AfterDamageEffectsHook,
 )
 from engine.dice import DiceEngine
+from engine.daowen import DaoWenEngine
 from engine.enums import EffectPolarity
 from engine.mechanisms import MECHANISMS, MechanismHookAdapter
 from engine.models import Entity, GameState, Relic, StatusEffect
@@ -137,16 +138,18 @@ def test_b_lethal_reflect_death_is_traceable():
 # ==================== C. 三层链：道纹 → 血限变化 → 命零 ====================
 
 def test_c_three_layer_chain_daowen_blood_limit_death():
-    """瓦解100%：道纹结算 → 血限归零 → 生命归零 → 统一命零，父链连续。"""
+    """通用道纹血限字段：结算 → 血限归零 → 生命归零 → 统一命零，父链连续。"""
     _, combat, player, enemy = _arena(enemy_hp=20, enemy_bl=20)
 
-    result = combat.apply_daowen_effect("瓦解", {"x": 10, "blood_limit_pct": 100}, player, enemy)
+    # 直接注入通用效果字段，只审计结算管线；不再假借已删除的【瓦解】。
+    result = combat.apply_daowen_effect(
+        "测试道纹", {"x": 10, "blood_limit_reduction": 20}, player, enemy)
 
     root_id = result["daowen_ctx"]["event_id"]
     bl_events = enemy._blood_limit_events
     assert len(bl_events) == 1
     assert bl_events[0]["mechanic"] == "blood_limit_change"
-    assert bl_events[0]["source"] == "瓦解"
+    assert bl_events[0]["source"] == "测试道纹"
     assert bl_events[0]["parent_event_id"] == root_id, "第二层必须指向道纹结算"
 
     assert enemy.blood_limit == 0 and enemy.current_hp == 0
@@ -692,6 +695,7 @@ def test_j_purify_negative_mutation_never_collapses():
     """净化（负异变）不得因为 collapsed 判定而误杀。"""
     state, combat, player, enemy = _arena()
     enemy.mutation_count = 20
-    combat.apply_daowen_effect("净化", {"x": 5, "mutation_reduction": 5}, player, enemy)
+    calc = DaoWenEngine.resolve("净化", 5, cost_choices=[{"type": "异变"}])
+    combat.apply_daowen_effect("净化", calc, player, enemy)
     assert enemy.mutation_count == 15 and enemy.is_alive is True
     assert _events(combat, CombatEventType.ENTITY_DIED) == []
