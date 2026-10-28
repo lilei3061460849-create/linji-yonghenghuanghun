@@ -64,18 +64,23 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('| A09 | 馈赠、受击次数供法力', scraps)
         self.assertIn('使目标受击时获得X点法力，持续∞', scraps)
 
-    def test_long_night_draft_blocks_round_experience_not_just_triggers(self):
-        dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
-        self.assertIn('3.长夜X：支付：法力10X。使[目标]无法经历回合，持续X。', dungeon)
-        self.assertNotIn('使[目标]由道纹、法术或遗物产生的[回始]与[回终]效果不再触发', dungeon)
+    def test_round_blocking_moves_to_unnamed_sea_reversal(self):
+        sea = (ROOT / '副本/沉沦海.md').read_text(encoding='utf-8')
+        night = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
+        self.assertIn('沉溺X ⇄（反转）【未命名道纹X】', sea)
+        self.assertIn('使[目标]无法经历X个回合。', sea)
+        self.assertIn('中断该次回合，并使剩余阻断次数-1', sea)
+        self.assertIn('普通回合与沉溺产生的额外回合均适用', sea)
+        self.assertIn('名称与支付待定', sea)
+        self.assertIn('3.长夜X：效果待重做', night)
+        self.assertNotIn('使[目标]无法经历回合，持续X', night)
         row = next(r for r in self.rows if r['name'] == '长夜')
-        self.assertFalse(row['runtime'])
-        self.assertEqual(row['review'], '暂未发现结构违规')
-        self.assertNotIn('持续期时钟待明确', row['tags'])
-        self.assertIn('中断该次回合，并使长夜的剩余持续时间-1', dungeon)
-        self.assertIn('降至0时解除长夜，但该次回合仍被中断', dungeon)
-        self.assertIn('普通回合与沉溺产生的额外回合均适用', dungeon)
-        # 仅固定已裁定的草案原文，不伪造运行时停止回合的行为验证。
+        self.assertEqual(row['review'], '语义待定')
+        design = json.loads(AUDIT.read_text(encoding='utf-8'))['pending_designs'][0]
+        self.assertIsNone(design['name'])
+        self.assertIsNone(design['cost'])
+        self.assertFalse(design['runtime'])
+        self.assertIn(design['effect'], sea)
 
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
