@@ -212,13 +212,13 @@ class DaoWenEngine:
     
     @staticmethod
     def calculate_xueqi(x: int, target: Entity = None) -> dict:
-        """共罪X：支付：法力10X。选择X个存活的非自身目标建立共罪分担组，持续∞；施法者支付的数值型【代价】由分担组内存活目标平分（不含施法者），余数按平分规则随机分配。"""
-        cost = 10 * x
+        """共罪X：支付：流血5X。选择X个存活的非自身目标建立共罪分担组，持续∞；施法者支付的数值型【代价】由分担组内存活目标平分（不含施法者），余数按平分规则随机分配。"""
+        cost = 5 * x
         return {
             "dao_wen": "共罪", "x": x,
-            "cost_type": CostType.MANA.value, "cost": cost,
+            "cost_type": CostType.BLEED.value, "cost_hp": cost,
             "mark_targets": x, "duration": -1,
-            "summary": f"支付：法力{cost}。选择{x}个目标，目标组彼此平分数值型代价，持续∞。",
+            "summary": f"支付：流血{cost}。选择{x}个目标，目标组彼此平分数值型代价，持续∞。",
         }
 
     @staticmethod

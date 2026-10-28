@@ -146,7 +146,7 @@ def test_event_and_daowen_costs_use_blood_pact_bus(tmp_path):
 
 
 def test_blood_pact_daowen_binds_x_targets_who_split_costs(tmp_path):
-    """共罪X：支付10X法力；X个目标组成无限期分担组，代价只在目标间平分。"""
+    """共罪X：支付流血5X；X个目标组成无限期分担组，代价只在目标间平分。"""
     state, combat, player, first = _state_with_blood_pact()
     state.relics.clear()  # 新能力来自道纹绑定，不靠遗物资格
     second = Entity("第二同伴", "朋友", blood_limit=80, current_hp=80,
@@ -167,12 +167,14 @@ def test_blood_pact_daowen_binds_x_targets_who_split_costs(tmp_path):
         ],
     })
     assert result["success"] is True, result
-    assert player.current_mana == before_mana - 20
-    assert result["execution"]["effects"][0]["targets"] == [first.name, second.name]
+    assert player.current_mana == before_mana
+    assert player.current_hp == 90, "建立共罪组前支付流血10"
+    assert any(effect.get("targets") == [first.name, second.name]
+               for effect in result["execution"]["effects"])
     assert combat._blood_pact_group(player) == [first, second]
 
     receipt = combat.pay_numeric_cost(player, "流血", 9)
-    assert player.current_hp == 100, "代价由共罪目标组承担，施法者不计入平分"
+    assert player.current_hp == 90, "后续代价由共罪目标组承担，不再扣施法者生命"
     assert sorted([80 - first.current_hp, 80 - second.current_hp]) == [4, 5]
     assert receipt["owner"]["paid"] == 0
     assert receipt["actual_paid"] == 9

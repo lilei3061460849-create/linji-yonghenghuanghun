@@ -112,9 +112,12 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         calc = DaoWenEngine.resolve('共罪', 2)
         self.assertEqual(calc['dao_wen'], '共罪')
         self.assertEqual(calc['mark_targets'], 2)
+        self.assertEqual(calc['cost_type'], '流血')
+        self.assertEqual(calc['cost_hp'], 10)
+        self.assertNotIn('cost', calc)
         self.assertEqual(calc['duration'], -1)
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
-        self.assertIn('6.血契X：支付：流血5X。使[目标]替你支付代价，持续X。', dungeon)
+        self.assertIn('6.血契X：支付：法力10X。使[目标]替你支付代价，持续X。', dungeon)
         self.assertNotIn('组内其他目标同步支付相同代价', dungeon)
         self.assertIn('获得道纹[共罪]', dungeon)
         by_name = {r['name']: r for r in self.rows}
