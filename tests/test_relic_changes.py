@@ -71,11 +71,12 @@ def test_wanjunyin_is_a_three_durability_consumable_not_a_relic():
 def test_relic_wording_uses_requested_concise_descriptions():
     index = (ROOT / "物品索引.md").read_text(encoding="utf-8")
     api = (ROOT / "engine/api.py").read_text(encoding="utf-8")
-    assert "[回终]，你获得等同于当前回合数的法力。" in index
+    assert "[回增]，你获得等同于增加后当前回合数的法力。" in index
     assert "任意角色每次失去生命时，使其衰老1。" in index
     assert "本回合你每失去1点生命，造成的伤害+1。" in index
     assert "战斗被动" not in index
-    assert "向上取整" not in index
+    # 缓厄沙漏的奇数延期按现行裁定向上取整，不再把必要结算术语当旧文案禁词。
+    assert "延期的一半向上取整" in index
     assert "持有者" not in index
     assert "战斗被动" not in api
     assert '("噬伤血囊", "任意角色受到伤害时，你回复该次实际伤害的20%")' in api
