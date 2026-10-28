@@ -44,7 +44,11 @@ def _engine(starter="杀伐", learn=(), region="龙心谷", seed=1, tmp="/tmp/bv
 
 def test_boba_marks_targets_after_start():
     """正常路径：波及开局后可真实发动并标记目标（X=2 标两个目标；2026-10-09 起 X 下限 repealed，X=1 也合法）。"""
-    e = _engine(starter="波及")
+    e = _engine(starter="杀伐")
+    # 只测现役多目标结算；专属道纹直接注入，不走其它副本的学习门禁。
+    from engine.models import DaoWen, DaoWenInstance
+    e.state.player.dao_wen["波及"] = DaoWenInstance(
+        DaoWen("波及", "", "消耗", "2X", ""))
     assert set(e.state.player.dao_wen) >= {"杀伐", "波及"}
     # 2026-10-12 出怪下界 1→2：第1场可能已有 2 只怪，本条要的靶子是「enemy:0 + 陪标怪」
     # 两个，故先把出怪收敛到 1 只（并清掉增援队列，免得后续回合又进场一只挤掉索引）。

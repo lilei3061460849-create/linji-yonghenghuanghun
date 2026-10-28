@@ -238,7 +238,10 @@ def test_ai_still_acts_when_shield_absorbs_all_probe_damage(tmp_path):
 def test_ai_can_mark_wave_targets(tmp_path):
     """正常：双怪场面AI能发动波及并显式提交X个目标的闪避选择。"""
     from engine.models import Entity
-    e = _engine(tmp_path, learn=("波及",))
+    e = _engine(tmp_path, learn=())
+    # 波及是沉沦海专属；直接注入以隔离AI多目标提交，不伪造龙心谷学习路径。
+    e.state.player.dao_wen["波及"] = DaoWenInstance(
+        DaoWen("波及", "", "消耗", "2X", ""))
     extra = Entity(name="木桩乙", entity_type="怪物", blood_limit=80, current_hp=80,
                    attack_count=1, attack_power=4)
     e.state.enemies.append(extra)
@@ -253,7 +256,9 @@ def test_ai_can_mark_wave_targets(tmp_path):
 
 def test_ai_keeps_shaifa_on_single_target(tmp_path):
     """边界：没有群伤道纹时单怪场面仍走杀伐，不得因无AOE而空过。"""
-    e = _engine(tmp_path, learn=("波及",))
+    e = _engine(tmp_path, learn=())
+    e.state.player.dao_wen["波及"] = DaoWenInstance(
+        DaoWen("波及", "", "消耗", "2X", ""))
     assert len(e.state.enemies) == 1
     e.state.player.current_mana = 12
     ai = TacticalAI(e)
