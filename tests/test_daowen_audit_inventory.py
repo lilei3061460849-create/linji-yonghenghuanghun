@@ -55,6 +55,15 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
             self.assertEqual(by_name[name]['review'], '暂未发现结构违规')
             self.assertNotIn('后续事件触发/改写', by_name[name]['tags'])
 
+    def test_retired_kuizeng_is_only_an_archived_design(self):
+        self.assertNotIn('馈赠', {r['name'] for r in self.rows})
+        dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
+        self.assertNotRegex(dungeon, r'馈赠(?:X|\d+)')
+        self.assertIn('⇄（转换）？？⇄（曲解）长夜X', dungeon)
+        scraps = (ROOT / '废稿汇总.md').read_text(encoding='utf-8')
+        self.assertIn('| A09 | 馈赠、受击次数供法力', scraps)
+        self.assertIn('使目标受击时获得X点法力，持续∞', scraps)
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
