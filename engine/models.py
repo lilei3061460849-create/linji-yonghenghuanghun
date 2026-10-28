@@ -309,7 +309,7 @@ class Entity:
     # 字段名保留 created_being 以兼容既有存档与开放世界记录。
     is_created_being: bool = False
     created_by_runtime_id: str = ""
-    # 妖怪视野成长值会随存档保存；每次指定培养增加1格。
+    # 妖怪视野范围随存档保存；旧档可能带有历史成长值，现行造生不再提供培养。
     created_being_vision_range: int = 1
     # 妖怪只有在主人明确召唤时才加入战斗；世界地图上的独立行动不因此中断。
     is_summoned: bool = False

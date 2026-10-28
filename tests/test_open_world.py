@@ -945,7 +945,7 @@ def test_creation_outside_graveyard_is_gated_without_the_artifact(tmp_path):
     assert engine.state.friends == []
 
 
-def test_creation_builds_map_yaoguai_then_explicitly_cultivates_stats_and_vision(tmp_path):
+def test_repeated_zaosheng_creates_another_map_yaoguai_without_growing_the_first(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
 
@@ -976,35 +976,34 @@ def test_creation_builds_map_yaoguai_then_explicitly_cultivates_stats_and_vision
     assert first["result"]["signature_daowen"] == signature_daowen
     assert being.runtime_id in engine.state.world_state["actors"]
 
+    first_id = being.runtime_id
     original_stats = (being.blood_limit, being.mana_limit, being.speed_limit)
     being.current_hp = max(0, being.blood_limit - 3)
     being.current_mana = max(0, being.mana_limit - 1)
     being.current_speed = max(0, being.speed_limit - 1)
     original_resources = (being.current_hp, being.current_mana, being.current_speed)
     second = engine.execute_action("pre_battle_action", {
-        "sub_action": "造生", "target": being.name,
+        "sub_action": "造生", "name": "第二只妖怪",
     })
     assert second["success"], second
-    assert engine.state.shards == 65
+    assert second["result"]["mode"] == "create"
+    assert engine.state.shards == 80
     beings = [friend for friend in engine.state.friends
               if getattr(friend, "is_created_being", False)]
-    assert len(beings) == 1
-    being = beings[0]
+    assert len(beings) == 2
+    second_being = next(entity for entity in beings
+                        if entity.runtime_id == second["result"]["created_being_id"])
+    being = next(entity for entity in beings if entity.runtime_id == first_id)
+    assert second_being.runtime_id in engine.state.world_state["actors"]
+
+    # 再次造生只创造新个体，不培养、治疗或提升第一只的视野。
+    assert (being.blood_limit, being.mana_limit, being.speed_limit) == original_stats
+    assert (being.current_hp, being.current_mana, being.current_speed) == original_resources
+    assert being.created_being_vision_range == 1
+    assert engine.state.world_state["actors"][being.runtime_id]["vision_range"] == 1
     assert len(being.preferences) == 1
-    assert (being.blood_limit, being.mana_limit, being.speed_limit) == tuple(
-        value + growth for value, growth in zip(original_stats, (6, 1, 1)))
-    assert (being.current_hp, being.current_mana, being.current_speed) == tuple(
-        min(limit, current + growth)
-        for limit, current, growth in zip(
-            (being.blood_limit, being.mana_limit, being.speed_limit),
-            original_resources, (6, 1, 1)))
-    assert being.created_being_vision_range == 2
-    actor_data = engine.state.world_state["actors"][being.runtime_id]
-    assert actor_data["vision_range"] == 2
-    assert second["result"]["growth"] == {
-        "blood_limit": 6, "mana_limit": 1, "speed_limit": 1, "vision_range": 1}
-    # 指定培养不新增偏爱，也不会反复抽取/替换专属道纹。
     assert list(being.dao_wen) == [signature_daowen]
+    assert len(second_being.preferences) == 1 and len(second_being.dao_wen) == 1
 
 
 def test_reincarnator_trade_requires_fair_offer_and_transfers_atomically(tmp_path):

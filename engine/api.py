@@ -545,9 +545,9 @@ class GameEngine:
             actions.append({"action_type": "pre_battle_action",
                             "params_schema": {
                                 "sub_action": "造生",
-                                "name": "创造新妖怪时可选；不得与target同传",
-                                "target": "培养现有妖怪时必填其名称或runtime_id"},
-                            "note": "持有煌妖幡可在乱葬岗以外造生；幡内最多6只妖怪"})
+                                "name": "可选：新妖怪名称；省略时自动生成唯一名称"},
+                            "note": "持有煌妖幡可在乱葬岗外创造妖怪；幡内最多6只。"
+                                    "造生不提供培养，成长收益通过修行、学习等通用行动分配"})
         dormant_targets = [{"ref": entity.runtime_id, "name": entity.name,
                             "current_hp": entity.current_hp, "blood_limit": entity.blood_limit}
                            for entity in owned_yaoguai(self.state)
@@ -713,10 +713,9 @@ class GameEngine:
             return [{"id": "炼心", "params_schema": {}}]
         if self.state.current_region == "乱葬岗":
             return [{"id": "造生", "params_schema": {
-                "name": "创造新妖怪时可选；须与其他角色不同，不得与target同传",
-                "target": "培养现有妖怪时必填其名称或runtime_id；省略target表示创造"},
-                "note": "创造消耗10碎片并获得固定专属道纹、初始偏爱；指定培养消耗25碎片，"
-                        "血限+6、法限+1、速限+1、视野+1格。未入幡妖怪每只占5张死者之页"}]
+                "name": "可选：新妖怪名称；须与其他角色不同，省略时自动生成唯一名称"},
+                "note": "仅创造：消耗10碎片并获得固定专属道纹、初始偏爱；不提供培养，"
+                        "成长收益通过修行、学习等通用行动分配。未入幡妖怪每只占5张死者之页"}]
         return []
 
     def _get_battle_start_actions(self) -> dict:
@@ -3565,7 +3564,7 @@ class GameEngine:
         if action == "探索":
             return {"success": False, "error": "开放世界已删除独立探索行动；请移动到地图地点"}
         if action == "附煞":
-            return {"success": False, "error": "附煞已删除；请使用造生创造或培养妖怪"}
+            return {"success": False, "error": "附煞已删除；造生仅用于创造妖怪"}
         if action not in durations:
             # 献祭等尚未裁定为耗时的条件性操作暂时保留即时结算。
             return self._execute_pre_battle_immediate(params, world_mode=True)
@@ -3794,7 +3793,7 @@ class GameEngine:
                                "required_turns": duration, "reward_applied": False,
                                "completion_error": result.get("error", "")}}
         if action == "造生":
-            # 创造时把新妖怪加入地图；指定培养时同步既有单位的成长后视野。
+            # 创造时把新妖怪加入地图，并同步既有单位记录的视野范围。
             for being in self.state.friends:
                 if (not getattr(being, "is_created_being", False)
                         or getattr(being, "created_by_runtime_id", "") != player_id):
@@ -4748,7 +4747,7 @@ class GameEngine:
         }
 
     def _pre_battle_zaosheng(self, params: dict) -> dict:
-        """造生：省略target创造新妖怪；显式target培养一只现有妖怪。"""
+        """造生：只创造新妖怪；既有妖怪的成长由修行、学习等通用行动分配。"""
         player = self.state.player
         if player is None:
             return {"success": False, "error": "没有玩家"}
@@ -4758,51 +4757,18 @@ class GameEngine:
         if self.state.current_region != "乱葬岗" and not banner:
             return {"success": False, "error": "造生只能在乱葬岗发动；持有煌妖幡时不受地点限制"}
 
-        has_target = "target" in params
+        if "target" in params:
+            return {"success": False,
+                    "error": "造生仅用于创造新妖怪，专用培养已移除；"
+                             "请通过修行、学习等通用行动向现有妖怪分配收益"}
         requested_name = params.get("name")
-        if has_target and requested_name not in (None, ""):
-            return {"success": False, "error": "创造与培养必须分开：target培养时不得同时传name"}
         if requested_name is not None and not isinstance(requested_name, str):
             return {"success": False, "error": "妖怪name必须是字符串"}
-
-        if has_target:
-            existing = find_owned_yaoguai(self.state, params.get("target"))
-            if existing is None:
-                return {"success": False, "error": "target必须唯一指定一只由你创造的妖怪（名称或runtime_id）"}
-            if getattr(existing, "is_dormant", False) or not existing.is_alive:
-                return {"success": False, "error": "休眠或已离场的妖怪不能培养；休眠者须先通过唤醒行动恢复"}
-            cost = 25
-            if self.state.shards < cost:
-                return {"success": False, "error": f"培养妖怪需要{cost}碎片"}
-            # 指定培养只提升该妖怪本身，不新增偏爱，也不替换其专属道纹。
-            existing.blood_limit += 6
-            existing.current_hp = min(existing.blood_limit, existing.current_hp + 6)
-            existing.mana_limit += 1
-            existing.current_mana = min(existing.mana_limit, existing.current_mana + 1)
-            existing.speed_limit += 1
-            existing.current_speed = min(existing.speed_limit, existing.current_speed + 1)
-            vision_range = max(1, int(getattr(existing, "created_being_vision_range", 1))) + 1
-            existing.created_being_vision_range = vision_range
-            self.state.shards -= cost
-            actor_data = self.state.world_state.get("actors", {}).get(existing.runtime_id, {})
-            actor_data["vision_range"] = vision_range
-            return {"success": True, "action": "造生·培养妖怪",
-                    "result": {"mode": "cultivate", "yaoguai": existing.name,
-                               "created_being": existing.name,
-                               "created_being_id": existing.runtime_id,
-                               "growth": {"blood_limit": 6, "mana_limit": 1,
-                                          "speed_limit": 1, "vision_range": 1},
-                               "vision_range": vision_range,
-                               "preferences": list(existing.preferences),
-                               "shard_cost": cost, "shards": self.state.shards,
-                               "attributes": {"blood_limit": existing.blood_limit,
-                                              "mana_limit": existing.mana_limit,
-                                              "speed_limit": existing.speed_limit}}}
 
         owned = owned_yaoguai(self.state)
         if banner and len(owned) >= BANNER_CAPACITY:
             return {"success": False,
-                    "error": f"煌妖幡最多收纳{BANNER_CAPACITY}只妖怪；请先指定target培养现有妖怪"}
+                    "error": f"煌妖幡最多收纳{BANNER_CAPACITY}只妖怪，无法继续创造"}
         if not banner:
             from .death_pages import bind_resources
             bind_resources(self.state)
@@ -4831,7 +4797,7 @@ class GameEngine:
                 name = f"{base_name}{suffix}"
                 suffix += 1
 
-        # 每只妖怪在创造时分别确定一次专属道纹与初始偏爱；指定培养不会重抽。
+        # 每只妖怪在创造时分别确定一次专属道纹与初始偏爱。
         from .monsters import MONSTER_PREFERENCE_POOL
         from .gamedata import MONSTER_DAOWEN
         from .models import MONSTER_MANA_RELIC, MONSTER_MANA_RELIC_EFFECT

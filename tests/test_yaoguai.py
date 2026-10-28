@@ -91,32 +91,36 @@ def test_unhoused_yaoguai_cost_five_pages_each_and_failed_creation_is_atomic(tmp
     assert pages_used(engine) == 1
 
 
-def test_creation_and_explicit_cultivation_select_different_existing_yaoguai(tmp_path):
+def test_zaosheng_only_creates_and_generic_xiuxing_handles_growth(tmp_path):
     engine = make_engine(tmp_path, banner=True)
     assert create(engine, "甲")["success"]
     assert create(engine, "乙")["success"]
     first, second = owned_yaoguai(engine.state)
-    before = (second.blood_limit, second.mana_limit, second.speed_limit,
-              second.created_being_vision_range)
-
-    grown = engine.execute_action("pre_battle_action", {
-        "sub_action": "造生", "target": first.runtime_id,
-    })
-    assert grown["success"], grown
-    assert grown["result"]["mode"] == "cultivate"
-    assert first.blood_limit == 36  # 初始为轮回者60血限的一半。
-    assert first.mana_limit == 5 and first.speed_limit == 4
-    assert first.created_being_vision_range == 2
-    assert (second.blood_limit, second.mana_limit, second.speed_limit,
-            second.created_being_vision_range) == before
-    assert len(owned_yaoguai(engine.state)) == 2
+    before = (first.blood_limit, first.mana_limit, first.speed_limit,
+              first.created_being_vision_range)
+    second_before = (second.blood_limit, second.mana_limit, second.speed_limit)
 
     shards = engine.state.shards
-    conflict = engine.execute_action("pre_battle_action", {
-        "sub_action": "造生", "target": first.name, "name": "丙",
+    rejected = engine.execute_action("pre_battle_action", {
+        "sub_action": "造生", "target": first.runtime_id,
     })
-    assert not conflict["success"] and "不得同时传name" in conflict["error"]
+    assert not rejected["success"] and "造生仅用于创造" in rejected["error"]
+    assert "修行、学习" in rejected["error"]
     assert engine.state.shards == shards
+    assert len(owned_yaoguai(engine.state)) == 2
+    assert (first.blood_limit, first.mana_limit, first.speed_limit,
+            first.created_being_vision_range) == before
+
+    # 用户裁定：既有妖怪的成长由通用行动承接，不再经造生重复实现。
+    grown = engine.execute_action("pre_battle_action", {
+        "sub_action": "修行", "tier": 1, "target": first.name,
+        "allocations": {"blood_points": 1, "speed_points": 0, "mana_points": 0},
+    })
+    assert grown["success"], grown
+    assert first.blood_limit == before[0] + 6
+    assert first.mana_limit == before[1] and first.speed_limit == before[2]
+    assert first.created_being_vision_range == before[3]
+    assert (second.blood_limit, second.mana_limit, second.speed_limit) == second_before
     assert len(owned_yaoguai(engine.state)) == 2
 
 
