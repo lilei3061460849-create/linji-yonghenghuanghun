@@ -82,6 +82,15 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertFalse(design['runtime'])
         self.assertIn(design['effect'], sea)
 
+    def test_undying_draft_uses_cooldown_and_life_floor(self):
+        dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
+        self.assertIn('4.不死X：支付：冷却X。使[目标]的生命无法降至1以下，持续X。', dungeon)
+        self.assertNotIn('4.不死X：支付：法力10X', dungeon)
+        self.assertNotIn('当前生命为0及以下时不触发[命零]', dungeon)
+        row = next(r for r in self.rows if r['name'] == '不死')
+        self.assertFalse(row['runtime'])
+        self.assertEqual(row['review'], '暂未发现结构违规')
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
