@@ -91,6 +91,15 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertFalse(row['runtime'])
         self.assertEqual(row['review'], '暂未发现结构违规')
 
+    def test_eternal_life_swap_has_no_healing_exemption(self):
+        dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
+        self.assertIn('5.永生X：支付：衰老10X。使[目标]的当前生命与已损生命互换，持续X。', dungeon)
+        self.assertIn('生命增加视为回复，生命减少视为失血', dungeon)
+        self.assertNotIn('［回终］［回复］你的所有已损生命', dungeon)
+        row = next(r for r in self.rows if r['name'] == '永生')
+        self.assertFalse(row['runtime'])
+        self.assertEqual(row['review'], '语义待定')
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
