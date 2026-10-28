@@ -85,3 +85,23 @@ def test_instant_spell_uses_the_same_floor_and_cooldown():
     assert p.current_mana==before and p.dao_wen['不死'].cooldown_remaining==2
     t.take_damage(100)
     assert t.current_hp==1
+
+
+def test_decay_hourglass_zero_duration_does_not_create_permanent_immortality():
+    from engine.models import Relic
+    e,p,t=setup('zero_duration');e.state.relics.append(Relic('衰变沙漏',''))
+    result=cast(e,t,x=1)
+    assert result['success'],result
+    assert p.dao_wen['不死'].cooldown_remaining==1  # 原声明代价照付。
+    assert not t.has_status('不死')  # 1-1=0不是持续∞。
+    t.take_damage(100)
+    assert not t.is_alive
+
+
+def test_spell_zero_duration_keeps_declared_cooldown_without_floor():
+    from engine.models import Relic
+    e,p,t=setup('spell_zero_duration');e.state.relics.append(Relic('衰变沙漏',''))
+    execution=e.combat.build_instant_execution(p,'发动不死X于目标',t,
+        [{'x':1,'dodge':False}],e.combat._combat_entity_refs())
+    execution.run_all()
+    assert p.dao_wen['不死'].cooldown_remaining==1 and not t.has_status('不死')

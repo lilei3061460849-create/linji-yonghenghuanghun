@@ -1242,12 +1242,12 @@ class DaowenEffectMixin:
                 "type": "bizhong_target" if target is not None else "bizhong_self",
                 "target": bearer.name, "rounds": rounds})
 
-        if ("duration" in calc and calc.get("duration") is not None
+        if ("duration" in calc and calc.get("duration") is not None and calc["duration"] != 0
               and not (name == "变形" and bianxing_blocked)
               # 波及标记由 use_daowen/怪物结算逐目标处理，不走通用状态块
               # 乱葬岗道纹已在上方乱葬岗段自行 add_status，跳过通用状态处理避免重复叠加
               and name not in ("勾魂", "冥气", "缄默", "波及", "共罪")):
-            duration = calc["duration"] if calc["duration"] != 0 else -1
+            duration = calc["duration"]  # 0不生效；只有显式-1表示持续∞。
             effect_target = target if target else caster
             # 自身作用型道纹（变形/超频等）作用于施法者
             # 【点金】即时结算失忆代价与碎片收益，不挂持续状态。
