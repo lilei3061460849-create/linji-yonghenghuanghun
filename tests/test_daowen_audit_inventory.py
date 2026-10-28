@@ -213,8 +213,16 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertNotIn('看破', {r['name'] for r in self.rows})
         dungeon = (ROOT / '副本/巴别塔.md').read_text(encoding='utf-8')
         self.assertNotRegex(dungeon, r'看破(?:X|\d)')
-        self.assertIn('独断X⇄（转换）？？⇄（反转）？？⇄（转换）攻心X', dungeon)
+        self.assertIn('独断X⇄（转换）？？⇄（反转）？？⇄（转换）？？', dungeon)
         self.assertIn('| A13 | 看破、预测闪避后追加禁闪',
+                      (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
+
+    def test_retired_target_prediction_control_is_archived(self):
+        self.assertNotIn('攻心', {r['name'] for r in self.rows})
+        dungeon = (ROOT / '副本/巴别塔.md').read_text(encoding='utf-8')
+        self.assertNotRegex(dungeon, r'攻心(?:X|\d)')
+        self.assertIn('？？⇄（转换）？？⇄（曲解）读心X', dungeon)
+        self.assertIn('| A14 | 攻心、预测后接管一次行动目标',
                       (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
 
     def test_rule_boundary_and_examples_remain_explicit(self):
