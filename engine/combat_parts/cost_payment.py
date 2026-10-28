@@ -362,12 +362,12 @@ class CostPaymentMixin:
             if not getattr(self, "_hp_loss_recording", 0):
                 self._hp_loss_recording = getattr(self, "_hp_loss_recording", 0) + 1
                 try:
-                    entity.current_hp = 0
+                    object.__setattr__(entity, "current_hp", 0)
                     entity.is_alive = False
                 finally:
                     self._hp_loss_recording -= 1
             else:
-                entity.current_hp = 0
+                object.__setattr__(entity, "current_hp", 0)
                 entity.is_alive = False
             self._on_entity_death(entity, ctx=self._lost_context(
                 entity, parent, subtype="collapse"))

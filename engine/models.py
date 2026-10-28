@@ -511,6 +511,12 @@ class Entity:
     # _hp_engine_ref 为可选弱引用（非字段，不参与序列化/深拷贝判定）。
     def __setattr__(self, name, value):
         old = self.__dict__.get(name, None)
+        # 不死只限制存活角色的当前生命下降，不回复、不复活，不豁免独立离场事件。
+        if (name == "current_hp" and old is not None and old >= 1 and value < 1
+                and self.__dict__.get("is_alive", False)
+                and any(status.name == "不死" and not status.is_expired
+                        for status in self.__dict__.get("status_effects", ()))):
+            value = 1
         # 缄默面具：已有实体获得法限时实际增量翻倍；初始化/读档时旧值为None，不重复放大。
         if (name == "mana_limit" and isinstance(old, int) and isinstance(value, int)
                 and value > old and self.__dict__.get("_silent_mask_active", False)):
@@ -738,6 +744,9 @@ class Entity:
             self.shield = shield_before
             raise
 
+        if self.is_alive and self.has_status("不死"):
+            # 同时修正实际伤害/代价账本，而不只在写HP时封顶。
+            remaining = min(remaining, max(0, self.current_hp - 1))
         # 扣除生命；actual_damage 是经过倍率的待扣数值，actual_life_loss 是
         # HP 实际下降量，过量伤害时二者可不同。
         hp_before = self.current_hp

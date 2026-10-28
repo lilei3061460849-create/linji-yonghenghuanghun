@@ -640,6 +640,13 @@ class DaoWenEngine:
                 "cost_hp": 10 * x, "preserve_daowen_changes": x,
                 "summary": f"流血{10*x}，自身接下来{x}次道纹变化保留原道纹"}
 
+    @staticmethod
+    def calculate_busi(x: int, target: Entity = None) -> dict:
+        """不死X：支付：冷却X。使[目标]的生命无法降至1以下，持续X。"""
+        return {"dao_wen": "不死", "x": x, "cost_type": CostType.COOLDOWN.value,
+                "cost": x, "duration": x, "hp_floor": 1,
+                "summary": f"冷却{x}，目标生命下限1，持续{x}"}
+
     # ========== 乱葬岗（二阶）专属道纹 ==========
 
     @staticmethod
@@ -753,6 +760,7 @@ class DaoWenEngine:
             "全力": cls.calculate_quanli,
             "净化": cls.calculate_jinghua,
             "出土": cls.calculate_chutu,
+            "不死": cls.calculate_busi,
             "必中": cls.calculate_bizhong,
             # 怪物转化（2026-10-11 A14：无神/借力/衰败 已删）
             "弱化": cls.calculate_ruhua,

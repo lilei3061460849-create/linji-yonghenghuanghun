@@ -380,10 +380,11 @@ else:
 section(f"初拥专属（{len(FIRST_EMBRACE_DAOWEN)}）", sorted(FIRST_EMBRACE_DAOWEN),
         note_lines=["初拥之夜专属道纹：仅由对应初拥选项授予，不可通过局外学习、【典当】发现或残韵获得。"])
 
-section(f"未实现副本（荒疫古城·{len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}）", list(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN),
-        note_lines=["所属副本**未接入运行时**（规则草案，见 `副本/荒疫古城.md`）：计算已实现并注册，"
-                    "但局外学习按专属道纹拒绝，不进入当前事件池/怪物池。荒疫古城草案闭环中还含"
-                    "感染/篡改/尘封/催化/重演/原初等草案道纹，均不在当前版本引擎内。出土已接入流血支付与现有残韵变化保留原纹路径。"])
+for owner in sorted(set(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.values())):
+    names = [name for name, region in UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.items() if region == owner]
+    section(f"未实现副本（{owner}·{len(names)}）", names,
+            note_lines=["这些道纹计算/效果已接入，但所属副本尚未接入运行时，局外学习仍按所属副本门禁拒绝。"
+                        "草案中其余感染/篡改/催化/原初等节点是否实现，分别查当前裁定落地核查，不能据此批量视为已实现。"])
 
 A("---")
 A("")

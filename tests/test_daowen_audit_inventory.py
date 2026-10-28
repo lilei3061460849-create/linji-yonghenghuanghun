@@ -88,7 +88,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertNotIn('4.不死X：支付：法力10X', dungeon)
         self.assertNotIn('当前生命为0及以下时不触发[命零]', dungeon)
         row = next(r for r in self.rows if r['name'] == '不死')
-        self.assertFalse(row['runtime'])
+        self.assertTrue(row['runtime'])
         self.assertEqual(row['review'], '暂未发现结构违规')
 
     def test_eternal_life_swap_has_no_healing_exemption(self):
