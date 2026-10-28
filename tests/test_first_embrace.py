@@ -23,6 +23,7 @@ from engine.api import GameEngine
 from engine.consumables import make_wing_item
 from engine.daowen import DaoWenEngine
 from engine.gamedata import learnability_error, learnable_daowen_pool
+from engine.mechanisms import Phase
 from engine.models import Entity, DaoWen, DaoWenInstance, Relic
 
 
@@ -212,9 +213,9 @@ def test_option2_immortal_body_halves_blood_limit_and_blocks_growth():
     assert player.speed_limit == sp_before + 1, "不朽之躯不阻止修行提升速限"
     engine.state.energy = 0
 
-    # 获得的法力无法超过法限：折速战始+24被钳到法限；守夜灯[敌回始]叠加也被钳到法限
+    # 获得的法力无法超过法限：折速战始+24与守夜灯[回增]叠加都被钳到法限
     engine.state.relics.append(Relic(name="折速法印", effect="[战始]可疲惫X获得6X法力"))
-    engine.state.relics.append(Relic(name="守夜灯", effect="[回始]获得等同于[法限]10%的法力"))
+    engine.state.relics.append(Relic(name="守夜灯", effect="[回增]获得当前世界回合数的法力"))
     zhesu = {"折速法印": {"use": True, "x": 4}}
     if any(r.name == "回锋刀" for r in engine.state.relics):
         zhesu["回锋刀"] = {"enemy_index": 0}
@@ -226,9 +227,9 @@ def test_option2_immortal_body_halves_blood_limit_and_blocks_growth():
     engine.execute_action("round_start", {})
     assert player.current_mana == player.mana_limit, \
         f"回始获得法限后仍钳在法限：当前{player.current_mana} 法限{player.mana_limit}"
-    engine.combat._grant_shouyedeng(player)
+    engine.combat._dispatch_phase(Phase.ROUND_INCREASE, target=player)
     assert player.current_mana == player.mana_limit, \
-        f"守夜灯敌回始叠加的法力也被钳到法限：当前{player.current_mana} 法限{player.mana_limit}"
+        f"守夜灯回增加叠的法力也被钳到法限：当前{player.current_mana} 法限{player.mana_limit}"
 
     # 免疫衰老代价
     engine.state.player.dao_wen["透支"] = DaoWenInstance(

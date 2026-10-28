@@ -15,6 +15,7 @@ from engine.api import GameEngine
 from engine.combat import CombatEngine
 from engine.daowen import DaoWenEngine
 from engine.dice import DiceEngine
+from engine.mechanisms import Phase
 from engine.models import Consumable, DaoWen, DaoWenInstance, Entity, GameState, Relic, Spell
 
 
@@ -328,21 +329,21 @@ def test_r43_all_implemented_event_options_have_a_runtime_route(tmp_path):
 # R44：统一向上取整
 
 def test_r44_normal_guard_lamp_ceil(tmp_path):
-    """守夜灯（2026-10-25 用户令）：[回终]获得等同于当前回合数的法力，与法限无关。"""
+    """守夜灯在[回增]获得当前世界回合数的法力，实际获得量受法限截断。"""
     engine = _engine(tmp_path); player, _ = _combat(engine)
     player.mana_limit = 5; player.current_mana = 0
     engine.state.relics = [Relic("守夜灯", "")]
     engine.combat.round_start({})
-    # [回始] 不再授予：一池制下回始不回填，守夜灯已改到回终。
-    assert player.current_mana == 0
+    assert player.current_mana == min(5, engine.state.current_round)
+    player.current_mana = 0
     engine.state.current_round = 4
-    granted = engine.combat._grant_shouyedeng(player)
-    assert granted["gained"] == 4
+    engine.combat._dispatch_phase(Phase.ROUND_INCREASE, target=player)
     assert player.current_mana == 4
-    # 金额随回合数涨，但一律不得超过[法限]：法限 5 时第 9 回合只进 5 点。
+    # 金额随世界回合数涨，但一律不得超过[法限]：法限 5 时第 9 回合只进 5 点。
     player.current_mana = 0
     engine.state.current_round = 9
-    assert engine.combat._grant_shouyedeng(player)["gained"] == 5
+    engine.combat._dispatch_phase(Phase.ROUND_INCREASE, target=player)
+    assert player.current_mana == 5
 
 
 def test_r44_boundary_slow_one_stays_one(tmp_path):

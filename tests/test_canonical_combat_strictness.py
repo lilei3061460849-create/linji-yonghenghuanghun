@@ -2,7 +2,7 @@
 正文战斗规则严格合规性全量测试（Canonical Combat Pipeline & Iron Laws Audit）
 严格按 README《七步原子时序切片流水线》与《推演铁律》审计战斗程序：
 1. 声明与付费：法力与代价精确扣除，不足时严厉拒绝；
-2. 反应法术与守夜灯：受伤害前反应抢攻，敌回始法力供给；
+2. 反应法术与守夜灯：受伤害前反应抢攻，回增法力供给；
 3. 闪避与避风铃：速度消耗、判定完全失效、避风铃叠甲；
 4. 爆裂受到伤害前反噬：反伤先于落地，反噬致死则攻击取消；
 5. 重定向与濒死拦截：嫁祸、背负、撤退、负岳碑、断尾求生；
@@ -20,6 +20,7 @@ from tests.setup_support import finish_initial_daowen
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
+from engine.mechanisms import Phase
 from engine.models import Entity, Relic, StatusEffect, DaoWenInstance, DaoWen, Spell
 from engine.enums import EntityType
 
@@ -71,15 +72,15 @@ def test_step1_mana_payment_and_rejection(tmp_path):
 # ==================== 2. 反应法术与守夜灯测试 ====================
 
 def test_step2_night_watchman_lamp_reactive_mana(tmp_path):
-    """正常路径：守夜灯[回终]获得等同于当前回合数的法力（2026-10-25 用户令）。"""
+    """正常路径：守夜灯在[回增]获得等同于当前世界回合数的法力。"""
     e = _setup_engine(tmp_path, relic="守夜灯")
     p = e.state.player
     p.mana_limit = 50
     p.current_mana = 0
     e.state.current_round = 3
 
-    granted = e.combat._grant_shouyedeng(p)
-    assert granted["gained"] == 3, "第3回合回终 = 3点法力"
+    e.combat._dispatch_phase(Phase.ROUND_INCREASE, target=p)
+    assert p.current_mana == 3, "世界第3回合每经历一个回合 = 3点法力"
 
 
 # ==================== 3. 闪避与避风铃测试 ====================
