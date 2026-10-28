@@ -364,6 +364,7 @@ def _resolve_monster_turn(engine):
     no_dodge_refs = set()  # 报错"速度不足不能闪避"的受击 ref：重交一律不闪避
     no_dodge_all = False   # 报错"回锋刀…提交目标"：快照目标阶段内失效，全场弃闪一次
     banned_spells = set()  # 报错"提交的法力不足"的法术：后续一律弃权
+    damage_budget_overrides = {}  # 道纹改变实时法力后，按resolve返回的当次预算重交
     wave_retry = False
     attempts = 0
     max_attempts = len(prepared["result"]["actors"]) + 2
@@ -402,10 +403,17 @@ def _resolve_monster_turn(engine):
             per_hit = monster.attack_power if monster is not None else 0
             target_option = next((o for o in actor["attack_target_options"]
                                   if o["ref"] == target_ref), None)   # 无合法攻击目标时为None
+            # 现代逐击契约要求显式damage。先按prepare预算均分；若本 actor 的道纹
+            # 先行改变当前法力，resolve会返回新的预算上限，下方按该值定向重试。
+            damage_budget = damage_budget_overrides.get(
+                actor["actor_ref"], actor.get("damage_budget", 0))
+            damage_base, damage_remainder = divmod(max(0, int(damage_budget)), hits_n) if hits_n else (0, 0)
+            hit_damages = [damage_base + (1 if i < damage_remainder else 0)
+                           for i in range(hits_n)]
             attacks = []
             for _ in range(actor["base_attack_actions"]):
                 hits = []
-                for _ in range(hits_n):
+                for hit_index in range(hits_n):
                     want_dodge = (not no_dodge_all and target_ref not in no_dodge_refs
                                   and choose_dodge(engine, per_hit, budget_used=dodge_budget))
                     if want_dodge:
@@ -427,7 +435,8 @@ def _resolve_monster_turn(engine):
                     else:
                         spell_choices = _decline_spells(target_option)
                     hit = {"target_ref": target_ref, "dodge": want_dodge,
-                           "blood_shadow": False, "spell_choices": spell_choices}
+                           "parry": False, "blood_shadow": False,
+                           "damage": hit_damages[hit_index], "spell_choices": spell_choices}
                     # 回锋刀：闪避触发反击必须显式提交合法敌方目标
                     if want_dodge and target_option and target_option.get("dodge_relic_target_options"):
                         hit["dodge_relic_target_ref"] = target_option["dodge_relic_target_options"][0]["ref"]
@@ -446,6 +455,17 @@ def _resolve_monster_turn(engine):
         if attempts > max_attempts:
             return result
         err = str(result.get("error", ""))
+        # 道纹先改变当前法力时，攻击预算也会变。按回滚后同一道纹路径的实际上限
+        # 重新均分每击伤害，不能靠引擎放宽预算或让兼容默认值逐击漂移。
+        m = _re.search(r"(.+?)分配总伤害\d+超过上限(\d+)", err)
+        if m:
+            name, budget = m.group(1), int(m.group(2))
+            ref = next((a["actor_ref"] for a in actors
+                        if refs_all.get(a["actor_ref"]) is not None
+                        and refs_all[a["actor_ref"]].name == name), None)
+            if ref and damage_budget_overrides.get(ref) != budget:
+                damage_budget_overrides[ref] = budget
+                continue
         # 命中数/出手数漂移：按报错给出的实时 N 定向覆盖该 actor 后重试
         m = _re.search(r"(.+?)每个攻击出手必须提交(\d+)次命中选择", err)
         if m:
