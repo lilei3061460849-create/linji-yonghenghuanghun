@@ -34,6 +34,8 @@ def _new_engine(db_suffix: str) -> GameEngine:
     choice = next((n for n in setup["result"]["relic_choices"] if n not in optional),
                   setup["result"]["relic_choices"][0])
     engine.execute_action("choose_discovered_relic", {"relic_name": choice})
+    # 龙心用例需在同回合连续支付两次代价；随机【沉重枷锁】不得抢占第二次出手。
+    engine.state.relics = []
     engine.state.player.dao_wen["连击"] = DaoWenInstance(
         DaoWen(name="连击", formula="", cost_type="流血", cost_formula="X", effect_formula=""))
     engine.state.energy = 3
