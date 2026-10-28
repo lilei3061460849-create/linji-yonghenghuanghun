@@ -412,3 +412,8 @@ def test_action_linter_rejects_exceeding_action_budget():
         BR.validate_battle_report_actions(exceed_budget_snippet)
 
 
+
+
+def test_round_start_renders_existing_mechanism_string_without_inventing_effects():
+    from engine.battle_report import _render_effect
+    assert _render_effect("守夜灯：获得10法力")=="守夜灯：获得10法力"
