@@ -898,6 +898,14 @@ class DaowenEffectMixin:
             result["effects"].append(cost_effect)
         elif cost_share_target_ref:
             raise ValueError("该道纹没有可由【共罪】共同承担的数值代价")
+        if calc.get("preserve_daowen_changes", 0) > 0:
+            # 次数保存在value；remaining_rounds=-1只表示不按回合递减。
+            caster.add_status(self._daowen_status(
+                daowen_order=daowen_order, name="出土", value=calc["preserve_daowen_changes"],
+                remaining_rounds=-1, source=caster.name))
+            result["effects"].append({"type": "preserve_daowen_changes",
+                                      "target": caster.name,
+                                      "remaining": caster.get_status_value("出土")})
         if "mana_gain" in calc:
             # 2026-10-08：走统一入口，【勾魂】期间不生效（实际获得量可能与声明量不同）
             gained = caster.gain_mana(calc["mana_gain"])

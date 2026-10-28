@@ -52,6 +52,7 @@ MONSTER_DAOWEN = ORIGINAL_MONSTER_DAOWEN | MONSTER_TRANSFORM_DAOWEN
 # 所属副本尚未接入运行时，但计算已实现；局外学习仍按专属道纹拒绝。
 UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN = {
     "净化": "荒疫古城",
+    "出土": "荒疫古城",
 }
 
 # 已有闭环/规则草案节点，但尚未注册运行时效果；不可通过学习或残韵获取。

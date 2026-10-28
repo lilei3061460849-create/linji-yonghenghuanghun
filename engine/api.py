@@ -5642,9 +5642,22 @@ class GameEngine:
             return None, f"场上无人持有道纹: {source}"
         return None, f"多名角色持有{source}，请指定target_ref"
 
+    @staticmethod
+    def _excavation_rule(holder: Entity):
+        return next((status for status in getattr(holder, "status_effects", ())
+                     if status.name == "出土" and not status.is_expired and status.value > 0), None)
+
+    def _conversion_capacity_error(self, holder: Entity, source: str, dest: str):
+        # 普通一换一不新增页；出土保留原纹后才需要承载新增种类。
+        if (source != dest and source in holder.dao_wen and dest not in holder.dao_wen
+                and self._excavation_rule(holder) is not None
+                and len(holder.dao_wen) >= holder.daowen_capacity):
+            return f"{holder.name}出土保留原纹后无空余死者之页承载{dest}，变化未生效"
+        return None
+
     def _permanently_convert_daowen(self, holder: Entity, source: str, dest: str) -> bool:
-        """将持有者的源道纹永久变为变化后的道纹；同名只保留一份。"""
-        if source not in holder.dao_wen:
+        """永久结算原次道纹变化；出土按剩余次数保留原实例，同名不重复。"""
+        if source not in holder.dao_wen or self._conversion_capacity_error(holder, source, dest):
             return False
         if holder.entity_type == "怪物" and source in ORIGINAL_MONSTER_DAOWEN:
             holder._had_monster_daowen = True
@@ -5657,7 +5670,13 @@ class GameEngine:
                 effect_formula=old.dao_wen.effect_formula,
             ), x_value=old.x_value)
         if dest != source:
-            del holder.dao_wen[source]
+            rule = self._excavation_rule(holder)
+            if rule is None:
+                del holder.dao_wen[source]
+            else:
+                rule.value -= 1
+                if rule.value == 0:
+                    holder.status_effects.remove(rule)
         return True
 
     def _grant_transformed_daowen(self, player: Entity, dest: str) -> bool:
@@ -5723,6 +5742,10 @@ class GameEngine:
         if not result["success"]:
             return {"success": False, "error": result["error"]}
 
+        capacity_error = self._conversion_capacity_error(holder, source, result["target"])
+        if capacity_error:
+            return {"success": False, "error": capacity_error}
+
         # 路径与持有者均已确认，此时才消耗（规则1：未生效不消耗）
         stock[rtype] = stock[rtype] - 1
 
@@ -5752,6 +5775,11 @@ class GameEngine:
                         target_has_daowen=True,
                         target_daowen=params.get("second_target_daowen", "") or "")
                     if r2.get("success"):
+                        capacity_error = self._conversion_capacity_error(
+                            second_entity, second_source_daowen, r2["target"])
+                        if capacity_error:
+                            r2 = {"success": False, "error": capacity_error}
+                    if r2.get("success"):
                         new_name = r2["target"]
                         self._permanently_convert_daowen(second_entity, second_source_daowen, new_name)
                         if self._grant_transformed_daowen(actor, new_name):
@@ -5769,6 +5797,7 @@ class GameEngine:
             "holder": holder.name,
             "holder_is_player": caster_has,
             "holder_changed": holder_changed,
+            "original_preserved": dest != source and source in holder.dao_wen,
             "granted_daowen": dest if granted else None,
             "actor": actor.name,
             "second_target_log": second_log,

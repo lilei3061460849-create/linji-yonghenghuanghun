@@ -1,5 +1,6 @@
 """回归：沉沦海道纹去重与【波及】迁移。"""
 from pathlib import Path
+import re
 
 from engine.daowen import ResonanceEngine
 from engine.gamedata import REGION_EXCLUSIVE_DAOWEN, RACE_EXCLUSIVE_DAOWEN, SHAFA_LOOP_DAOWEN
@@ -39,7 +40,8 @@ def test_deleted_sunken_sea_daowen_and_panel_tags_are_gone():
     assert "映照" not in index
     assert "扩散" not in index
     assert "道纹数量5" in dungeon
-    assert "当前索引收录道纹（35种）" in index
+    indexed_count = len(re.findall(r"^### [\u4e00-\u9fff]{2}$", index, re.M))
+    assert f"当前索引收录道纹（{indexed_count}种）" in index
     assert "流动】【遗忘】尚未接入运行时" in index
     assert "杀伐闭环（通用核心）8" in index
     assert "沉沦海专属（5）" in index

@@ -633,6 +633,13 @@ class DaoWenEngine:
                 "cost": 5 * x, "extend_duration": x, "status_index": status_index,
                 "summary": f"支付：{5*x}法力，将目标一种持续时间增加{x}"}
 
+    @staticmethod
+    def calculate_chutu(x: int) -> dict:
+        """出土X：支付：流血10X。自身接下来X次道纹变化保留原道纹。"""
+        return {"dao_wen": "出土", "x": x, "cost_type": CostType.BLEED.value,
+                "cost_hp": 10 * x, "preserve_daowen_changes": x,
+                "summary": f"流血{10*x}，自身接下来{x}次道纹变化保留原道纹"}
+
     # ========== 乱葬岗（二阶）专属道纹 ==========
 
     @staticmethod
@@ -745,6 +752,7 @@ class DaoWenEngine:
             # 怪物原始（2026-10-25 用户令：【疯狂】【减速】遗物化，退出道纹体系）
             "全力": cls.calculate_quanli,
             "净化": cls.calculate_jinghua,
+            "出土": cls.calculate_chutu,
             "必中": cls.calculate_bizhong,
             # 怪物转化（2026-10-11 A14：无神/借力/衰败 已删）
             "弱化": cls.calculate_ruhua,

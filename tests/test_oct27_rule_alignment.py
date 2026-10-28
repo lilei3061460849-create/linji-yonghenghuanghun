@@ -27,7 +27,7 @@ def test_drafts_are_not_runtime_implementations():
     import pytest
     from engine.gamedata import UNIMPLEMENTED_DAOWEN, learnable_daowen_pool
     DaoWenEngine.register_all()
-    for name in ("流动", "遗忘", "出土", "篡改"):
+    for name in ("流动", "遗忘", "篡改"):
         assert name not in DaoWenEngine._registry
         with pytest.raises(ValueError, match="未知道纹"):
             DaoWenEngine.resolve(name, 1)
