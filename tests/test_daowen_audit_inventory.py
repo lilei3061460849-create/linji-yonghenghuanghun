@@ -152,6 +152,18 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
             self.assertIn(phrase, rules)
         # 是规则文本护栏，不是相反状态覆盖运行时已实现的证明。
 
+    def test_infection_keeps_name_without_retired_effect(self):
+        dungeon = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
+        self.assertIn('1.感染X（核心起点/终点）：保留名称及闭环位置，效果与支付待定', dungeon)
+        self.assertIn('【感染X】⇄（反转）净化X', dungeon)
+        self.assertNotRegex(dungeon, r'，感染[，）]')
+        self.assertNotIn('支付：法力3X。使[目标]获得X层【异变】', dungeon)
+        row = next(r for r in self.rows if r['name'] == '感染')
+        self.assertEqual(row['review'], '语义待定')
+        self.assertFalse(row['runtime'])
+        self.assertIn('| A11 | 感染旧效、主动赋予异变',
+                      (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
