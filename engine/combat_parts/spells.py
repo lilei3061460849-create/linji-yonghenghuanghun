@@ -567,7 +567,7 @@ class SpellReactionMixin:
                 dodge=bool(entry.get("dodge")),
                 dodge_relic_target_ref=entry.get("dodge_relic_target_ref"),
                 extra={**dict(entry.get("extra") or {}),
-                       **{key: entry[key] for key in ("status_index", "status_indices")
+                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper")
                           if key in entry}},
             ))
         return out
@@ -787,6 +787,14 @@ class SpellReactionMixin:
                 detail=f"步骤target_ref={target_ref_in}与期望{expected_ref}不一致")
         target_ref = expected_ref if role != "any" else target_ref_in
 
+        try:
+            target, tamper_rule = self.resolve_tampered_target(caster, target, daowen, entry_dict, refs)
+            if tamper_rule is not None:
+                target_ref = reverse.get(id(target))
+        except ValueError as exc:
+            return StepResult(status=StepStatus.FAILED, daowen=daowen, x=x or 0,
+                              reason=InterruptReason.INVALID_INPUT, detail=str(exc))
+
         # --- 目标失效：跳过本步，不中断整个法术 ---
         if target is None or not getattr(target, "is_alive", False):
             return StepResult(
@@ -878,6 +886,7 @@ class SpellReactionMixin:
                     detail="目标速度不足以闪避",
                     trigger_spell_logs=trigger_logs, iteration=iteration)
             self._spend_dodge_speed(target, dodge_relic)
+            self.consume_tamper(caster, tamper_rule)
             return StepResult(
                 status=StepStatus.DODGED, daowen=daowen, x=x,
                 target_ref=target_ref, target_name=target.name,
@@ -895,6 +904,7 @@ class SpellReactionMixin:
                 detail=f"道纹{daowen}执行失败: {exc}",
                 trigger_spell_logs=trigger_logs, iteration=iteration)
 
+        self.consume_tamper(caster, tamper_rule)
         return StepResult(
             status=StepStatus.COMPLETED, daowen=daowen, x=x,
             target_ref=target_ref, target_name=target.name,
@@ -1360,7 +1370,7 @@ class SpellReactionMixin:
                 dodge_relic_target_ref=entry.get("dodge_relic_target_ref"),
                 # 每一步都是一次"发动道纹"：敌方「目标发动道纹前」反应的逐步提交
                 extra={"trigger_spell_choices": entry.get("trigger_spell_choices", {}),
-                       **{key: entry[key] for key in ("status_index", "status_indices")
+                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper")
                           if key in entry}},
             ))
 

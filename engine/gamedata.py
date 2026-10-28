@@ -53,6 +53,7 @@ MONSTER_DAOWEN = ORIGINAL_MONSTER_DAOWEN | MONSTER_TRANSFORM_DAOWEN
 UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN = {
     "净化": "荒疫古城",
     "出土": "荒疫古城",
+    "篡改": "荒疫古城",
     "不死": "永夜庭",
 }
 

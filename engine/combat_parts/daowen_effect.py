@@ -79,6 +79,37 @@ class DaowenEffectMixin:
             result["effects"].append({"type": "diandang_granted", "caster": caster.name,
                                       "granted": granted_now})
 
+    def resolve_tampered_target(self, actor, target, name, choices, refs):
+        rule = next((s for s in actor.status_effects
+                     if s.name == "篡改" and not s.is_expired and s.value > 0), None)
+        if rule is None:
+            return target, None
+        decision = choices.get("tamper")
+        if (not isinstance(decision, dict)
+                or decision.get("controller_id") != getattr(rule, "controller_runtime_id", None)
+                or not getattr(rule, "controller_runtime_id", None)):
+            raise ValueError("篡改生效：必须由controller_runtime_id对应持有者提交tamper目标选择")
+        selected = refs.get(decision.get("target_ref"))
+        if selected is None or not selected.is_alive or not self.is_targetable(actor, selected):
+            raise ValueError("篡改不能选择非法、死亡或不可选中的目标")
+        if (not self._daowen_requires_target(name) and name != "变形"
+                and selected is not actor):
+            raise ValueError("篡改不扩大合法目标范围：自身道纹仍只能作用于自身")
+        if name in ("波及", "共罪"):
+            controlled_refs = decision.get("target_refs")
+            actual_refs = [entry.get("target_ref") for entry in choices.get("dodge_targets", [])]
+            if (not isinstance(controlled_refs, list) or controlled_refs != actual_refs
+                    or not controlled_refs or decision["target_ref"] != controlled_refs[0]):
+                raise ValueError("篡改多目标道纹须由持有者选择全部target_refs，防御提交须与之对应")
+        return selected, rule
+
+    @staticmethod
+    def consume_tamper(actor, rule):
+        if rule is not None and any(s is rule for s in actor.status_effects) and rule.value > 0:
+            rule.value -= 1
+            if rule.value == 0:
+                actor.status_effects.remove(rule)
+
     def prepare_huixiang(self, calc: dict, caster: Entity, target: Entity,
                          choices: Optional[dict] = None, refs: Optional[dict] = None) -> None:
         """在支付前锁定每个受影响者的一种持续状态；歧义不得偷偷选择第一项。
@@ -898,6 +929,19 @@ class DaowenEffectMixin:
             result["effects"].append(cost_effect)
         elif cost_share_target_ref:
             raise ValueError("该道纹没有可由【共罪】共同承担的数值代价")
+        if calc.get("tamper_activations", 0) > 0:
+            amounts = wave_pieces.get("tamper_activations", [calc["tamper_activations"]])
+            for recipient, amount in zip(wave_status_targets, amounts):
+                if amount <= 0:
+                    continue
+                # 不同控制者的选择权不能同时成立：后生效者覆盖，不比较X。
+                recipient.status_effects[:] = [s for s in recipient.status_effects
+                    if s.name != "篡改" or getattr(s, "controller_runtime_id", None) == caster.runtime_id]
+                recipient.add_status(self._daowen_status(
+                    daowen_order=daowen_order, name="篡改", value=amount, remaining_rounds=-1,
+                    source=caster.name, controller_runtime_id=caster.runtime_id))
+                result["effects"].append({"type": "target_control", "target": recipient.name,
+                    "controller_id": caster.runtime_id, "remaining": recipient.get_status_value("篡改")})
         if calc.get("preserve_daowen_changes", 0) > 0:
             # 次数保存在value；remaining_rounds=-1只表示不按回合递减。
             caster.add_status(self._daowen_status(

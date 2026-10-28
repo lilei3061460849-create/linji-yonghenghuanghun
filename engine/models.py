@@ -205,6 +205,7 @@ class StatusEffect:
     polarity: str = EffectPolarity.NEUTRAL.value
     activation_x: Optional[int] = None  # 旧版兼容字段，不参与排序
     application_sequence: int = 0  # 旧版兼容字段，不生成新排序序号
+    controller_runtime_id: Optional[str] = None  # 篡改目标选择权的持有者，稳定身份而非名字
     daowen_order: Optional[int] = None  # 发动该状态的道纹在持有者序列中的位置，越小越先
     
     def __post_init__(self):
@@ -1058,7 +1059,8 @@ class Entity:
             "relics": [r.to_dict() for r in self.relics],
             "status_effects": [
                 {"name": s.name, "value": s.value, "rounds": s.remaining_rounds,
-                 "source": s.source, "scope": s.scope, "polarity": s.polarity}
+                 "source": s.source, "scope": s.scope, "polarity": s.polarity,
+                 "controller_runtime_id": getattr(s, "controller_runtime_id", None)}
                 for s in self.status_effects
             ]
         }

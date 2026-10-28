@@ -67,7 +67,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     WAVE_NUMERIC_KEYS = (
         "target_damage", "total_damage", "hits", "aoe_damage", "hp_percent_loss",
         "target_heal", "heal_percent", "mutation_reduction",
-        "target_shield", "shield_drain", "extend_duration",
+        "target_shield", "shield_drain", "extend_duration", "tamper_activations",
         "blood_limit_reduction", "hp_reduction", "blood_limit_increase", "blood_limit_penalty",
         "attack_boost", "attack_reduction",
         "speed_boost", "speed_penalty",

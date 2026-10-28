@@ -647,6 +647,13 @@ class DaoWenEngine:
                 "cost": x, "duration": x, "hp_floor": 1,
                 "summary": f"冷却{x}，目标生命下限1，持续{x}"}
 
+    @staticmethod
+    def calculate_cuangai(x: int, target: Entity = None) -> dict:
+        """篡改X：支付：流血3X。使[目标]接下来X次发动道纹的目标由你选择。"""
+        return {"dao_wen": "篡改", "x": x, "cost_type": CostType.BLEED.value,
+                "cost_hp": 3*x, "tamper_activations": x,
+                "summary": f"流血{3*x}，接管目标接下来{x}次道纹的目标选择"}
+
     # ========== 乱葬岗（二阶）专属道纹 ==========
 
     @staticmethod
@@ -760,6 +767,7 @@ class DaoWenEngine:
             "全力": cls.calculate_quanli,
             "净化": cls.calculate_jinghua,
             "出土": cls.calculate_chutu,
+            "篡改": cls.calculate_cuangai,
             "不死": cls.calculate_busi,
             "必中": cls.calculate_bizhong,
             # 怪物转化（2026-10-11 A14：无神/借力/衰败 已删）

@@ -179,7 +179,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('4.篡改X：支付：流血3X。使[目标]接下来X次发动道纹的目标由你选择。', dungeon)
         row = next(r for r in self.rows if r['name'] == '篡改')
         self.assertEqual(row['review'], '暂未发现结构违规')
-        self.assertFalse(row['runtime'])
+        self.assertTrue(row['runtime'])
         self.assertIn('合法目标范围', row['note'])
 
     def test_catalysis_is_retained_without_rewriting_its_effect(self):

@@ -5419,6 +5419,13 @@ class GameEngine:
             if len(matches) != 1:
                 return {"success": False, "error": f"目标名称{target_name}不唯一或不存在，请改用target_ref"}
             target = matches[0]
+        try:
+            target, tamper_rule = self.combat.resolve_tampered_target(actor, target, name, params, refs)
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+        if tamper_rule is not None:
+            params = dict(params, target_ref=next(ref for ref, entity in refs.items() if entity is target), target="")
+            target_ref = params["target_ref"]
         if is_command and target is actor:
             return {"success": False, "error": "听从指令发动道纹必须指定一个非自身目标"}
         if name == "共罪":
@@ -5564,6 +5571,7 @@ class GameEngine:
             calc["blood_pact_target_ids"] = [str(entity.runtime_id)
                                                 for entity in (aoe_targets_override or [])]
         if dodge_log.get("fully_dodged"):
+            self.combat.consume_tamper(actor, tamper_rule)
             self._advance_duel_turn()
             if self.state.in_final_duel and not self._duel_side_can_act("player_side") and not self._duel_side_can_act("opponent_side"):
                 self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
@@ -5592,6 +5600,7 @@ class GameEngine:
                 cost_share_target_ref=params.get("cost_share_target_ref", ""),
                 aoe_targets_override=aoe_targets_override,
             )
+        self.combat.consume_tamper(actor, tamper_rule)
         if dodge_log.get("dodged_names"):
             execution = dict(execution)
             execution["dodged"] = dodge_log
@@ -7842,7 +7851,7 @@ class GameEngine:
         """完整序列化单个实体(用于封存候选人，需能无损还原道纹X值/法术/状态/面板等)"""
         from dataclasses import asdict
         return {
-            "name": e.name, "entity_type": e.entity_type,
+            "name": e.name, "entity_type": e.entity_type, "runtime_id": e.runtime_id,
             "world_region": e.world_region, "world_x": e.world_x, "world_y": e.world_y,
             "is_neutral": e.is_neutral,
             "preferences": list(getattr(e, "preferences", [])),
@@ -7876,7 +7885,8 @@ class GameEngine:
                             (self.state.consumables if e is self.state.player
                              else getattr(e, "consumables", []))],
             "status_effects": [{"name": s.name, "value": s.value,
-                                 "remaining_rounds": s.remaining_rounds, "source": s.source,
+                                 "remaining_rounds": s.remaining_rounds,
+                                "controller_runtime_id": getattr(s, "controller_runtime_id", None), "source": s.source,
                                  "scope": s.scope, "polarity": s.polarity,
                                  "daowen_order": s.daowen_order}
                                 for s in e.status_effects],
@@ -7885,6 +7895,7 @@ class GameEngine:
     def _deserialize_entity_full(self, d: dict) -> Entity:
         """按_serialize_entity_full的格式还原实体"""
         e = Entity(name=d["name"], entity_type=d["entity_type"],
+                   runtime_id=d.get("runtime_id") or uuid.uuid4().hex,
                    world_region=d.get("world_region", ""), world_x=d.get("world_x"),
                    world_y=d.get("world_y"), is_neutral=d.get("is_neutral", False),
                    preferences=list(d.get("preferences") or []),
@@ -7949,6 +7960,7 @@ class GameEngine:
                                                   scope=st.get("scope", EffectScope.BATTLE.value),
                                                   polarity=st.get("polarity", EffectPolarity.NEUTRAL.value),
                                                   # 旧档 X/施加序号仅保留为兼容元数据，不参与结算顺序。
+                                                  controller_runtime_id=st.get("controller_runtime_id"),
                                                   activation_x=st.get("activation_x"),
                                                   application_sequence=st.get("application_sequence", 0),
                                                   daowen_order=(st.get("daowen_order")

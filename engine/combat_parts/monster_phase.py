@@ -392,6 +392,8 @@ class MonsterPhaseMixin:
                 raise ValueError(f"道纹【{effective_name}】不接受target_ref")
             target = monster
 
+        target, tamper_rule = self.resolve_tampered_target(monster, target, effective_name, choice, refs)
+
         # 2026-09-16 用户令：面板未写死 X（x_free）时，X 由发动方在提交里自选，
         # 「上限只受法限或者代价限制」——这里按 prepare 同一口径重新探一次上限并校验，
         # 防止提交方给出此刻已付不起的 X（资源在 prepare 之后可能已被消耗）。
@@ -448,6 +450,7 @@ class MonsterPhaseMixin:
         # 攻击与道纹的先后顺序由提交方（AI/操作者）决定，这正是"先攻后纹还是先纹后攻"的取舍。
         if calc.get("cost_type") == "消耗" and calc.get("cost", 0) > 0:
             monster.spend_mana(calc["cost"])
+        self.consume_tamper(monster, tamper_rule)
         hostile = self.state.on_player_side(target) != self.state.on_player_side(monster)
         dodge = choice.get("dodge")
         blood_shadow = choice.get("blood_shadow", False)
@@ -655,6 +658,7 @@ class MonsterPhaseMixin:
                 raise ValueError(f"道纹【{effective_name}】不接受target_ref")
             target = monster
 
+        target, _ = self.resolve_tampered_target(monster, target, effective_name, choice, refs)
         hostile = self.state.on_player_side(target) != self.state.on_player_side(monster)
         dodge = choice.get("dodge")
         blood_shadow = choice.get("blood_shadow", False)
