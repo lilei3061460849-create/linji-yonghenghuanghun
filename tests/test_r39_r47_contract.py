@@ -291,6 +291,9 @@ def test_r43_all_implemented_event_options_have_a_runtime_route(tmp_path):
                             mana_limit=100, current_mana=100, speed_limit=100, current_speed=100)
             for name in set(engine.SPELL_REGISTRY) | {"杀伐", "切割", "庇护", "再生", "连击"}:
                 player.dao_wen[name] = DaoWenInstance(DaoWen(name, "", "消耗", "X", ""))
+            # 本用例只验证所有事件选项均有运行路由；提供充足页数，避免十页承载门禁
+            # 对这些故意注入的大量资源作出与路由无关的合法回滚。
+            player.death_page_count = 100
             engine.state.player = player; engine.state.phase = "pre_battle"
             engine.state.current_region = event["region"] if event["region"] != "通用" else "罪孽都市"
             engine.state.shards = 1000; engine.state.energy = 20
@@ -323,7 +326,7 @@ def test_r43_all_implemented_event_options_have_a_runtime_route(tmp_path):
             assert result["success"], (event_name, option["id"], result)
             assert not result.get("result", {}).get("instructions"), (event_name, option["id"], result)
             checked += 1
-    assert checked == 86  # 当前已接入的事件选项数；删除/迁移事件后同步更新此契约
+    assert checked == 88  # 当前已接入的事件选项数；删除/迁移事件后同步更新此契约
 
 
 # R44：统一向上取整
