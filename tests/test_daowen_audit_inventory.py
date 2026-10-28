@@ -201,6 +201,14 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertFalse(row['runtime'])
         self.assertIn('统一定义未接入', row['tags'])
 
+    def test_retired_attack_prediction_control_is_archived(self):
+        self.assertNotIn('料敌', {r['name'] for r in self.rows})
+        dungeon = (ROOT / '副本/巴别塔.md').read_text(encoding='utf-8')
+        self.assertNotRegex(dungeon, r'料敌(?:X|\d)')
+        self.assertIn('独断X⇄（转换）？？⇄（反转）看破X', dungeon)
+        self.assertIn('| A12 | 料敌、预测攻击后施加禁攻',
+                      (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
