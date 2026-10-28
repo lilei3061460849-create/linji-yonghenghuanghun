@@ -134,6 +134,15 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('| A10 | 失血道纹、伤害来源自反噬', scraps)
         self.assertIn('法力3X，使目标每次造成伤害时失去等量生命，持续X', scraps)
 
+    def test_hunger_draft_temporarily_lowers_blood_limit(self):
+        dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
+        self.assertIn('8.饥饿X：支付：法力10X。使[目标]的血限降至当前生命，持续X。', dungeon)
+        self.assertNotIn('[目标]失去等同已损生命的生命，持续 X', dungeon)
+        row = next(r for r in self.rows if r['name'] == '饥饿')
+        self.assertFalse(row['runtime'])
+        self.assertIn('生效血限覆盖', row['note'])
+        # 文本护栏不代表已验证增殖覆盖或无限数值反制。
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
