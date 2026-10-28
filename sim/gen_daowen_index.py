@@ -85,6 +85,10 @@ for name, fn in DaoWenEngine._registry.items():
         effects[name] = (eff + "。") if eff and not eff.endswith("。") else eff
     params_of[name] = list(inspect.signature(fn).parameters)
 
+# 已裁定的新分裂尚未实现，不能让旧计算器覆盖现行定义。
+costs["分裂"] = "支付：流血X+Y"
+effects["分裂"] = "创造一个X（法限）/Y（血限）的造物为你而战。"
+
 for name, draft in DRAFT_DAOWEN.items():
     costs[name] = draft["cost"]
     effects[name] = draft["effect"]
@@ -190,7 +194,7 @@ NOTES = {
     # 2026-10-11 修正：旧注记「【命零】时触发」是废止口径。沿革见
     # engine/daowen.py::calculate_fenlie —— 旧版[命零]触发（2026-09-17 废止）
     # → 即时发动+代价【衰老】X×10Y → 2026-10-08 用户令改为代价【流血】X×10Y。
-    "分裂": "即时发动（不绑【命零】）；代价【流血】X×10Y 付的是当前生命，付不起不能发动。复制体无【分裂】道纹、无[碎片]奖励。",
+    "分裂": "现行裁定为单个造物，X为法限、Y为血限；初始资源/速度/道纹配置及存续未定。运行时仍是旧流血X×10Y/复制X个，尚未实现新版；不可将旧版数量和继承规则套入新稿。",
     "招魂": "唤回者为[临时朋友]，[战终]消失。",
     "真理": "初拥之夜选项5授予的血族专属道纹。X=陈述句数：提出X句陈述，目标须逐句言明真理，任一句无法言明则无法开口，持续X回合；真伪由DM逐句裁定。冷却2场战斗。",
     "原初": "原初新定义：支付异变5X，借用目标身上自身未拥有的随机X种道纹；旧进化接口的指定借一种尚未同步，不可当作新规则已实现。",
@@ -227,13 +231,13 @@ if BLOODLINE_EXCLUSIVE_DAOWEN:
 category_summary += f" ｜ 初拥专属 {len(FIRST_EMBRACE_DAOWEN)} ｜ 未实现 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。"
 A(category_summary)
 A("")
-A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余已注册道纹取 `engine/daowen.py` `calculate_*` docstring；沉沦海3个未接入运行时节点取 `DRAFT_DAOWEN`。公式以实际引擎结算为准。")
+A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余已注册道纹取 `engine/daowen.py` `calculate_*` docstring；沉沦海3个未接入运行时节点取 `DRAFT_DAOWEN`。分裂按最新用户裁定覆盖旧计算器文案，注记明确运行时尚未同步。")
 A("- **归属与残韵闭环**：`engine/gamedata.py` + `engine/daowen.py`（`CLOSED_LOOPS`）；与规则正文的闭环图一致。\n"
   "  `CLOSED_LOOPS` 里的每条边为**无向边**（2026-10-07 用户令：残韵路径双向）——登记 `(a,类型,b)` 表示 a、b 互为相邻节点，\n"
   "  正反两向都走同一种残韵、同样消耗一次；双向由 `ResonanceEngine.find_transformations` 在查询时展开，边表不重复登记反向边。\n"
   "  闭环中的 `？？` 专用于道纹遗物化后的旧节点占位，`（待补）` 用于其它待补设计的空位；两类占位均不可作为残韵结果获得。")
 A("- **承载怪物**：解析自已实现副本与沉沦海专属网络草案的面板行（怪物池 + 事件/雇佣面板）；格式 `怪物名X`。")
-A("- 冲突时：数值/结算以引擎为准，规则叙述以 [规则正文](规则正文.md#第四宇宙规则正文) 为准，本索引为派生索引（与两者冲突时应重新生成本文件）。")
+A("- 冲突时：已确认用户裁定及其规则正文优先；引擎与裁定冲突属于实现欠账，不以旧代码反推玩法。规则叙述见 [规则正文](规则正文.md#第四宇宙规则正文) 为准，本索引为派生索引（与两者冲突时应重新生成本文件）。")
 A("- 通用规则（自由规则里的自由控X、[目标]与闪避、代价结算、平分、声明、怪物冷却道纹X≤1等）见 [规则正文](规则正文.md#第四宇宙规则正文)，本文件不重复。")
 A("")
 A("## 数值规则迁移状态")
