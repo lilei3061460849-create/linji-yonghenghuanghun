@@ -140,8 +140,17 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertNotIn('[目标]失去等同已损生命的生命，持续 X', dungeon)
         row = next(r for r in self.rows if r['name'] == '饥饿')
         self.assertFalse(row['runtime'])
-        self.assertIn('生效血限覆盖', row['note'])
+        self.assertIn('相反效果统一后生效覆盖先生效', row['note'])
         # 文本护栏不代表已验证增殖覆盖或无限数值反制。
+
+    def test_opposing_effects_follow_latest_effect_rule(self):
+        rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
+        for phrase in ('相反效果覆盖：', '后生效者覆盖先生效者',
+                       '不按X大小、来源资源类型或是否为∞赋予额外优先级',
+                       '先增殖后饥饿，饥饿覆盖增殖的无限血限',
+                       '先饥饿后增殖，增殖覆盖饥饿的血限限制'):
+            self.assertIn(phrase, rules)
+        # 是规则文本护栏，不是相反状态覆盖运行时已实现的证明。
 
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
