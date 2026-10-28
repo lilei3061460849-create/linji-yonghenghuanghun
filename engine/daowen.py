@@ -212,10 +212,10 @@ class DaoWenEngine:
     
     @staticmethod
     def calculate_xueqi(x: int, target: Entity = None) -> dict:
-        """血契X：支付：法力10X。选择X个存活的非自身目标建立血契分担组，持续∞；施法者支付的数值型【代价】由分担组内存活目标平分（不含施法者），余数按平分规则随机分配。"""
+        """共罪X：支付：法力10X。选择X个存活的非自身目标建立共罪分担组，持续∞；施法者支付的数值型【代价】由分担组内存活目标平分（不含施法者），余数按平分规则随机分配。"""
         cost = 10 * x
         return {
-            "dao_wen": "血契", "x": x,
+            "dao_wen": "共罪", "x": x,
             "cost_type": CostType.MANA.value, "cost": cost,
             "mark_targets": x, "duration": -1,
             "summary": f"支付：法力{cost}。选择{x}个目标，目标组彼此平分数值型代价，持续∞。",
@@ -730,7 +730,7 @@ class DaoWenEngine:
             "庇护": cls.calculate_bihu,
             "连击": cls.calculate_lianji,
             "波及": cls.calculate_boba,
-            "血契": cls.calculate_xueqi,
+            "共罪": cls.calculate_xueqi,
             "增殖": cls.calculate_zengzhi,
             "束缚": cls.calculate_shufu,
             "透支": cls.calculate_touzhi,

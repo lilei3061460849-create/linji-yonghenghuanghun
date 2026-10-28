@@ -51,7 +51,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
 
     def test_persistent_relations_are_not_misclassified_as_triggers(self):
         by_name = {r['name']: r for r in self.rows}
-        for name in ('血契', '波及', '坏死', '勾魂'):
+        for name in ('共罪', '波及', '坏死', '勾魂'):
             self.assertEqual(by_name[name]['review'], '暂未发现结构违规')
             self.assertNotIn('后续事件触发/改写', by_name[name]['tags'])
 
@@ -103,19 +103,29 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertFalse(row['runtime'])
         self.assertEqual(row['review'], '语义待定')
 
-    def test_shared_sin_is_a_symmetric_selected_group(self):
+    def test_pact_names_do_not_reuse_the_wrong_mechanism(self):
+        from engine.gamedata import UNIMPLEMENTED_DAOWEN
+        DaoWenEngine.register_all()
+        self.assertIn('共罪', DaoWenEngine._registry)
+        self.assertNotIn('血契', DaoWenEngine._registry)
+        self.assertIn('血契', UNIMPLEMENTED_DAOWEN)
+        calc = DaoWenEngine.resolve('共罪', 2)
+        self.assertEqual(calc['dao_wen'], '共罪')
+        self.assertEqual(calc['mark_targets'], 2)
+        self.assertEqual(calc['duration'], -1)
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
-        self.assertIn('6.共罪X：支付：流血5X。选择X个[目标]，其中任意一个目标支付代价时，组内其他目标同步支付相同代价，持续X。', dungeon)
-        self.assertNotIn('使[目标]在施法者付出代价时，同步支付', dungeon)
-        row = next(r for r in self.rows if r['name'] == '共罪')
-        self.assertFalse(row['runtime'])
-        self.assertEqual(row['review'], '语义待定')
+        self.assertIn('6.血契X：支付：流血5X。使[目标]替你支付代价，持续X。', dungeon)
+        self.assertNotIn('组内其他目标同步支付相同代价', dungeon)
+        self.assertIn('获得道纹[共罪]', dungeon)
+        by_name = {r['name']: r for r in self.rows}
+        self.assertTrue(by_name['共罪']['runtime'])
+        self.assertFalse(by_name['血契']['runtime'])
 
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
                        '疑义处理', '坏死禁止回复', '勾魂禁止获得法力',
-                       '血契分担代价', '波及平分道纹效果',
+                       '共罪分担代价', '波及平分道纹效果',
                        '回终回复生命', '受击后获得法力', '状态结束时再生效'):
             self.assertIn(phrase, rules)
         self.assertNotIn('在事件发生时改写结算的效果，不符合道纹定义', rules)

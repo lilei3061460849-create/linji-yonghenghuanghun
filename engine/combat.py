@@ -1444,9 +1444,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                     or index >= len(self.state.enemies) or not self.state.enemies[index].is_alive):
                 raise ValueError(f"回锋刀触发时必须显式提交合法relic_choices.回锋刀.enemy_index，可选{legal}")
         # 2026-10-14 用户令：【余火印】整段删除（extra 方案废弃）——回始 use 决策取消。
-        # 2026-10-12 用户令：【血契】删掉与道纹【透支】重合的「[回始]流血4X换X法力」，
+        # 2026-10-12 用户令：【共罪】删掉与道纹【透支】重合的「[回始]流血4X换X法力」，
         # 只保留「数值型代价可与朋友/员工平分」作为其主要功能。它因此不再是回始主动
-        # 遗物，`血契`/`对手血契` 两个回始决策键随之取消（平分仍在各代价提交处走
+        # 遗物，`共罪`/`对手共罪` 两个回始决策键随之取消（平分仍在各代价提交处走
         # cost_share_target_ref，不受影响）。
 
     def process_relics(self, trigger: str | TriggerTiming, ctx: dict = None) -> list:

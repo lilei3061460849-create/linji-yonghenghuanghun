@@ -196,7 +196,7 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
     except ValueError as exc:
         return str(exc)
     if cost_share_ref and not any(numeric_costs.values()):
-        return "该事件选项没有可由【血契】共同承担的数值代价"
+        return "该事件选项没有可由【共罪】共同承担的数值代价"
 
     shard_cost = sum(int(v) for v in re.findall(r"(?:失去|消耗)\s*(\d+)\s*\[?碎片\]?", text))
     if params.get("_event_name") == "医生" and text.startswith("雇佣医生"):
@@ -846,7 +846,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         hurt(int(m.group(1)))
     if "流血X" in text:
         hurt(params["x"])
-    # 数值代价统一走代价总线，允许【血契】按显式引用共同承担。
+    # 数值代价统一走代价总线，允许【共罪】按显式引用共同承担。
     for m in re.finditer(r'衰老\s*(\d+)', text):
         x = int(m.group(1)); _pay_numeric("衰老", x)
         applied.append(f"衰老{x}(血限-{x})")

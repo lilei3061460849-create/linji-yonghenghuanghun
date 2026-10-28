@@ -68,7 +68,7 @@ def test_rule_sync_extracts_same_common_daowen_after_migration():
     names = {item["name"] for item in sync.extract_daowen_from_file(COMMON_RULES_FILE)}
     # 2026-10-11 校正：33 为旧口径遗留；本测试的要点是"不为 0、且关键道纹在列"，
     # 2026-10-15：独立【飞行】及已遗物化的【寄生】删除后，通用道纹定义数相应减少。
-    # 2026-10-25：【疯狂】【减速】遗物化 → 18；2026-10-26：【血契】转为通用道纹 → 19。
+    # 2026-10-25：【疯狂】【减速】遗物化 → 18；2026-10-26：【共罪】转为通用道纹 → 19。
     assert len(names) == 19
     assert {"杀伐", "波及", "封印"} <= names
     assert {"飞行", "寄生"}.isdisjoint(names)

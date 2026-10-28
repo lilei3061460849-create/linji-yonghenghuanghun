@@ -25,7 +25,7 @@ def _state_with_oath_and(*relics: str) -> tuple[GameState, CombatEngine, Entity]
 
 
 
-# 2026-10-12 用户令：【血契】删掉与道纹【透支】重合的「[回始]流血4X换X法力」，
+# 2026-10-12 用户令：【共罪】删掉与道纹【透支】重合的「[回始]流血4X换X法力」，
 # 只保留平分。原先此处有 2 条测试专测那个回始付费决策，驱动已被删除，
 # 按「唯一驱动是已删机制的测试应删除而非改写」处理；平分功能的覆盖仍在
 # test_blood_pact_shares_every_supported_numeric_cost /

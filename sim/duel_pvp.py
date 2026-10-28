@@ -622,7 +622,7 @@ def run_duel_pvp(e, player_act=None, max_rounds=60, max_steps=400, log=None,
             rs, _rsart = start_round(e)
         if not rs.get("success"):
             # 回始失败不允许吞掉:法力不会回填,双方将永久空转(2026-08-26 死斗三
-            # "对手血契"校验事故)。显式报告提交错误并留因，不把程序错误算作规则败北。
+            # "对手共罪"校验事故)。显式报告提交错误并留因，不把程序错误算作规则败北。
             return {"winner": None, "rounds": rnd, "error": True, "error_kind": "contract",
                     "reason": f"回始提交失败: {str(rs.get('error', ''))[:80]}"}
         # 死锁防护:连续 STALL_GUARD_STEPS 步双方面板零变化 → 判卫冕(双有效行动

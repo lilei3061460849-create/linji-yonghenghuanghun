@@ -15,7 +15,7 @@
   以及 `Trigger(kind="event")` 的事件型触发。
 - 被动资源：编译成 `Mechanism` 注册进 `MECHANISMS`，与内建遗物走同一条分发路径
   （`CombatEngine._dispatch_phase`），conditions 复用 `relic_active` 等组合子。
-- 代价：数值代价走 `CombatEngine.pay_numeric_cost`（龙心抵扣、血契拆分、反应链
+- 代价：数值代价走 `CombatEngine.pay_numeric_cost`（龙心抵扣、共罪拆分、反应链
   全部照常），法力走 `pay_daowen_mana`，碎片走 `shards` 动词。
 
 四条设计标准的机械校验

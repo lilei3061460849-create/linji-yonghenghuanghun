@@ -170,12 +170,12 @@ def lab_zhesu_huifeng():
 
 
 def lab_blood_pact_qiankewanua():
-    """血契分担流血后，玩家仍失血，千刀万剐循环仍可提交；净生命看再生3X-ceil(X/2)。"""
+    """共罪分担流血后，玩家仍失血，千刀万剐循环仍可提交；净生命看再生3X-ceil(X/2)。"""
     e = _lab_engine("qian")
     p = e.state.player
     f = _friend(e, hp=80)
     m = _monster(e, hp=200, atk=1, ap=5)
-    e.state.relics.append(Relic("血契", ""))
+    e.state.relics.append(Relic("共罪", ""))
     for n in ("再生", "连击"):
         _give_dw(p, n)
     p.spells.append(Spell("千刀万剐", ["连击", "再生"], "失去生命后", "发动再生X→发动连击X"))
@@ -219,7 +219,7 @@ def lab_blood_pact_qiankewanua():
             (ef.get("shared_with") for log in logs for ef in (log.get("execution") or {}).get("effects", [])),
         ),
         "infinite": False,
-        "stop_reason": "法力耗尽或癌变阈值；法术循环当前不转发血契分担",
+        "stop_reason": "法力耗尽或癌变阈值；法术循环当前不转发共罪分担",
     }
 
 
@@ -413,7 +413,7 @@ def run_lab():
     return {
         "急速闪避": lab_jisu_dodge_loop(),
         "折速回锋": lab_zhesu_huifeng(),
-        "血契千刀万剐": lab_blood_pact_qiankewanua(),
+        "共罪千刀万剐": lab_blood_pact_qiankewanua(),
         "寄生滋养癌变": lab_jisheng_and_ziyang(),
         "冲击切割贯穿": lab_chongji_qiege_guanchuan(),
         "同魂笔": lab_tonghun(),
@@ -919,7 +919,7 @@ def main():
     for key, fn in (
         ("急速闪避", lab_jisu_dodge_loop),
         ("折速回锋", lab_zhesu_huifeng),
-        ("血契千刀万剐", lab_blood_pact_qiankewanua),
+        ("共罪千刀万剐", lab_blood_pact_qiankewanua),
         ("寄生滋养癌变", lab_jisheng_and_ziyang),
         ("冲击切割贯穿", lab_chongji_qiege_guanchuan),
         ("同魂笔", lab_tonghun),

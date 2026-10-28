@@ -1,4 +1,4 @@
-"""CombatEngine 分片：碎片/必中/血契、数值代价校验与分摊（均摊/波次/塌缩）、pay_numeric_cost、
+"""CombatEngine 分片：碎片/必中/共罪、数值代价校验与分摊（均摊/波次/塌缩）、pay_numeric_cost、
 流血代价、龙心抵消、连心银行；含类级常量 SHAREABLE_NUMERIC_COSTS
 
 方法体自 engine/combat.py 原样搬来（逐字节），行为与对外契约不变；
@@ -72,11 +72,11 @@ class CostPaymentMixin:
     SHAREABLE_NUMERIC_COSTS = {"流血", "衰老", "枯竭", "萎缩", "疲惫", "异变"}
 
     def _blood_pact_group(self, payer: Optional[Entity]) -> list[Entity]:
-        """返回【血契】绑定且仍存活的目标组。"""
+        """返回【共罪】绑定且仍存活的目标组。"""
         if payer is None:
             return []
         pact = next((st for st in payer.status_effects
-                     if st.name == "血契" and st.remaining_rounds != 0), None)
+                     if st.name == "共罪" and st.remaining_rounds != 0), None)
         if pact is None:
             return []
         import json
@@ -92,7 +92,7 @@ class CostPaymentMixin:
                 if entity.is_alive and str(entity.runtime_id) in ids]
 
     def blood_pact_targets(self, payer: Optional[Entity] = None) -> dict[str, Entity]:
-        """当前【血契】道纹绑定的存活目标组；旧存档遗物仍兼容读取。"""
+        """当前【共罪】道纹绑定的存活目标组；旧存档遗物仍兼容读取。"""
         payer = payer or self.state.player
         if payer is None:
             return {}
@@ -100,7 +100,7 @@ class CostPaymentMixin:
         if group:
             refs = self._combat_entity_refs()
             return {ref: entity for ref, entity in refs.items() if entity in group}
-        # 兼容已有存档/旧测试中的血契遗物；新遗物池已移除该条目。
+        # 兼容已有存档/旧测试中的共罪遗物；新遗物池已移除该条目。
         if payer is self.state.player and self._has_legacy_blood_pact(payer):
             return {f"{prefix}:{i}": e for prefix, group in
                     (("friend", self.state.friends), ("employee", self.state.employees))
@@ -113,17 +113,17 @@ class CostPaymentMixin:
 
     def _has_legacy_blood_pact(self, payer: Entity) -> bool:
         if payer is self.state.player:
-            return (any(relic.name == "血契" for relic in self.state.relics)
-                    and self.state.sealed_relics.get("血契", 0) <= 0)
+            return (any(relic.name == "共罪" for relic in self.state.relics)
+                    and self.state.sealed_relics.get("共罪", 0) <= 0)
         if payer is not None and payer.entity_type == "轮回者" and self.state.on_enemy_side(payer):
-            return any(relic.name == "血契" for relic in self.state.opponent_relics)
+            return any(relic.name == "共罪" for relic in self.state.opponent_relics)
         return False
 
     def _has_active_blood_pact(self, payer: Entity) -> bool:
         return bool(self.blood_pact_targets(payer))
 
     def blood_shadow_cost_share_options(self, payer: Entity) -> list[dict]:
-        """血影要求所有承担者支付后仍存活，返回可执行的血契分担引用。"""
+        """血影要求所有承担者支付后仍存活，返回可执行的共罪分担引用。"""
         if not self._has_active_blood_pact(payer) or payer.current_hp <= 5:
             return []
         return [
@@ -151,9 +151,9 @@ class CostPaymentMixin:
         cost_share_target_ref: str = "",
         forced: bool = False,
     ) -> tuple[Entity, int, Optional[Entity], int]:
-        """纯校验并计算血契拆分；无法整除的余数按随机数分配（平分规则，2026-08-21）。
+        """纯校验并计算共罪拆分；无法整除的余数按随机数分配（平分规则，2026-08-21）。
 
-        forced=True 跳过足额校验（血契资格与存活校验保留）：用于裁定为
+        forced=True 跳过足额校验（共罪资格与存活校验保留）：用于裁定为
         “付不起照扣、正常死亡”的自动代价（2026-10-13 血族血脉）。"""
         if cost_type not in self.SHAREABLE_NUMERIC_COSTS:
             raise ValueError(f"{cost_type}不是可共同承担的数值代价")
@@ -165,7 +165,7 @@ class CostPaymentMixin:
         pact_group = self._blood_pact_group(payer)
         if pact_group:
             if cost_share_target_ref:
-                raise ValueError("血契持续期间由绑定目标组自动平分，不接受单目标分担引用")
+                raise ValueError("共罪持续期间由绑定目标组自动平分，不接受单目标分担引用")
             parts = self._divide_flat(amount, len(pact_group)) if pact_group else []
             for entity, part in zip(pact_group, parts):
                 if part <= 0 or forced:
@@ -178,11 +178,11 @@ class CostPaymentMixin:
         pact_targets = self.blood_pact_targets(payer)
         if cost_share_target_ref:
             if not self._has_active_blood_pact(payer):
-                raise ValueError("只有持有且未被封印【血契】的轮回者才能提交cost_share_target_ref")
+                raise ValueError("只有持有且未被封印【共罪】的轮回者才能提交cost_share_target_ref")
             ally = self.blood_pact_targets(payer).get(cost_share_target_ref)
             if ally is None:
-                raise ValueError("cost_share_target_ref必须指向血契指定的存活目标")
-            # 血契：数值型代价可与一名存活的朋友或员工平分；无法整除时余数按随机数分配。
+                raise ValueError("cost_share_target_ref必须指向共罪指定的存活目标")
+            # 共罪：数值型代价可与一名存活的朋友或员工平分；无法整除时余数按随机数分配。
             owner_amount, ally_amount = self._divide_flat(amount, 2)
         for entity, part in ((payer, owner_amount), (ally, ally_amount)):
             if entity is None or part <= 0:
@@ -200,7 +200,7 @@ class CostPaymentMixin:
         self, payer: Entity, cost_type: str, amount: int,
         cost_context: Optional[EffectContext] = None,
     ) -> dict:
-        """支付一方的已拆分数值代价；不再进行血契递归。"""
+        """支付一方的已拆分数值代价；不再进行共罪递归。"""
         if amount <= 0:
             return {"payer": payer.name, "cost_type": cost_type, "paid": 0}
         if cost_type == "流血":
@@ -462,7 +462,7 @@ class CostPaymentMixin:
         cost_context: Optional[EffectContext | dict] = None,
         forced: bool = False,
     ) -> dict:
-        """统一支付可分担的数值代价：龙心先抵消，血契再拆分剩余后果。
+        """统一支付可分担的数值代价：龙心先抵消，共罪再拆分剩余后果。
 
         forced=True 时跳过足额校验直接结算（付不起则正常死亡），其余管线
         （拆分/反应/记账/烙痕钉）不变。
@@ -601,10 +601,10 @@ class CostPaymentMixin:
         *, cost_context: Optional[EffectContext] = None,
     ) -> dict:
         """
-        支付单个承担者的"流血X"代价；血契拆分由 pay_numeric_cost 在外层完成。
+        支付单个承担者的"流血X"代价；共罪拆分由 pay_numeric_cost 在外层完成。
         血誓戒：玩家在明确主动时点（回始/玩家行动/反应）首次主动支付流血代价时，
         获得等同于本次流血的格挡；若支付后生命≤30%[血限]，改为获得等量生命。
-        血契分担时只按玩家本人实际承担的部分触发。
+        共罪分担时只按玩家本人实际承担的部分触发。
         dragon_heart_use：本次希望消耗"流血龙心"抵消的点数(龙心谷"炼心"产出)，抵消后剩余部分才真正支付。
         cost_context：代价来源上下文，未显式传入则不触发“主动/时点”监听。
         """

@@ -124,7 +124,7 @@ in_edges = defaultdict(list)
 # 目标需求
 def target_label(name):
     p = params_of[name]
-    if name in ("波及", "血契"):
+    if name in ("波及", "共罪"):
         return "X个（显式提交）"
     if name == "唤潮":
         return "自身周围X个可用地图格"
@@ -163,7 +163,7 @@ def region_daowen_order(region: str) -> list:
 CATEGORY = {}
 for n in SHAFA_LOOP_DAOWEN:
     CATEGORY[n] = "shaifa"
-CATEGORY["血契"] = "other"
+CATEGORY["共罪"] = "other"
 for n in ORIGINAL_MONSTER_DAOWEN:
     CATEGORY[n] = "original"
 for n in MONSTER_TRANSFORM_DAOWEN:
@@ -276,7 +276,7 @@ CAT_LABEL = {
 }
 for name in sorted(DaoWenEngine._registry, key=lambda n: (list(CATEGORY).index(n), n)):
     pass
-order = (list(SHAFA_LOOP_DAOWEN) + ["血契"] + sorted(ORIGINAL_MONSTER_DAOWEN)
+order = (list(SHAFA_LOOP_DAOWEN) + ["共罪"] + sorted(ORIGINAL_MONSTER_DAOWEN)
          + sorted(MONSTER_TRANSFORM_DAOWEN)
          + [n for r in REGION_EXCLUSIVE_DAOWEN for n in region_daowen_order(r)]
          + [n for pool in RACE_EXCLUSIVE_DAOWEN.values() for n in sorted(pool)]
@@ -285,7 +285,7 @@ order = (list(SHAFA_LOOP_DAOWEN) + ["血契"] + sorted(ORIGINAL_MONSTER_DAOWEN)
          + list(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN))
 for name in order:
     out = "、".join(out_edges[name]) if out_edges[name] else "—"
-    if name == "血契":
+    if name == "共罪":
         out = "—（不属于残韵闭环）"
     c = carriers.get(name, [])
     cstr = "、".join(c[:6]) + (f"…+{len(c)-6}" if len(c) > 6 else "") or "—"
@@ -309,7 +309,7 @@ def section(title, names, note_lines=(), loop=None, loop_title=None):
         A(f"### {name}")
         A(f"X：{costs[name]}。{effects[name]}" if effects[name] else f"X：{costs[name]}。")
         meta = [f"[目标]：{target_label(name)}"]
-        if name == "血契":
+        if name == "共罪":
             meta.append("残韵路径：—（不属于残韵闭环）")
         elif out_edges[name]:
             meta.append("残韵路径（双向）：" + "、".join(out_edges[name]))
@@ -325,7 +325,7 @@ section(f"杀伐闭环（通用核心·{len(SHAFA_LOOP_DAOWEN)}）", list(SHAFA_
                     "通用核心道纹为人类侧基础概念，局外可经学习/残韵获得。"],
         loop="杀伐闭环")
 
-section("其他通用道纹（1）", ["血契"],
+section("其他通用道纹（1）", ["共罪"],
         note_lines=["该类道纹不属于杀伐闭环，但属于当前可用通用道纹。"])
 
 section(f"原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）", sorted(ORIGINAL_MONSTER_DAOWEN),
@@ -397,7 +397,7 @@ A("5. **血族专属转换消耗品**：【逆命筹】当前尚无专属获取�
 A("6. **初拥专属**：【真理】仅由初拥之夜选项5授予，不可通过局外学习、【典当】发现或残韵获得。")
 A("7. **角色道纹唯一**：同名道纹不重复存在；通过残韵获得的道纹X按自由规则（自由控X）自定义。")
 A("8. **道纹默认局内发动**；局外发动须条文明示，当前明示项为【真理】【唤潮】【蜃景】；【唤潮】【蜃景】仅作用于开放地图。")
-A("9. **自由控X（自由规则的下属条文，不单独成规）**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】【血契】的X还受合法目标数封顶（玩家schema上限按当前存活目标数封顶）。")
+A("9. **自由控X（自由规则的下属条文，不单独成规）**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】【共罪】的X还受合法目标数封顶（玩家schema上限按当前存活目标数封顶）。")
 A("")
 
 out = ROOT / "全道纹索引.md"

@@ -818,7 +818,7 @@ class DaowenEffectMixin:
             spent = self._lose_shards_of(self.state.player, calc["cost_shards"]) if caster is self.state.player else 0
             result["effects"].append({"type": "cost_shards", "spent": spent})
 
-        # ---- 数值代价：统一走代价总线；【血契】可按显式引用共同承担 ----
+        # ---- 数值代价：统一走代价总线；【共罪】可按显式引用共同承担 ----
         cost_spec = None
         if "cost_hp" in calc:
             cost_spec = ("流血", calc["cost_hp"], "bleed_cost")
@@ -826,7 +826,7 @@ class DaowenEffectMixin:
             cost_spec = ("衰老", calc["cost_blood_limit"], "aging_cost")
         elif "cost_mana_limit" in calc:
             # 2026-10-14：【透支】多代价（枯竭通道）。此前没有道纹用枯竭作代价，
-            # 本分支是第一条；走代价总线（【苍白之花】豁免/【血契】平分照常）。
+            # 本分支是第一条；走代价总线（【苍白之花】豁免/【共罪】平分照常）。
             cost_spec = ("枯竭", calc["cost_mana_limit"], "exhaust_cost")
         elif "cost_speed" in calc:
             cost_spec = ("疲惫", calc["cost_speed"], "fatigue_cost")
@@ -844,12 +844,12 @@ class DaowenEffectMixin:
             )
             cost_effect = {"type": effect_type, **payment}
             if cost_type == "流血":
-                # 保留既有公开字段，同时以owner/shared_with暴露血契拆分详情。
+                # 保留既有公开字段，同时以owner/shared_with暴露共罪拆分详情。
                 cost_effect["actual_damage"] = payment["actual_paid"]
                 cost_effect["hp_after"] = caster.current_hp
             result["effects"].append(cost_effect)
         elif cost_share_target_ref:
-            raise ValueError("该道纹没有可由【血契】共同承担的数值代价")
+            raise ValueError("该道纹没有可由【共罪】共同承担的数值代价")
         if "mana_gain" in calc:
             # 2026-10-08：走统一入口，【勾魂】期间不生效（实际获得量可能与声明量不同）
             gained = caster.gain_mana(calc["mana_gain"])
@@ -1011,7 +1011,7 @@ class DaowenEffectMixin:
               and not (name == "变形" and bianxing_blocked)
               # 波及标记由 use_daowen/怪物结算逐目标处理，不走通用状态块
               # 乱葬岗道纹已在上方乱葬岗段自行 add_status，跳过通用状态处理避免重复叠加
-              and name not in ("勾魂", "冥气", "缄默", "波及", "血契")):
+              and name not in ("勾魂", "冥气", "缄默", "波及", "共罪")):
             duration = calc["duration"] if calc["duration"] != 0 else -1
             effect_target = target if target else caster
             # 自身作用型道纹（变形/超频等）作用于施法者
@@ -1046,14 +1046,14 @@ class DaowenEffectMixin:
                 advanced = self.advance_target_rounds(st_target, int(calc["extra_target_rounds"]), source="沉溺")
                 result["effects"].extend(advanced)
 
-        if name == "血契":
+        if name == "共罪":
             # 重新发动时以新目标组替换旧组；目标ID写入状态，随战斗快照保存。
             import json
             target_ids = list(calc.get("blood_pact_target_ids") or [str(target.runtime_id)])
-            caster.status_effects[:] = [st for st in caster.status_effects if st.name != "血契"]
+            caster.status_effects[:] = [st for st in caster.status_effects if st.name != "共罪"]
             if target_ids:
                 caster.add_status(self._daowen_status(
-                    daowen_order=daowen_order, name="血契", value=len(target_ids),
+                    daowen_order=daowen_order, name="共罪", value=len(target_ids),
                     remaining_rounds=-1, source=json.dumps(target_ids, ensure_ascii=False)))
             result["effects"].append({"type": "blood_pact", "targets": [
                 entity.name for entity in self._blood_pact_group(caster)],

@@ -230,7 +230,7 @@ def run_inter_dungeon_playthrough():
     finish_initial_daowen(e2)
     e2.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
     s2 = e2.execute_action("setup_choose_region", {"region": "扭曲都市"})
-    relic_s2 = next((r for r in s2["result"]["relic_choices"] if r != "血契"), s2["result"]["relic_choices"][0])
+    relic_s2 = next((r for r in s2["result"]["relic_choices"] if r != "共罪"), s2["result"]["relic_choices"][0])
     e2.execute_action("choose_discovered_relic", {"relic_name": relic_s2})
     p2 = e2.state.player
 

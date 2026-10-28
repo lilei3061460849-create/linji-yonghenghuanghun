@@ -1,7 +1,7 @@
 """死斗 PvP 防护回归测试(2026-08-26 死斗三事故)。
 
-事故:守擂方(敌方轮回者)持激活【血契】时,引擎要求玩家每回始显式提交
-"对手血契"决策;sim 从不构建该键 → round_start 永远失败 → 双 0 法力
+事故:守擂方(敌方轮回者)持激活【共罪】时,引擎要求玩家每回始显式提交
+"对手共罪"决策;sim 从不构建该键 → round_start 永远失败 → 双 0 法力
 空转 598 步 → 30s 超时判卫冕。同时补:死锁防护、守擂攻击的闪避中继。
 """
 import os
@@ -18,7 +18,7 @@ from engine.models import DaoWen, DaoWenInstance, Entity, Relic
 from sim.optional_actions import round_start_relic_choices
 
 
-def _duel_engine(tmp_path, *, lord_relics=("血契",), lord_hp=1, lord_daowen=("再生", "封印", "庇护"),
+def _duel_engine(tmp_path, *, lord_relics=("共罪",), lord_hp=1, lord_daowen=("再生", "封印", "庇护"),
                  challenger_hp=1, challenger_speed=8):
     e = GameEngine(db_path=str(tmp_path / "d.db"), rng_seed=1,
                    sealed_candidate_path=str(tmp_path / "s.json"),
@@ -48,32 +48,32 @@ def _duel_engine(tmp_path, *, lord_relics=("血契",), lord_hp=1, lord_daowen=("
 
 
 def test_round_start_needs_no_opponent_blood_pact_decision(tmp_path):
-    """死斗+守擂持血契:回始不再要求'对手血契'决策,round_start 直接成功(事故根因回归)。
+    """死斗+守擂持共罪:回始不再要求'对手共罪'决策,round_start 直接成功(事故根因回归)。
 
-    2026-08-26 死斗三事故的根因是「引擎要求提交对手血契决策、sim 从不构建该键 →
+    2026-08-26 死斗三事故的根因是「引擎要求提交对手共罪决策、sim 从不构建该键 →
     round_start 每回合 ValueError → 法力永不回填 → 双 0 法力空转到超时」。
-    2026-10-12 用户令删掉【血契】与【透支】重合的「[回始]流血4X换X法力」后,
-    血契不再是回始主动遗物,该决策键取消 —— 这一类卡死从结构上不可能再发生。
-    本条就是那道结构守护:守擂仍持【血契】时,回始既不该要这个键,也不该失败。
+    2026-10-12 用户令删掉【共罪】与【透支】重合的「[回始]流血4X换X法力」后,
+    共罪不再是回始主动遗物,该决策键取消 —— 这一类卡死从结构上不可能再发生。
+    本条就是那道结构守护:守擂仍持【共罪】时,回始既不该要这个键,也不该失败。
     """
     e = _duel_engine(tmp_path)
     choices = round_start_relic_choices(e)
-    assert "对手血契" not in choices, "血契已无回始主动效果,不应再构建该决策"
-    assert "血契" not in choices
+    assert "对手共罪" not in choices, "共罪已无回始主动效果,不应再构建该决策"
+    assert "共罪" not in choices
     r = e.execute_action("round_start", {"relic_choices": choices})
-    assert r.get("success"), f"回始不应再被血契校验卡死: {r.get('error')}"
+    assert r.get("success"), f"回始不应再被共罪校验卡死: {r.get('error')}"
 
 
 def test_round_start_choices_no_opponent_pact_in_pve(tmp_path):
-    """PVE(无敌方轮回者)不受影响:不构建对手血契键。"""
-    e = _duel_engine(tmp_path, lord_relics=("血契",), lord_daowen=("再生",))
+    """PVE(无敌方轮回者)不受影响:不构建对手共罪键。"""
+    e = _duel_engine(tmp_path, lord_relics=("共罪",), lord_daowen=("再生",))
     e.state.in_final_duel = False
     e.state.enemies.clear()
     e.state.enemies.append(Entity("杂兵", "怪物", blood_limit=30, current_hp=30,
                                   attack_count=1, attack_power=3))
     e.state.opponent_relics = []
     choices = round_start_relic_choices(e)
-    assert "对手血契" not in choices
+    assert "对手共罪" not in choices
 
 
 def test_mediocrity_fires_before_deadlock_guard(tmp_path, monkeypatch):
