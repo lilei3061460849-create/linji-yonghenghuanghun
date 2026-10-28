@@ -255,7 +255,7 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `consume_item` | 使用消耗品 |
 | `declare_wish` | 声明许愿：轮回者向"某人"祈求（消耗1出手） |
 | `declare_escape` | 逃跑：一次付清5次出手，以当前状态强制脱离本场战斗（死斗/【不离】不可） |
-| `declare_evolution` | 怪物进化：发动【原初X】借用原始怪物道纹（引擎直接结算） |
+| `declare_evolution` | 旧怪物进化借用接口；尚未同步原初的目标随机X种新定义 |
 | `round_start` | 回始结算 |
 | `round_end` | 回终结算 |
 | `battle_start` | 战始（配方式出怪：N=随机(1,上界), S=随机(1,N), 增援 R_i/T_i 随机；上界一阶=max(1,战斗场数-3)、二阶及以上=12；从当前副本池随机抽取允许重复；战斗背景纯叙事不做机制化；无尽模式出怪池=所有副本合并、面板按轮次递增） |

@@ -189,6 +189,18 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertEqual(row['review'], '暂未发现结构违规')
         self.assertFalse(row['runtime'])
 
+    def test_origin_has_one_random_target_borrowing_definition(self):
+        definition = '原初X：支付：异变5X。借用[目标]身上自身未拥有的随机X种道纹。'
+        sea = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
+        book = (ROOT / '死者之书.md').read_text(encoding='utf-8')
+        self.assertIn('8.' + definition, sea)
+        self.assertIn(definition, book)
+        self.assertNotIn('原初X：支付：异变25X', sea)
+        self.assertNotIn('其数值固定为本次X', book)
+        row = next(r for r in self.rows if r['name'] == '原初')
+        self.assertFalse(row['runtime'])
+        self.assertIn('统一定义未接入', row['tags'])
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
