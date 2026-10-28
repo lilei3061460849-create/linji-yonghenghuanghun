@@ -64,6 +64,15 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('| A09 | 馈赠、受击次数供法力', scraps)
         self.assertIn('使目标受击时获得X点法力，持续∞', scraps)
 
+    def test_long_night_draft_blocks_round_experience_not_just_triggers(self):
+        dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
+        self.assertIn('3.长夜X：支付：法力10X。使[目标]无法经历回合，持续X。', dungeon)
+        self.assertNotIn('使[目标]由道纹、法术或遗物产生的[回始]与[回终]效果不再触发', dungeon)
+        row = next(r for r in self.rows if r['name'] == '长夜')
+        self.assertFalse(row['runtime'])
+        self.assertIn('持续期时钟待明确', row['tags'])
+        # 仅固定已裁定的草案原文，不伪造停止回合/期限递减的行为验证。
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
