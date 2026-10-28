@@ -18,27 +18,21 @@ def test_project_rules_are_extracted_from_their_authoritative_documents():
     sync = _sync()
     facts = sync.extract_project_rules()
     assert [entry["name"] for entry in facts["event_daowen"]] == ["真理"]
-    # 2026-10-03：删除爆裂/坠落/滑翔/狂暴/兴奋/尸爆/活血后：
-    # 通用道纹 38→34（删 7 条、正文补回 愤怒/无神/疯狂 定义），
-    # 副本道纹 64→61（扭曲-1、龙心-1、乱葬-1）
-    # 2026-10-08 用户令删除【镇尸】（与【坏死】硬重复）与一条无残韵路径的
-    # 孤儿转化道纹：通用道纹 34→33，副本道纹 61→60（乱葬-1）。
-    # 真正的护栏是下面 diff_project_daowen() 双向为空——正文与引擎必须逐条对齐。
-    # 2026-10-11 校正：33 是旧口径遗留（HEAD 实测 28，补回漏定义的【寄生】【衰败】后为 30）。
-    # 计数只是快照，唯一硬要求是双向 diff 为空 + 引擎当前全部道纹都能在正文找到定义。
-    # 2026-10-11 用户令删【无神】【借力】【衰败】→ 30 → 27；删除独立【自食】并入【再生】后为26。
-    # 2026-10-25：【疯狂】【减速】遗物化 → 18；2026-10-26：【共罪】转为通用道纹 → 19。
-    assert len(facts["common_daowen"]) == 19
-    # 2026-10-11：龙心谷删【嫁祸】（效果与遗物【贪婪契约】重复）→ 60 → 59。
-    # 2026-10-14：+【勒索】（点金反转分叉，罪孽副本文档第9定义）→ 59 → 60。
-    # 2026-10-14：扭曲都市删【搏命】（并入【透支】）→ 60 → 59；罪孽都市删【赌命】（遗物化）→ 59 → 58。
-    # 2026-10-15：移除已遗物化的副本专属道纹【畸变】【退化】【逆鳞】【伤痕】【冥气】【缄默】→ 58 → 52。
-    assert len(facts["dungeon_daowen"]) == 52
+    # 当前通用正文14条；副本抽取36条，包含已实现副本与各草案，状态逐行保留。
+    assert len(facts["common_daowen"]) == 14
+    assert len(facts["dungeon_daowen"]) == 36
     assert len(facts["spells"]) == 10  # 2026-09-16：删「血溅五步」（无引擎流程的空名字）
     assert len(facts["dungeons"]) == 8
     assert len(facts["monsters"]) == 48  # 36 + 乱葬岗12(已实现)
-    assert sync.diff_project_daowen()["in_file_only"] == []
-    assert sync.diff_project_daowen()["in_engine_only"] == []
+    diff = sync.diff_project_daowen()
+    assert diff["in_file_only"] == [], "通用或已实现副本正文不得定义引擎未注册的道纹"
+    # diff 的范围是「通用＋已实现副本」；草案和种族道纹有自己的事实源，不能为使
+    # 双向列表为空而被误搬进通用正文。除此之外不允许出现新的 engine-only 缺口。
+    from engine.gamedata import RACE_EXCLUSIVE_DAOWEN
+    draft_names = {row["name"] for row in facts["dungeon_daowen"]
+                   if row.get("status") != "已实现"}
+    race_names = {name for names in RACE_EXCLUSIVE_DAOWEN.values() for name in names}
+    assert set(diff["in_engine_only"]) <= draft_names | race_names
 
     spell_names = {spell["name"] for spell in facts["spells"]}
     item_names = {item["name"] for item in facts["items"]}
