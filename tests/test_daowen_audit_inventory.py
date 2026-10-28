@@ -182,6 +182,13 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertFalse(row['runtime'])
         self.assertIn('合法目标范围', row['note'])
 
+    def test_catalysis_is_retained_without_rewriting_its_effect(self):
+        dungeon = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
+        self.assertIn('6.催化X：支付：冷却2X。使自身或[目标]X种处于【冷却】状态的道纹立即发动一次。', dungeon)
+        row = next(r for r in self.rows if r['name'] == '催化')
+        self.assertEqual(row['review'], '暂未发现结构违规')
+        self.assertFalse(row['runtime'])
+
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
         for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
