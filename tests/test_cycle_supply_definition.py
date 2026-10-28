@@ -1,4 +1,4 @@
-"""供能分类用语及沉溺/守夜灯的现行供能边界；不改游戏规则。"""
+"""供能分类用语及大梦/守夜灯的现行供能边界；不改游戏规则。"""
 import unittest
 from pathlib import Path
 from engine.models import Entity, GameState, Relic
@@ -14,6 +14,13 @@ class CycleSupplyDefinitionTests(unittest.TestCase):
                          '供能端有限的循环称为**循环**', '供能端无限的循环称为**无限**'):
             self.assertIn(sentence, text)
 
+    def test_extra_rounds_are_dameng_not_new_chengni(self):
+        DaoWenEngine.register_all()
+        self.assertIn('大梦', DaoWenEngine._registry)
+        self.assertNotIn('沉溺', DaoWenEngine._registry)
+        from engine.gamedata import UNIMPLEMENTED_DAOWEN
+        self.assertIn('沉溺', UNIMPLEMENTED_DAOWEN)
+
     def probe(self, world_round):
         state = GameState(phase='in_combat', current_round=world_round)
         player = Entity('持灯者', '轮回者', blood_limit=100, current_hp=100,
@@ -24,7 +31,7 @@ class CycleSupplyDefinitionTests(unittest.TestCase):
         combat = CombatEngine(state, DiceEngine(seed=1))
         rows = []
         # Isolate payment and actual extra-round settlement, not a full spell submission.
-        cost = DaoWenEngine.calculate_chengni(1, target=player)['cost']
+        cost = DaoWenEngine.calculate_dameng(1, target=player)['cost']
         while player.is_alive and len(rows) < 6:
             self.assertTrue(player.spend_mana(cost))
             combat.advance_target_rounds(player, 1)

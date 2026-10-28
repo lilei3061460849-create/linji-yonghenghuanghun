@@ -354,7 +354,7 @@ def consume_wing(combat, item, params, actor):
 # Selection policy only. Execution has no new round/cooldown/use-limit rule.
 # Unknown/custom/DM/pre-battle resources are deliberately not guessed at.
 _AID_DEBUFFS = frozenset({"坏死", "勾魂", "退化", "伤痕", "畸变", "蒙蔽", "束缚",
-                         "弱化", "干扰", "手雷减攻", "加害", "沉溺"})
+                         "弱化", "干扰", "手雷减攻", "加害", "大梦"})
 
 
 def auto_use_consumables(combat, actor, opponents=None):

@@ -32,6 +32,6 @@ def test_drafts_are_not_runtime_implementations():
         with pytest.raises(ValueError, match="未知道纹"):
             DaoWenEngine.resolve(name, 1)
     # A caller accidentally including draft names in 'known' must not enable learning.
-    pool = learnable_daowen_pool(owned={"沉溺"}, region="沉沦海",
+    pool = learnable_daowen_pool(owned={"大梦"}, region="沉沦海",
                                 known=set(DaoWenEngine._registry) | set(UNIMPLEMENTED_DAOWEN))
     assert not set(UNIMPLEMENTED_DAOWEN).intersection(pool)

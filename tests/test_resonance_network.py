@@ -130,7 +130,7 @@ def test_unimplemented_sunken_sea_nodes_cannot_be_acquired_by_resonance():
 def test_race_exclusive_sunken_sea_nodes_cannot_be_acquired_by_resonance():
     for source, rtype, target in (
         ("遗忘", "曲解", "唤潮"),
-        ("沉溺", "曲解", "蜃景"),
+        ("大梦", "曲解", "蜃景"),
     ):
         result = R.apply_resonance(source, rtype, caster_has_daowen=True,
                                    target_has_daowen=True, target_daowen=target)

@@ -1108,7 +1108,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             "state": self._get_combat_state()
         }
     
-    def advance_target_rounds(self, target: Entity, rounds: int, source: str = "沉溺") -> list[dict]:
+    def advance_target_rounds(self, target: Entity, rounds: int, source: str = "大梦") -> list[dict]:
         """令单一目标额外经历若干回合。
 
         角色经历的回合数与世界回合数分离：这里不修改 state.current_round，也不执行
@@ -1118,7 +1118,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         effects: list[dict] = []
         rounds = max(0, int(rounds))
         # 额外回合需要自己的周期记录，但不能覆盖正在进行的世界回合记录。
-        # 例如目标已经在世界第10回合出手后再受到【沉溺】，其额外回合应按
+        # 例如目标已经在世界第10回合出手后再受到【大梦】，其额外回合应按
         # “没有在这个额外回合出手”推进凡庸；结算结束后，第10回合原始行动/伤害记录恢复。
         cycle_fields = (
             "hp_lost_this_round", "_hp_loss_events", "_speed_change_events",

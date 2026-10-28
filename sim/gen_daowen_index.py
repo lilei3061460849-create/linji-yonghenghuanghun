@@ -213,6 +213,7 @@ def loop_chain(loop_name):
 L = []
 A = L.append
 A("# 全道纹索引")
+A("\n> 当前命名：大梦＝额外经历X回合；沉溺＝无法经历X回合（支付未定、未接入，不在当前可执行索引中）。旧存档名称迁移尚未验证。")
 A("")
 A(f"本文件是**当前索引收录道纹（{len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)}种）的完整索引**（含{len(DRAFT_DAOWEN)}种尚未接入运行时的沉沦海草案节点）。道纹条目按归属分类：")
 category_summary = (

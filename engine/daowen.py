@@ -616,12 +616,12 @@ class DaoWenEngine:
                 "summary": f"支付：{10*x}法力，在开放地图创造{x}个地图幻象"}
 
     @staticmethod
-    def calculate_chengni(x: int, target: Entity = None) -> dict:
-        """沉溺X：支付：法力5X。使[目标]额外经历X个回合；世界回合数不变，不提供额外行动机会。"""
+    def calculate_dameng(x: int, target: Entity = None) -> dict:
+        """大梦X：支付：法力5X。使[目标]额外经历X个回合；世界回合数不变，不提供额外行动机会。"""
         if target is None:
-            raise ValueError("沉溺必须显式选择目标")
+            raise ValueError("大梦必须显式选择目标")
         return {
-            "dao_wen": "沉溺", "x": x, "cost_type": CostType.MANA.value,
+            "dao_wen": "大梦", "x": x, "cost_type": CostType.MANA.value,
             "cost": 5 * x, "extra_target_rounds": x,
             "summary": f"支付：{5*x}法力，使{target.name}真实额外经历{x}回合",
         }
@@ -760,7 +760,7 @@ class DaoWenEngine:
             # ---- 沉沦海（二阶）----
             "唤潮": cls.calculate_chao,
             "蜃景": cls.calculate_shenjing,
-            "沉溺": cls.calculate_chengni,
+            "大梦": cls.calculate_dameng,
             # ---- 乱葬岗（二阶）----
             "分裂": cls.calculate_fenlie,
             "勾魂": cls.calculate_gouhun,
@@ -935,8 +935,8 @@ class ResonanceEngine:
         "沉沦海闭环": [
             ("流动", "转换", "波及"),
             ("波及", "反转", "遗忘"),
-            ("遗忘", "曲解", "沉溺"),
-            ("沉溺", "曲解", "回响"),
+            ("遗忘", "曲解", "大梦"),
+            ("大梦", "曲解", "回响"),
             ("回响", "转换", "流动"),
         ],
         # ---- 原始怪物道纹 → 转化道纹（规则正文）----

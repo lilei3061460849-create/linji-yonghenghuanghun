@@ -362,17 +362,17 @@ def test_zengzhi_grants_temporary_infinite_blood_limit_and_bypasses_cancer():
 
 
 def test_chengni_advances_target_rounds_without_advancing_world_time():
-    """沉溺推进目标经历的回合，不推进世界回合；状态与凡庸按该回合结算。"""
+    """大梦推进目标经历的回合，不推进世界回合；状态与凡庸按该回合结算。"""
     engine = _engine("ningzhi_real_round")
-    _give(engine.state.player, "沉溺")
-    target = _monster(engine, "沉溺靶怪", hp=100)
+    _give(engine.state.player, "大梦")
+    target = _monster(engine, "大梦靶怪", hp=100)
     target.add_status(StatusEffect(name="测试增益", value=1, remaining_rounds=2, source="test"))
     target.actions_used_this_round = 1
     target.damage_dealt_this_round = 1
     engine.execute_action("round_start", {})
     before_round = engine.state.current_round
     result = engine.execute_action("use_daowen", {
-        "daowen_name": "沉溺", "x": 1, "target": target.name,
+        "daowen_name": "大梦", "x": 1, "target": target.name,
         "dodge": False, "blood_shadow": False,
     })
     assert result["success"], result
@@ -384,7 +384,7 @@ def test_chengni_advances_target_rounds_without_advancing_world_time():
 
 
 def test_chengni_triggers_nightwatch_per_extra_round_using_world_round():
-    """沉溺每让角色经历一个回合就触发守夜灯，但收益始终按世界回合数计算。"""
+    """大梦每让角色经历一个回合就触发守夜灯，但收益始终按世界回合数计算。"""
     engine = _engine("chengni_nightwatch")
     target = Entity(
         name="持灯轮回者", entity_type="轮回者",
@@ -401,7 +401,7 @@ def test_chengni_triggers_nightwatch_per_extra_round_using_world_round():
     engine.state.player.add_status(
         StatusEffect(name="玩家状态", value=1, remaining_rounds=3, source="test"))
 
-    effects = engine.combat.advance_target_rounds(target, 3, source="沉溺")
+    effects = engine.combat.advance_target_rounds(target, 3, source="大梦")
 
     assert engine.state.current_round == 10
     assert target.current_mana == 30

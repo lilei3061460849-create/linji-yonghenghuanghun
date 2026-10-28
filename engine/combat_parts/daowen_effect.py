@@ -1038,12 +1038,12 @@ class DaowenEffectMixin:
                     result["effects"].append({"type": "status_added", "target": et.name,
                                               "status": status_name, "duration": duration, "value": x})
 
-        if name == "沉溺" and calc.get("extra_target_rounds"):
-            # 沉溺：目标额外经历回合，推进目标回合事件、凡庸与自身限时状态。
+        if name == "大梦" and calc.get("extra_target_rounds"):
+            # 大梦：目标额外经历回合，推进目标回合事件、凡庸与自身限时状态。
             for st_target in wave_status_targets:
                 if not st_target.is_alive:
                     continue
-                advanced = self.advance_target_rounds(st_target, int(calc["extra_target_rounds"]), source="沉溺")
+                advanced = self.advance_target_rounds(st_target, int(calc["extra_target_rounds"]), source="大梦")
                 result["effects"].extend(advanced)
 
         if name == "共罪":
