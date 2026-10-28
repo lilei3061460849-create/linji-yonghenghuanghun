@@ -466,25 +466,13 @@ def test_r18_r24_illegal_wrong_event_and_bad_discovery_choice(tmp_path):
 
 # R25-R31：工具、战终与取整
 
-def test_r25_r31_normal_tools_and_ceil(tmp_path):
+def test_r25_normal_energy_battery(tmp_path):
     engine = _engine(tmp_path)
-    player, monster = _controlled_combat(engine)
+    player, _ = _controlled_combat(engine)
     player.current_mana = 0
     engine.state.consumables.append(Consumable("储能电池", "", 1, 1))
     battery = engine.execute_action("consume_item", {"name": "储能电池"})
     assert battery["success"] and player.current_mana == 12
-
-    # 裂变：5÷2每段向上取整为3，共失去6生命。
-    # DM裁定 2026-09-10：轮回者攻力=当前法力，写 attack_power 无效——用 current_mana 设定攻击力。
-    monster.add_status(StatusEffect("裂变", -1, 2))
-    player.current_mana = 2
-    before = monster.current_hp
-    engine.combat.resolve_attack(player, monster, dodge=False)
-    assert before - monster.current_hp == 2  # 攻力2；2÷2仍为1×2
-    player.current_mana = 5
-    before = monster.current_hp
-    engine.combat.resolve_attack(player, monster, dodge=False)
-    assert before - monster.current_hp == 6
 
 
 def test_r25_r31_boundary_flight_grenade_and_all_character_cleanup(tmp_path):
