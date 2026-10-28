@@ -70,8 +70,12 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertNotIn('使[目标]由道纹、法术或遗物产生的[回始]与[回终]效果不再触发', dungeon)
         row = next(r for r in self.rows if r['name'] == '长夜')
         self.assertFalse(row['runtime'])
-        self.assertIn('持续期时钟待明确', row['tags'])
-        # 仅固定已裁定的草案原文，不伪造停止回合/期限递减的行为验证。
+        self.assertEqual(row['review'], '暂未发现结构违规')
+        self.assertNotIn('持续期时钟待明确', row['tags'])
+        self.assertIn('中断该次回合，并使长夜的剩余持续时间-1', dungeon)
+        self.assertIn('降至0时解除长夜，但该次回合仍被中断', dungeon)
+        self.assertIn('普通回合与沉溺产生的额外回合均适用', dungeon)
+        # 仅固定已裁定的草案原文，不伪造运行时停止回合的行为验证。
 
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
