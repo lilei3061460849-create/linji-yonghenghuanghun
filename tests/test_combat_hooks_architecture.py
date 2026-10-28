@@ -27,6 +27,9 @@ class MockState:
     def side_has(self, entity, relic_name):
         return relic_name in self.relics
 
+    def _relic_active(self, entity, relic_name):
+        return self.side_has(entity, relic_name)
+
     def life_loss_multiplier(self, entity):
         """【第一杯】「失去的生命翻倍」的倍率：真实实现在 GameState，
         替身保持同接口（本替身不持有该遗物 → 1）。"""
@@ -87,9 +90,9 @@ def test_combat_event_serialization():
 # ---------- 边界条件 ----------
 
 def test_hooks_boundary_conditions():
-    """边界条件：速度归零获得15格挡、龙鳞减免至保底0、代价伤害不受加害增幅"""
+    """边界条件：速度归零获得15格挡、叠鳞甲固定减1并封底0、代价伤害不受调整"""
     manager = CombatHookManager()
-    state = MockState(relics=["避风铃"])
+    state = MockState(relics=["避风铃", "叠鳞甲"])
 
     zero_speed_entity = Entity(name="零速者", blood_limit=30, current_hp=30, speed_limit=0, entity_type="轮回者")
     zero_speed_entity.current_speed = 0
@@ -97,11 +100,12 @@ def test_hooks_boundary_conditions():
     assert d_res["shield_gained"] == 3
     assert zero_speed_entity.shield == 3  # 闪避句只+3；归零+15走失速总线
 
-    # 龙鳞减免边界
+    # 叠鳞甲每笔非代价伤害固定减1，最低为0；旧龙鳞X状态不再参与。
     dragon_target = Entity(name="龙族", blood_limit=40, current_hp=40, entity_type="怪物")
-    dragon_target.add_status(StatusEffect(name="龙鳞", value=15, remaining_rounds=-1, source="test"))
+    dragon_target.add_status(StatusEffect(name="龙鳞", value=15, remaining_rounds=-1, source="legacy"))
     dmg_adj = manager.apply_incoming_adjust(dragon_target, 10, "普通", None, state)
-    assert dmg_adj == 0, "龙鳞15面对10伤害应减至保底0"
+    assert dmg_adj == 9, "叠鳞甲只固定减1，旧龙鳞15不得生效"
+    assert manager.apply_incoming_adjust(dragon_target, 1, "普通", None, state) == 0
 
     # 代价类型伤害不触发加害
     jiahai_target = Entity(name="目标", blood_limit=30, current_hp=30, entity_type="轮回者")

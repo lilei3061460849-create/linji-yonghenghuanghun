@@ -3,7 +3,7 @@
 迁移要求（全部由本文件钉死）：
   1. 规则语义完全一致（amount>0、代价除外、状态值相加、缺省按0）；
   2. priority 保持原值 20；
-  3. 与龙鳞/龙族血脉等其它伤害修正的先后顺序完全一致；
+  3. 与叠鳞甲/龙族血脉等其它伤害修正的先后顺序完全一致；
   4. EffectContext 传递与迁移前一致；
   5. 只触发一次——旧 JiahaiHook 已删除，不存在第二条分发路径。
 """
@@ -22,7 +22,7 @@ from engine.combat_events import CombatEventType
 from engine.combat_hooks import CombatHookManager
 from engine.dice import DiceEngine
 from engine.mechanisms import MECHANISMS, MechanismHookAdapter, Phase
-from engine.models import Entity, GameState, StatusEffect
+from engine.models import Entity, GameState, Relic, StatusEffect
 
 
 def _arena(enemy_hp: int = 100, enemy_bl: int | None = None):
@@ -49,7 +49,10 @@ def _target(*statuses):
 
 class _State:
     def side_has(self, entity, name):
-        return False
+        return any(r.name == name for r in getattr(entity, "relics", ()))
+
+    def _relic_active(self, entity, name):
+        return self.side_has(entity, name)
 
 
 # ==================== 1. 声明层形态 ====================
@@ -77,8 +80,9 @@ def test_jiahai_numeric_equivalence():
     plain = _target(("加害", 2))
     assert manager.apply_incoming_adjust(plain, 8, "普通", None, state) == 10, "8+2=10"
 
-    both = _target(("加害", 2), ("龙鳞", 8))
-    assert manager.apply_incoming_adjust(both, 8, "普通", None, state) == 2, "max(0,(8+2)-8)=2"
+    both = _target(("加害", 2))
+    both.relics.append(Relic("叠鳞甲", ""))
+    assert manager.apply_incoming_adjust(both, 8, "普通", None, state) == 9, "8+2-1=9"
 
     assert manager.apply_incoming_adjust(plain, 8, "代价", None, state) == 8, "代价不受增幅"
     assert manager.apply_incoming_adjust(plain, 0, "普通", None, state) == 0, "amount<=0 不改"
@@ -130,25 +134,26 @@ def test_jiahai_priority_position_unchanged():
     adapter = next(h for h in hooks
                    if isinstance(h, MechanismHookAdapter) and h.mechanism.name == "加害")
     assert adapter.priority == 20
-    assert hooks.index(adapter) == 1, "加害必须位于龙族血脉(10)之后、龙鳞(30)之前"
-    assert MECHANISMS.get("加害").priority < MECHANISMS.get("龙鳞").priority
+    assert hooks.index(adapter) == 1, "加害必须位于龙族血脉(10)之后、叠鳞甲(30)之前"
+    assert MECHANISMS.get("加害").priority < MECHANISMS.get("叠鳞甲").priority
 
 
-def test_jiahai_before_longlin_still_rule_relevant():
-    """顺序敏感性原样保留：反过来结算会得到不同伤害。"""
+def test_jiahai_and_dielinjia_current_order():
+    """固定加害与叠鳞甲仍按20/30执行；正数伤害下 +2/-1 的结果可交换。"""
     manager = CombatHookManager()
-    target = _target(("加害", 2), ("龙鳞", 8))
+    target = _target(("加害", 2))
+    target.relics.append(Relic("叠鳞甲", ""))
     adapter = next(h for h in manager.hooks()
                    if isinstance(h, MechanismHookAdapter) and h.mechanism.name == "加害")
-    longlin_adapter = next(h for h in manager.hooks()
-                           if isinstance(h, MechanismHookAdapter) and h.mechanism.name == "龙鳞")
+    armor_adapter = next(h for h in manager.hooks()
+                         if isinstance(h, MechanismHookAdapter) and h.mechanism.name == "叠鳞甲")
 
-    assert manager.apply_incoming_adjust(target, 5, "普通", None, _State()) == 0
+    assert manager.apply_incoming_adjust(target, 8, "普通", None, _State()) == 9
     reversed_result = adapter.on_incoming_adjust(
         target,
-        longlin_adapter.on_incoming_adjust(target, 5, "普通", None, _State()),
+        armor_adapter.on_incoming_adjust(target, 8, "普通", None, _State()),
         "普通", None, _State())
-    assert reversed_result == 2, "中间值归零后仍继续结算加害"
+    assert reversed_result == 9
 
 
 # ==================== 5. EffectContext 传递 ====================
