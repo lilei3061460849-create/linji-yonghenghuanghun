@@ -79,6 +79,8 @@ def test_unwired_trigger_is_honestly_labelled_by_production_define_spell(tmp_pat
     assert finish_initial_daowen(e)["success"]
     assert e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})["success"]
     assert e.execute_action("setup_choose_region", {"region": "龙心谷"})["success"]
+    # 本用例验证触发时点接线，不让随机【沉重枷锁】挤占二阶法术的两手预算。
+    e.state.relics = []
     player = e.state.player
     player.dao_wen["庇护"] = DaoWenInstance(
         DaoWen(name="庇护", formula="", cost_type="消耗", cost_formula="X", effect_formula=""),

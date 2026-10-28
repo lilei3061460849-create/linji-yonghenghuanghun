@@ -53,6 +53,8 @@ def _battle_engine(tmp_path, suffix: str, region: str = "龙心谷") -> GameEngi
     if (setup.get("result") or {}).get("relic_choices"):
         e.execute_action("choose_discovered_relic",
                          {"relic_name": setup["result"]["relic_choices"][0]})
+    # 精确结算/法术预算与随机开局遗物无关，避免【沉重枷锁】改变测试前置预算。
+    e.state.relics = []
     assert begin_battle(e)["success"]
     assert begin_round(e)["success"]
     p = e.state.player
