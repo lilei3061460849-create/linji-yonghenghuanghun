@@ -257,7 +257,6 @@ for _race, _pool in RACE_EXCLUSIVE_DAOWEN.items():
 if BLOODLINE_EXCLUSIVE_DAOWEN:
     A(f"- [血族专属（{len(BLOODLINE_EXCLUSIVE_DAOWEN)}）](#血族专属{len(BLOODLINE_EXCLUSIVE_DAOWEN)})")
 A(f"- [初拥专属（{len(FIRST_EMBRACE_DAOWEN)}）](#初拥专属{len(FIRST_EMBRACE_DAOWEN)})")
-A("- [未实现（荒疫古城·1）](#未实现荒疫古城1)")
 A("- [道纹归属与学习规则](#道纹归属与学习规则)")
 A("")
 A("---")
