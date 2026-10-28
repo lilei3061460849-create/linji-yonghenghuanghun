@@ -167,11 +167,11 @@ def test_resonance():
     assert result["target"] == "庇护"
     print("  ✓ 再生 --曲解--> 庇护")
     
-    # 波及 → 反转 → 增殖
-    result = ResonanceEngine.apply_resonance("波及", "反转", False, True)
+    # 全力 → 反转 → 弱化（现役唯一出边，无需额外指定目标）
+    result = ResonanceEngine.apply_resonance("全力", "反转", False, True)
     assert result["success"]
-    assert result["target"] == "增殖"
-    print("  ✓ 波及 --反转--> 增殖")
+    assert result["target"] == "弱化"
+    print("  ✓ 全力 --反转--> 弱化")
     
     # 查看可用残韵
     available = ResonanceEngine.get_available_resonance("杀伐")
@@ -719,9 +719,9 @@ def test_spells_trigger():
     print("  ✓ 法术触发测试通过")
 
 
-def test_flying_and_split():
-    """测试飞行免选中 + 裂变分次结算"""
-    print("\n=== 测试：飞行/裂变 ===")
+def test_flying():
+    """测试飞行免选中；旧裂变分次承伤机制已删除，不在此复活。"""
+    print("\n=== 测试：飞行 ===")
     from engine.models import GameState, StatusEffect
     from engine.combat import CombatEngine
     from engine.dice import DiceEngine
@@ -736,18 +736,7 @@ def test_flying_and_split():
     assert st.player.current_hp == 60, "飞行玩家不应受伤"
     print("  ✓ 飞行：地面怪无法选中飞行玩家(HP不变)")
 
-    # 裂变：怪受100伤分4次(每次25)
-    # 轮回者攻次=当前速度、攻力=当前法力：要造出「单次100伤」须 1速×100法，写 attack_count/attack_power 无效
-    st2 = GameState(); st2.player = Entity(name="贾凡", entity_type="轮回者", blood_limit=60, current_hp=60, speed_limit=1, current_speed=1, mana_limit=100, current_mana=100)
-    m2 = Entity(name="靶", entity_type="怪物", blood_limit=200, current_hp=200, attack_count=1, attack_power=1)
-    m2.add_status(StatusEffect(name="裂变", remaining_rounds=3, value=4))
-    st2.enemies.append(m2); st2.player.is_flying = False; m2.is_flying = False
-    combat2 = CombatEngine(st2, DiceEngine())
-    r2 = combat2.resolve_attack(st2.player, m2)
-    assert r2.get("split") == 4, "裂变应分4次"
-    assert m2.current_hp == 100, f"裂变4次×25后应100，实{m2.current_hp}"
-    print(f"  ✓ 裂变：100伤分4次×25结算，靶HP200→{m2.current_hp}")
-    print("  ✓ 飞行/裂变测试通过")
+    print("  ✓ 飞行免选中测试通过")
 
 
 def test_huoxueyi_relic():
