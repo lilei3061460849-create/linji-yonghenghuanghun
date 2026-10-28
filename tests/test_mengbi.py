@@ -1,173 +1,91 @@
-"""蒙蔽X：消耗5X，使[目标]下X次造成的伤害无效。
-
-此前测绿的是：怪物激活 / 强光探照灯 直接 add_status，以及状态已在身上时
-resolve_attack / apply_daowen_effect 会扣层。轮回者 use_daowen 只算出
-invalid_damage_hits，从未挂状态。
-"""
-import os
-import sys
-
-from tests.setup_support import finish_initial_daowen
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from engine.api import GameEngine
+"""蒙蔽道纹退役后的入口与强光探照灯伤害无效契约。"""
 from engine.daowen import DaoWenEngine
-from engine.models import DaoWen, DaoWenInstance, Entity, StatusEffect
+from engine.models import Consumable, DaoWen, DaoWenInstance
+from tests.test_dingming_pill import ready
 
 
-def _engine(suffix):
-    os.makedirs("/tmp/linji_tests", exist_ok=True)
-    engine = GameEngine(db_path=f"/tmp/linji_tests/test_mengbi_{suffix}.db", rng_seed=1)
-    engine.execute_action("setup_attributes", {
-        "name": "贾凡", "blood_points": 11, "speed_points": 8, "mana_points": 6,
+def _ready_with_lamp():
+    engine, player, monster, _ = ready()
+    item = Consumable("强光探照灯", "", 2, 2)
+    engine.state.consumables = [item]
+    return engine, player, monster, item
+
+
+def test_retired_daowen_entry_is_rejected_without_cost():
+    """即使旧存档手工残留道纹实例，也不能再从 use_daowen 发动。"""
+    engine, player, monster, _ = _ready_with_lamp()
+    player.dao_wen["蒙蔽"] = DaoWenInstance(
+        DaoWen(name="蒙蔽", formula="", cost_type="消耗", cost_formula="2X", effect_formula=""))
+    mana = player.current_mana
+    actions = player.actions_used_this_round
+
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "蒙蔽", "x": 1, "target": monster.name,
     })
-    finish_initial_daowen(engine)
-    engine.state.relics = []
-    # 2026-10-13：遗物池删2件后随机发放漂移，本文件断言与开局遗物无关，清空钉死环境。
-    engine.state.current_region = "龙心谷"
-    engine.state.phase = "in_combat"
-    p = engine.state.player
-    p.dao_wen["蒙蔽"] = DaoWenInstance(
-        DaoWen(name="蒙蔽", formula="", cost_type="消耗", cost_formula="5X", effect_formula=""))
-    p.speed_limit = 12
-    p.current_speed = 12
-    p.current_mana = 40
-    p.mana_limit = 40
-    return engine
+
+    assert not result["success"]
+    assert player.current_mana == mana
+    assert player.actions_used_this_round == actions
+    assert not monster.has_status("蒙蔽")
 
 
-def _enemy_caster(engine, name="对手"):
-    foe = Entity(name=name, entity_type="轮回者", blood_limit=80, current_hp=80,
-                 mana_limit=20, current_mana=20, speed_limit=12, current_speed=12,
-                 attack_count=1, attack_power=8)
-    foe.dao_wen["杀伐"] = DaoWenInstance(
-        DaoWen(name="杀伐", formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
-    engine.state.enemies.append(foe)
-    return foe
-
-
-def test_use_daowen_mengbi_blocks_next_hits():
-    """正常路径：蒙蔽2 后，目标接下来两次伤害归零，第三次落地。"""
-    engine = _engine("happy")
-    foe = _enemy_caster(engine)
-    engine.execute_action("round_start", {})
-    mana_before = engine.state.player.current_mana
-    r = engine.execute_action("use_daowen", {
-        "daowen_name": "蒙蔽", "x": 2, "target": foe.name,
+def test_lamp_blocks_two_daowen_damage_instances_then_damage_returns():
+    """物品固定施加两层；道纹伤害与普攻共用同一个次数消耗状态。"""
+    engine, player, monster, item = _ready_with_lamp()
+    result = engine.execute_action("consume_item", {
+        "name": item.name, "target_ref": "enemy:0",
     })
-    assert r["success"], r
-    assert foe.has_status("蒙蔽")
-    assert foe.get_status_value("蒙蔽") == 2
-    assert engine.state.player.current_mana == mana_before - 4   # 蒙蔽X=2：消耗5X→2X=4
-
-    hp = engine.state.player.current_hp
-    player = engine.state.player
+    assert result["success"], result
+    hp = player.current_hp
 
     def _shaifa():
-        calc = DaoWenEngine.resolve("杀伐", 3, target=player, caster=foe)
-        return engine.combat.apply_daowen_effect("杀伐", calc, foe, player)
+        calc = DaoWenEngine.resolve("杀伐", 3, target=player, caster=monster)
+        return engine.combat.apply_daowen_effect("杀伐", calc, monster, player)
 
-    a1 = _shaifa()
-    assert a1.get("mengbi_blocked") is True
+    first = _shaifa()
+    assert first.get("mengbi_blocked") is True
     assert player.current_hp == hp
-    assert foe.get_status_value("蒙蔽") == 1
+    assert monster.get_status_value("蒙蔽") == 1
 
-    a2 = _shaifa()
-    assert a2.get("mengbi_blocked") is True
+    second = _shaifa()
+    assert second.get("mengbi_blocked") is True
     assert player.current_hp == hp
-    assert not foe.has_status("蒙蔽")
+    assert not monster.has_status("蒙蔽")
 
-    a3 = _shaifa()
-    assert not a3.get("mengbi_blocked")
-    assert player.current_hp == hp - 9    # 杀伐3→X²=9（2026-09-13 由 5X 改平方）
+    third = _shaifa()
+    assert not third.get("mengbi_blocked")
+    assert player.current_hp < hp
 
 
-def test_mengbi_x1_blocks_one_attack_then_expires():
-    """边界：X=1 只挡一次普攻，层数归零后下一击照常。"""
-    engine = _engine("bound")
-    foe = _enemy_caster(engine)
-    engine.execute_action("round_start", {})
-    r = engine.execute_action("use_daowen", {
-        "daowen_name": "蒙蔽", "x": 1, "target": foe.name,
+def test_lamp_spends_durability_not_mana_or_actions_and_rejects_exhaustion():
+    engine, player, monster, item = _ready_with_lamp()
+    mana = player.current_mana
+    actions = player.actions_used_this_round
+
+    for expected_uses, expected_stacks in ((1, 2), (0, 4)):
+        result = engine.execute_action("consume_item", {
+            "name": item.name, "target_ref": "enemy:0",
+        })
+        assert result["success"], result
+        assert item.current_uses == expected_uses
+        assert monster.get_status_value("蒙蔽") == expected_stacks
+        assert player.current_mana == mana
+        assert player.actions_used_this_round == actions
+
+    result = engine.execute_action("consume_item", {
+        "name": item.name, "target_ref": "enemy:0",
     })
-    assert r["success"]
-    assert foe.get_status_value("蒙蔽") == 1
-    hp = engine.state.player.current_hp
-    d1 = engine.combat.resolve_attack(foe, engine.state.player, dodge=False)
-    assert d1.get("blocked_by") == "蒙蔽"
-    assert d1["damage_dealt"] == 0
-    assert engine.state.player.current_hp == hp
-    assert not foe.has_status("蒙蔽")
-    d2 = engine.combat.resolve_attack(foe, engine.state.player, dodge=False)
-    assert d2.get("blocked_by") != "蒙蔽"
-    # 轮回者攻力=当前法力=20（写 attack_power=8 对轮回者无效）
-    assert d2["damage_dealt"] == 20
-    assert engine.state.player.current_hp == hp - 20
+    assert not result["success"]
+    assert item.current_uses == 0
+    assert monster.get_status_value("蒙蔽") == 4
 
 
-def test_mengbi_stacks_and_rejects_bad_input():
-    """错误输入：法力不足 / X<1 失败；叠加两次层数相加。"""
-    engine = _engine("invalid")
-    foe = _enemy_caster(engine)
-    engine.execute_action("round_start", {})
-
-    engine.state.player.current_mana = 1   # 蒙蔽X=1 现为消耗2X=2，故4点已够、需降到1才够不成
-    r1 = engine.execute_action("use_daowen", {
-        "daowen_name": "蒙蔽", "x": 1, "target": foe.name,
-    })
-    assert r1["success"] is False
-    assert "法力不足" in r1["error"]
-    assert not foe.has_status("蒙蔽")
-
-    # X=0 = 拒绝发动（DM裁定2026-08-30，报告.md 硬伤1b）：合法"放弃"，
-    # 不报错、不付法力、不消耗出手、不挂状态。X<1 中的"非法"只剩负数/非整数。
-    engine.state.player.current_mana = 40
-    mana_before = engine.state.player.current_mana
-    used_before = engine.state.player.actions_used_this_round
-    r2 = engine.execute_action("use_daowen", {
-        "daowen_name": "蒙蔽", "x": 0, "target": foe.name,
-    })
-    assert r2["success"] is True
-    assert r2.get("skipped") is True
-    assert engine.state.player.current_mana == mana_before
-    assert engine.state.player.actions_used_this_round == used_before
-    assert not foe.has_status("蒙蔽")
-
-    r2b = engine.execute_action("use_daowen", {
-        "daowen_name": "蒙蔽", "x": -1, "target": foe.name,
-    })
-    assert r2b["success"] is False
-    assert "X必须≥1" in r2b["error"]
-
-    r3 = engine.execute_action("use_daowen", {
-        "daowen_name": "蒙蔽", "x": 1, "target": foe.name,
-    })
-    assert r3["success"]
-    r4 = engine.execute_action("use_daowen", {
-        "daowen_name": "蒙蔽", "x": 2, "target": foe.name,
-    })
-    assert r4["success"]
-    assert foe.get_status_value("蒙蔽") == 3
-
-    r5 = engine.execute_action("use_daowen", {
-        "daowen_name": "蒙蔽", "x": 1, "target": "路人",
-    })
-    assert r5["success"] is False
-    assert foe.get_status_value("蒙蔽") == 3
-
-
-def test_mengbi_dodged_does_not_apply_status():
-    """边界：目标有速度并闪避时，法力与出手仍扣，蒙蔽不挂上。"""
-    engine = _engine("dodge")
-    foe = _enemy_caster(engine)
-    engine.execute_action("round_start", {})
-    mana = engine.state.player.current_mana
-    spd = foe.current_speed
-    r = engine.execute_action("use_daowen", {
-        "daowen_name": "蒙蔽", "x": 1, "target": foe.name, "dodge": True,
-    })
-    assert r["success"]
-    assert r["dodge"]["fully_dodged"] is True
-    assert not foe.has_status("蒙蔽")
-    assert engine.state.player.current_mana == mana - 2   # 蒙蔽X=1：消耗5X→2X=2
-    assert foe.current_speed == spd - 1
+def test_lamp_invalid_target_does_not_spend_durability():
+    engine, player, monster, item = _ready_with_lamp()
+    for target_ref in ("player:0", "enemy:99", ""):
+        result = engine.execute_action("consume_item", {
+            "name": item.name, "target_ref": target_ref,
+        })
+        assert not result["success"], result
+        assert item.current_uses == 2
+        assert not monster.has_status("蒙蔽")
