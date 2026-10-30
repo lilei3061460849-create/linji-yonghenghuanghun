@@ -606,14 +606,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         return None
 
     def _hostile_targeting(self, actor: Entity, target: Entity) -> bool:
-        """目标记录所用的阵营关系；养蛊场内不同怪物也彼此为敌。"""
-        if actor is None or target is None or actor is target:
-            return False
-        if getattr(self.state, "arena_ffa", False) \
-                and self.state.on_enemy_side(actor) and self.state.on_enemy_side(target):
-            return True
-        return ((self.state.on_player_side(actor) and self.state.on_enemy_side(target))
-                or (self.state.on_enemy_side(actor) and self.state.on_player_side(target)))
+        """目标记录所用的敌对关系：统一按阵营判定（阵营不同即敌对）。"""
+        return self.state.are_hostile(actor, target)
 
     def note_target_lock(self, actor: Entity, target: Entity) -> None:
         """记录本场真实的敌对目标选择；仅枚举候选目标不调用此入口。"""
@@ -1093,14 +1087,13 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """
         if side in self._ended_turn_sides:
             return False
-        # 养蛊场：玩家侧是观众，不参与出手交替，也不产生优先权
-        # （否则「还有怪物没出手」与「观众能出手」会互相打架，回合卡在玩家行动阶段）。
-        if getattr(self.state, "arena_ffa", False) and side == "player_side":
-            return False
         entities = (self.state.get_all_player_side() if side == "player_side"
                     else self.state.get_all_enemy_side())
+        # 通用规则：旁观者（`in_combat=False`）不在场上，不产生出手权。
+        # 养蛊场的观众就是这样一个实体，因此不需要任何模式开关。
         return any(
             e.is_alive and not getattr(e, "has_retreated", False)
+            and getattr(e, "in_combat", True)
             and e.actions_used_this_round < self.single_round_action_count(e)
             and self.entity_can_take_active_action(e)
             for e in entities)
@@ -1861,6 +1854,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
     def is_targetable(self, attacker: Entity, target: Entity) -> bool:
         """目标是否可被选中：统一结算飞行与压迫的目标限制。"""
+        if attacker is None or target is None:
+            return False
+        if not getattr(attacker, "in_combat", True) or not getattr(target, "in_combat", True):
+            return False  # 旁观者不在场上：既不选人，也不被选
         if self.state.is_sealed_away(attacker) or self.state.is_sealed_away(target):
             return False
         if self.yapo_target_lock_holder(attacker, target) is not None:

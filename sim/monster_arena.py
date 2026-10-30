@@ -9,9 +9,11 @@
     python sim/monster_arena.py --compare 777 --matches 12 --monsters 3   # holdout 对比
 
 设计（与用户 2026-10-03 的要求逐条对应）：
-  · 怪物之间互相攻击——引擎侧新增 `state.arena_ffa` 开关（默认 False，正式玩法不受影响）：
-    打开后怪物阶段的合法目标从「玩家侧」扩为「其它存活怪物」，并允许逐个 actor 提交
-    （严格交替，避免先手方一次结算全场）。
+  · 怪物之间互相攻击——不靠模式开关，靠基础规则：
+    敌对＝阵营（`Entity.camp`）不同。养蛊场给每只怪物填唯一 camp（自成一营），
+    于是怪物阶段的合法目标按通用规则自然变成「其它参战者」；观众用通用属性
+    `Entity.in_combat = False` 表达「不在场上」，既不占出手权也不进合法目标。
+    每次提交仍只结算 1 个行动者的 1 个行动（严格交替，避免先手方一次结算全场）。
   · 赢了加分——存活到最后 +1；每击杀 +0.3。
   · 自己行动导致自己死亡＝失败品——两条路径都记为 self_kill 并在报告里单列：
     ① 自己出手之后自己没了（自伤/反噬/自爆）；② 回合结算时被【凡庸】一类"自己折腾出来的"
@@ -104,8 +106,13 @@ def build_arena(lineup: list[dict], *, seed: int = 0, rng_seed: int = 7,
         m.current_hp = m.blood_limit
         monsters.append(m)
     e.state.enemies = monsters
-    # 观众不进合法目标（arena_ffa 只把「其它怪物」加进目标集）
-    e.state.arena_ffa = True
+    # 用通用属性表达这件事，引擎里没有任何「养蛊场模式」分支：
+    #   · 观众 `in_combat=False` —— 不占出手权、不进任何合法目标；
+    #   · 每只怪物自成一营（camp 唯一）—— 敌对＝阵营不同，于是它们互相攻击，
+    #     而不会去打观众（观众本来也不在场上）。
+    e.state.player.in_combat = False
+    for index, monster in enumerate(monsters):
+        monster.camp = f"arena:{index}"
     # 行动自由化（2026-10-03 用户裁定，规则实验）：怪物不再被强制发动道纹，
     # 每回合 2 个槽——攻击/道纹各占 1 槽，可「连续两次攻击」「连续两次道纹」。
     e.state.monster_free_actions = bool(free_actions)

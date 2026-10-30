@@ -1,8 +1,9 @@
 """养蛊场（怪物互斗训练模式）的引擎闸门与失败品判据。
 
-覆盖三件事：
-  1. 默认关闭：怪物阶段的合法目标仍然只有玩家侧，怪物之间不能互相攻击——正式玩法不受影响；
-  2. 打开 `state.arena_ffa`：怪物之间可以互相攻击，并且允许逐个 actor 提交（严格交替）；
+覆盖三件事（全部由基础规则决定，引擎里没有「养蛊场模式」开关）：
+  1. 二元敌我（默认阵营）：怪物的合法攻击目标只有玩家侧，怪物之间不能互相攻击；
+  2. 多阵营：给每只怪物填不同的 `camp` 后，怪物按「阵营不同即敌对」互相攻击；
+     观众用通用属性 `in_combat=False` 表达「不在场上」，不占出手权、不进合法目标；
   3. 「自己行动导致自己死亡＝失败品」：训练器把它记为 self_kill 且适应度 0。
 """
 from __future__ import annotations
@@ -45,8 +46,11 @@ def test_default_battle_attack_targets_are_player_side_only():
     旧行为本来就允许怪物道纹把其它怪物列为可选目标（属既有语义，本次未动）。
     """
     e = arena.build_arena(_lineup(2))
-    e.state.arena_ffa = False
-    hand_priority_to_enemy(e)   # 观众不参战；声明轮回者这一手已交出，敌方才能准备
+    # 回到默认二元敌我：观众参战、所有怪物同属敌方阵营。
+    e.state.player.in_combat = True
+    for monster in e.state.enemies:
+        monster.camp = ""
+    hand_priority_to_enemy(e)   # 声明轮回者这一手已交出，敌方才能准备
     res = _prepare(e)
     assert res["actors"], "应当有可行动怪物"
     for actor in res["actors"]:
@@ -71,7 +75,9 @@ def test_default_battle_attack_targets_are_player_side_only():
 def test_arena_ffa_lets_monsters_fight_each_other():
     """打开闸门：怪物可以把其它怪物列为目标，并且真的能打掉对方的生命。"""
     e = arena.build_arena(_lineup(2))
-    assert e.state.arena_ffa is True
+    assert e.state.player.in_combat is False, "观众不参战（通用属性，不是模式开关）"
+    assert e.state.camp_of(e.state.enemies[0]) != e.state.camp_of(e.state.enemies[1]), \
+        "养蛊场里每只怪物自成一营，敌对关系由阵营推导"
     res = _prepare(e)
     actor = next(a for a in res["actors"] if a["actor_ref"] == "enemy:0")
     rival_refs = {t["ref"] for t in actor["attack_target_options"]}

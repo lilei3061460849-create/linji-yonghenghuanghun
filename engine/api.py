@@ -5230,6 +5230,20 @@ class GameEngine:
         else:
             self.state.combat_subphase = CombatSubphase.PLAYER_ACTIONS.value
 
+    def _normalize_priority(self) -> None:
+        """优先权只属于还能出手的一方。
+
+        某侧没有参战者或已用尽出手（含【跳过】结束本回合），出手权就归对方。
+        这是通用规则：养蛊场观众（`in_combat=False`）、死斗一方耗尽、普通战斗
+        里怪物先手，都不需要各自的特例分支。
+        """
+        if self.state.phase != GamePhase.IN_COMBAT.value:
+            return
+        current = self.state.duel_turn or "player_side"
+        other = "opponent_side" if current == "player_side" else "player_side"
+        if not self._duel_side_can_act(current) and self._duel_side_can_act(other):
+            self.state.duel_turn = other
+
     def _advance_duel_turn(self):
         """一次出手后：对方还有余手则换边；否则本侧连动，余手不作废。
 
@@ -7711,10 +7725,13 @@ class GameEngine:
         # 「当前轮到，」这类无主语拒绝；正常战斗在 battle_start 已写入 duel_turn。
         if not self.state.duel_turn:
             self.state.duel_turn = "opponent_side"
-        # 养蛊场：场上是怪物互斗，玩家侧是观众、不参与交替，故不受优先权闸门限制。
-        if (not getattr(self.state, "arena_ffa", False)
-                and (self.state.duel_turn != "opponent_side"
-                     or "opponent_side" in self.combat._ended_turn_sides)):
+        # 优先权只属于还能出手的一方：对方没有参战者/已用尽出手时自动归位。
+        self._normalize_priority()
+        # 优先权闸门对所有战斗一致：只有敌方持有优先权时才能准备怪物行动。
+        # 观众（`in_combat=False`）不产生出手权，因此它的场景天然不会把优先权
+        # 交到玩家侧——不需要按模式开口子。
+        if (self.state.duel_turn != "opponent_side"
+                or "opponent_side" in self.combat._ended_turn_sides):
             return {"success": False,
                     "error": f"交替出手：当前轮到{self.state.duel_turn}，不能准备怪物行动"}
         # 侧回终不在prepare/每次单行动后重复触发，统一由中央行动路径按
@@ -7772,24 +7789,12 @@ class GameEngine:
         # 【敌回终】由中央侧回终结算在该方真正失去行动能力时触发；
         # 单个怪物行动结束不等于整个敌方回合结束。
         enemy_round_end_spells = []
-        # 死斗交替（对称）：守擂方结算完后换回挑战者侧（若还有余手），
-        # 与挑战者每次行动后 _advance_duel_turn 的行为一致。
-        # 死斗中若任一侧仍有余手，子阶段回到 player_actions 允许继续交替；
-        # 仅双方都无余手才进入 await_round_end。
-        if self.state.in_final_duel:
-            if self._duel_side_can_act("player_side") or self._duel_side_can_act("opponent_side"):
-                self.state.combat_subphase = CombatSubphase.PLAYER_ACTIONS.value
-            else:
-                self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
-        elif getattr(self.state, "arena_ffa", False):
-            # 养蛊场：允许逐 actor 提交，每步只结算 1 只怪物（严格交替）。
-            # 只要还有「本回合尚未出手」的存活怪物，就把子阶段退回玩家行动阶段，
-            # 让下一次 prepare_monster_phase 能列出剩余怪物的合法选项；全部出手完
-            # 才进入 await_round_end。默认关闭时走下面的原分支，行为不变。
-            if any(m.is_alive and m.actions_used_this_round < 1 for m in self.state.enemies):
-                self.state.combat_subphase = CombatSubphase.PLAYER_ACTIONS.value
-            else:
-                self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
+        # 一次 resolve 只结算 1 个行动者的 1 个行动（严格交替），所以结算后的子阶段
+        # 只由一条通用规则决定：任一侧还有能出手的参战者，就回到 player_actions
+        # 继续交替；双方都没有余手才进入 await_round_end。
+        # 死斗、养蛊场、普通战斗共用这一条——不再按模式分支。
+        if self._duel_side_can_act("player_side") or self._duel_side_can_act("opponent_side"):
+            self.state.combat_subphase = CombatSubphase.PLAYER_ACTIONS.value
         else:
             self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
         player_dead = (self.state.player is None) or (not self.state.player.is_alive)

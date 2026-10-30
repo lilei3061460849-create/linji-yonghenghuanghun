@@ -1,11 +1,12 @@
-"""交替出手的优先权闸门：普通战斗严格拒绝，养蛊场（观众不参战）不受限。
+"""交替出手的优先权闸门：对所有战斗一套规则，没有按模式开口子。
 
-本文件锁住两条契约，防止为了修夹具而放宽生产校验：
+本文件锁住三条契约，防止为了修夹具而放宽生产校验：
 
-1. 普通战斗里，轮回者持有优先权时 `prepare_monster_phase` 必须被拒；
-   多人提交（一次提交多个行动者）在任何模式下都必须被拒。
-2. 养蛊场（`state.arena_ffa`）玩家侧是观众、不产生优先权，故怪物阶段可以直接
-   准备；这不是「放宽闸门」，而是该模式下没有对手出手可交替。
+1. 轮回者持有优先权时 `prepare_monster_phase` 必须被拒；
+2. 一次提交多个行动者必须被拒；
+3. 优先权只属于还能出手的一侧——养蛊场的观众用通用属性 `in_combat=False`
+   表达「不在场上」，因此玩家侧天然没有出手权，怪物阶段可以准备。
+   这不是特例分支，而是「旁观者不占出手权」这条基础规则的推论。
 """
 from __future__ import annotations
 
@@ -98,15 +99,15 @@ def test_multi_actor_submission_is_rejected_in_normal_battle(tmp_path):
 
 
 def test_ffa_spectator_holds_no_priority():
-    """养蛊场：玩家侧是观众，不产生优先权；怪物阶段可以直接准备。"""
+    """观众不参战 ⇒ 玩家侧没有出手权 ⇒ 优先权归于敌方（基础规则的推论）。"""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))), "sim"))
     import monster_arena as arena
     from tests.test_arena_ffa import _lineup
 
     engine = arena.build_arena(_lineup(2))
-    assert engine.state.arena_ffa is True
-    assert engine.combat.side_can_act("player_side") is False, "观众不该产生优先权"
+    assert engine.state.player.in_combat is False, "观众用通用属性标记为不参战"
+    assert engine.combat.side_can_act("player_side") is False, "旁观者不占出手权"
     assert engine.combat.side_can_act("opponent_side") is True
     prepared = engine.execute_action("prepare_monster_phase", {})
     assert prepared["success"], prepared

@@ -147,12 +147,15 @@ class MonsterPhaseMixin:
             # 参与任何"当回合不能发动道纹"的判定。
             # 养蛊场：怪物互斗时，道纹与普攻的合法目标都是「除自己以外的其它存活怪物」
             # （不含玩家侧；正式玩法下该名单为空，走下面的原有分支）。
-            ffa_rivals = (
-                [target for target in all_targets
-                 if target["ref"] != actor_ref and self.state.on_enemy_side(refs[target["ref"]])
-                 and refs[target["ref"]].is_alive and self.is_targetable(monster, refs[target["ref"]])]
-                if getattr(self.state, "arena_ffa", False) else []
-            )
+            # 通用规则：怪物的合法目标＝所有与它阵营不同的参战者。
+            # 二元战斗下这正好是玩家侧；养蛊场里每只怪物自成一营，其它怪物自然入列。
+            hostile_rivals = [
+                target for target in all_targets
+                if refs[target["ref"]] is not monster
+                and refs[target["ref"]].is_alive
+                and self.state.are_hostile(monster, refs[target["ref"]])
+                and self.is_targetable(monster, refs[target["ref"]])
+            ]
             if not monster.has_status("干扰"):
                 for name, inst in monster.dao_wen.items():
                     if (name in round_used or not inst.can_use()
@@ -164,10 +167,13 @@ class MonsterPhaseMixin:
                     if effective_name in {"唤潮", "蜃景"}:
                         continue
                     requires_target = self._daowen_requires_target(effective_name)
+                    # 通用目标规则：道纹只能落在「自身」或「敌对参战者」身上。
+                    # 二元战斗下敌对者就是玩家侧；养蛊场里每只怪物自成一营，
+                    # 其它怪物自动成为敌对者。不再有「没有敌对者就退回全表」的兜底。
                     legal_targets = (
-                        (list(ffa_rivals) if ffa_rivals else
-                         [target for target in all_targets
-                          if self.is_targetable(monster, refs[target["ref"]])])
+                        [target for target in all_targets
+                         if refs[target["ref"]] is monster
+                         or self.state.are_hostile(monster, refs[target["ref"]])]
                         if requires_target else [])
                     if effective_name == "冰冻":
                         legal_targets = [option for option in legal_targets
@@ -274,7 +280,7 @@ class MonsterPhaseMixin:
                         "trigger_spell_options": self.prepare_daowen_trigger_spells(monster),
                         "extra_choice_schema":self.daowen_extra_choice_schema(monster,effective_name,refs),
                     })
-            attack_targets = (list(ffa_rivals) if ffa_rivals else [
+            attack_targets = (list(hostile_rivals) if hostile_rivals else [
                 target for target in player_refs
                 if self.is_targetable(monster, refs[target["ref"]])
             ])
@@ -881,12 +887,8 @@ class MonsterPhaseMixin:
                     if hit.get("target_ref") not in legal_attack_options:
                         raise ValueError("怪物攻击目标不在prepare合法选项中")
                     target = refs.get(hit.get("target_ref", ""))
-                    if target is None or not (
-                            self.state.on_player_side(target)
-                            or (getattr(self.state, "arena_ffa", False)
-                                and self.state.on_enemy_side(target) and target is not monster)):
-                        raise ValueError("怪物攻击target_ref必须是prepare列出的己方目标"
-                                         "（养蛊场下可为其它怪物）")
+                    if target is None or not self.state.are_hostile(monster, target):
+                        raise ValueError("怪物攻击target_ref必须是prepare列出的敌对目标")
                     if not self.is_targetable(monster, target):
                         raise ValueError(f"{target.name}当前不可被{monster.name}选中")
                     option = legal_attack_options[hit["target_ref"]]
@@ -1090,12 +1092,8 @@ class MonsterPhaseMixin:
                     if hit.get("target_ref") not in legal_attack_options:
                         raise ValueError("怪物攻击目标不在prepare合法选项中")
                     target = refs.get(hit.get("target_ref", ""))
-                    if target is None or not (
-                            self.state.on_player_side(target)
-                            or (getattr(self.state, "arena_ffa", False)
-                                and self.state.on_enemy_side(target) and target is not monster)):
-                        raise ValueError("怪物攻击target_ref必须是prepare列出的己方目标"
-                                         "（养蛊场下可为其它怪物）")
+                    if target is None or not self.state.are_hostile(monster, target):
+                        raise ValueError("怪物攻击target_ref必须是prepare列出的敌对目标")
                     # 静态预校验后，同阶段先前的道纹可能已让预选目标暂离/失去可选资格
                     # （例如怪物先封印玩家，再结算自己预选的玩家普攻）。这与预选目标
                     # 已命零相同：该击跳过，不把整次合法阶段提交回滚成无效行动。
