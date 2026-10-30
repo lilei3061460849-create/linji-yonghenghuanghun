@@ -1070,6 +1070,45 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                             "entity": entity.name, "detail": detail})
         return effects
 
+    def entity_has_spell_action_option(self, entity: Entity) -> bool:
+        """该角色是否还有可用于瞬发/自定义施法（含黄符授予）的道纹或法术。"""
+        if any(instance.can_use() for instance in entity.dao_wen.values()):
+            return True
+        grants = self.state.huangfu_grants()
+        return any((entity.runtime_id, spell.name) in grants for spell in entity.spells)
+
+    def entity_can_take_active_action(self, entity: Entity) -> bool:
+        """该角色本次是否还能主动行动；【束缚】者仅放行法术行动。"""
+        if self.can_act(entity):
+            return True
+        return (entity.has_status("束缚")
+                and self.can_act(entity, action_type="cast")
+                and self.entity_has_spell_action_option(entity))
+
+    def side_can_act(self, side: str) -> bool:
+        """该侧是否还有未用完的出手预算（存活且未撤退；get_all_* 已排除死者/撤退者）。
+
+        交替出手与回始初始优先权共用本判定，避免两套口径互相矛盾。
+        怪物同样按 `single_round_action_count` 计入预算（与出手门禁同一口径）。
+        """
+        if side in self._ended_turn_sides:
+            return False
+        entities = (self.state.get_all_player_side() if side == "player_side"
+                    else self.state.get_all_enemy_side())
+        return any(
+            e.is_alive and not getattr(e, "has_retreated", False)
+            and e.actions_used_this_round < self.single_round_action_count(e)
+            and self.entity_can_take_active_action(e)
+            for e in entities)
+
+    def _initial_priority_side(self) -> str:
+        """回始时该由哪一方先出手：优先轮回者侧，其次敌方，双方皆无余手则轮回者侧。"""
+        if self.side_can_act("player_side"):
+            return "player_side"
+        if self.side_can_act("opponent_side"):
+            return "opponent_side"
+        return "player_side"
+
     def round_start(self, relic_choices: Optional[dict] = None) -> dict:
         """
         回始结算
@@ -1243,7 +1282,11 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         self._priority_passes = 0
         self._ended_turn_sides.clear()
         if not self.state.in_final_duel:
-            self.state.duel_turn = "player_side"
+            # 回始的初始出手权交给实际还能行动的一方：轮回者侧可能因【沉溺】、
+            # 【封印】或出手预算为0而完全无法行动，此时把出手权留在无行动能力
+            # 的一侧会让怪物阶段永远无法开始。双方都不能行动时保持轮回者侧，
+            # 由统一子阶段门禁直接进入回终。
+            self.state.duel_turn = self._initial_priority_side()
         return {
             "round": self.state.current_round,
             "phase": "回始",

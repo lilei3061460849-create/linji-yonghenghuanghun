@@ -33,7 +33,8 @@ from .yaoguai import (
     BANNER_NAME, BANNER_CAPACITY, UNHOUSED_PAGE_COST,
     find_owned_yaoguai, has_banner as has_yaoguai_banner, owned_yaoguai,
 )
-from .daowen import DaoWenEngine, ResonanceEngine
+from .daowen import (DaoWenEngine, ResonanceEngine, PURIFIABLE_COST_KINDS,
+                     purifiable_cost_layers)
 from .combat import CombatEngine
 from .npc_consumables import (consume_tool, consume_named_combat_item,
                               NAMED_COMBAT_ITEMS, auto_use_consumables, consume_ordinary,
@@ -842,7 +843,7 @@ class GameEngine:
                     **({"zaisheng_cost": ["法力", "攻击力"]} if name == "再生" else {}),
                     **({"lianji_cost": ["生命", "法力", "血限", "枯竭", "碎片", "假碎片"]}
                        if name == "连击" else {}),
-                    **({"cost_choices": "净化：支付法力20X；必须显式选择目标拥有的一种数值类代价，格式为[{type: 血限/枯竭/法限/速度/异变}]，固定减少X层；不能选择失忆或冷却"} if name == "净化" else {}),
+                    **({"cost_choices": "净化：支付法力20X；显式选择目标拥有的数值类代价及层数，格式为[{type: 血限/枯竭/法限/速度/异变, layers: 正整数}]；可混选多种，所有layers之和不得超过X；单选项省略layers时默认吃满X；不能选择失忆或冷却"} if name == "净化" else {}),
                     "cost_share_target_ref": (
                         [{"ref": ref, "name": entity.name}
                          for ref, entity in self.combat.blood_pact_targets().items()]
@@ -1054,15 +1055,20 @@ class GameEngine:
                     actor.current_speed, self.state.shards, self.state.fake_shards, 50)
         probe_kwargs={"target":actor}
         if name=="净化":
-            owned=next(((target,kind) for target in self.combat._combat_entity_refs().values()
-                if target.is_alive and self.combat.is_targetable(actor,target)
-                for kind in ("血限","枯竭","法限","速度","异变")
-                if (target.mutation_count if kind=="异变" else
-                    int(getattr(target, "pending_exhaust_mana", 0) or 0) if kind=="枯竭" else
-                    target.reversible_cost_layers.get(kind,0))>0),None)
-            if owned is None:
+            # 可混选：以「所有可净化对象中可净化的总层数最多者」为准给出合法上限，
+            # 真正的目标与层数分配仍由提交时的 cost_choices 逐项校验。
+            best = None
+            for target in self.combat._combat_entity_refs().values():
+                if not target.is_alive or not self.combat.is_targetable(actor, target):
+                    continue
+                chosen = [{"type": kind, "layers": 1}
+                          for kind in PURIFIABLE_COST_KINDS
+                          if purifiable_cost_layers(target, kind) > 0]
+                if chosen and (best is None or len(chosen) > len(best[1])):
+                    best = (target, chosen)
+            if best is None:
                 return 0
-            probe_kwargs={"target":owned[0],"cost_choices":[{"type":owned[1]}]}
+            probe_kwargs={"target":best[0],"cost_choices":best[1]}
         legal = 0
         for x in range(1, upper + 1):
             try:
@@ -5184,43 +5190,15 @@ class GameEngine:
         return None
 
     def _has_spell_action_option(self, entity: "Entity") -> bool:
-        """死斗行动余量判断：束缚者须有可用于瞬发或自定义施法的道纹/黄符法术。"""
-        if any(instance.can_use() for instance in entity.dao_wen.values()):
-            return True
-        grants = self.state.huangfu_grants()
-        return any(
-            (entity.runtime_id, spell.name) in grants
-            for spell in entity.spells
-        )
+        """行动余量判断：束缚者须有可用于瞬发或自定义施法的道纹/黄符法术。"""
+        return self.combat.entity_has_spell_action_option(entity)
 
     def _entity_can_take_active_action(self, entity: "Entity") -> bool:
-        if self.combat.can_act(entity):
-            return True
-        return (entity.has_status("束缚")
-                and self.combat.can_act(entity, action_type="cast")
-                and self._has_spell_action_option(entity))
+        return self.combat.entity_can_take_active_action(entity)
 
     def _duel_side_can_act(self, side: str) -> bool:
-        """该侧是否还有未用完的出手预算（存活且未撤退；get_all_* 已排除死者/撤退者）。
-
-        对称性修复：守擂侧（怪物阶段逐 actor 结算）不能只看 Entity.action_count——
-        怪物 action_count 按速限推导恒为0，会导致守擂永远"无余手"、挑战者连动。
-        守擂侧"有余手"= 仍有存活敌人未结算（驱动维护已结算集合）。"""
-        if side in self.combat._ended_turn_sides:
-            return False
-        if side == "player_side":
-            entities = self.state.get_all_player_side()
-            return any(e.actions_used_this_round < self.combat.single_round_action_count(e)
-                       and self._entity_can_take_active_action(e) for e in entities)
-        # 守擂侧：怪物按正文口径「每回合 1 次攻击 + 1 种道纹」计出手预算
-        # （single_round_action_count），与 _consume_action_or_error 同一口径——
-        # 此前这里写成"存活未撤退即有余手"，与实际结算门禁不一致：怪物既被
-        # 0 预算卡死无法出手，本函数又坚称它还有余手，回合因此永远结束不了。
-        # 对手轮回者/盟友按各自出手预算判断（耗尽则连动）。
-        return any(
-            e.is_alive and not e.has_retreated and self._entity_can_take_active_action(e)
-            and e.actions_used_this_round < self.combat.single_round_action_count(e)
-            for e in self.state.get_all_enemy_side())
+        """该侧是否还有未用完的出手预算；唯一事实源在 CombatEngine。"""
+        return self.combat.side_can_act(side)
 
     def _settle_side_turn_end_spells(self, capacity_before: dict[str, bool],
                                      params: dict) -> dict[str, list]:

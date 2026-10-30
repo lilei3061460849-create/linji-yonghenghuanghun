@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from tests.setup_support import finish_initial_daowen
+from tests.setup_support import finish_initial_daowen, opponent_passes
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
@@ -75,6 +75,7 @@ def test_boba_marks_and_unmarks_targets():
     assert r["dodge"]["wave_marked"] == [refs["enemy:0"].name, refs["enemy:1"].name]
 
     # 再次选择同一目标：解除标记（toggle）
+    opponent_passes(engine)  # 交替出手：敌方【跳过】后轮回者才再次获得出手权
     r2 = engine.execute_action("use_daowen",
                                {"daowen_name": "波及", "x": 2, "dodge_targets": targets})
     assert r2["success"], r2
@@ -104,6 +105,7 @@ def test_boba_spreads_damage_equally_with_random_remainder():
     assert refs["enemy:0"].has_status("波及") and refs["enemy:1"].has_status("波及")
 
     # 杀伐2的X²=4点总生命损失作用于[目标]敌0+波及目标敌1：2+2。
+    opponent_passes(engine)  # 交替出手：敌方【跳过】后轮回者才再次获得出手权
     r2 = engine.execute_action("use_daowen", {
         "daowen_name": "杀伐", "x": 2, "target_ref": "enemy:0",
         "dodge": False, "blood_shadow": False,
@@ -412,12 +414,13 @@ def test_chengni_triggers_nightwatch_per_extra_round_using_world_round():
     assert len([e for e in effects if isinstance(e, dict) and e.get("type") == "extra_target_round"]) == 3
 
 
-def test_jinghua_rejects_mixed_cost_layers():
-    """净化只能选择一种数值类代价，不能混选或拆分X。"""
+def test_jinghua_purifies_mixed_cost_layers_within_x():
+    """净化可混选多种数值类代价；总层数不超过X，按各自层数真实扣减。"""
     engine = _engine("jinghua_cost_choices")
     _give(engine.state.player, "净化")
     target = _monster(engine, "净化靶怪", hp=100)
     target.blood_limit = 100
+    target.reversible_cost_layers["血限"] = 2
     target.mutation_count = 4
     engine.execute_action("round_start", {})
     result = engine.execute_action("use_daowen", {
@@ -425,7 +428,36 @@ def test_jinghua_rejects_mixed_cost_layers():
         "cost_choices": [{"type": "衰老", "layers": 1}, {"type": "异变", "layers": 2}],
         "dodge": False, "blood_shadow": False,
     })
+    assert result["success"], result
+    # 血限按1层回补、异变按2层减少；合计3层 = X
+    assert target.blood_limit == 101
+    assert target.mutation_count == 2
+    assert target.reversible_cost_layers["血限"] == 1
+    purified = [e for e in result["execution"]["effects"] if e.get("type") == "cost_purified"]
+    assert purified and purified[0]["applied"]["血限"] == 1
+    assert purified[0]["applied"]["异变"]["requested"] == 2
+
+
+def test_jinghua_rejects_total_layers_over_x_without_spending():
+    """非法输入：总层数超过X必须拒绝，且不扣法力、不消耗出手、不改状态。"""
+    engine = _engine("jinghua_over_x")
+    p = engine.state.player
+    _give(p, "净化")
+    target = _monster(engine, "净化靶怪", hp=100)
+    target.blood_limit = 100
+    target.reversible_cost_layers["血限"] = 5
+    target.mutation_count = 5
+    engine.execute_action("round_start", {})
+    mana_before = p.current_mana
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "净化", "x": 2, "target": target.name,
+        "cost_choices": [{"type": "血限", "layers": 2}, {"type": "异变", "layers": 1}],
+        "dodge": False, "blood_shadow": False,
+    })
     assert not result["success"], result
+    assert "总层数" in result["error"]
+    assert p.current_mana == mana_before
+    assert p.actions_used_this_round == 0
     assert target.blood_limit == 100
-    assert target.mutation_count == 4
+    assert target.mutation_count == 5
 

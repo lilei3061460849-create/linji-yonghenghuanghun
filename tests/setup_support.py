@@ -121,3 +121,20 @@ def grant_extra_actions(entity, extra: int) -> None:
         return
     entity.add_status(StatusEffect(name="蓄锐·增", value=int(extra), remaining_rounds=1,
                                    source="测试夹具"))
+
+
+def opponent_passes(engine) -> dict:
+    """让当前获得出手权的敌方以【跳过】结束其本回合，把出手权交回轮回者。
+
+    「交替出手」下，连续两次主动行动之间必须经过敌方的行动或【跳过】。
+    本夹具只执行规则内的【跳过】：不消耗敌方出手，也不改动其状态与资源；
+    它不是绕过优先权的旁路，也不改变世界回合数。
+    """
+    if engine.state.duel_turn != "opponent_side":
+        return {"success": True, "skipped": False, "note": "当前本就不在敌方出手权"}
+    refs = engine.combat._combat_entity_refs()
+    ref = next((ref for ref, entity in refs.items()
+                if entity.is_alive and engine.state.on_enemy_side(entity)), None)
+    if ref is None:
+        return engine.execute_action("prepare_monster_phase", {})
+    return engine.execute_action("rest", {"actor_ref": ref})

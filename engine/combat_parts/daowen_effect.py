@@ -10,7 +10,7 @@ import weakref
 import uuid
 from typing import Optional, Any
 from ..models import Entity, StatusEffect, GameState, DaoWenInstance, DaoWen, Spell, Consumable
-from ..daowen import DaoWenEngine, ResonanceEngine
+from ..daowen import DaoWenEngine, ResonanceEngine, PURIFIABLE_COST_KINDS, purifiable_cost_layers
 from ..dice import DiceEngine
 from ..enums import (ActionPhase, TriggerTiming, InterruptType, DamageType,
                      EffectScope, EffectPolarity, CostType)
@@ -628,9 +628,14 @@ class DaowenEffectMixin:
     ) -> dict:
         """应用道纹效果；aoe_targets_override用于绑定两阶段决策的目标快照。"""
         if name == "净化":
-            kinds = set(calc.get("cost_reductions", {}))
-            if len(kinds) != 1 or not kinds <= {"血限", "枯竭", "法限", "速度", "异变"}:
-                raise ValueError("净化仅允许减少一种数值类代价，不支持失忆或冷却")
+            reductions = calc.get("cost_reductions", {})
+            kinds = set(reductions)
+            if not kinds or not kinds <= set(PURIFIABLE_COST_KINDS):
+                raise ValueError("净化仅允许减少数值类代价（血限/枯竭/法限/速度/异变），不支持失忆或冷却")
+            if any(int(layers) < 1 for layers in reductions.values()):
+                raise ValueError("净化层数必须为正整数")
+            if sum(int(layers) for layers in reductions.values()) > int(calc.get("x", 0) or 0):
+                raise ValueError("净化总层数不得超过X")
         if name == "催化" and "catalysis_plan" not in calc:
             raise ValueError("催化须在支付前通过共用前置入口准备完整调用计划")
         if name == "回响" and "huixiang_selected" not in calc:
@@ -993,15 +998,19 @@ class DaowenEffectMixin:
             for wt in wave_status_targets:
                 if not wt.is_alive:
                     continue
-                reductions = dict(calc["cost_reductions"])
-                ledger = getattr(wt, "reversible_cost_layers", {})
+                reductions = {kind: int(layers)
+                              for kind, layers in calc["cost_reductions"].items()}
+                if not set(reductions) <= set(PURIFIABLE_COST_KINDS):
+                    raise ValueError("净化仅允许减少数值类代价（血限/枯竭/法限/速度/异变）")
+                max_total = int(calc.get("x", 0) or 0)
+                if sum(reductions.values()) > max_total:
+                    raise ValueError("净化总层数不得超过X")
+                ledger = getattr(wt, "reversible_cost_layers", None)
                 applied = {}
                 for kind in list(reductions):
-                    owned = (wt.mutation_count if kind == "异变" else
-                             int(getattr(wt, "pending_exhaust_mana", 0) or 0)
-                             if kind == "枯竭" else ledger.get(kind, 0))
+                    owned = purifiable_cost_layers(wt, kind)
                     reductions[kind] = min(reductions[kind], max(0, owned))
-                    if kind != "异变":
+                    if kind != "异变" and isinstance(ledger, dict):
                         ledger[kind] = max(0, owned - reductions[kind])
                 if reductions.get("血限", 0) > 0:
                     amount = int(reductions["血限"])

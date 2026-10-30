@@ -45,6 +45,25 @@ def normalize_daowen_name(name):
     return LEGACY_DAOWEN_ALIASES.get(name, name)
 
 
+# 【净化】可逆的数值类代价：只包含可以按层数回退的当前状态。
+# 失忆（已失去的道纹）、冷却、唯一、生命／流血、法力、碎片等属于已经发生的历史结果，
+# 不在净化范围内——它们没有可逆层数账本，也不允许凭空退回。
+PURIFIABLE_COST_KINDS = ("血限", "枯竭", "法限", "速度", "异变")
+
+
+def purifiable_cost_layers(entity: Entity, kind: str) -> int:
+    """目标当前持有、可被【净化】逆转的某种数值类代价层数。"""
+    if entity is None:
+        return 0
+    kind = normalize_payment_type(kind)
+    if kind == "异变":
+        return max(0, int(getattr(entity, "mutation_count", 0) or 0))
+    if kind == "枯竭":
+        return max(0, int(getattr(entity, "pending_exhaust_mana", 0) or 0))
+    ledger = getattr(entity, "reversible_cost_layers", None) or {}
+    return max(0, int(ledger.get(kind, 0) or 0))
+
+
 def display_resonance_node(name):
     """内部空位独立编号；玩家/索引统一显示为「？？」或「（待补）」。"""
     if isinstance(name, str) and name.startswith("？？〔"):
@@ -381,34 +400,54 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_jinghua(x: int, target: Entity = None, cost_choices: list[dict] | None = None) -> dict:
-        """净化X：支付：法力20X。选择目标拥有的一种数值类代价，使其层数-X。
+        """净化X：支付：法力20X。选择目标拥有的数值类代价及各层数，可混选，总层数不超过X。
 
         仅血限、枯竭、法限、速度、异变；失忆、冷却与已经失去的生命不在范围内。
+        可混选多种代价：每项显式给出 layers（单选项省略 layers 时默认吃满 X），
+        所有 layers 之和不得超过 X；代价恒按声明的 X 支付 20X，未用完的层数不返还。
         """
         target_name = target.name if target is not None else "未选定目标"
-        allowed = {"血限", "枯竭", "法限", "速度", "异变"}
-        if not isinstance(cost_choices, list) or len(cost_choices) != 1:
-            raise ValueError("净化必须显式选择目标拥有的一种数值类代价")
-        item = cost_choices[0]
-        if not isinstance(item, dict):
-            raise ValueError("净化选择必须是对象")
-        item = dict(item, type=normalize_payment_type(item.get("type", "")))
-        if item.get("type") not in allowed:
-            raise ValueError("净化仅支持数值类代价：血限/枯竭/法限/速度/异变，不支持失忆、冷却或已经失去的生命")
-        kind = item["type"]
-        if "layers" in item and (type(item["layers"]) is not int or item["layers"] != x):
-            raise ValueError("净化所选代价固定减少X层，不能拆分层数")
+        allowed = PURIFIABLE_COST_KINDS
+        if not isinstance(cost_choices, list) or not cost_choices:
+            raise ValueError("净化必须显式选择目标拥有的数值类代价")
+        normalized: list[dict] = []
+        for item in cost_choices:
+            if not isinstance(item, dict):
+                raise ValueError("净化选择必须是对象")
+            kind = normalize_payment_type(item.get("type", ""))
+            if kind not in allowed:
+                raise ValueError("净化仅支持数值类代价：血限/枯竭/法限/速度/异变，不支持失忆、冷却或已经失去的生命")
+            normalized.append({"type": kind, "layers": item.get("layers")})
+        kinds = [item["type"] for item in normalized]
+        if len(set(kinds)) != len(kinds):
+            raise ValueError("净化同一种代价只能选择一次；请合并为一项并给出总层数")
+        if any(item["layers"] is None for item in normalized) and len(normalized) > 1:
+            raise ValueError("净化选择多种代价时必须显式给出每种代价的层数")
+        chosen: dict[str, int] = {}
+        for item in normalized:
+            kind = item["type"]
+            layers = x if item["layers"] is None else item["layers"]
+            if type(layers) is not int or isinstance(layers, bool):
+                raise ValueError("净化层数必须是正整数")
+            if layers < 1:
+                raise ValueError("净化层数必须为正整数")
+            chosen[kind] = layers
+        total = sum(chosen.values())
+        if total > x:
+            raise ValueError(f"净化总层数{total}超过X={x}")
         if target is not None:
-            owned = (target.mutation_count if kind == "异变" else
-                     int(getattr(target, "pending_exhaust_mana", 0) or 0)
-                     if kind == "枯竭" else
-                     getattr(target, "reversible_cost_layers", {}).get(kind, 0))
-            if owned <= 0:
-                raise ValueError(f"目标未拥有可净化的【{kind}】层数")
+            for kind, layers in chosen.items():
+                owned = purifiable_cost_layers(target, kind)
+                if owned <= 0:
+                    raise ValueError(f"目标未拥有可净化的【{kind}】层数")
+                if layers > owned:
+                    raise ValueError(
+                        f"净化选择{kind}{layers}层超过目标实际持有的{owned}层")
+        detail = "、".join(f"{kind}-{n}" for kind, n in chosen.items())
         return {
             "dao_wen": "净化", "x": x, "cost_type": CostType.MANA.value, "cost": 20 * x,
-            "cost_reductions": {kind: x},
-            "summary": f"支付：法力{20*x}。使{target_name}的{kind}层数-{x}",
+            "cost_reductions": chosen, "purified_layers": total,
+            "summary": f"支付：法力{20*x}。使{target_name}的{detail}（合计{total}层，≤X={x}）",
         }
 
     @staticmethod
