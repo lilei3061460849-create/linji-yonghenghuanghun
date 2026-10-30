@@ -1093,6 +1093,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """
         if side in self._ended_turn_sides:
             return False
+        # 养蛊场：玩家侧是观众，不参与出手交替，也不产生优先权
+        # （否则「还有怪物没出手」与「观众能出手」会互相打架，回合卡在玩家行动阶段）。
+        if getattr(self.state, "arena_ffa", False) and side == "player_side":
+            return False
         entities = (self.state.get_all_player_side() if side == "player_side"
                     else self.state.get_all_enemy_side())
         return any(

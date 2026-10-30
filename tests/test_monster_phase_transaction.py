@@ -18,7 +18,7 @@ from engine.combat import CombatEngine
 from engine.combat_events import CombatEventType
 from engine.dice import DiceEngine
 from engine.models import DaoWen, DaoWenInstance, Entity
-from tests.setup_support import finish_initial_daowen
+from tests.setup_support import finish_initial_daowen, hand_priority_to_enemy
 from tests.monster_phase_support import resolve_monster_phase as advance_round1
 
 
@@ -53,6 +53,7 @@ def _arena(seed: int = 1):
     # 第 1 回合走完整两阶段 API：2026-09-15 删除白板后，首回合怪物也要交一个道纹，
     # 这里选一个非【抢劫】的选项（保住抢劫 X=2，供第 2 回合断言吸金 10X=20）。
     assert e.execute_action("round_start", {"relic_choices": {}})["success"]
+    hand_priority_to_enemy(e)  # 交替出手：声明轮回者本回合已交出优先权
     prep1 = e.execute_action("prepare_monster_phase", {})
     assert prep1["success"], prep1
     from tests.monster_phase_support import _decline_spells as _ds
@@ -75,6 +76,7 @@ def _arena(seed: int = 1):
         DaoWen(name="抢劫", formula="", cost_type="", cost_formula="", effect_formula=""),
         x_value=2)
     assert e.execute_action("round_start", {"relic_choices": {}})["success"]
+    hand_priority_to_enemy(e)
     prep = e.execute_action("prepare_monster_phase", {})
     assert prep["success"], prep
     return e, m, prep
@@ -252,20 +254,30 @@ def test_legal_submission_behavior_unchanged():
     e.state.shards = 100
     m.shards = 100
 
-    choice = {
+    # 交替出手：一次提交只承载一个行动，道纹与攻击必须分两次提交。
+    # 本用例要观察两份结算，故按通用规则用【蓄锐·增】把怪物出手预算补到 2。
+    from tests.setup_support import grant_extra_actions
+    grant_extra_actions(m, 1)
+
+    dao_choice = {
         "actor_ref": actor,
         "daowen": {"name": "抢劫", "dodge": False, "blood_shadow": False,
                    "trigger_spell_choices": {}, "target_ref": "player:0"},
-        "attack_actions": _legal_hits(e, prep, actor),
+        "attack_actions": [],
     }
-    results = e.combat.resolve_monster_phase([choice], prep["result"])
+    e.combat.resolve_monster_phase([dao_choice], prep["result"])
 
     # 道纹已激活：round_used 含 抢劫，X 递增（+2×副本阶级）
     assert "抢劫" in e.combat._monster_round_used(m)
     # 抢劫X=2 → 夺 10X=20 碎片：玩家 100→80，怪物 100→120（caster 入账）
     assert m.shards == 120, f"抢劫应入账 20: {m.shards}"
     assert e.state.shards == 80
-    # 攻击结算存在
+
+    # 第二手：重新 prepare 后只提交攻击组
+    prep2 = e.combat.prepare_monster_phase()
+    attack_choice = {"actor_ref": actor, "daowen": None,
+                     "attack_actions": _legal_hits(e, {"result": prep2}, actor)}
+    results = e.combat.resolve_monster_phase([attack_choice], prep2)
     attack_rows = [r for r in results if r.get("attacker") == m.name
                    and "damage_dealt" in r]
     assert attack_rows, "合法提交必须结算攻击"

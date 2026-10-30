@@ -13,7 +13,7 @@ import math
 import os
 import sys
 
-from tests.setup_support import finish_initial_daowen
+from tests.setup_support import finish_initial_daowen, hand_priority_to_enemy
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -122,6 +122,7 @@ def test_monster_phase_payload_carries_monster_progress(tmp_path):
     e = _new_engine(tmp_path)
     e.execute_action("battle_start")
     e.execute_action("round_start", {})
+    hand_priority_to_enemy(e)  # 交替出手：声明轮回者本回合已交出优先权
     prepared = e.execute_action("prepare_monster_phase", {})
     assert prepared["success"], prepared
     actors = prepared["result"]["actors"]

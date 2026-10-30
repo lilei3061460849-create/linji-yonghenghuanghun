@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "sim"))
 import monster_arena as arena  # noqa: E402
 from engine.models import StatusEffect  # noqa: E402
 from engine.daowen import DaoWenEngine  # noqa: E402
+from tests.setup_support import hand_priority_to_enemy  # noqa: E402
 
 
 def _lineup(n: int = 2) -> list[dict]:
@@ -45,6 +46,7 @@ def test_default_battle_attack_targets_are_player_side_only():
     """
     e = arena.build_arena(_lineup(2))
     e.state.arena_ffa = False
+    hand_priority_to_enemy(e)   # 观众不参战；声明轮回者这一手已交出，敌方才能准备
     res = _prepare(e)
     assert res["actors"], "应当有可行动怪物"
     for actor in res["actors"]:
@@ -55,12 +57,10 @@ def test_default_battle_attack_targets_are_player_side_only():
 
     # 行为面复核：硬把攻击目标顶成另一只怪物，必须被拒
     actor = res["actors"][0]
-    hit = {"dodge": False, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}}
-    daowen = None
-    if actor["daowen_options"] and not actor["daowen_options"][0].get("requires_target"):
-        opt = actor["daowen_options"][0]
-        daowen = {"name": opt["name"], "x": 1, "dodge": False, "blood_shadow": False}
-    rogue = {"actor_ref": actor["actor_ref"], "daowen": daowen,
+    hit = {"dodge": False, "blood_shadow": False,
+           "spell_choices": {"before": {}, "after": {}}}
+    # 一次提交只含一个行动：这里测的是攻击目标闸门，故只提交攻击组。
+    rogue = {"actor_ref": actor["actor_ref"], "daowen": None,
              "attack_actions": [{"hits": [dict(hit, target_ref="enemy:1")
                                           for _ in range(max(1, actor["base_hits_per_attack"]))]}
                                 for _ in range(max(1, actor["base_attack_actions"]))]}
@@ -85,12 +85,7 @@ def test_arena_ffa_lets_monsters_fight_each_other():
               "attack_actions": [{"hits": [dict(hit, target_ref="enemy:1")
                                            for _ in range(max(1, actor["base_hits_per_attack"]))]}
                                  for _ in range(max(1, actor["base_attack_actions"]))]}
-    if actor["daowen_options"]:      # 有合法道纹时必须提交一个（引擎契约）
-        opt = actor["daowen_options"][0]
-        choice["daowen"] = {"name": opt["name"], "x": 1,
-                            "dodge": False, "blood_shadow": False}
-        if opt.get("requires_target"):
-            choice["daowen"]["target_ref"] = "enemy:1"
+    # 一次提交只含一个行动：本用例测「怪物能打怪物」，只提交攻击组。
     out = e.execute_action("resolve_monster_phase",
                            {"token": res["token"], "choices": [choice]})
     assert out["success"], out.get("error")
@@ -103,14 +98,7 @@ def test_arena_ffa_allows_single_actor_submission():
     res = _prepare(e)
     hit = {"dodge": False, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}}
     actor = res["actors"][0]
-    daowen = None
-    if actor["daowen_options"]:
-        opt = actor["daowen_options"][0]
-        daowen = {"name": opt["name"], "x": 1,
-                  "dodge": False, "blood_shadow": False}
-        if opt.get("requires_target"):
-            daowen["target_ref"] = actor["attack_target_options"][0]["ref"]
-    one = {"actor_ref": actor["actor_ref"], "daowen": daowen,
+    one = {"actor_ref": actor["actor_ref"], "daowen": None,
            "attack_actions": [{"hits": [dict(hit, target_ref=actor["attack_target_options"][0]["ref"])
                                         for _ in range(max(1, actor["base_hits_per_attack"]))]}
                               for _ in range(max(1, actor["base_attack_actions"]))]}
@@ -118,21 +106,19 @@ def test_arena_ffa_allows_single_actor_submission():
     assert ok["success"], f"养蛊场应当接受单 actor 提交: {ok.get('error')}"
     assert e.state.combat_subphase == "player_actions", "还有怪物没出手，子阶段应退回玩家行动阶段"
 
-    # 闸门关闭时：同一种单 actor 提交必须被拒（要求一次交齐）
+    # 一次提交只能结算一个行动者——这条契约与闸门开关无关（2026-10 统一交替出手）。
     e2 = arena.build_arena(_lineup(2))
-    e2.state.arena_ffa = False
     res2 = _prepare(e2)
-    a2 = res2["actors"][0]
-    d2 = None
-    if a2["daowen_options"] and not a2["daowen_options"][0].get("requires_target"):
-        d2 = {"name": a2["daowen_options"][0]["name"], "x": a2["daowen_options"][0].get("x") or 1,
-              "dodge": False, "blood_shadow": False}
-    one2 = {"actor_ref": a2["actor_ref"], "daowen": d2,
-            "attack_actions": [{"hits": [dict(hit, target_ref="player:0")
-                                         for _ in range(max(1, a2["base_hits_per_attack"]))]}
-                               for _ in range(max(1, a2["base_attack_actions"]))]}
-    out2 = e2.execute_action("resolve_monster_phase", {"token": res2["token"], "choices": [one2]})
-    assert not out2["success"], "闸门关闭时必须要求一次提交全部 actor"
+    both = []
+    for a2 in res2["actors"]:
+        ref2 = a2["attack_target_options"][0]["ref"]
+        both.append({"actor_ref": a2["actor_ref"], "daowen": None,
+                     "attack_actions": [{"hits": [dict(hit, target_ref=ref2)
+                                                  for _ in range(max(1, a2["base_hits_per_attack"]))]}
+                                        for _ in range(max(1, a2["base_attack_actions"]))]})
+    out2 = e2.execute_action("resolve_monster_phase", {"token": res2["token"], "choices": both})
+    assert not out2["success"], "一次提交多个行动者必须被拒"
+    assert "只能提交1个" in out2["error"], out2["error"]
 
 
 def test_ffa_self_kill_is_scored_zero():
@@ -158,103 +144,116 @@ def _hit(ref):
             "spell_choices": {"before": {}, "after": {}}, "target_ref": ref}
 
 
-def test_free_actions_allows_double_attack_double_daowen_and_mixed():
-    """行动自由化（2026-10-03 用户裁定）：攻击×2 / 道纹×2 / 一攻一道纹 都必须可结算。"""
-    # 攻击×2：同回合两组命中都要打出去
+def test_free_actions_switch_no_longer_allows_bundled_submission():
+    """一次提交＝一个真实行动：旧的「攻击×2／道纹×2／一攻一道纹」候选必须被拒。
+
+    沿革：2026-10-03 的「怪物行动自由化（每回合 2 槽）」已被统一交替出手取代——
+    《规则正文·战斗行动》第 7 条／怪物条目要求「按当前优先权每次只提交一个行动，
+    不得把攻击与道纹打包」；`CombatEngine._monster_free_actions()` 因此固定返回 True，
+    `attack_slots + dao_slots != 1` 由引擎硬拒。
+    """
+    # 攻击×2（把两组命中塞进同一次提交）→ 必须被拒
     e, res = _free_env()
     a = next(x for x in res["actors"] if x["actor_ref"] == "enemy:0")
     ref = a["attack_target_options"][0]["ref"]
     hits = max(1, a["base_hits_per_attack"])
-    target = e.state.enemies[1]
-    hp0 = target.current_hp
     out = e.execute_action("resolve_monster_phase", {"token": res["token"], "choices": [
         {"actor_ref": "enemy:0", "daowen": None,
          "attack_actions": [{"hits": [_hit(ref) for _ in range(hits)]} for _ in range(2)]}]})
-    assert out["success"], out.get("error")
-    assert target.current_hp < hp0, "攻击×2 应当两组命中都生效"
+    assert not out["success"], "两组攻击不得打包进一次提交"
+    assert "1个行动" in out["error"] or "attack_actions" in out["error"], out["error"]
 
-    # 道纹×2（不同名）+ 一攻一道纹：只要引擎接受即通过（效果按各自道纹规则）
-    for tag, build in (("道纹×2", "double_daowen"), ("一攻一道纹", "mixed")):
-        e, res = _free_env()
-        a = next(x for x in res["actors"] if x["actor_ref"] == "enemy:0")
-        opts = a["daowen_options"]
-        if len(opts) < 2 and tag == "道纹×2":
-            continue                      # 该怪只有 1 个合法道纹时跳过
-        ref = a["attack_target_options"][0]["ref"]
-        hits = max(1, a["base_hits_per_attack"])
-
-        def dao(opt):
-            cand = {"name": opt["name"], "x": 1,
-                    "dodge": False, "blood_shadow": False}
-            if opt.get("requires_target"):
-                cand["target_ref"] = ref
-            return cand
-
-        if build == "double_daowen":
-            choice = {"actor_ref": "enemy:0", "daowen": dao(opts[0]), "daowen_2": dao(opts[1]),
-                      "attack_actions": []}
-        else:
-            choice = {"actor_ref": "enemy:0", "daowen": dao(opts[0]),
-                      "attack_actions": [{"hits": [_hit(ref) for _ in range(hits)]}]}
-        out = e.execute_action("resolve_monster_phase", {"token": res["token"], "choices": [choice]})
-        assert out["success"], f"{tag} 应当被接受: {out.get('error')}"
-
-    # 同一种道纹发两次 / 0 槽：必须被拒
+    # 一攻一道纹 → 必须被拒
     e, res = _free_env()
     a = next(x for x in res["actors"] if x["actor_ref"] == "enemy:0")
     opt = a["daowen_options"][0]
-    same = {"name": opt["name"], "x": 1, "dodge": False, "blood_shadow": False}
-    if opt.get("requires_target"):
-        same["target_ref"] = a["attack_target_options"][0]["ref"]
-    bad = e.execute_action("resolve_monster_phase", {"token": res["token"], "choices": [
-        {"actor_ref": "enemy:0", "daowen": same, "daowen_2": dict(same), "attack_actions": []}]})
-    assert not bad["success"], "同一种道纹不得一回合发两次"
-    zero = e.execute_action("resolve_monster_phase", {"token": res["token"], "choices": [
-        {"actor_ref": "enemy:0", "daowen": None, "attack_actions": []}]})
-    assert not zero["success"], "0 槽必须被拒"
+    ref = a["attack_target_options"][0]["ref"]
+    hits = max(1, a["base_hits_per_attack"])
+
+    def dao(o):
+        cand = {"name": o["name"], "x": 1, "dodge": False, "blood_shadow": False}
+        if o.get("requires_target"):
+            cand["target_ref"] = ref
+        return cand
+
+    out = e.execute_action("resolve_monster_phase", {"token": res["token"], "choices": [
+        {"actor_ref": "enemy:0", "daowen": dao(opt),
+         "attack_actions": [{"hits": [_hit(ref) for _ in range(hits)]}]}]})
+    assert not out["success"], "道纹与攻击不得打包成同一次提交"
+    assert "1个行动" in out["error"], out["error"]
+
+    # 同一次提交塞两个道纹 → 必须被拒
+    e, res = _free_env()
+    a = next(x for x in res["actors"] if x["actor_ref"] == "enemy:0")
+    opts = a["daowen_options"]
+    if len(opts) >= 2:
+        out = e.execute_action("resolve_monster_phase", {"token": res["token"], "choices": [
+            {"actor_ref": "enemy:0", "daowen": dao(opts[0]), "daowen_2": dao(opts[1]),
+             "attack_actions": []}]})
+        assert not out["success"], "一次提交只能有一个道纹行动"
+        assert "1个行动" in out["error"], out["error"]
+
+    # 单槽：一个道纹（无攻击）与一组攻击，都必须能正常结算
+    e, res = _free_env()
+    a = next(x for x in res["actors"] if x["actor_ref"] == "enemy:0")
+    ok = e.execute_action("resolve_monster_phase", {"token": res["token"], "choices": [
+        {"actor_ref": "enemy:0", "daowen": dao(a["daowen_options"][0]), "attack_actions": []}]})
+    assert ok["success"], ok.get("error")
 
 
 def test_free_actions_round_advances_even_without_attacks():
-    """只发道纹、不打人的回合也要正常走完（不得卡在玩家行动阶段）——引擎路由回归。"""
+    """只发道纹、不打人的回合也要正常走完（不得卡在玩家行动阶段）——引擎路由回归。
+
+    交替出手下每只怪一步：prepare → 提交一个道纹 → 换下一只，全部走完才回终。
+    """
     e = arena.build_arena(_lineup(2), free_actions=True)
-    for _ in range(2):                      # 两只怪，每只：prepare → 提交（道纹×2，无攻击）
+    for _ in range(len(e.state.enemies)):
         res = _prepare(e)
-        actor = next(a for a in res["actors"]      # 养蛊场逐 actor 交替：挑还没出手的那只
+        actor = next(a for a in res["actors"]
                      if e.state.enemies[int(a["actor_ref"].split(":")[1])]
-                     .actions_used_this_round < 2)
+                     .actions_used_this_round < 1)
         opts = actor["daowen_options"]
         assert opts, "测试怪应当有合法道纹"
-        ref_target = actor["attack_target_options"][0]["ref"]
-
-        def dao(opt):
-            cand = {"name": opt["name"], "x": 1,
-                    "dodge": False, "blood_shadow": False}
-            if opt.get("requires_target"):
-                cand["target_ref"] = ref_target
-            return cand
-
-        choice = {"actor_ref": actor["actor_ref"], "daowen": dao(opts[0]), "attack_actions": []}
-        if len(opts) >= 2:
-            choice["daowen_2"] = dao(opts[1])
-        out = e.execute_action("resolve_monster_phase", {"token": res["token"], "choices": [choice]})
+        target_ref = actor["attack_target_options"][0]["ref"]
+        dx = {"name": opts[0]["name"], "x": 1, "dodge": False, "blood_shadow": False}
+        if opts[0].get("requires_target"):
+            dx["target_ref"] = target_ref
+        choice = {"actor_ref": actor["actor_ref"], "daowen": dx, "attack_actions": []}
+        out = e.execute_action("resolve_monster_phase",
+                               {"token": res["token"], "choices": [choice]})
         assert out["success"], out.get("error")
     assert e.state.combat_subphase == "await_round_end", \
         "全部怪物（只有道纹、没有攻击）出手后，回合应当可以推进到回终"
     assert e.execute_action("round_end", {})["success"]
 
 
-def test_free_actions_off_still_requires_daowen():
-    """默认关：候选里有道纹时提交 daowen=null 仍被拒（原契约零回归）。"""
+def test_free_actions_off_still_rejects_bundling():
+    """自由行动开关关闭时：单槽攻击照常合法，但「道纹＋攻击」打包仍被拒。"""
     e = arena.build_arena(_lineup(2))
     e.state.monster_free_actions = False
     res = _prepare(e)
     a = next(x for x in res["actors"] if x["actor_ref"] == "enemy:0")
     ref = a["attack_target_options"][0]["ref"]
     hits = max(1, a["base_hits_per_attack"])
-    out = e.execute_action("resolve_monster_phase", {"token": res["token"], "choices": [
+    ok = e.execute_action("resolve_monster_phase", {"token": res["token"], "choices": [
         {"actor_ref": "enemy:0", "daowen": None,
          "attack_actions": [{"hits": [_hit(ref) for _ in range(hits)]}]}]})
-    assert not out["success"], "自由行动关闭时，有合法道纹就必须提交一个"
+    assert ok["success"], ok.get("error")
+
+    e2 = arena.build_arena(_lineup(2))
+    e2.state.monster_free_actions = False
+    res2 = _prepare(e2)
+    a2 = next(x for x in res2["actors"] if x["actor_ref"] == "enemy:0")
+    opt = a2["daowen_options"][0]
+    ref2 = a2["attack_target_options"][0]["ref"]
+    dx = {"name": opt["name"], "x": 1, "dodge": False, "blood_shadow": False}
+    if opt.get("requires_target"):
+        dx["target_ref"] = ref2
+    out = e2.execute_action("resolve_monster_phase", {"token": res2["token"], "choices": [
+        {"actor_ref": "enemy:0", "daowen": dx,
+         "attack_actions": [{"hits": [_hit(ref2) for _ in range(max(1, a2["base_hits_per_attack"]))]}]}]})
+    assert not out["success"], "自由行动关闭时也不得把道纹与攻击打包"
+    assert "1个行动" in out["error"], out["error"]
 
 
 def test_self_kill_rule_has_teeth():

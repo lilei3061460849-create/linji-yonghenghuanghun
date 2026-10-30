@@ -138,3 +138,32 @@ def opponent_passes(engine) -> dict:
     if ref is None:
         return engine.execute_action("prepare_monster_phase", {})
     return engine.execute_action("rest", {"actor_ref": ref})
+
+
+def hand_priority_to_enemy(engine) -> dict:
+    """把「本回合优先权」直接标记给敌方，使 `prepare_monster_phase` 可用。
+
+    「交替出手」下 `prepare_monster_phase` 只在敌方持有优先权时可用。夹具若只关心
+    怪物阶段本身，就用本函数把状态声明成「轮回者这一手已经交出去了」——它不执行
+    任何行动，也不改任何资源，因此不会像真实【跳过】那样触发【沉重枷锁】之类
+    「对方跳过时」的遗物，把被测数值改写成另一套机制。
+
+    这是夹具的状态声明，不是绕过闸门：生产代码里的优先权检查一行未改，
+    真正越过优先权的提交仍会被拒（见 `tests/test_priority_gate.py`）。
+    """
+    if engine.state.duel_turn == "opponent_side":
+        return {"success": True, "changed": False, "note": "优先权已在敌方"}
+    engine.state.duel_turn = "opponent_side"
+    # 与真实【跳过】一致：轮回者这一侧本回合不再有出手（否则怪物行动后子阶段会
+    # 停在 player_actions 等一个夹具里根本不存在的玩家行动）。
+    engine.combat._ended_turn_sides.add("player_side")
+    return {"success": True, "changed": True}
+
+
+def player_passes(engine) -> dict:
+    """让轮回者以规则内的【跳过】交出出手权（会触发「对方跳过」类遗物）。"""
+    if engine.state.duel_turn == "opponent_side":
+        return {"success": True, "skipped": False, "note": "优先权已在敌方"}
+    result = engine.execute_action("skip", {})
+    assert result.get("success"), result
+    return result
