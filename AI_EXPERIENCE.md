@@ -251,7 +251,13 @@ grep -n "道纹名" sim/gen_*.py
 | 法器 | `effects`（可带 `trigger`） | `activate_resource` 主动激活，或触发式自动结算 |
 | 消耗品 | `uses` + `effects`（可带 `trigger`） | `consume_item` 结算并扣耐久；带 trigger 则被动触发 |
 
-声明字段与 v1 边界见 `engine/custom_resources.py` 顶部说明与 `data/custom_resources/examples/`。运行时声明必须满足《规则正文》规定的资源类型约束；非消耗品的 `uniqueness` 字段须说明现有资源组合为何无法实现该效果。v1 不支持：随机目标、失忆/唯一代价、残韵闭环。
+声明字段与边界见 `engine/custom_resources.py` 顶部说明与 `data/custom_resources/examples/`。运行时声明必须满足《规则正文》规定的资源类型约束；非消耗品的 `uniqueness` 字段须说明现有资源组合为何无法实现该效果。
+
+**v2（2026-10-30）新增**：
+- `target` 新增 `random_enemy` / `random_ally`：走 `DiceEngine` 的正式随机源（与遗物随机目标同一 `roll_pick`），日志记录 `seed`、`selected_index`、池大小，可复现。
+- 代价 `cost.type = "失忆"`：发动时必须显式提交 `forget_daowen`（要失去的道纹名），缺省或非法一律拒绝且不扣任何资源、不消耗出手。
+- 存档持久化：`save_game` 写入声明快照，`load_game` 经 `restore_specs` 重新注册；跨会话不必重新声明。
+- 仍未支持（缺裁定）：`唯一` 代价（本项目没有可支付的唯一资源账本）、残韵闭环（自定义道纹进入哪个闭环、连哪条边须由用户裁定）。
 
 新资源在 `battle_start` **之前**授予才会跨「重来」保留；战中才给再重来，会被战始快照整体抹掉（见下文「现场新增道纹/遗物/法术与『重来』的配合」）。
 

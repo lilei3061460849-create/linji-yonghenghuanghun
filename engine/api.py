@@ -861,6 +861,11 @@ class GameEngine:
                                   "dodge": "敌对目标可选布尔值",
                                   "blood_shadow": "可选布尔值"},
                     }
+            _custom = custom_resources.get(name)
+            if (_custom is not None and _custom.category == "道纹"
+                    and _custom.spec.get("cost", {}).get("type") == "失忆"):
+                # 失忆代价必须显式选择要失去的道纹（缺失即拒绝，不替玩家选）。
+                params_schema["forget_daowen"] = custom_resources.amnesia_candidates(player)
             params_schema.update(self.combat.daowen_extra_choice_schema(player,name,refs))
             actions.append({
                 "action_type": "use_daowen", "available": max_x >= 1,
@@ -5810,7 +5815,8 @@ class GameEngine:
         # 付不起就当次发动失败、不消耗出手（与内建道纹同一口径）。
         if calc.get("custom_effects") is not None:
             custom_cost_error = custom_resources.pay_custom_cost(
-                self, actor, dw_instance, calc)
+                self, actor, dw_instance, calc,
+                forget_daowen=params.get("forget_daowen"))
             if custom_cost_error:
                 return {"success": False, "error": custom_cost_error}
 
@@ -7700,9 +7706,15 @@ class GameEngine:
         """
         if self.state.pending_monster_phase:
             return {"success": False, "error": "已有待提交的怪物阶段决策"}
-        # 所有战斗共用交替优先权：只有敌方当前获得行动权时才能准备怪物行动。
-        if (self.state.duel_turn != "opponent_side"
-                or "opponent_side" in self.combat._ended_turn_sides):
+        # 空优先权＝尚无优先权记录（手工构造的战斗、旧存档、回始前的中间态）：
+        # 既然此刻是在准备敌方行动，就按「敌方持有优先权」记录，避免出现
+        # 「当前轮到，」这类无主语拒绝；正常战斗在 battle_start 已写入 duel_turn。
+        if not self.state.duel_turn:
+            self.state.duel_turn = "opponent_side"
+        # 养蛊场：场上是怪物互斗，玩家侧是观众、不参与交替，故不受优先权闸门限制。
+        if (not getattr(self.state, "arena_ffa", False)
+                and (self.state.duel_turn != "opponent_side"
+                     or "opponent_side" in self.combat._ended_turn_sides)):
             return {"success": False,
                     "error": f"交替出手：当前轮到{self.state.duel_turn}，不能准备怪物行动"}
         # 侧回终不在prepare/每次单行动后重复触发，统一由中央行动路径按
@@ -10161,7 +10173,10 @@ class GameEngine:
         }
         encoded = base64.b64encode(pickle.dumps(snapshot, protocol=pickle.HIGHEST_PROTOCOL)).decode("ascii")
         save_data = {"format": "linji-save", "version": self.SAVE_FORMAT_VERSION,
-                     "payload": encoded, "timestamp": time.time()}
+                     "payload": encoded, "timestamp": time.time(),
+                     # 自定义资源声明活在进程内注册表里，必须随存档往返；
+                     # 不写进 pickle（它有独立校验入口），读档时重新注册。
+                     "custom_resources": custom_resources.export_specs()}
         filepath = os.path.join(self.save_dir, f"save_{slot}.json")
         os.makedirs(self.save_dir, exist_ok=True)
         with open(filepath, "w", encoding="utf-8") as handle:
@@ -10200,7 +10215,9 @@ class GameEngine:
         self._last_result = restored["last_result"]
         self._battle_restart_snapshot = restored.get("battle_restart_snapshot")
         self._restore_combat_runtime(restored["combat_runtime"])
+        resource_report = custom_resources.restore_specs(save_data.get("custom_resources"))
         return {"success": True, "filepath": filepath, "version": self.SAVE_FORMAT_VERSION,
+                "custom_resources": resource_report,
                 "state": self.state.to_dict()}
 
     def get_action_history(self) -> list[dict]:

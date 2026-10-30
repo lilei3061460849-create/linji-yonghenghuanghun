@@ -84,7 +84,8 @@ def _select_enemies(ctx: TriggerContext) -> list:
 def roll_pick(ctx: TriggerContext, candidates: list, *, stream: str, context: str) -> dict:
     """从候选里按 DiceEngine 口径随机取一个（RNG 目标选择，原为道纹【赌命】，现供遗物【灾厄轮盘】被动使用）。
 
-    返回 {"entity", "roll"(1-based), "of", "names"}；无候选返回 None。
+    返回 {"entity", "roll"(1-based), "of", "names", "stream", "seed", "selected_index"}；
+    无候选返回 None。`seed`/`selected_index` 供战报与存档复现同一次投掷。
     **一次调用只投一次**：调用方拿 roll/of 直接写战报，不得再投第二次（否则战报与实际目标不符）。
     池名由调用方给出（含回合号的流名，如 `赌命_r3`），保证同一场次可复现。
     """
@@ -93,15 +94,19 @@ def roll_pick(ctx: TriggerContext, candidates: list, *, stream: str, context: st
         return None
     combat = ctx.combat
     dice = getattr(combat, "dice", None) if combat is not None else None
+    seed = None
     if dice is not None and hasattr(dice, "auto_roll"):
         roll = dice.auto_roll(stream, [e.name for e in candidates], context=context)
         number = int(roll["player_number"])
+        seed = roll.get("seed")
     else:                                     # 无骰子（离线脚本）时的降级：仍按序号口径
         import random
         number = random.randrange(len(candidates)) + 1
+        seed = getattr(dice, "_seed", None)
     idx = min(max(number - 1, 0), len(candidates) - 1)
     info = {"entity": candidates[idx], "roll": idx + 1, "of": len(candidates),
-            "names": [e.name for e in candidates], "stream": stream}
+            "names": [e.name for e in candidates], "stream": stream,
+            "seed": seed, "selected_index": idx}
     ctx.picks[stream] = info      # 供机制效果写战报（同一笔投掷，不重投）
     return info
 
