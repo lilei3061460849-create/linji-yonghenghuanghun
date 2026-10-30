@@ -21,7 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from engine.api import GameEngine  # noqa: E402
 from engine.models import DaoWen, DaoWenInstance, Entity, StatusEffect  # noqa: E402
 from tests.monster_phase_support import resolve_monster_phase  # noqa: E402
-from tests.setup_support import finish_initial_daowen  # noqa: E402
+from tests.setup_support import (finish_initial_daowen, grant_extra_actions,
+                                 opponent_passes)  # noqa: E402
 
 
 def _engine(suffix, region="乱葬岗"):
@@ -64,8 +65,9 @@ def _monster_cast(e, name, dodge):
                           "spell_choices": {"before": {}, "after": {}}}
                          for _ in range(actor["base_hits_per_attack"])]}
                for _ in range(actor["base_attack_actions"])]
+    # 交替出手：一次提交＝一个行动，发动道纹时不再捆绑攻击组。
     res = e.combat.resolve_monster_phase(
-        [{"actor_ref": "enemy:0", "daowen": dao, "attack_actions": attacks}],
+        [{"actor_ref": "enemy:0", "daowen": dao, "attack_actions": []}],
         prepared=prepared)
     return res
 
@@ -90,7 +92,7 @@ def test_debuff_daowen_is_dodgeable_without_bizhong():
                           "blood_shadow": False,
                           "spell_choices": {"before": {}, "after": {}}}]}]
     res = e.combat.resolve_monster_phase(
-        [{"actor_ref": "enemy:0", "daowen": dao, "attack_actions": attacks}],
+        [{"actor_ref": "enemy:0", "daowen": dao, "attack_actions": []}],
         prepared=prepared)
     entry = next(d for d in res if "daowen_activated" in d)
     assert entry.get("dodged") is True, entry
@@ -113,13 +115,14 @@ def test_bizhong_makes_debuff_unresistable_and_consumes_layer():
                           "blood_shadow": False,
                           "spell_choices": {"before": {}, "after": {}}}]}]
     res = e.combat.resolve_monster_phase(
-        [{"actor_ref": "enemy:0", "daowen": dao, "attack_actions": attacks}],
+        [{"actor_ref": "enemy:0", "daowen": dao, "attack_actions": []}],
         prepared=prepared)
     entry = next(d for d in res if "daowen_activated" in d)
     assert not entry.get("dodged"), entry
     assert p.has_status("勾魂"), "必中压下 debuff 必须生效"
-    # 2 层：道纹判定吃 1 层，随后的攻击判定吃 1 层 → 归零
-    assert e.combat.bizhong_remaining(m) == 0, e.combat.bizhong_remaining(m)
+    # 一次提交只有道纹一个行动：道纹判定吃 1 层（2 → 1）。
+    # 「攻击判定也吃同一份层数」由 test_attack_and_daowen_share_one_pool 覆盖。
+    assert e.combat.bizhong_remaining(m) == 1, e.combat.bizhong_remaining(m)
 
 
 # ==================== A. 攻击与道纹共用层数 ====================
@@ -168,7 +171,9 @@ def test_attack_and_daowen_share_one_pool():
                                     "trigger_spell_choices": {}})
     assert e.combat.bizhong_remaining(p) == 1
     # ② 普攻判定从同一份里再扣 1
-    p.actions_used_this_round = 0
+    # 交替出手：两次主动行动之间必须经过敌方【跳过】；并给轮回者第二次出手额度。
+    grant_extra_actions(p, 1)
+    opponent_passes(e)
     p.current_speed = 1   # 攻次=当前速度：压到1，本条只提交1个hit
     prep = e.execute_action("prepare_attack", {})
     assert prep.get("success") is True, prep.get("error")
@@ -221,6 +226,7 @@ def test_monster_cast_bizhong_self_then_forces_debuff():
 
     # 下一回合：怪物放勾魂 → 怪物处于必中姿态 → 玩家无法闪避/抵抗 → 勾魂生效
     e.state.current_round = 3
+    m.actions_used_this_round = 0   # 手工推进回合：同步重置通用出手预算
     e.combat.reset_monster_activation()
     prepared = e.combat.prepare_monster_phase()
     actor = next(a for a in prepared["actors"] if a["actor_ref"] == "enemy:0")
@@ -232,7 +238,7 @@ def test_monster_cast_bizhong_self_then_forces_debuff():
                          for _ in range(actor["base_hits_per_attack"])]}
                for _ in range(actor["base_attack_actions"])]
     e.combat.resolve_monster_phase(
-        [{"actor_ref": "enemy:0", "daowen": dao, "attack_actions": attacks}],
+        [{"actor_ref": "enemy:0", "daowen": dao, "attack_actions": []}],
         prepared=prepared)
     assert p.has_status("勾魂"), "怪物处于必中姿态，勾魂必须命中生效"
 

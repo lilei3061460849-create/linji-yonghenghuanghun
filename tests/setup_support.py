@@ -167,3 +167,28 @@ def player_passes(engine) -> dict:
     result = engine.execute_action("skip", {})
     assert result.get("success"), result
     return result
+
+
+def advance_to_player_turn(engine) -> dict:
+    """把战斗推进到「轮回者可以再次主动行动」的位置（跨过敌方一手）。
+
+    「交替出手」下同一侧不能连续主动行动：一次玩家行动之后出手权归敌方，
+    玩家要把下一次行动落到规则允许的位置，必须经过敌方的行动/【跳过】，
+    若双方本回合余手都已用尽还要走一次回终。本夹具只做这三步规则内动作
+    （【休整】→ 回终 → 回始），不直接改写 `duel_turn`，也不是优先权旁路。
+    """
+    from engine.enums import CombatSubphase
+
+    steps = []
+    if engine.state.duel_turn == "opponent_side":
+        steps.append(("enemy_pass", opponent_passes(engine)))
+    subphase = engine.state.combat_subphase
+    if subphase == CombatSubphase.AWAIT_ROUND_END.value:
+        steps.append(("round_end", engine.execute_action("round_end", {})))
+        subphase = engine.state.combat_subphase
+    if subphase == CombatSubphase.AWAIT_ROUND_START.value:
+        steps.append(("round_start", begin_round(engine)))
+    failed = [(name, res) for name, res in steps if not res.get("success")]
+    if failed:
+        return {"success": False, "steps": steps, "failed": failed}
+    return {"success": True, "steps": steps, "duel_turn": engine.state.duel_turn}

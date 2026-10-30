@@ -18,7 +18,7 @@ R_i/T_i 随机），按阶级递增——一阶上界沿用旧"battle_number-3"�
     python -m pytest tests/test_monster_draw.py -v
 """
 import os
-from tests.setup_support import finish_initial_daowen
+from tests.setup_support import finish_initial_daowen, hand_priority_to_enemy
 os.makedirs("/tmp/linji_tests", exist_ok=True)
 import os
 import sys
@@ -166,9 +166,10 @@ def test_seven_battles_match_per_battle_draw_totals():
             for enemy in engine.state.enemies:
                 enemy.current_hp = 0
                 enemy.is_alive = False
+            hand_priority_to_enemy(engine)   # 交替出手：声明轮回者已交出优先权
             prep = engine.execute_action("prepare_monster_phase", {})
-            engine.execute_action("resolve_monster_phase",
-                                  {"token": prep["result"]["token"], "choices": []})
+            # 清场后引擎按【跳过】结束敌方回合，无需提交行动者
+            assert prep["success"], prep
             engine.state.player.damage_dealt_this_round = 1
             engine.state.player.actions_used_this_round = 1
             engine.execute_action("round_end", {})

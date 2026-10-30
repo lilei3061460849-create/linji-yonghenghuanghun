@@ -11,7 +11,7 @@ import os
 import math
 import sys
 
-from tests.setup_support import finish_initial_daowen
+from tests.setup_support import finish_initial_daowen, hand_priority_to_enemy
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
@@ -69,6 +69,7 @@ def _advance_to_active_round(engine: GameEngine) -> None:
 
 
 def _resolve_prepared_monsters(engine: GameEngine, daowen_name: str | None = None):
+    hand_priority_to_enemy(engine)   # 交替出手：声明轮回者本回合已交出优先权
     prepared = engine.execute_action("prepare_monster_phase", {})
     choices = []
     for actor in prepared["result"]["actors"]:
@@ -84,8 +85,9 @@ def _resolve_prepared_monsters(engine: GameEngine, daowen_name: str | None = Non
         attacks = [{"hits": [{"target_ref": "player:0", "dodge": False, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}}
                               for _ in range(actor["base_hits_per_attack"])]}
                    for _ in range(actor["base_attack_actions"])]
+        # 交替出手：一次提交＝一个行动；发道纹时不捆绑攻击组。
         choices.append({"actor_ref": actor["actor_ref"], "daowen": dao,
-                        "attack_actions": attacks})
+                        "attack_actions": [] if dao is not None else attacks})
     return engine.execute_action("resolve_monster_phase", {
         "token": prepared["result"]["token"], "choices": choices,
     })
@@ -124,6 +126,7 @@ def test_resonance_on_enemy_grants_dest_and_rewrites_next_activation():
 
     finish_round(engine)
     engine.execute_action("round_start", {})
+    hand_priority_to_enemy(engine)
     prepared = engine.execute_action("prepare_monster_phase", {})
     actor = prepared["result"]["actors"][0]
     option = next(o for o in actor["daowen_options"] if o["name"] == "弱化")
@@ -134,11 +137,8 @@ def test_resonance_on_enemy_grants_dest_and_rewrites_next_activation():
             "actor_ref": actor["actor_ref"],
             "daowen": {"name": "弱化", "target_ref": "player:0",
                        "dodge": False, "blood_shadow": False, "trigger_spell_choices": {}},
-            # 2026-10-25：击数＝[攻击次数]＝当前速度，按 prepare 契约提交完整命中数
-            "attack_actions": [{"hits": [{"target_ref": "player:0", "dodge": False,
-                                          "blood_shadow": False,
-                                          "spell_choices": {"before": {}, "after": {}}}
-                                         for _ in range(actor["base_hits_per_attack"])]}],
+            # 交替出手：一次提交＝一个行动，发道纹时不再捆绑攻击组。
+            "attack_actions": [],
         }],
     })
     assert phase["success"], phase

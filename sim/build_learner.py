@@ -354,8 +354,11 @@ def _resolve_monster_turn(engine):
     """
     import re as _re
     # 所有战斗共用交替优先权；调用方结束我方决策后，显式交出剩余优先权。
+    # 若轮回者一侧本回合已经交过优先权（`_ended_turn_sides` 已有记录），再【跳过】
+    # 会被引擎按「所在阵营已结束本回合」拒绝——这一步只在还没交权时才做。
     if (engine.state.duel_turn != "opponent_side"
-            and engine.state.combat_subphase != "await_round_end"):
+            and "player_side" not in engine.combat._ended_turn_sides
+            and engine.state.combat_subphase not in ("await_round_end", "await_round_start")):
         skipped = engine.execute_action("skip", {"actor_ref": "player:0"})
         if not skipped.get("success"):
             return skipped
@@ -1404,34 +1407,50 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
                                 for x in e.state.enemies if x.is_alive],
                     "player_daowen": sorted(_p.dao_wen) if _p else [],
                 })
-            try:
-                ai.take_turn()
-            except Exception as ex:
-                record("engine_error", "combat", f"{type(ex).__name__}: {ex}")
-                return {"cleared": cleared, "won": False, "invalid": True,
-                        "reason": f"combat: {ex}"}
-            if (not [x for x in e.state.enemies if x.is_alive] and not getattr(e.state, "monster_reinforcements", None)
-                and not getattr(e.state, "delayed_monster_reentries", None)):  # 增援/封印延迟回场未到不算清场
-                break
-            # 玩家可能在自己回合内命零（癌变/崩解/代价反噬）——此时死者之页中断已入队，
-            # 不能再进怪物阶段（会被中断门禁挡成 invalid），直接按阵亡结算。
-            if not e.state.player or not e.state.player.is_alive:
-                break
-            # [朋友]/[员工]自主出手（无语言命令时，规则正文：微光者会根据情况对敌方出手）
-            e.execute_action("resolve_ally_phases", {})
-            if (not [x for x in e.state.enemies if x.is_alive] and not getattr(e.state, "monster_reinforcements", None)
-                and not getattr(e.state, "delayed_monster_reentries", None)):  # 增援/封印延迟回场未到不算清场
-                break
-            # 困境驱动（DM裁定2026-08-23③）：强制困境怪进化/逃跑二选一
-            _drive_plight_monsters(e, telemetry)
-            if (not [x for x in e.state.enemies if x.is_alive] and not getattr(e.state, "monster_reinforcements", None)
-                and not getattr(e.state, "delayed_monster_reentries", None)):  # 增援/封印延迟回场未到不算清场
-                break   # 困境怪全逃跑=清场（不视为击杀）
-            mp = _resolve_monster_turn(e)
-            if not mp.get("success"):
-                return {"cleared": cleared, "won": False, "invalid": True,
-                        "reason": f"monster_phase: {mp.get('error')}"}
-            if mp["result"].get("player_dead"):
+            # 交替出手：一个世界回合内双方都可能各出手多次。引擎只在双方余手都用尽
+            # 时才打开 round_end（子阶段 await_round_end），因此这里必须反复
+            # 「玩家行动 → 朋友/员工 → 怪物阶段」直到本回合真的收尾，
+            # 而不是每回合只走一遍就把 round_end 交上去（旧写法会以
+            # 「round_end 要求 await_round_end，当前为 player_actions」判无效局）。
+            _battle_over = False
+            for _alt in range(12):
+                try:
+                    ai.take_turn()
+                except Exception as ex:
+                    record("engine_error", "combat", f"{type(ex).__name__}: {ex}")
+                    return {"cleared": cleared, "won": False, "invalid": True,
+                            "reason": f"combat: {ex}"}
+                if (not [x for x in e.state.enemies if x.is_alive] and not getattr(e.state, "monster_reinforcements", None)
+                    and not getattr(e.state, "delayed_monster_reentries", None)):  # 增援/封印延迟回场未到不算清场
+                    _battle_over = True
+                    break
+                # 玩家可能在自己回合内命零（癌变/崩解/代价反噬）——此时死者之页中断已入队，
+                # 不能再进怪物阶段（会被中断门禁挡成 invalid），直接按阵亡结算。
+                if not e.state.player or not e.state.player.is_alive:
+                    _battle_over = True
+                    break
+                # [朋友]/[员工]自主出手（无语言命令时，规则正文：微光者会根据情况对敌方出手）
+                e.execute_action("resolve_ally_phases", {})
+                if (not [x for x in e.state.enemies if x.is_alive] and not getattr(e.state, "monster_reinforcements", None)
+                    and not getattr(e.state, "delayed_monster_reentries", None)):  # 增援/封印延迟回场未到不算清场
+                    _battle_over = True
+                    break
+                # 困境驱动（DM裁定2026-08-23③）：强制困境怪进化/逃跑二选一
+                _drive_plight_monsters(e, telemetry)
+                if (not [x for x in e.state.enemies if x.is_alive] and not getattr(e.state, "monster_reinforcements", None)
+                    and not getattr(e.state, "delayed_monster_reentries", None)):  # 增援/封印延迟回场未到不算清场
+                    _battle_over = True
+                    break   # 困境怪全逃跑=清场（不视为击杀）
+                mp = _resolve_monster_turn(e)
+                if not mp.get("success"):
+                    return {"cleared": cleared, "won": False, "invalid": True,
+                            "reason": f"monster_phase: {mp.get('error')}"}
+                if mp["result"].get("player_dead"):
+                    _battle_over = True
+                    break
+                if e.state.combat_subphase == "await_round_end":
+                    break
+            if _battle_over:
                 break
             re_ = e.execute_action("round_end", {})
             if not re_.get("success"):

@@ -147,7 +147,12 @@ def test_no_bizhong_auto_dodge_still_works():
     engine.combat.reset_monster_activation()
     engine.state.current_round = 0
     engine.combat.round_start()
-    results = resolve_monster_phase(engine.combat, {m.name: "全力"}, dodge=True)
+    # 交替出手：一次提交＝一个行动，故「先发道纹、再普攻」分两步提交。
+    # 用通用【蓄锐·增】把这只怪的出手预算补到 2，不引入任何特例分支。
+    from tests.setup_support import grant_extra_actions
+    grant_extra_actions(m, 1)
+    resolve_monster_phase(engine.combat, {m.name: "全力"}, dodge=True)
+    results = resolve_monster_phase(engine.combat, {m.name: None}, dodge=True)
     hits = [d for d in results if d.get("attacker") == m.name]
     assert hits and hits[0].get("dodge_success") is True
 
