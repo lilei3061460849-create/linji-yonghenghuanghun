@@ -113,9 +113,8 @@ def build_arena(lineup: list[dict], *, seed: int = 0, rng_seed: int = 7,
     e.state.player.in_combat = False
     for index, monster in enumerate(monsters):
         monster.camp = f"arena:{index}"
-    # 行动自由化（2026-10-03 用户裁定，规则实验）：怪物不再被强制发动道纹，
-    # 每回合 2 个槽——攻击/道纹各占 1 槽，可「连续两次攻击」「连续两次道纹」。
-    e.state.monster_free_actions = bool(free_actions)
+    # 「行动自由化 2 槽」已随统一交替出手废止（规则：每次只提交一个行动），
+    # 因此这里不再有任何开关；`free_actions` 参数保留只为兼容旧命令行调用。
     return e
 
 
@@ -132,8 +131,8 @@ def _candidates(actor: dict, rivals: list[dict]) -> list[dict]:
     """把 prepare 给出的合法选项展开成候选提交（确定性顺序，性能闸门截断）。
 
     契约：一次提交＝一个真实行动（攻击组或一个道纹，不打包）。
-    free_actions 如今只影响日程统计口径——引擎的 `_monster_free_actions()` 已在
-    统一交替出手后固定返回 True，两槽（攻击×2／道纹×2／一攻一道纹）的旧候选族
+    free_actions 参数仅为兼容旧命令行保留（引擎里已无自由行动开关），
+    两槽（攻击×2／道纹×2／一攻一道纹）的旧候选族
     已随该裁定废止。
     """
     out: list[dict] = []

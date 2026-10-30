@@ -155,8 +155,8 @@ def test_free_actions_switch_no_longer_allows_bundled_submission():
 
     沿革：2026-10-03 的「怪物行动自由化（每回合 2 槽）」已被统一交替出手取代——
     《规则正文·战斗行动》第 7 条／怪物条目要求「按当前优先权每次只提交一个行动，
-    不得把攻击与道纹打包」；`CombatEngine._monster_free_actions()` 因此固定返回 True，
-    `attack_slots + dao_slots != 1` 由引擎硬拒。
+    不得把攻击与道纹打包」。引擎里没有任何「自由行动」开关，
+    `attack_slots + dao_slots != 1` 对所有战斗硬拒。
     """
     # 攻击×2（把两组命中塞进同一次提交）→ 必须被拒
     e, res = _free_env()
@@ -233,10 +233,9 @@ def test_free_actions_round_advances_even_without_attacks():
     assert e.execute_action("round_end", {})["success"]
 
 
-def test_free_actions_off_still_rejects_bundling():
-    """自由行动开关关闭时：单槽攻击照常合法，但「道纹＋攻击」打包仍被拒。"""
+def test_single_action_contract_rejects_bundling_without_any_switch():
+    """单行动契约无需开关：单槽攻击照常合法，但「道纹＋攻击」打包仍被拒。"""
     e = arena.build_arena(_lineup(2))
-    e.state.monster_free_actions = False
     res = _prepare(e)
     a = next(x for x in res["actors"] if x["actor_ref"] == "enemy:0")
     ref = a["attack_target_options"][0]["ref"]
@@ -247,7 +246,6 @@ def test_free_actions_off_still_rejects_bundling():
     assert ok["success"], ok.get("error")
 
     e2 = arena.build_arena(_lineup(2))
-    e2.state.monster_free_actions = False
     res2 = _prepare(e2)
     a2 = next(x for x in res2["actors"] if x["actor_ref"] == "enemy:0")
     opt = a2["daowen_options"][0]
@@ -258,7 +256,7 @@ def test_free_actions_off_still_rejects_bundling():
     out = e2.execute_action("resolve_monster_phase", {"token": res2["token"], "choices": [
         {"actor_ref": "enemy:0", "daowen": dx,
          "attack_actions": [{"hits": [_hit(ref2) for _ in range(max(1, a2["base_hits_per_attack"]))]}]}]})
-    assert not out["success"], "自由行动关闭时也不得把道纹与攻击打包"
+    assert not out["success"], "不得把道纹与攻击打包"
     assert "1个行动" in out["error"], out["error"]
 
 
