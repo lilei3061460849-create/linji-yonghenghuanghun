@@ -1,7 +1,7 @@
 """【连击】（2026-10-22 由【血债】改名）多支付通道测试。
 
-用户令口径：与【透支】同例的多代价道纹——支付六选一（流血5X/法力5X/
-衰老X/枯竭X/碎片5X/假碎片50X，价格与效果全表同乘五），各通道只有
+用户令口径：与【透支】同例的多代价道纹——支付六选一（生命5X/法力5X/
+血限X/枯竭X/碎片5X/假碎片50X，价格与效果全表同乘五），各通道只有
 倍率不同，效果完全相同：选择[目标]5X次、每次1点伤害，不带任何通道专属机制。
 旧名【血债】仅在读入边界自动映射，引擎不接受旧名提交。
 """
@@ -19,16 +19,16 @@ from tests.setup_support import begin_battle, finish_initial_daowen
 
 def test_lianji_default_channel_is_bleed_legacy_price():
     calc = DaoWenEngine.resolve("连击", 4)
-    assert calc["cost_type"] == "流血"
+    assert calc["cost_type"] == "生命"
     assert calc["cost_hp"] == 20
     assert calc["hits"] == 20 and calc["damage_per_hit"] == 1
     assert calc["total_damage"] == 20
 
 
 @pytest.mark.parametrize("channel,cost_key,amount,cost_type", [
-    ("流血", "cost_hp", 35, "流血"),
+    ("生命", "cost_hp", 35, "生命"),
     ("法力", "cost", 35, "消耗"),
-    ("衰老", "cost_blood_limit", 7, "衰老"),
+    ("血限", "cost_blood_limit", 7, "血限"),
     ("枯竭", "cost_mana_limit", 7, "枯竭"),
     ("碎片", "cost_real_shards", 35, "碎片"),
     ("假碎片", "cost_fake_shards", 350, "碎片"),
@@ -37,16 +37,16 @@ def test_lianji_channels_same_effect_different_price(channel, cost_key, amount, 
     calc = DaoWenEngine.resolve("连击", 7, cost_channel=channel)
     assert calc[cost_key] == amount
     assert calc["cost_type"] == cost_type
-    # 效果恒同：与缺省流血通道逐字段一致（除代价）
+    # 效果恒同：与缺省生命通道逐字段一致（除代价）
     assert calc["hits"] == 35 and calc["damage_per_hit"] == 1
     assert calc["total_damage"] == 35
 
 
 def test_lianji_limit_channels_priced_in_whole_x():
     # 全乘五后上限类回到整数X计价，无⌈X/5⌉零头
-    assert DaoWenEngine.resolve("连击", 5, cost_channel="衰老")["cost_blood_limit"] == 5
+    assert DaoWenEngine.resolve("连击", 5, cost_channel="血限")["cost_blood_limit"] == 5
     assert DaoWenEngine.resolve("连击", 6, cost_channel="枯竭")["cost_mana_limit"] == 6
-    assert DaoWenEngine.resolve("连击", 1, cost_channel="衰老")["cost_blood_limit"] == 1
+    assert DaoWenEngine.resolve("连击", 1, cost_channel="血限")["cost_blood_limit"] == 1
 
 
 def test_lianji_invalid_channel_rejected():
@@ -65,7 +65,7 @@ def test_old_name_not_registered():
 def test_normalize_and_daowen_post_init():
     assert normalize_daowen_name("血债") == "连击"
     assert normalize_daowen_name("连击") == "连击"
-    dw = DaoWen(name="血债", formula="", cost_type="流血", cost_formula="X", effect_formula="")
+    dw = DaoWen(name="血债", formula="", cost_type="生命", cost_formula="X", effect_formula="")
     assert dw.name == "连击"
 
 
@@ -83,7 +83,7 @@ def test_load_migration_renames_entity_daowen(tmp_path):
     p = Entity("旧档人", "轮回者", blood_limit=60, current_hp=60, attack_count=1, attack_power=1)
     e.state.player = p
     p.dao_wen["血债"] = DaoWenInstance(
-        DaoWen(name="连击", formula="", cost_type="流血", cost_formula="X", effect_formula=""),
+        DaoWen(name="连击", formula="", cost_type="生命", cost_formula="X", effect_formula=""),
         x_value=3)
     # DaoWen.__post_init__ 已把实例名归一；此处模拟 pickle 旧档的键与实例名双旧
     p.dao_wen["血债"].dao_wen.name = "血债"
@@ -110,7 +110,7 @@ def _setup_battle(tmp_path):
     assert started["success"], started
     p = e.state.player
     p.dao_wen["连击"] = DaoWenInstance(
-        DaoWen(name="连击", formula="", cost_type="流血", cost_formula="X", effect_formula=""),
+        DaoWen(name="连击", formula="", cost_type="生命", cost_formula="X", effect_formula=""),
         x_value=0, x_free=True)
     m = Entity("靶怪", "怪物", blood_limit=80, current_hp=80, attack_count=1, attack_power=1)
     e.state.enemies[:] = [m]
@@ -131,7 +131,7 @@ def test_battle_mana_channel_laser(tmp_path):
     r = _cast(e, m, 1, "法力")
     assert r["success"], r
     assert p.current_mana == mana0 - 5       # 法力通道：5/击扣法力
-    assert p.current_hp == hp0               # 不流血
+    assert p.current_hp == hp0               # 不生命
     assert m.current_hp == 80 - 5            # 效果恒同：5击×1点
 
 
@@ -160,7 +160,7 @@ def test_battle_shard_channel_insufficient_rejected_cleanly(tmp_path):
     e.state.shards, e.state.fake_shards = 9, 0
     r = _cast(e, m, 2, "碎片")
     assert r["success"] is False
-    assert "碎片不足" in r["error"]
+    assert "无法完整承担碎片10" in r["error"]
     assert e.state.shards == 9 and m.current_hp == 80  # 未扣未伤
 
 

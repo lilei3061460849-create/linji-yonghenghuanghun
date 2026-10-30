@@ -46,11 +46,12 @@ from .mechanisms import (
     MECHANISMS, Mechanism, Phase, Trigger,
     apply_verb, relic_active, verb_names,
 )
+from .enums import normalize_payment_type, RESOURCE_TYPES
 
 CATEGORIES = ("道纹", "遗物", "法器", "消耗品")
 
 # 与《规则正文·代价》一致的可数值化代价；法力单独走法力通道。
-NUMERIC_COST_TYPES = ("流血", "衰老", "枯竭", "萎缩", "疲惫", "异变")
+NUMERIC_COST_TYPES = ("生命", "血限", "枯竭", "法限", "速度", "速限", "异变")
 SUPPORTED_COST_TYPES = ("法力",) + NUMERIC_COST_TYPES + ("碎片", "假碎片", "冷却")
 
 TARGET_TOKENS = ("self", "target", "all_enemies", "all_allies")
@@ -158,6 +159,13 @@ def validate_spec(spec: dict) -> dict:
     """校验一份声明；通过则返回深拷贝，不修改调用方对象。"""
     _require(isinstance(spec, dict), "资源声明必须是对象")
     spec = copy.deepcopy(spec)
+    # 旧存档/示例只在支付类型字段迁移；状态名、道纹名不经过别名表。
+    cost = spec.get("cost")
+    if isinstance(cost, dict) and isinstance(cost.get("type"), str):
+        cost["type"] = normalize_payment_type(cost["type"])
+    for effect in spec.get("effects", []) if isinstance(spec.get("effects"), list) else []:
+        if isinstance(effect, dict) and isinstance(effect.get("cost_type"), str):
+            effect["cost_type"] = normalize_payment_type(effect["cost_type"])
     name = spec.get("name")
     category = spec.get("category")
     _require(isinstance(name, str) and name.strip(), "name 不能为空")
@@ -472,17 +480,28 @@ def pay_custom_cost(engine, actor, instance, calc: dict) -> Optional[str]:
         return None
     combat = engine.combat
     state = engine.state
-    if cost_type in NUMERIC_COST_TYPES:
-        required = {"流血": "current_hp", "衰老": "blood_limit", "枯竭": "mana_limit",
-                    "萎缩": "speed_limit", "疲惫": "current_speed"}.get(cost_type)
-        if required is not None and getattr(actor, required, 0) < amount:
-            return (f"{cost_type}{amount}无法支付：{actor.name}当前"
-                    f"{required}为{getattr(actor, required, 0)}")
-        combat.pay_numeric_cost(
-            actor, cost_type, amount,
-            cost_context={"timing": state.combat_subphase or state.phase,
-                          "source": calc["dao_wen"], "source_type": "custom_daowen",
-                          "actor": actor, "target": actor})
+    cost_type = normalize_payment_type(cost_type)
+    if cost_type in RESOURCE_TYPES:
+        try:
+            combat.pay_resource(
+                actor, cost_type, amount,
+                cost_context={"timing": state.combat_subphase or state.phase,
+                              "source": calc["dao_wen"], "source_type": "custom_daowen",
+                              "actor": actor, "target": actor,
+                              "tags": {"active_payment"}})
+        except ValueError as exc:
+            return str(exc)
+        return None
+    if cost_type in {"枯竭", "异变"}:
+        try:
+            combat.pay_numeric_cost(
+                actor, cost_type, amount,
+                cost_context={"timing": state.combat_subphase or state.phase,
+                              "source": calc["dao_wen"], "source_type": "custom_daowen",
+                              "actor": actor, "target": actor,
+                              "tags": {"active_payment"}})
+        except ValueError as exc:
+            return str(exc)
         return None
     if cost_type == "碎片":
         if state.on_player_side(actor):

@@ -17,7 +17,7 @@
     [回终]：[回终]类效果结算→格挡清空→持续X剩余回合-1→本回合资源面板
 
     [战终]
-    死亡结算→[碎片]奖励计算→增益与减益清除→代价保留项→[朋友][员工]留存与[临时朋友]消失→精力恢复
+    死亡结算→[碎片]奖励计算→增益与减益清除→代价保留项→[朋友][员工]留存与[造物]消失→精力恢复
 
 设计约束（对应 推演铁律）：
 1. 本模块只做"排版"，不产生任何数值。所有数字均取自引擎返回的结果字典 /
@@ -216,10 +216,10 @@ def _render_effect(eff: dict | str) -> str:
     if t == "shield":
         return f"{eff.get('target') or eff.get('entity')} 获得格挡 {eff.get('amount')}"
     if t == "bleed_cost":
-        return (f"{eff.get('source') or eff.get('entity')} 支付【流血】代价 "
+        return (f"{eff.get('source') or eff.get('entity')} 支付【生命】 "
                 f"{eff.get('actual_damage')}，生命{eff.get('hp_before')}→{eff.get('hp_after')}")
     if t == "aging_cost":
-        return f"{eff.get('entity') or eff.get('source')} 支付【衰老】代价 {eff.get('amount')}"
+        return f"{eff.get('entity') or eff.get('source')} 支付【血限】 {eff.get('amount')}"
     if t == "mana_gain":
         return f"{eff.get('entity') or eff.get('target')} 获得法力 {eff.get('amount')}"
     if t == "status_added":
@@ -240,7 +240,7 @@ def _render_effect(eff: dict | str) -> str:
     if t == "blood_lineage_heal":
         return f"{eff.get('entity')} 触发【血族血脉】：[回复]{eff.get('amount')}"
     if t == "blood_lineage_bleed":
-        return f"{eff.get('entity')} 触发【血族血脉】：流血{eff.get('amount')}"
+        return f"{eff.get('entity')} 触发【血族血脉】：支付生命{eff.get('amount')}"
     if t == "seal":
         return (f"{eff.get('target')} 被【封印】暂离，延后{eff.get('delay_rounds')}回合"
                 f"于第{eff.get('return_round')}回合始再入场")
@@ -415,7 +415,7 @@ def format_battle_end(be_result: dict) -> list[str]:
     lines.append("代价保留项：代价不随[战终]清除")
     for log in r.get("relic_end_logs", []) or []:
         lines.append(f"  → 遗物[战终]：{log}")
-    lines.append("[朋友][员工]留存，[临时朋友]消失")
+    lines.append("[朋友][员工]留存，[造物]消失")
     lines.append(f"精力恢复：{r.get('energy_restored')}")
     return lines
 

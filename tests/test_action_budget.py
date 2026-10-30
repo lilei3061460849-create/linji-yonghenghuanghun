@@ -2,8 +2,8 @@
 pytest 风格测试 - 里程碑4b：出手预算校验
 
 DM裁定记录：
-- 出手次数：所有角色都按`action_count`（基础2次 +【疯狂】/【无力】/【蓄锐·增】等修正）；
-  怪物走独立的 run_monster_phase（基础 2 槽），不受此约束。
+- 出手次数：所有角色按`action_count`（基础1次 +【疯狂】/【无力】/【蓄锐·增】等修正）；
+  造物不另设上限；怪物与玩家侧共用交替优先权及同一预算。
 - 普攻本身不消耗速度；速度消耗只来自正文明确的闪避等机制。
 - 消耗1出手的动作：attack、use_daowen(含指挥朋友/员工)、deploy_employee(消耗玩家的出手)、
   declare_wish；declare_escape（逃跑）一次付清5出手（2026-10-13 改制）。
@@ -16,7 +16,7 @@ DM裁定记录：
 import os
 import sys
 
-from tests.setup_support import finish_initial_daowen
+from tests.setup_support import finish_initial_daowen, grant_extra_actions
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
@@ -24,11 +24,17 @@ import pytest
 from tests.attack_support import resolve_attack as resolve_player_attack
 from tests.monster_phase_support import resolve_monster_phase
 from engine.api import GameEngine
-from engine.models import Entity, DaoWen, DaoWenInstance, Consumable
+from engine.models import Entity, DaoWen, DaoWenInstance, Consumable, StatusEffect, Relic
 
 
 def _give_daowen(entity: Entity, name: str):
     entity.dao_wen[name] = DaoWenInstance(DaoWen(name=name, formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
+
+
+def _isolate_player_budget(engine):
+    """预算单元测试显式给回玩家优先权；交替行为由窗口专项另行验证。"""
+    engine.state.duel_turn = "player_side"
+    engine.state.combat_subphase = "player_actions"
 
 
 def _new_engine(db_suffix: str, speed_points: int = 8) -> GameEngine:
@@ -56,7 +62,7 @@ def _new_engine(db_suffix: str, speed_points: int = 8) -> GameEngine:
                                         blood_limit=10 ** 7, current_hp=10 ** 7,
                                         attack_count=1, attack_power=1))
     engine.execute_action("round_start", {})
-    # 本夹具测基础2出手，不能让随机发现的【沉重枷锁】把全场预算减1。
+    # 本夹具只测基础1出手，清空随机遗物以隔离其他被动效果。
     engine.state.relics.clear()
     engine.state.player.current_mana = 999
     return engine
@@ -67,53 +73,81 @@ def _new_engine(db_suffix: str, speed_points: int = 8) -> GameEngine:
 # ========================================================================
 
 def test_player_action_count_formula_and_budget_enforced():
-    """正常路径：轮回者出手预算固定2次（DM裁定 2026-09-10，不再由速限换算），用满后第3次被拒绝"""
+    """所有角色基础1出手；用后既不能抢优先权，也没有第二份预算。"""
     engine = _new_engine("player_budget", speed_points=8)
     player = engine.state.player
-    assert player.action_count == 2
-    for i in range(2):
-        r = resolve_player_attack(engine, player.name, [])
-        assert r["success"] is True, f"第{i+1}次攻击应成功: {r}"
-    r4 = resolve_player_attack(engine, player.name, [])
-    assert r4["success"] is False
-    assert "出手已用完" in r4["error"]
+    assert player.action_count == 1
+    first = resolve_player_attack(engine, player.name, [])
+    assert first["success"] is True, first
+    assert player.actions_used_this_round == 1
+    second = resolve_player_attack(engine, player.name, [])
+    assert second["success"] is False
+    assert "出手" in second["error"]
 
 
 def test_budget_resets_at_round_start():
-    """正常路径：用完预算后，下一回合round_start必须重置，可以继续行动"""
-    engine = _new_engine("reset_budget")   # 轮回者固定2次出手
+    """正常路径：用完基础1手后，下一回合round_start必须重置。"""
+    engine = _new_engine("reset_budget")
     player = engine.state.player
-    assert player.action_count == 2
+    assert player.action_count == 1
     r1 = resolve_player_attack(engine, player.name, [])
     assert r1["success"] is True
-    resolve_player_attack(engine, player.name, [])   # 第2次用满预算
     r2 = resolve_player_attack(engine, player.name, [])
     assert r2["success"] is False
 
-    resolve_monster_phase(engine.combat, {"靶怪": None})
-    engine.state.combat_subphase = "await_round_end"  # 单元测试直接调用CombatEngine，手动同步API子阶段
+    engine.state.combat_subphase = "await_round_end"  # 单元测试直接同步API子阶段
     engine.execute_action("round_end", {})
     engine.execute_action("round_start", {})
     r3 = resolve_player_attack(engine, player.name, [])
     assert r3["success"] is True, "新回合应重置出手预算"
 
 
-def test_ally_action_count_is_fixed_two_like_everyone():
-    """2026-09-16 用户令：全体角色出手次数固定 2 次，与攻击次数/速限都无关。
+def test_heavy_shackles_is_triggered_by_explicit_skip_only():
+    """主动跳过触发当前回合扣减，并返回实际生效清单。"""
+    engine = _new_engine("heavy_shackles_skip")
+    player = engine.state.player
+    monster = engine.state.enemies[0]
+    engine.state.relics.append(Relic("沉重枷锁", ""))
+    monster.add_status(StatusEffect("疯狂", 1, 1, "test"))
+    player.hostile_targeters_this_battle.add(monster.runtime_id)
+    monster.actions_used_this_round = 1  # 已用一手，剩一手准备留到后手
+    assert engine._action_budget_of(monster) == 2
 
-    旧口径「微光者出手 = 攻击次数/3」已废止——该式会让高攻次微光者白拿第 3、4 次出手，
-    违反"出手不再与攻击次数挂钩"的裁定。唯一额外来源是遗物（【疯狂】+X 照旧）。
-    """
+    result = engine.execute_action("skip", {"actor_ref": "player:0"})
+
+    assert result["success"] is True, result
+    assert result["result"]["heavy_shackles"][0]["target"] == monster.name
+    assert result["result"]["heavy_shackles"][0]["remaining_after"] == 0
+    assert engine._action_budget_of(monster) == 1
+    assert monster.actions_used_this_round == 1, "扣的是剩余预算，不篡改已发生的行动"
+    assert engine._action_budget_of(player) == 1
+
+
+def test_ally_action_count_is_fixed_one_like_everyone():
+    """全体角色基础1次，与攻击次数/速限无关；额外来源只走通用修正。"""
     engine = _new_engine("ally_formula")
     friend = Entity(name="力士", entity_type="朋友", blood_limit=40, current_hp=40,
                      attack_count=7, attack_power=3, speed_limit=0)
     engine.state.friends.append(friend)
-    assert friend.action_count == 2, "出手固定2次，攻次7不再推导出3"
+    assert friend.action_count == 1, "基础出手固定1次，攻次7不增加预算"
+
+
+def test_creation_uses_common_action_budget_without_special_cap():
+    creation = Entity("造物", "造物", blood_limit=1, current_hp=1,
+                      mana_limit=1, current_mana=1, speed_limit=1, current_speed=1)
+    assert creation.action_count == 1
+    creation.add_status(StatusEffect("疯狂", 3, 1, "test"))
+    creation.add_status(StatusEffect("蓄锐·增", 2, 1, "test"))
+    assert creation.action_count == 3  # 两个通用+1修正均保留，无造物专用夹顶
+
+    weakened = Entity("无力造物", "造物", blood_limit=1, current_hp=1)
+    weakened.add_status(StatusEffect("无力", 1, 1, "test"))
+    assert weakened.action_count == 0
 
 
 def test_deploy_employee_consumes_player_budget_not_employee():
     """正常路径：deploy_employee扣的是玩家的出手，不是被部署员工的出手"""
-    engine = _new_engine("deploy_budget")   # 玩家固定2次出手
+    engine = _new_engine("deploy_budget")   # 玩家基础1次出手
     engine.state.employees.append(Entity(
         name="小李", entity_type="员工", blood_limit=96, current_hp=96,
         attack_count=4, attack_power=8, is_deployed=False,
@@ -122,9 +156,8 @@ def test_deploy_employee_consumes_player_budget_not_employee():
     r = engine.execute_action("deploy_employee", {"name": "小李"})
     assert r["success"] is True
     assert player.actions_used_this_round == 1
-    resolve_player_attack(engine, player.name, [])   # 第2次用满
     r2 = resolve_player_attack(engine, player.name, [])
-    assert r2["success"] is False, "玩家2次出手已被 deploy_employee + 攻击 用掉，不应再能攻击"
+    assert r2["success"] is False, "deploy_employee已用掉基础1手，且优先权已让出"
 
 
 def test_consume_item_and_resonance_do_not_consume_budget():
@@ -150,11 +183,13 @@ def test_consume_item_and_resonance_do_not_consume_budget():
 
 def test_ally_command_daowen_shares_same_budget_pool_as_attack():
     """边界：同一实体的攻击与道纹共用同一份出手预算，不是分别独立计数"""
-    engine = _new_engine("shared_pool")   # 固定2次出手
+    engine = _new_engine("shared_pool")
     player = engine.state.player
+    grant_extra_actions(player, 1)  # 夹具补到2手，验证攻击/道纹确实共用同一池
     player.dao_wen["杀伐"] = DaoWenInstance(DaoWen(name="杀伐", formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
     r1 = resolve_player_attack(engine, player.name, [])
     assert r1["success"] is True
+    assert engine.execute_action("skip", {"actor_ref": "enemy:0"})["success"]
     r2 = engine.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 1, "target": "靶怪"})
     assert r2["success"] is True, "第2次出手仍可发动道纹（与攻击共用同一份预算）"
     r3 = engine.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 1, "target": "靶怪"})
@@ -183,6 +218,7 @@ def test_declare_wish_and_escape_consume_budget_and_reject_when_exhausted():
     player = engine.state.player
     for _ in range(player.action_count):        # 用光全部出手
         resolve_player_attack(engine, player.name, [])
+    _isolate_player_budget(engine)
     r_wit = engine.execute_action("declare_wish", {"wish_text": "愿望测试", "target_ref": "enemy:0"})
     assert r_wit["success"] is False
     assert "出手已用完" in r_wit["error"]
@@ -231,17 +267,14 @@ def test_deploy_employee_rejected_when_player_budget_exhausted():
     assert emp.is_deployed is False, "预算不足时不应部署成功"
 
 
-def test_rules_text_gives_every_role_the_same_base_two_slots():
-    """规则正文的[速限]条目必须与引擎一致：全体基础 2 次，不再有攻击次数/3 的旧式。
-
-    2026-10-25：正文残留「[朋友]/[员工] = [攻击次数] / 3」，而 Entity.action_count
-    对所有角色都是 2 +【疯狂】/【无力】/【蓄锐·增】。以正文为准会让 DM 给错预算。
-    """
+def test_rules_text_gives_every_role_one_base_action_without_creation_cap():
+    """[速限]条目须写明全体基础1手，且不得恢复造物专用夹顶。"""
     from pathlib import Path
 
     rules = (Path(__file__).resolve().parents[1] / "规则正文.md").read_text(encoding="utf-8")
     line = next(l for l in rules.splitlines() if l.startswith("[速限]（速度上限）："))
-    assert "所有角色的出手预算都是基础 2 次" in line
+    assert "所有角色的出手预算基础均为 1 次" in line
+    assert "[造物]不另设专用上限" in line
     assert "攻击次数" not in line
 
 

@@ -41,6 +41,7 @@
 """
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
@@ -104,6 +105,7 @@ class InterruptReason(str, Enum):
     SHARDS_INSUFFICIENT = "shards_insufficient"
     CASTER_DEAD = "caster_dead"
     CASTER_UNAVAILABLE = "caster_unavailable"
+    ACTION_INSUFFICIENT = "action_insufficient"
     TRIGGER_CHOICES_INVALID = "trigger_choices_invalid"
     # 工程安全阀：循环次数超过 MAX_SPELL_LOOP_ITERATIONS。
     # 正常规则循环不会触达；触达说明程序不满足任何规则终止条件。
@@ -292,7 +294,8 @@ class SpellExecution:
     def __init__(self, engine, definition: SpellDefinition, caster,
                  attacker, refs: dict[str, Any], request: SpellCastRequest,
                  *, trigger_label: str = "", policy: Optional[SpellStepPolicy] = None,
-                 target_resolver=None, skip_predicate=None, on_step=None):
+                 target_resolver=None, skip_predicate=None, on_step=None,
+                 before_step=None):
         self.engine = engine
         self.definition = definition
         self.caster = caster
@@ -304,6 +307,9 @@ class SpellExecution:
         self.target_resolver = target_resolver
         self.skip_predicate = skip_predicate
         self.on_step = on_step   # callback(StepResult) 每步结束后调用
+        # 主动施法逐步支付：callback(step, index) -> None/错误文本。
+        # 自动反应不传此回调，仍按各自既有规则结算。
+        self.before_step = before_step
 
         self.status: ExecutionStatus = ExecutionStatus.RUNNING
         self.interrupt_reason: InterruptReason = InterruptReason.NONE
@@ -319,6 +325,11 @@ class SpellExecution:
         # （包括循环的每一轮）始终按当前状态重新求值。
         self._frozen_at_start = dict(request.branch_snapshot or {})
         self._run_decisions: dict[str, int] = {}
+        # 可暂停施法的生成器；只在首次推进时创建，暂停不会丢失控制流位置。
+        self._driver = None
+        # 读档恢复：只重放已记录的控制流/结果，不重新支付或执行效果。
+        self._replay_mode = False
+        self._replay_results = []
 
     # -- 快捷访问 --
     @property
@@ -331,16 +342,60 @@ class SpellExecution:
         self.interrupt_detail = detail
 
     # -- 主驱动 --
-    def run_all(self) -> list[StepResult]:
-        """执行整段程序；遇中断/失败立即停机，已完成步骤保留。"""
-        self._run_steps(self.definition.body, iteration=0)
+    def _drive(self):
+        """生成器驱动：每完成一个效果步骤就让出一次，保留全部控制栈。"""
+        yield from self._run_steps(self.definition.body, iteration=0)
         # 事件级分支冻结：把本次首轮做过的分支选择写回提交对象（原地）。
         if self.request.branch_snapshot is not None:
             for key, choice in self._run_decisions.items():
                 self.request.branch_snapshot.setdefault(key, choice)
         if self.status == ExecutionStatus.RUNNING:
             self.status = ExecutionStatus.COMPLETED
+
+    def run_all(self) -> list[StepResult]:
+        """执行剩余全部程序；兼容自动反应等不需要交互空档的调用方。"""
+        if not self.is_running:
+            return self.results
+        if self._driver is None:
+            self._driver = self._drive()
+        for _ in self._driver:
+            pass
         return self.results
+
+    def run_to_window(self) -> list[StepResult]:
+        """推进到下一个施法空档；最后一步后的空档也会先暂停，再续跑收尾。"""
+        if not self.is_running:
+            return []
+        if self._driver is None:
+            self._driver = self._drive()
+        before = len(self.results)
+        try:
+            next(self._driver)
+        except StopIteration:
+            pass
+        return self.results[before:]
+
+    def restore_paused(self, results: list[StepResult],
+                       run_decisions: dict[str, int]) -> None:
+        """从存档记录重建到同一空档；重放不触发任何支付、效果或回调。"""
+        if self._driver is not None or self.results or not self.is_running:
+            raise ValueError("只能恢复尚未推进的新执行器")
+        if not results:
+            raise ValueError("暂停施法至少需要一条已结算步骤记录")
+        self._replay_results = list(results)
+        self._frozen_at_start = dict(run_decisions)
+        self._run_decisions = dict(run_decisions)
+        self._replay_mode = True
+        self._driver = self._drive()
+        while self._replay_results:
+            try:
+                next(self._driver)
+            except StopIteration as exc:
+                self._replay_mode = False
+                raise ValueError("施法存档的控制流与步骤记录不一致") from exc
+        self._replay_mode = False
+        if not self.is_running:
+            raise ValueError("暂停施法存档意外进入了终止状态")
 
     # -- 控制流 --
     def _run_steps(self, steps, *, iteration: int) -> None:
@@ -355,10 +410,17 @@ class SpellExecution:
                 return
             if isinstance(step, ActionStep):
                 self._run_action(step, iteration=iteration)
+                # 重放前缀时不在历史空档停留；最后一条记录后恢复到原空档。
+                if self._replay_mode and not self._replay_results:
+                    self._replay_mode = False
+                if not self._replay_mode:
+                    # 无论本步完成、闪避或条件跳过，都公开一个真实施法空档；
+                    # 中断/失败也会先让出，由上层决定是否还需要继续调度。
+                    yield self.results[-1] if self.results else None
             elif isinstance(step, IfStep):
-                self._run_if(step, iteration=iteration)
+                yield from self._run_if(step, iteration=iteration)
             elif isinstance(step, LoopStep):
-                self._run_loop(step, iteration=iteration)
+                yield from self._run_loop(step, iteration=iteration)
             else:  # 非法 AST = 程序错误，不伪装成游戏中断
                 self._stop(ExecutionStatus.FAILED, InterruptReason.INVALID_INPUT,
                            f"未知步骤类型: {step!r}")
@@ -373,7 +435,7 @@ class SpellExecution:
             if self.is_running:
                 self._run_decisions.setdefault(key, taken)
         branch = node.then_steps if taken == 0 else node.else_steps
-        self._run_steps(branch, iteration=iteration)
+        yield from self._run_steps(branch, iteration=iteration)
 
     def _run_loop(self, node: LoopStep, *, iteration: int) -> None:
         rounds = 0
@@ -389,7 +451,7 @@ class SpellExecution:
                 bound = (self.request.max_iterations if bound is None
                          else min(bound, self.request.max_iterations))
             guard = getattr(self.engine, "spell_loop_guard", None)
-            if guard is not None:
+            if guard is not None and not self._replay_mode:
                 stop, reason = guard(self.definition, self.caster, self.attacker)
                 if stop:
                     self.loop_stop_reason = reason
@@ -405,7 +467,8 @@ class SpellExecution:
             rounds += 1
             self.loop_iterations = rounds
             executed_before = self._executed_count()
-            self._run_steps(node.body, iteration=rounds if iteration == 0 else iteration)
+            yield from self._run_steps(
+                node.body, iteration=rounds if iteration == 0 else iteration)
             if not self.is_running:
                 break
             if self._executed_count() == executed_before:
@@ -450,24 +513,57 @@ class SpellExecution:
                        f"步骤未登记进决策索引表: {step!r}")
             return
         entry = self.request.steps[index] if index < len(self.request.steps) else StepRequest()
-        result = self.engine._execute_single_daowen_step(
-            definition=self.definition,
-            step=step,
-            entry=entry,
-            caster=self.caster,
-            attacker=self.attacker,
-            refs=self.refs,
-            trigger_label=self.trigger_label,
-            target_resolver=self.target_resolver,
-            skip_predicate=self.skip_predicate,
-            policy=self.policy,
-            step_key=str(index),
-            iteration=iteration,
-        )
+        if self._replay_mode and self._replay_results:
+            recorded = self._replay_results.pop(0)
+            if (recorded.step_key != str(index)
+                    or int(recorded.iteration or 0) != int(iteration or 0)):
+                raise ValueError(
+                    f"施法存档步骤错位: 记录{recorded.step_key}/{recorded.iteration}，"
+                    f"控制流{index}/{iteration}")
+            result = copy.deepcopy(recorded)
+            payment_error = None
+        else:
+            payment_error = (self.before_step(step, index)
+                             if self.before_step is not None else None)
+        if self._replay_mode:
+            pass  # 上面已恢复记录；不得重新支付或执行效果。
+        elif payment_error:
+            if isinstance(payment_error, dict):
+                reason = InterruptReason(payment_error.get(
+                    "reason", InterruptReason.ACTION_INSUFFICIENT.value))
+                detail = str(payment_error.get("detail", "步骤无法继续"))
+            else:
+                reason = InterruptReason.ACTION_INSUFFICIENT
+                detail = str(payment_error)
+            result = StepResult(
+                status=StepStatus.INTERRUPTED,
+                daowen=getattr(step, "daowen", ""), x=getattr(entry, "x", 0),
+                reason=reason, detail=detail, iteration=iteration,
+                step_key=str(index),
+            )
+        else:
+            result = self.engine._execute_single_daowen_step(
+                definition=self.definition,
+                step=step,
+                entry=entry,
+                caster=self.caster,
+                attacker=self.attacker,
+                refs=self.refs,
+                trigger_label=self.trigger_label,
+                target_resolver=self.target_resolver,
+                skip_predicate=self.skip_predicate,
+                policy=self.policy,
+                step_key=str(index),
+                iteration=iteration,
+            )
+        if not result.step_key:
+            result.step_key = str(index)
+        if not result.iteration:
+            result.iteration = iteration
         self.results.append(result)
         self.step_extras.append(
             {"trigger_spell_logs": list(result.trigger_spell_logs or [])})
-        if self.on_step is not None:
+        if self.on_step is not None and not self._replay_mode:
             self.on_step(result)
         if result.status in (StepStatus.INTERRUPTED, StepStatus.FAILED):
             self._stop(

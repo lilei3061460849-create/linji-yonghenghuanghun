@@ -1,5 +1,5 @@
 """
-罪孽都市（点金/典当/豪夺/清算/消灾/假钞）与扭曲都市（爆裂/退化）的道纹实装。原道纹【赌命】已改为遗物【灾厄轮盘】，专项见 test_zui_ledger_migration。
+罪孽都市（点金/典当/豪夺/假钞）与扭曲都市现行机制，以及逆命筹和退役道纹护栏。原道纹【赌命】已改为遗物【灾厄轮盘】，专项见 test_zui_ledger_migration。
 2026-10-13：【逼债】删除，【典当】顶替其闭环格。
 - 正常：按《副本/罪孽都市.md》《副本/扭曲都市.md》定义结算
 - 边界：碎片不足/无遗物/无碎片/反噬致死/退化归零等
@@ -13,7 +13,7 @@ from tests.setup_support import finish_initial_daowen
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
-from engine.models import Entity, DaoWen, DaoWenInstance, Relic, StatusEffect
+from engine.models import Consumable, Entity, DaoWen, DaoWenInstance, Relic, StatusEffect
 from engine.combat import CombatEngine
 from engine.dice import DiceEngine
 from engine.daowen import DaoWenEngine
@@ -179,18 +179,17 @@ def test_monster_diandang_grants_instantly_without_pending():
     assert engine.state.pending_diandang_discoveries == []
 
 
-def test_boundary_battle_end_clears_ledger():
-    """[战终]必须清除清算挂账与封印遗物，否则跨场残留继续扣减玩家"""
+def test_boundary_battle_end_clears_sealed_relics_without_qingsuan():
+    """[战终]仍清封印遗物；已删除的清算不再产生或保留挂账。"""
     engine = _setup()
     player = engine.state.player
     m = _add_monster(engine, shards=0)
-    _apply_monster_daowen(engine, m, "清算", 1, player)
     engine.state.sealed_relics = {"避风铃": 3}
-    assert player._qingsuan
+    assert not hasattr(player, "_qingsuan")
     m.current_hp = 0
     m.is_alive = False
     engine.execute_action("battle_end")
-    assert player._qingsuan == [], "战终应清算算挂账"
+    assert not hasattr(player, "_qingsuan")
     assert engine.state.sealed_relics == {}, "战终应清封印遗物"
 
 
@@ -237,69 +236,72 @@ def test_legacy_dikou_name_rejected():
     assert r["success"] is False, "旧名【抵扣】已废弃，必须用新名【豪夺】"
 
 
-# ==================== 清算 ====================
+# ==================== 清算（已删除，不保留替代效果） ====================
 
-def test_normal_qingsuan_drains_shield_each_round_start():
-    engine = _setup(); _grant(engine, ["清算"])
+def test_qingsuan_daowen_is_retired_and_cannot_drain_shield():
+    engine = _setup(); _grant(engine, ["清算"])  # 模拟旧存档残留
     m = _add_monster(engine, shards=0)
     m.shield = 50
     r = engine.execute_action("use_daowen", {"daowen_name": "清算", "x": 2, "target": m.name})
-    assert r["success"], r
-    assert m.shield == 50  # 发动瞬间不结算
+    assert not r["success"]
     engine.combat.round_start()
-    assert m.shield == 50 - 20, f"应失[你碎片=20]格挡，实{m.shield}"  # 玩家初始碎片20
+    assert m.shield == 50
+    assert "清算" not in DaoWenEngine._registry
 
 
-def test_boundary_qingsuan_zero_shield():
-    engine = _setup(); _grant(engine, ["清算"])
-    m = _add_monster(engine, shards=0)
-    m.shield = 0
-    engine.execute_action("use_daowen", {"daowen_name": "清算", "x": 2, "target": m.name})
-    engine.combat.round_start()
-    assert m.shield == 0
+# ==================== 逆命筹（原消灾转换的消耗品） ====================
+
+def _give_nimingchou(engine, uses=1):
+    item = Consumable(name="逆命筹", effect="下一次随机结算重投",
+                      current_uses=uses, max_uses=1)
+    engine.state.consumables.append(item)
+    return item
 
 
-# ==================== 消灾 ====================
-
-def test_normal_xiaozai_rerolls_next_auto_roll():
-    engine = _setup(); _grant(engine, ["消灾"])
+def test_normal_nimingchou_rerolls_next_auto_roll():
+    engine = _setup()
+    item = _give_nimingchou(engine)
     engine.state.fake_shards = 60
-    r = engine.execute_action("use_daowen", {"daowen_name": "消灾", "x": 1})
+    r = engine.execute_action("consume_item", {"name": "逆命筹"})
     assert r["success"], r
-    assert engine.state.fake_shards == 60 - 50, "应优先扣50X假碎片"
+    assert item.current_uses == 0
+    assert engine.state.fake_shards == 60, "消耗品只扣耐久，不沿用旧道纹碎片价格"
     assert engine.dice.rerolls_pending == 1
     roll = engine.dice.auto_roll("t", ["a", "b", "c"])
     assert roll["rerolled"] is True, "下一次自动随机应被重投"
     assert engine.dice.rerolls_pending == 0
 
 
-def test_boundary_xiaozai_real_payment_fallback():
-    engine = _setup(); _grant(engine, ["消灾"])
+def test_nimingchou_does_not_spend_real_shards():
+    engine = _setup()
+    _give_nimingchou(engine)
     engine.state.shards = 10
     engine.state.fake_shards = 0
-    r = engine.execute_action("use_daowen", {"daowen_name": "消灾", "x": 1})
+    r = engine.execute_action("consume_item", {"name": "逆命筹"})
     assert r["success"], r
-    assert engine.state.shards == 10 - 5, "无假碎片时按5X真碎片付费"
+    assert engine.state.shards == 10
     assert engine.dice.rerolls_pending == 1
 
 
-def test_boundary_xiaozai_out_of_combat_double_cost():
-    engine = _setup(); _grant(engine, ["消灾"])
-    engine.state.phase = "pre_battle"  # 局外
+def test_nimingchou_out_of_combat_has_same_durability_cost():
+    engine = _setup()
+    item = _give_nimingchou(engine)
+    engine.state.phase = "pre_battle"
     engine.state.shards = 10
-    engine.state.fake_shards = 0
-    r = engine.execute_action("use_daowen", {"daowen_name": "消灾", "x": 1})
+    r = engine.execute_action("consume_item", {"name": "逆命筹"})
     assert r["success"], r
-    assert engine.state.shards == 10 - 10, "局外发动消耗×2：5X→10X"
+    assert item.current_uses == 0
+    assert engine.state.shards == 10
 
 
-def test_error_xiaozai_insufficient_funds_rejected():
-    engine = _setup(); _grant(engine, ["消灾"])
+def test_error_nimingchou_depleted_is_rejected_without_shard_cost():
+    engine = _setup()
+    _give_nimingchou(engine, uses=0)
     engine.state.shards = 4
-    engine.state.fake_shards = 0
-    r = engine.execute_action("use_daowen", {"daowen_name": "消灾", "x": 1})
-    assert not r["success"], "碎片不足应被拒绝"
-    assert "碎片不足" in r.get("error", "")
+    r = engine.execute_action("consume_item", {"name": "逆命筹"})
+    assert not r["success"]
+    assert engine.state.shards == 4
+    assert engine.dice.rerolls_pending == 0
 
 
 # ==================== 假钞 ====================

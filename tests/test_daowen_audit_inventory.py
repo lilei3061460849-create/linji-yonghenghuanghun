@@ -64,23 +64,25 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('| A09 | 馈赠、受击次数供法力', scraps)
         self.assertIn('使目标受击时获得X点法力，持续∞', scraps)
 
-    def test_round_blocking_moves_to_unnamed_sea_reversal(self):
+    def test_round_blocking_is_implemented_sea_reversal(self):
         sea = (ROOT / '副本/沉沦海.md').read_text(encoding='utf-8')
         night = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
         self.assertIn('大梦X ⇄（反转）【沉溺X】', sea)
+        self.assertIn('7.沉溺X（大梦反转分支）：支付：法力10X。', sea)
         self.assertIn('使[目标]无法经历X个回合。', sea)
         self.assertIn('中断该次回合，并使剩余阻断次数-1', sea)
         self.assertIn('普通回合与大梦产生的额外回合均适用', sea)
-        self.assertIn('名称已定为沉溺，支付待定', sea)
+        self.assertNotIn('沉溺尚未接入', sea)
+        self.assertNotIn('沉溺，支付待定', sea)
         self.assertIn('3.长夜X：效果待重做', night)
         self.assertNotIn('使[目标]无法经历回合，持续X', night)
-        row = next(r for r in self.rows if r['name'] == '长夜')
-        self.assertEqual(row['review'], '语义待定')
-        design = json.loads(AUDIT.read_text(encoding='utf-8'))['pending_designs'][0]
-        self.assertEqual(design['name'], '沉溺')
-        self.assertIsNone(design['cost'])
-        self.assertFalse(design['runtime'])
-        self.assertIn(design['effect'], sea)
+        long_night = next(r for r in self.rows if r['name'] == '长夜')
+        self.assertEqual(long_night['review'], '语义待定')
+        row = next(r for r in self.rows if r['name'] == '沉溺')
+        self.assertTrue(row['runtime'])
+        self.assertEqual(row['review'], '暂未发现结构违规')
+        pending = json.loads(AUDIT.read_text(encoding='utf-8'))['pending_designs']
+        self.assertNotIn('沉溺', {design['name'] for design in pending})
 
     def test_undying_draft_uses_cooldown_and_life_floor(self):
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
@@ -93,7 +95,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
 
     def test_eternal_life_swap_has_no_healing_exemption(self):
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
-        self.assertIn('5.永生X：支付：衰老10X。使[目标]的当前生命与已损生命互换，持续X。', dungeon)
+        self.assertIn('5.永生X：支付：血限10X。使[目标]的当前生命与已损生命互换，持续X。', dungeon)
         self.assertIn('生命增加视为回复，生命减少视为失血', dungeon)
         self.assertNotIn('［回终］［回复］你的所有已损生命', dungeon)
         self.assertIn('恢复至本次互换发生前记录的当前生命', dungeon)
@@ -104,25 +106,28 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertEqual(row['review'], '语义待定')
 
     def test_pact_names_do_not_reuse_the_wrong_mechanism(self):
-        from engine.gamedata import UNIMPLEMENTED_DAOWEN
+        from engine.gamedata import UNIMPLEMENTED_DAOWEN, UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN
         DaoWenEngine.register_all()
         self.assertIn('共罪', DaoWenEngine._registry)
-        self.assertNotIn('血契', DaoWenEngine._registry)
-        self.assertIn('血契', UNIMPLEMENTED_DAOWEN)
+        self.assertIn('血契', DaoWenEngine._registry)
+        self.assertNotIn('血契', UNIMPLEMENTED_DAOWEN)
+        self.assertEqual(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN['血契'], '永夜庭')
         calc = DaoWenEngine.resolve('共罪', 2)
         self.assertEqual(calc['dao_wen'], '共罪')
-        self.assertEqual(calc['mark_targets'], 2)
-        self.assertEqual(calc['cost_type'], '流血')
-        self.assertEqual(calc['cost_hp'], 10)
-        self.assertNotIn('cost', calc)
-        self.assertEqual(calc['duration'], -1)
+        self.assertNotIn('mark_targets', calc)
+        self.assertEqual(calc['cost_type'], '消耗')
+        self.assertEqual(calc['cost'], 2)
+        self.assertEqual(calc['duration'], 2)
+        pact = DaoWenEngine.resolve('血契', 2)
+        self.assertEqual(pact['blood_pact_multiplier'], 2)
+        self.assertEqual(pact['cost'], 2)
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
-        self.assertIn('6.血契X：支付：法力10X。使[目标]替你支付代价，持续X。', dungeon)
-        self.assertNotIn('组内其他目标同步支付相同代价', dungeon)
+        self.assertIn('6.血契X：支付：法力X。你支付资源时，[目标]额外支付X倍同种名义资源，持续X；', dungeon)
+        self.assertNotIn('使[目标]替你支付代价', dungeon)
         self.assertIn('获得道纹[共罪]', dungeon)
         by_name = {r['name']: r for r in self.rows}
         self.assertTrue(by_name['共罪']['runtime'])
-        self.assertFalse(by_name['血契']['runtime'])
+        self.assertTrue(by_name['血契']['runtime'])
 
     def test_retired_life_loss_daowen_does_not_delete_life_loss_rules(self):
         self.assertNotIn('失血', {r['name'] for r in self.rows})
@@ -156,12 +161,17 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         dungeon = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
         self.assertIn('1.感染X（核心起点/终点）：支付待定。使[目标]的X种道纹变为感染。', dungeon)
         self.assertIn('后续感染仍须主动发动并支付代价，不会自动传播', dungeon)
-        self.assertIn('2.辨认一龛：衰老10。选择自身一种被【感染】替换的道纹，使其恢复为被感染前的原版道纹。', dungeon)
+        self.assertIn('2.辨认一龛：血限10。选择自身一种被【感染】替换的道纹，使其恢复为被感染前的原版道纹。', dungeon)
         self.assertNotIn('选择自身一种【尘封】', dungeon)
         self.assertNotIn('支付：法力3X。使[目标]获得X层【异变】', dungeon)
-        self.assertIn('5.尘封X：保留名称及闭环位置，效果与支付待定', dungeon)
+        self.assertIn('5.唯一X：支付：法力5X。使[目标]无法使用用过的道纹，持续X。', dungeon)
+        self.assertIn('唯一替换原【尘封】草案', dungeon)
+        self.assertNotIn('5.尘封X：', dungeon)
         self.assertNotRegex(dungeon, r'，尘封[，）]')
-        row = next(r for r in self.rows if r['name'] == '感染')
+        by_name = {r['name']: r for r in self.rows}
+        self.assertNotIn('尘封', by_name)
+        self.assertTrue(by_name['唯一']['runtime'])
+        row = by_name['感染']
         self.assertFalse(row['runtime'])
         self.assertIn('新效果支付待定', row['tags'])
         self.assertIn('| A11 | 感染旧效、主动赋予异变',
@@ -169,14 +179,14 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
 
     def test_excavation_is_retained_as_transformation_rule(self):
         dungeon = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
-        self.assertIn('3.出土X：支付：流血10X。自身接下来X次道纹变化保留原道纹。', dungeon)
+        self.assertIn('3.出土X：支付：生命10X。自身接下来X次道纹变化保留原道纹。', dungeon)
         row = next(r for r in self.rows if r['name'] == '出土')
         self.assertEqual(row['review'], '暂未发现结构违规')
         self.assertTrue(row['runtime'])
 
     def test_tampering_retains_target_selection_rule(self):
         dungeon = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
-        self.assertIn('4.篡改X：支付：流血3X。使[目标]接下来X次发动道纹的目标由你选择。', dungeon)
+        self.assertIn('4.篡改X：支付：生命3X。使[目标]接下来X次发动道纹的目标由你选择。', dungeon)
         row = next(r for r in self.rows if r['name'] == '篡改')
         self.assertEqual(row['review'], '暂未发现结构违规')
         self.assertTrue(row['runtime'])
@@ -233,12 +243,40 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('| A15 | 嗜血原回终草案、延迟伤害兑换回复',
                       (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
 
-    def test_split_index_keeps_new_ruling_and_runtime_warning(self):
+    def test_split_index_tracks_implemented_creation_rule(self):
         index = (ROOT / '全道纹索引.md').read_text(encoding='utf-8')
         entry = index.split('### 分裂\n', 1)[1].split('### ', 1)[0]
-        self.assertIn('支付：流血X+Y', entry)
-        self.assertIn('创造一个X（法限）/Y（血限）的造物', entry)
-        self.assertIn('尚未实现新版', entry)
+        self.assertIn('支付：生命3X', entry)
+        self.assertIn('创造X个1/1/1的造物', entry)
+        self.assertIn('每次发动创造X个独立造物', entry)
+        self.assertIn('1血限/当前生命、1速限/当前速度、1法限/当前法力', entry)
+        self.assertIn('与所有角色共用基础1次出手及通用修正', entry)
+        self.assertIn('不另设专用上限', entry)
+        self.assertNotIn('每回合最多出手1次', entry)
+        self.assertIn('[战终]消散', entry)
+        self.assertNotIn('尚未实现', entry)
+        row = next(r for r in self.rows if r['name'] == '分裂')
+        self.assertTrue(row['runtime'])
+        self.assertEqual(row['review'], '暂未发现结构违规')
+
+    def test_diaoling_is_reviewed_runtime_graveyard_daowen(self):
+        dungeon = (ROOT / '副本/乱葬岗.md').read_text(encoding='utf-8')
+        index = (ROOT / '全道纹索引.md').read_text(encoding='utf-8')
+        self.assertIn('7.凋零X（2026-10-29 补入勾魂—招魂之间）：支付：法力10X。', dungeon)
+        self.assertIn('除[目标]外，当前生命≤X的角色立即死亡。', dungeon)
+        self.assertIn('一次性瞬发效果，只在施放当次按场上快照判定', dungeon)
+        self.assertIn('施法者并非目标时同样参与判定', dungeon)
+        entry = index.split('### 凋零\n', 1)[1].split('### ', 1)[0]
+        self.assertIn('支付：法力10X', entry)
+        self.assertIn('除[目标]外，当前生命≤X的角色立即死亡。', entry)
+        self.assertNotIn('持续∞', entry)
+        self.assertIn('[目标]：需显式选定', entry)
+        self.assertNotIn('仅自身', entry)
+        self.assertIn('已补入勾魂—招魂之间的主环格', entry)
+        row = next(r for r in self.rows if r['name'] == '凋零')
+        self.assertTrue(row['runtime'])
+        self.assertEqual(row['review'], '暂未发现结构违规')
+        self.assertNotIn('内嵌触发', row['tags'])
 
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')

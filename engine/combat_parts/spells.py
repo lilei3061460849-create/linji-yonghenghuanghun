@@ -67,7 +67,7 @@ class SpellReactionMixin:
                    "automatic": True},
         # 血炼周天：
         # 失去生命后→发动再生→发动透支（循环）。
-        # 【透支】的流血每轮都会推进【癌变】阈值，循环由规则自然终止
+        # 【透支】的生命支付每轮都会推进【癌变】阈值，循环由规则自然终止
         # （施法者命零 / 法力耗尽 / 调用方提交的 max_iterations 到顶）。
         "血炼周天": {"trigger": ActionPhase.AFTER_LIFE_LOST.value,
                      "steps": [("再生", "self"), ("透支", "self")],
@@ -174,6 +174,65 @@ class SpellReactionMixin:
                 out.append(name)
         return sorted(out)
 
+    def complete_spell(self, holder: Entity, spell: Spell) -> Spell:
+        """登记一份已完成法术，并按完成先后追加到持有者定义列表。
+
+        完成序号属于这一次定义，不因持有者阵营或当次提交顺序改变。
+        """
+        # 先迁移旧定义，再给新定义序号，避免旧存档里早已完成的法术反而排到新法术后。
+        self._ensure_spell_completion_orders(self._combat_entity_refs())
+        order = int(getattr(spell, "completion_order", 0) or 0)
+        if order <= 0:
+            serial = int(getattr(self.state, "spell_completion_serial", 0) or 0) + 1
+            self.state.spell_completion_serial = serial
+            spell.completion_order = serial
+        else:
+            self.state.spell_completion_serial = max(
+                int(getattr(self.state, "spell_completion_serial", 0) or 0), order)
+        holder.spells.append(spell)
+        return spell
+
+    def _ensure_spell_completion_orders(self, refs: dict[str, Entity]) -> None:
+        """为旧存档/旧夹具一次性补完成序号；新定义应走 complete_spell()。"""
+        holders = list(refs.values())
+        serial = int(getattr(self.state, "spell_completion_serial", 0) or 0)
+        for holder in holders:
+            for spell in getattr(holder, "spells", []) or []:
+                serial = max(serial, int(getattr(spell, "completion_order", 0) or 0))
+        # 旧对象没有历史序号，只能按稳定的战场顺序及原有定义列表顺序迁移一次。
+        for holder in holders:
+            for spell in getattr(holder, "spells", []) or []:
+                if int(getattr(spell, "completion_order", 0) or 0) <= 0:
+                    serial += 1
+                    spell.completion_order = serial
+        self.state.spell_completion_serial = serial
+
+    def _ordered_spell_names(self, holder: Entity) -> list[str]:
+        """自定义法术按完成先来后到；同序号仅作旧数据稳定兜底。"""
+        spells = list(getattr(holder, "spells", []) or [])
+        return [pair[1].name for pair in sorted(
+            enumerate(spells),
+            key=lambda pair: (int(getattr(pair[1], "completion_order", 0) or 0), pair[0]),
+        )]
+
+    def _ordered_trigger_entries(self, refs: dict[str, Entity], trigger: str,
+                                 include_holder=None) -> list[tuple[str, Entity, str, dict]]:
+        """同一条件的待触发法术按完成序号排列，而非按阵营或提交顺序。"""
+        self._ensure_spell_completion_orders(refs)
+        entries = []
+        for discovery_index, (holder_ref, holder) in enumerate(refs.items()):
+            if include_holder is not None and not include_holder(holder):
+                continue
+            for name, flow in self._eligible_spell_flows(holder, trigger).items():
+                completed = next((spell for spell in holder.spells if spell.name == name), None)
+                # 无独立定义对象的内置自动流程保持原有的前置顺序；显式完成的
+                # 法术都有正序号，彼此严格按完成先来后到。
+                order = int(getattr(completed, "completion_order", 0) or 0)
+                entries.append((order, discovery_index, holder_ref, holder, name, flow))
+        entries.sort(key=lambda entry: (entry[0], entry[1]))
+        return [(holder_ref, holder, name, flow)
+                for _order, _index, holder_ref, holder, name, flow in entries]
+
     def spell_definition(self, holder: Entity, name: str):
         """取一个法术的定义：自创法术读实体 spells，内置法术按道纹即时合成。"""
         if holder is None or not name:
@@ -218,6 +277,7 @@ class SpellReactionMixin:
         flows = {}
         if holder is None or not holder.is_alive:
             return flows
+        self._ensure_spell_completion_orders(self._combat_entity_refs())
         # 2026-10-12 用户令：【必中】X =「你选中的目标无法进行回合外行动，持续X」。
         # 反应型法术就是最典型的回合外行动，故在此统一拦掉——被封锁者连提案都没有，
         # prepare 侧也就不会把它列进可选反应。新增反应窗口自动继承这道闸。
@@ -226,7 +286,9 @@ class SpellReactionMixin:
         for name, flow in self._builtin_spell_flows(holder).items():
             if flow.get("trigger") == trigger:
                 flows[name] = flow
-        for spell in holder.spells:
+        spells_by_name = {spell.name: spell for spell in holder.spells}
+        for spell_name in self._ordered_spell_names(holder):
+            spell = spells_by_name[spell_name]
             flow = self.SPELL_FLOWS.get(spell.name)
             if flow is None:
                 flow = getattr(spell, "_parsed_flow", None)
@@ -568,7 +630,7 @@ class SpellReactionMixin:
                 dodge=bool(entry.get("dodge")),
                 dodge_relic_target_ref=entry.get("dodge_relic_target_ref"),
                 extra={**dict(entry.get("extra") or {}),
-                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper", "catalysis_steps", "cost_channel", "cost_choices", "cost_share_target_ref", "dragon_heart_use", "y")
+                       **{key: entry[key] for key in ("status_index", "status_indices", "flow_target_ref", "tamper", "catalysis_steps", "freeze_daowen", "cost_channel", "cost_choices", "cost_share_target_ref", "dragon_heart_use", "y")
                           if key in entry}},
             ))
         return out
@@ -609,51 +671,21 @@ class SpellReactionMixin:
 
     def pay_daowen_shard_cost(self, actor: Entity, name: str, calc: dict,
                               x: int) -> Optional[str]:
-        """消灾X 的碎片类代价：足够则支付并返回 None，不足返回错误文本。"""
-        if name == "消灾":
-            in_combat = self.state.phase == "in_combat"
-            mult = 1 if in_combat else 2
-            fake_need = calc.get("fake_cost", 50 * x) * mult
-            real_need = calc.get("real_cost", 5 * x) * mult
-            if actor is self.state.player:
-                have_fake, have_real = self.state.fake_shards, self.state.shards
-            else:
-                have_fake, have_real = getattr(actor, "fake_shards", 0), actor.shards
-            if have_fake >= fake_need:
-                if actor is self.state.player:
-                    self.state.fake_shards -= fake_need
-                else:
-                    actor.fake_shards -= fake_need
-            elif have_real >= real_need:
-                if actor is self.state.player:
-                    self.state.lose_shards(real_need)
-                else:
-                    actor.lose_shards(real_need)
-            else:
-                return (f"碎片不足：消灾X需{fake_need}假碎片或{real_need}碎片"
-                        f"（局外×{mult}），当前假{have_fake}/真{have_real}")
-        if name == "连击":
-            # 2026-10-22：碎片/假碎片是两个独立通道，只扣各自池子，
-            # 不走 lose_shards 的「假碎片优先」合并失去（双价在 calc 里分开声明）。
-            real_need = int(calc.get("cost_real_shards", 0) or 0)
-            fake_need = int(calc.get("cost_fake_shards", 0) or 0)
-            if real_need > 0:
-                have_real = self.state.shards if actor is self.state.player else actor.shards
-                if have_real < real_need:
-                    return f"碎片不足：连击碎片通道需{real_need}碎片，当前{have_real}"
-                if actor is self.state.player:
-                    self.state.shards -= real_need
-                else:
-                    actor.shards -= real_need
-            if fake_need > 0:
-                have_fake = (self.state.fake_shards if actor is self.state.player
-                             else getattr(actor, "fake_shards", 0))
-                if have_fake < fake_need:
-                    return f"假碎片不足：连击假碎片通道需{fake_need}假碎片，当前{have_fake}"
-                if actor is self.state.player:
-                    self.state.fake_shards -= fake_need
-                else:
-                    actor.fake_shards -= fake_need
+        """现役道纹的真／假碎片资源支付；两个池始终分开。"""
+        if name != "连击":
+            return None
+        for resource, key in (("碎片", "cost_real_shards"), ("假碎片", "cost_fake_shards")):
+            need = int(calc.get(key, 0) or 0)
+            if need <= 0:
+                continue
+            try:
+                self.pay_resource(
+                    actor, resource, need,
+                    ctx={"timing": "monster_action" if actor.entity_type == "怪物" else "player_action",
+                         "source": name, "source_type": "daowen", "actor": actor,
+                         "target": actor, "tags": {"active_payment"}})
+            except ValueError as exc:
+                return str(exc)
         return None
 
     def pay_daowen_mana(self, caster: Entity, calc: dict, target: Entity) -> tuple[int, Optional[str]]:
@@ -666,10 +698,17 @@ class SpellReactionMixin:
         cost = calc.get("cost", 0)
         if cost <= 0:
             return 0, None
-        if not caster.spend_mana(cost):
-            return 0, f"法力不足，需{cost}，当前{caster.current_mana}"
-        self.note_mana_inflicted(caster, target, cost)
-        return cost, None
+        actual_cost = caster.mana_cost(cost)
+        try:
+            self.pay_resource(
+                caster, "法力", actual_cost, nominal_amount=cost,
+                ctx={"timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
+                     "source": calc.get("dao_wen", "道纹"), "source_type": "daowen",
+                     "actor": caster, "target": target or caster, "tags": {"active_payment"}})
+        except ValueError as exc:
+            return 0, str(exc)
+        self.note_mana_inflicted(caster, target, actual_cost)
+        return actual_cost, None
 
     def _daowen_step_preflight(self, *, daowen: str, x: int, calc: dict, caster: Entity,
                                target: Optional[Entity], refs: dict[str, Entity],
@@ -708,6 +747,12 @@ class SpellReactionMixin:
         if daowen == "回响":
             try:
                 self.prepare_huixiang(calc, caster, target, entry_extra, refs)
+            except ValueError as exc:
+                return StepResult(status=StepStatus.FAILED, daowen=daowen, x=x,
+                                  reason=InterruptReason.INVALID_INPUT, detail=str(exc)), []
+        if daowen in {"流动", "遗忘"}:
+            try:
+                self.prepare_liudong_yiwang(daowen, calc, caster, target, entry_extra, refs)
             except ValueError as exc:
                 return StepResult(status=StepStatus.FAILED, daowen=daowen, x=x,
                                   reason=InterruptReason.INVALID_INPUT, detail=str(exc)), []
@@ -834,16 +879,36 @@ class SpellReactionMixin:
                 reason=InterruptReason.INVALID_X,
                 detail=f"X={x!r}非法，必须≥1整数")
 
+        freeze_choices = None
+        if daowen == "冰冻":
+            try:
+                effective_x, freeze_choices = self.prepare_bingdong(
+                    target, x, entry_dict.get("freeze_daowen"))
+            except ValueError as exc:
+                return StepResult(
+                    status=StepStatus.FAILED, daowen=daowen, x=x,
+                    target_ref=target_ref, target_name=target.name,
+                    reason=InterruptReason.INVALID_INPUT, detail=str(exc), iteration=iteration)
+            if effective_x == 0:
+                return StepResult(
+                    status=StepStatus.SKIPPED, daowen=daowen, x=0,
+                    target_ref=target_ref, target_name=target.name,
+                    reason=InterruptReason.INVALID_X,
+                    detail="目标没有道纹，冰冻X自动降为0", iteration=iteration)
+            x = effective_x
+            entry_dict = dict(entry_dict, x=x)
+
         # --- 道纹可用性 ---
         dw_inst = caster.dao_wen.get(daowen)
         allowed_by_catalysis=(dw_inst is not None and dw_inst is _cooldown_permission
-                              and not dw_inst.is_frozen and not dw_inst.spent_unique)
+                              and not dw_inst.is_frozen and not getattr(dw_inst, "ice_frozen", False)
+                              )
         if dw_inst is None or not (dw_inst.can_use() or allowed_by_catalysis):
             return StepResult(
                 status=StepStatus.INTERRUPTED, daowen=daowen, x=x,
                 target_ref=target_ref, target_name=target.name,
                 reason=InterruptReason.DAOWEN_UNUSABLE,
-                detail=f"道纹{daowen}不可用（未持有/封印/冷却/唯一已用）")
+                detail=f"道纹{daowen}不可用（未持有/封印/冷却）")
 
         # --- 跳过谓词（如连击需要前序伤害） ---
         if skip_predicate is not None:
@@ -858,6 +923,8 @@ class SpellReactionMixin:
         try:
             calc = DaoWenEngine.resolve(daowen, x, target=target, caster=caster,
                 **{key:entry_dict[key] for key in ("cost_channel","cost_choices","y") if key in entry_dict})
+            if daowen == "冰冻":
+                calc["freeze_daowen"] = freeze_choices
         except Exception as exc:
             return StepResult(
                 status=StepStatus.FAILED, daowen=daowen, x=x,
@@ -885,7 +952,7 @@ class SpellReactionMixin:
                 reason=InterruptReason.MANA_INSUFFICIENT, detail=err,
                 trigger_spell_logs=trigger_logs, iteration=iteration)
 
-        # --- 碎片代价（消灾X） ---
+        # --- 碎片代价（连击真/假碎片独立通道） ---
         shard_error = self.pay_daowen_shard_cost(caster, daowen, calc, x)
         if shard_error:
             return StepResult(
@@ -910,6 +977,7 @@ class SpellReactionMixin:
             self._spend_dodge_speed(target, dodge_relic)
             self.pay_daowen_cooldown(daowen,calc,caster)
             self.consume_tamper(caster, tamper_rule)
+            caster.mark_daowen_used(daowen)
             return StepResult(
                 status=StepStatus.DODGED, daowen=daowen, x=x,
                 target_ref=target_ref, target_name=target.name,
@@ -1131,34 +1199,36 @@ class SpellReactionMixin:
             elif result.status == StepStatus.DODGED:
                 previous_damage["value"] = 0
 
-        for holder_ref, choices in (submitted or {}).items():
-            holder = refs[holder_ref]
-            flows = self._eligible_spell_flows(holder, "目标发动道纹前")
-            subject_of = self._daowen_trigger_subject_of(holder, actor)
+        entries = self._ordered_trigger_entries(
+            refs, "目标发动道纹前",
+            include_holder=lambda holder: self.state.on_player_side(holder) != self.state.on_player_side(actor))
+        for holder_ref, holder, spell_name, flow in entries:
+            if not holder.is_alive:
+                continue
+            choices = (submitted or {}).get(holder_ref, {})
             resolver = self._daowen_trigger_resolver(actor)
-            for spell_name, flow in flows.items():
-                decision = choices[spell_name]
-                if not decision.get("use"):
-                    continue
-                definition = self._spell_definition_from_flow(spell_name, flow, "目标发动道纹前")
-                request = SpellCastRequest(
-                    use=True, steps=self._decision_to_requests(decision),
-                    branch_snapshot=dict(decision.get("branch_snapshot") or {}),
-                    max_iterations=decision.get("max_iterations"))
-                execution = SpellExecution(
-                    engine=self, definition=definition, caster=holder, attacker=actor,
-                    refs=refs, request=request, trigger_label="目标发动道纹前",
-                    policy=self.EVENT_STEP_POLICY, target_resolver=resolver,
-                    skip_predicate=_daowen_skip, on_step=_on_step)
-                execution.run_all()
-                if decision.get("branch_snapshot") is None:
-                    decision["branch_snapshot"] = dict(request.branch_snapshot or {})
-                    decision["_engine_branch_owner"] = self._branch_owner_token
-                logs.extend(execution.logs())
-                if execution.status == ExecutionStatus.FAILED:
-                    raise ValueError(
-                        f"法术{spell_name}执行失败: {execution.interrupt_reason.value} "
-                        f"{execution.interrupt_detail}")
+            decision = choices[spell_name]
+            if not decision.get("use"):
+                continue
+            definition = self._spell_definition_from_flow(spell_name, flow, "目标发动道纹前")
+            request = SpellCastRequest(
+                use=True, steps=self._decision_to_requests(decision),
+                branch_snapshot=dict(decision.get("branch_snapshot") or {}),
+                max_iterations=decision.get("max_iterations"))
+            execution = SpellExecution(
+                engine=self, definition=definition, caster=holder, attacker=actor,
+                refs=refs, request=request, trigger_label="目标发动道纹前",
+                policy=self.EVENT_STEP_POLICY, target_resolver=resolver,
+                skip_predicate=_daowen_skip, on_step=_on_step)
+            execution.run_all()
+            if decision.get("branch_snapshot") is None:
+                decision["branch_snapshot"] = dict(request.branch_snapshot or {})
+                decision["_engine_branch_owner"] = self._branch_owner_token
+            logs.extend(execution.logs())
+            if execution.status == ExecutionStatus.FAILED:
+                raise ValueError(
+                    f"法术{spell_name}执行失败: {execution.interrupt_reason.value} "
+                    f"{execution.interrupt_detail}")
         return logs
 
     # ==================================================================
@@ -1171,11 +1241,17 @@ class SpellReactionMixin:
                 if entity.is_alive
                 and (entity.spells or self._builtin_spell_flows(entity))}
 
+    def _chenni_blocks_global_trigger(self, holder: Entity, trigger: str) -> bool:
+        return bool(trigger in {"回始", "回终", "敌回始", "敌回终", "自身回合结束"}
+                    and self.chenni_round_blocked(holder))
+
     def prepare_global_trigger_spells(self, trigger: str) -> dict:
         """列出当前时点全部持有者的可发动全局法术及其决策槽位。"""
         refs = self._combat_entity_refs()
         result: dict[str, list[dict]] = {}
         for holder_ref, holder in self._global_trigger_holders(refs).items():
+            if self._chenni_blocks_global_trigger(holder, trigger):
+                continue
             flows = self._eligible_spell_flows(holder, trigger)
             if not flows:
                 continue
@@ -1279,28 +1355,29 @@ class SpellReactionMixin:
                                       refs: dict[str, Entity]) -> list[dict]:
         """结算全局时点法术（唯一执行路径）。"""
         logs = []
-        for holder_ref, choices in (submitted or {}).items():
-            holder = refs.get(holder_ref)
-            if holder is None or not holder.is_alive:
+        entries = self._ordered_trigger_entries(
+            refs, trigger,
+            include_holder=lambda holder: not self._chenni_blocks_global_trigger(holder, trigger))
+        for holder_ref, holder, spell_name, flow in entries:
+            if not holder.is_alive:
                 continue
-            flows = self._eligible_spell_flows(holder, trigger)
+            choices = (submitted or {}).get(holder_ref, {})
             subject_of = self._global_subject_of(holder)
-            for spell_name, flow in flows.items():
-                decision = choices.get(spell_name)
-                if not decision or not decision.get("use"):
-                    logs.append({"spell": spell_name, "holder": holder.name, "used": False})
-                    continue
-                execution = self._run_flow_spell(
-                    spell_name=spell_name, flow=flow, trigger_str=trigger,
-                    holder=holder, attacker=holder, refs=refs, decision=decision,
-                    policy=self.EVENT_STEP_POLICY)
-                for log_entry in execution.logs():
-                    log_entry["holder"] = holder.name
-                logs.extend(execution.logs())
-                if execution.status == ExecutionStatus.FAILED:
-                    raise ValueError(
-                        f"法术{spell_name}执行失败: {execution.interrupt_reason.value} "
-                        f"{execution.interrupt_detail}")
+            decision = choices.get(spell_name)
+            if not decision or not decision.get("use"):
+                logs.append({"spell": spell_name, "holder": holder.name, "used": False})
+                continue
+            execution = self._run_flow_spell(
+                spell_name=spell_name, flow=flow, trigger_str=trigger,
+                holder=holder, attacker=holder, refs=refs, decision=decision,
+                policy=self.EVENT_STEP_POLICY)
+            for log_entry in execution.logs():
+                log_entry["holder"] = holder.name
+            logs.extend(execution.logs())
+            if execution.status == ExecutionStatus.FAILED:
+                raise ValueError(
+                    f"法术{spell_name}执行失败: {execution.interrupt_reason.value} "
+                    f"{execution.interrupt_detail}")
         return logs
 
     # ==================================================================
@@ -1396,7 +1473,7 @@ class SpellReactionMixin:
                 dodge_relic_target_ref=entry.get("dodge_relic_target_ref"),
                 # 每一步都是一次"发动道纹"：敌方「目标发动道纹前」反应的逐步提交
                 extra={"trigger_spell_choices": entry.get("trigger_spell_choices", {}),
-                       **{key: entry[key] for key in ("status_index", "status_indices", "tamper", "catalysis_steps", "cost_channel", "cost_choices", "cost_share_target_ref", "dragon_heart_use", "y")
+                       **{key: entry[key] for key in ("status_index", "status_indices", "flow_target_ref", "tamper", "catalysis_steps", "freeze_daowen", "cost_channel", "cost_choices", "cost_share_target_ref", "dragon_heart_use", "y")
                           if key in entry}},
             ))
 
@@ -1417,7 +1494,7 @@ class SpellReactionMixin:
         )
 
     # ==================================================================
-    # 十、非攻击路径的自动反应（道纹伤害/流血代价/直接失血等）
+    # 十、非攻击路径的自动反应（道纹伤害/生命支付/直接失血等）
     # ==================================================================
 
     def _max_auto_life_lost_x(self, daowen: str, target: Entity, caster: Entity,

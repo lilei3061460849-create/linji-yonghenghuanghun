@@ -35,8 +35,8 @@
     状态——一律不进入本模块的任何输出。
   * 角色说的话（由调用方显式传入的 text，代表角色真正说出口的话）原样
     进入战报，不做真实性校验、不做心理解读、不由旁白拆穿。
-  * 造成的伤害数值属于"公开可观察结果"：一方能感知到自己挨了多少下、
-    造成了多少伤害，因此伤害/闪避/死亡/撤退这类物理可见事件会展示；
+  * 造成的伤害或直接失去生命数值属于"公开可观察结果"：一方能感知到自己挨了多少下、
+    失去了多少生命，因此伤害/直接失血/闪避/死亡/撤退这类物理可见事件会展示；
     但引发该结果的具体道纹/法术/遗物名称，以及事后的资源总量（HP/血限/
     法力/法限/速度等），默认一律不可见——除非调用方显式传入 reveal_name
     （代表这次发动已经通过某种无可置疑的方式被公开识别）。默认永远选择
@@ -97,6 +97,12 @@ def extract_daowen_facts(
                 "absorbed": eff.get("shield_absorbed") or 0,
                 "died": bool(eff.get("died")),
             })
+        elif eff.get("type") == "target_life_loss" and hostile:
+            # 杀伐等直接失去生命不是伤害，但数值与命零同样是公开可观察结果。
+            facts.append({
+                "kind": "life_loss", "target": eff.get("target"),
+                "amount": eff.get("lost", 0), "died": bool(eff.get("died")),
+            })
     return facts
 
 
@@ -118,7 +124,7 @@ def extract_hit_facts(
     if detail.get("cant_target"):
         return [{"kind": "cant_target"}]
     if detail.get("blood_shadow_success"):
-        # 血影：目标付出流血代价取消判定——流血是隐藏资源变化，只展示"判定被取消"
+        # 血影：目标支付生命取消判定——生命是隐藏资源变化，只展示"判定被取消"
         return [{"kind": "cancelled"}]
 
     hostile = actor_side != target_side
@@ -254,6 +260,11 @@ def _render_fact(fact: dict) -> Optional[str]:
         parts = [f"{fact.get('target')} 受到{fact.get('amount')}点伤害"]
         if fact.get("absorbed"):
             parts.append(f"（格挡吸收{fact['absorbed']}点）")
+        if fact.get("died"):
+            parts.append("，当场[命零]")
+        return "".join(parts)
+    if kind == "life_loss":
+        parts = [f"{fact.get('target')} 失去{fact.get('amount')}点生命"]
         if fact.get("died"):
             parts.append("，当场[命零]")
         return "".join(parts)

@@ -10,7 +10,7 @@
 - 游戏完成：True
 - 胜者：测试轮回者
 - 结束原因：sole survivor victory
-- 玩家最终状态：{'name': '测试轮回者', 'runtime_id': 'd39a3ab4e4e3408fb4df7e827efa7c71', 'alive': True, 'hp': 51, 'blood_limit': 78}
+- 玩家最终状态：{'name': '测试轮回者', 'runtime_id': '912478cd610246fdbc285e1fa34f7702', 'alive': True, 'hp': 51, 'blood_limit': 78}
 
 ## 最终地图
 P=玩家位置（若仍在场），R=其他轮回者，M=怪物，$=中立单位；#=墙，:=废墟。

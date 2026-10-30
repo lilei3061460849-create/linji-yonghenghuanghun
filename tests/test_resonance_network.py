@@ -82,7 +82,9 @@ def test_monster_transform_branch_is_reversible():
     （用户口径：整体大改前不新增道路）；【全力】仍有（反转）→弱化、（曲解）→再生。
     2026-10-26 用户令：那条（转换）接给【全速】——攻击力⇄攻击次数。
     """
-    assert R.find_transformation("弱化", "反转") == "全力"
+    assert R.find_transformation("弱化", "反转", target_daowen="全力") == "全力"
+    assert R.find_transformation("弱化", "反转", target_daowen="强化") == "强化"
+    assert R.find_transformation("弱化", "反转") is None  # 两个真实出口必须显式选目标
     assert R.find_transformation("再生", "曲解", target_daowen="全力") == "全力"
     assert R.find_transformation("寄生", "曲解") is None  # 自愈删除后不补新路径
     assert R.get_available_resonance("全力") == [
@@ -99,32 +101,28 @@ def test_single_ten_node_core_loop():
     edges = R.CLOSED_LOOPS["杀伐闭环"]
     assert len(edges) == 10
     assert sorted(source for source, _, _ in edges) == sorted(target for _, _, target in edges)
-    assert R.find_transformation("连击", "转换") == "增殖"
-    assert R.find_transformation("增殖", "转换") == "连击"
+    assert is_reserved_slot(R.find_transformation("连击", "转换"))
+    assert not any("增殖" in (src, dst) for src, _, dst in edges)
+    assert R.find_transformation("超频", "反转", target_daowen="萎缩") == "萎缩"
+    assert R.find_transformation("超频", "反转", target_daowen="增殖") == "增殖"
+    assert R.find_transformation("超频", "反转") is None
+    assert R.find_transformation("增殖", "转换") == "坏死"
     assert R.find_transformation("波及", "反转") == "遗忘"
     assert R.find_transformation("封印", "反转") == "杀伐"
     for removed in ("冲击", "慈悲", "切割", "缓慢"):
         assert not any(src == removed or tgt == removed for src, _, tgt in edges)
 
 
-def test_unimplemented_sunken_sea_nodes_cannot_be_acquired_by_resonance():
-    from engine.gamedata import UNIMPLEMENTED_DAOWEN, learnability_error
-    from engine.daowen import DaoWenEngine
-
-    for name in UNIMPLEMENTED_DAOWEN:
-        error = learnability_error(name, owned=set(), region="沉沦海",
-                                   known=set(DaoWenEngine._registry))
-        assert "尚未接入运行时" in error
-
+def test_sunken_sea_former_draft_nodes_can_be_acquired_by_resonance():
+    from engine.gamedata import UNIMPLEMENTED_DAOWEN
     for source, rtype, target in (
         ("回响", "转换", "流动"),
         ("波及", "反转", "遗忘"),
-        
     ):
+        assert target not in UNIMPLEMENTED_DAOWEN
         result = R.apply_resonance(source, rtype, caster_has_daowen=True,
                                    target_has_daowen=True, target_daowen=target)
-        assert not result["success"]
-        assert "尚未接入运行时" in result["error"]
+        assert result["success"] is True and result["target"] == target
 
 
 def test_race_exclusive_sunken_sea_nodes_cannot_be_acquired_by_resonance():
@@ -144,7 +142,8 @@ def test_region_loops_present():
     # 2026-10-27：罪孽都市移除【消灾】，闭环压缩为7条边。
     # 2026-10-11：龙心谷删【嫁祸】（效果与遗物【贪婪契约】重复），由【裂变】直连【背负】，7 → 6 条边。
     # 2026-10-14：扭曲都市删【搏命】（并入【透支】），该格留成空占位符（镇尸先例），仍 7 条边。
-    expected = {"扭曲都市闭环": 7, "罪孽都市闭环": 7, "龙心谷闭环": 6, "沉沦海闭环": 5}
+    # 2026-10-29：沉沦海在遗忘—大梦间接入冰冻，主环5 → 6条边。
+    expected = {"扭曲都市闭环": 7, "罪孽都市闭环": 7, "龙心谷闭环": 6, "沉沦海闭环": 6}
     for loop, n in expected.items():
         assert loop in R.CLOSED_LOOPS, f"缺少 {loop}"
         assert len(R.CLOSED_LOOPS[loop]) == n, f"{loop} 应有{n}条边"
@@ -168,7 +167,8 @@ def test_disaster_ward_is_removed_from_sin_city_loop():
     assert len(edges) == 7
     assert not any(src == "消灾" or dst == "消灾" for src, _, dst in edges)
     assert R.get_available_resonance("消灾") == []
-    assert R.find_transformation("？？", "曲解", target_daowen="点金") == "点金"
+    assert R.find_transformation("勒索", "曲解", target_daowen="点金") == "点金"
+    assert R.find_transformation("假钞", "曲解", target_daowen="勒索") == "勒索"
 
 
 def test_region_loops_are_closed():
@@ -181,12 +181,17 @@ def test_region_loops_are_closed():
 
 
 def test_no_duplicate_declared_edge():
-    """边界：登记的**正向**边里，同一 (源道纹, 残韵类型) 仍不得重复指向两个结果"""
-    seen = {}
-    for s, t, d in engine_edges():
-        key = (s, t)
-        assert key not in seen or seen[key] == d, f"{s}+{t} 同时指向 {seen[key]} 与 {d}"
-        seen[key] = d
+    """同源同残韵可保留多个显式分叉，但不得由引擎静默任选其一。"""
+    outgoing = {}
+    for source, resonance_type, target in engine_edges():
+        outgoing.setdefault((source, resonance_type), set()).add(target)
+    for (source, resonance_type), targets in outgoing.items():
+        if len(targets) < 2:
+            continue
+        assert R.find_transformation(source, resonance_type) is None
+        for target in targets:
+            assert R.find_transformation(
+                source, resonance_type, target_daowen=target) == target
 
 
 

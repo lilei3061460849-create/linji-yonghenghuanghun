@@ -221,8 +221,8 @@ def test_dragon_breath_can_kill_monster_before_it_acts():
 # 5. 震岳龙躯
 # ========================================================================
 
-def test_dragon_body_passively_caps_single_hit_at_15():
-    """正常路径（重做后）：持有震岳龙躯即常驻生效，单次超过15点的伤害只落15点。"""
+def test_dragon_body_passively_caps_single_hit_at_10():
+    """正常路径（重做后）：持有震岳龙躯即常驻生效，单次超过10点的伤害只落10点。"""
     engine = _new_engine(dbsuffix="body")
     player = engine.state.player
     _with_heart(engine)
@@ -236,12 +236,12 @@ def test_dragon_body_passively_caps_single_hit_at_15():
     engine.state.enemies.append(heavy)
     hp_before = player.current_hp
     result = engine.combat.resolve_attack(heavy, player, is_must_hit=True)
-    assert result["damage_dealt"] == 15
-    assert player.current_hp == hp_before - 15
+    assert result["damage_dealt"] == 10
+    assert player.current_hp == hp_before - 10
 
 
 def test_dragon_body_boundary_leaves_small_hits_untouched():
-    """边界：不超过15点的单次伤害原样落地，不会被抬到15。"""
+    """边界：不超过10点的单次伤害原样落地，不会被抬到10。"""
     engine = _new_engine(dbsuffix="body_small")
     player = engine.state.player
     _with_heart(engine)
@@ -340,20 +340,20 @@ def test_tail_sacrifice_error_declare_self_or_unowned_trait():
 # ========================================================================
 
 def test_ember_wing_unlock_grants_consumable_not_relic():
-    """正常路径（2026-10-23）：烬翼改为消耗品 5/5，兑换仍花 12 点，不占龙族遗物位。"""
+    """正常路径（2026-10-23）：烬翼改为消耗品 3/3，兑换仍花 12 点，不占龙族遗物位。"""
     engine = _new_engine(dbsuffix="wings")
     _with_heart(engine, points=12)
     r = engine.execute_action("unlock_dragon_trait", {"trait": "烬翼"})
     assert r["success"], r.get("error")
     wing = next((c for c in engine.state.consumables if c.name == "烬翼"), None)
     assert wing is not None
-    assert (wing.current_uses, wing.max_uses) == (5, 5)
+    assert (wing.current_uses, wing.max_uses) == (3, 3)
     assert "烬翼" not in engine.state.dragon_traits
     assert engine.state.dragon_cost_points == 0
 
 
 def test_ember_wing_active_use_grants_flight():
-    """正常路径：主动使用获得【飞行】1回合，耐久 5→4。"""
+    """正常路径：主动使用获得【飞行】1回合，耐久 3→2。"""
     engine = _new_engine(dbsuffix="wings_use")
     _with_heart(engine, points=12)
     engine.execute_action("unlock_dragon_trait", {"trait": "烬翼"})
@@ -363,7 +363,7 @@ def test_ember_wing_active_use_grants_flight():
     r = engine.execute_action("consume_item", {"name": "烬翼", "mode": "fly"})
     assert r["success"], r
     assert player.get_status_value("飞行") == 1
-    assert r["result"]["uses_remaining"] == 4
+    assert r["result"]["uses_remaining"] == 2
 
 
 def test_ember_wing_recharges_on_any_monster_death():

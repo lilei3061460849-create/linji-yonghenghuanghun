@@ -1,4 +1,10 @@
-"""死者之页的统一承载：每角色默认十页，四类资源按种类共用。"""
+"""死者之页的统一承载：每角色默认十页，资源按种类共用。
+
+普通道纹／遗物／法器／消耗品每种一页；未收入【煌妖幡】的妖怪每只五页。
+妖怪页仍使用相同的二元资源键与快照，因此既有原子成长回滚无需另设接口。
+"""
+from .yaoguai import UNHOUSED_PAGE_COST, unhoused_yaoguai
+
 
 def resource_keys(entity):
     resources = getattr(entity, "_page_resources", {})
@@ -8,6 +14,9 @@ def resource_keys(entity):
             name = item if isinstance(item, str) else item.get("name") if isinstance(item, dict) else item.name
             if name:
                 keys.add((kind, name))
+    for being in resources.get("unhoused_yaoguai", []) or []:
+        for page_index in range(UNHOUSED_PAGE_COST):
+            keys.add(("妖怪", f"{being.runtime_id}:{page_index + 1}"))
     return keys
 
 
@@ -26,7 +35,8 @@ def bind_resources(state):
     if state.player:
         state.player._page_resources = {
             "relics": state.relics, "consumables": state.consumables,
-            "artifacts": list(state.artifacts_owned) + list(state.artifacts)}
+            "artifacts": list(state.artifacts_owned) + list(state.artifacts),
+            "unhoused_yaoguai": unhoused_yaoguai(state)}
 
     if getattr(state, "in_final_duel", False):
         leader = next((e for e in state.enemies if e.entity_type == "轮回者"), None)
@@ -52,5 +62,6 @@ def growth_error(state, before):
         old_keys = before.get(actor_id, (None, set()))[1]
         if len(keys) > entity.load_capacity and len(keys) > len(old_keys):
             return (f"【{entity.name}】死者之页承载不足：共{entity.load_capacity}张，"
-                    f"本次将承载{len(keys)}种道纹／遗物／法器／消耗品；未获得，原行动已回滚")
+                    f"本次将占用{len(keys)}页（普通资源每种1页，未入幡妖怪每只5页）；"
+                    "未获得，原行动已回滚")
     return None

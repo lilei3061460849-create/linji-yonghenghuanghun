@@ -1,164 +1,211 @@
-"""【分裂】X/Y 双参数重做（2026-09-17 用户令）。
+"""【分裂】X个1/1/1造物规则。
 
-旧版：代价冷却X；[命零]时创造X个本体血限20%的复制体。
-2026-09-17 新版：**即时**创造 X 个 10Y 血限的自身复制体，代价【衰老】= X×10Y = 总血限。
-2026-10-08 用户令：代价由【衰老】改为【流血】（数值不变，付当前生命而非[血限]）。
+分裂X：流血3X，每次发动创造X个1血限/1速限/1法限的造物。
+攻击面板按通用规则换算，造物每回合最多出手1次；不携带道纹、不继承施法者构筑，[战终]消散。
 
-新版要点（逐条对照旧版废止的三处）：
-1. 触发时机：[命零] → 即时发动（不再需要本体先死）
-2. 复制体血限：本体20%（随本体浮动，越壮越赚）→ 固定 10Y（Y 自定）
-3. 代价：冷却X（与产出无关，可白嫖）→ 流血X×10Y（造多少血流多少血）
-4. 旧版 `entity_type != "怪物"` 过滤导致怪物永远不分裂，已取消，各类型一视同仁
-
-运行方式：
-    python -m pytest tests/test_fenlie_split.py -v
+运行方式：python -m pytest tests/test_fenlie_split.py -v
 """
 import os
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
 from engine.daowen import DaoWenEngine
-from engine.models import DaoWen, DaoWenInstance, Entity
+from engine.models import DaoWen, DaoWenInstance, Entity, Relic, StatusEffect
+from tests.attack_support import resolve_attack
 
 
 def _engine(actor_is_monster: bool = False):
-    e = GameEngine()
-    p = Entity("轮回者", "轮回者", blood_limit=200, current_hp=200,
-               mana_limit=99, current_mana=99, speed_limit=9, current_speed=9,
-               attack_count=9, attack_power=99)
-    m = Entity("怪", "怪物", blood_limit=300, current_hp=300, attack_count=2,
-               attack_power=10, mana_limit=10, current_mana=10,
-               speed_limit=2, current_speed=2)
-    e.state.player = p
-    e.state.friends = []
-    e.state.employees = []
-    e.state.enemies = [m]
-    e.state.phase = "in_combat"
-    e.state.combat_subphase = "player_actions"
-    e.state.current_round = 2
-    actor = m if actor_is_monster else p
+    engine = GameEngine(autosave=False)
+    player = Entity("轮回者", "轮回者", blood_limit=200, current_hp=200,
+                    mana_limit=99, current_mana=99,
+                    speed_limit=9, current_speed=9,
+                    attack_count=9, attack_power=99)
+    monster = Entity("怪", "怪物", blood_limit=300, current_hp=300,
+                     mana_limit=10, current_mana=10,
+                     speed_limit=2, current_speed=2,
+                     attack_count=2, attack_power=10)
+    engine.state.player = player
+    engine.state.friends = []
+    engine.state.employees = []
+    engine.state.temp_friends = []
+    engine.state.enemies = [monster]
+    engine.state.phase = "in_combat"
+    engine.state.combat_subphase = "player_actions"
+    engine.state.current_round = 2
+    actor = monster if actor_is_monster else player
     actor.dao_wen["分裂"] = DaoWenInstance(
         DaoWen(name="分裂", formula="", cost_type="流血",
-               cost_formula="X*10Y", effect_formula=""),
+               cost_formula="3X", effect_formula="创造X个1/1/1造物"),
         x_value=0, x_free=True)
-    return e, p, m, actor
+    return engine, player, monster, actor
 
 
-def _cast(e, actor, *, x=3, y=2, aref=""):
-    kw = {"actor_ref": aref} if aref else {}
-    return e.execute_action("use_daowen", {
-        **kw, "daowen_name": "分裂", "x": x, "y": y,
-        "target_ref": "enemy:0" if aref else "player:0",
-        "dodge": False, "blood_shadow": False, "trigger_spell_choices": {}})
+def _cast(engine, *, x=3, actor_ref=""):
+    extra = {"actor_ref": actor_ref} if actor_ref else {}
+    return engine.execute_action("use_daowen", {
+        **extra, "daowen_name": "分裂", "x": x,
+        "target_ref": "enemy:0" if actor_ref else "player:0",
+        "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
+    })
 
 
-# ---------------------------------------------------------------- 公式
-
-def test_cost_equals_total_clone_blood_limit():
-    """代价流血 = X×10Y，恰好等于造出的总血限。"""
-    for x, y in ((1, 1), (3, 2), (2, 5), (4, 3)):
-        c = DaoWenEngine.resolve("分裂", x, y=y)
-        assert c["cost_type"] == "流血"
-        assert c["cost_hp"] == x * 10 * y
-        assert c["split_clones"] == x
-        assert c["clone_hp"] == 10 * y
-        assert c["cost_hp"] == c["split_clones"] * c["clone_hp"]
-
-
-def test_y_defaults_to_one():
-    """不传 y 时默认 1，单参数调用不受影响。"""
-    c = DaoWenEngine.resolve("分裂", 3)
-    assert c["clone_hp"] == 10 and c["cost_hp"] == 30
+def _assert_minimal_creation(creation, creator):
+    assert creation.entity_type == "造物"
+    assert creation.blood_limit == creation.current_hp == 1
+    assert creation.mana_limit == creation.current_mana == 1
+    assert creation.speed_limit == creation.current_speed == 1
+    assert creation.attack_power == 1 and creation.attack_count == 1
+    assert creation.effective_attack_power() == 1
+    assert creation.effective_attack_count() == 1
+    assert creation.action_count == 1
+    assert creation.copy_creator_runtime_id == creator.runtime_id
+    assert creation.is_created_being is False  # 分裂造物不是【造生】妖怪
+    assert creation.dao_wen == {}
+    assert creation.preferences == []
+    assert creation.relics == []
+    assert creation.artifacts == []
 
 
-# ---------------------------------------------------------------- 结算
+def test_cost_is_3x_and_x_is_the_number_of_minimal_creations():
+    for x in (1, 2, 3, 5):
+        calc = DaoWenEngine.resolve("分裂", x)
+        assert calc["cost_type"] == "流血"
+        assert calc["cost_hp"] == 3 * x
+        assert calc["split_creations"] == x
+        assert calc["creation_blood_limit"] == 1
+        assert calc["creation_speed_limit"] == 1
+        assert calc["creation_mana_limit"] == 1
+        assert calc["creation_attack_power"] == 1
+        assert calc["creation_attack_count"] == 1
+        assert "y" not in calc
 
-def test_casting_pays_bleed_and_spawns_clones_immediately():
-    """正常路径：即时付流血、即时创造复制体（不必等命零）。"""
-    e, p, m, actor = _engine()
-    r = _cast(e, actor, x=3, y=2)
-    assert r["success"] is True, r
-    assert p.current_hp == 200 - 60, "流血 = 3×10×2 = 60，付当前生命"
-    assert p.blood_limit == 200, "流血不扣[血限]"
-    assert len(e.state.temp_friends) == 3, "应即时创造 3 个复制体"
-    for c in e.state.temp_friends:
-        assert c.blood_limit == 20 and c.current_hp == 20, "每个复制体 10Y = 20 血限"
+
+@pytest.mark.parametrize("x", [-1, True, 1.5, "3"])
+def test_split_rejects_invalid_effective_x(x):
+    with pytest.raises(ValueError, match="分裂X必须是非负整数"):
+        DaoWenEngine.resolve("分裂", x)
 
 
-def test_clones_inherit_daowen_but_not_fenlie():
-    """复制体继承本体道纹，但不继承【分裂】——否则可无限套娃。"""
-    e, p, m, actor = _engine()
-    actor.dao_wen["庇护"] = DaoWenInstance(
+def test_decay_can_reduce_effective_count_to_zero_after_valid_submission():
+    caster = Entity("施法者", "轮回者", blood_limit=20, current_hp=20)
+    caster.add_status(StatusEffect(name="退化", value=2, remaining_rounds=1))
+    calc = DaoWenEngine.resolve("分裂", 2, caster=caster)
+    assert calc["x"] == 0
+    assert calc["cost_hp"] == 0
+    assert calc["split_creations"] == 0
+
+
+def test_cast_pays_bleed_and_creates_exactly_x_minimal_creations():
+    engine, player, _, _ = _engine()
+    result = _cast(engine, x=3)
+    assert result["success"] is True, result
+    assert player.current_hp == 191
+    assert player.blood_limit == 200
+    assert len(engine.state.temp_friends) == 3
+    assert len({creation.runtime_id for creation in engine.state.temp_friends}) == 3
+    assert len({creation.name for creation in engine.state.temp_friends}) == 3
+    for creation in engine.state.temp_friends:
+        _assert_minimal_creation(creation, player)
+    effect = next(effect for effect in result["execution"]["effects"]
+                  if isinstance(effect, dict) and effect.get("type") == "fenlie")
+    assert effect["creations"] == 3
+    assert len(effect["names"]) == 3
+
+
+def test_creation_can_attack_once_but_cannot_act_twice_in_one_round():
+    engine, _, monster, _ = _engine()
+    assert _cast(engine, x=1)["success"] is True
+    creation = engine.state.temp_friends[0]
+    hp_before = monster.current_hp
+
+    # 施法者已让出优先权；敌方跳过后才轮到新造物攻击。
+    assert engine.execute_action("skip", {"actor_ref": "enemy:0"})["success"]
+    first = resolve_attack(engine, creation.name)
+    assert first["success"] is True, first
+    assert creation.actions_used_this_round == creation.action_count == 1
+    assert monster.current_hp == hp_before - 1  # 1法限按通用规则给出1攻击力
+    second = resolve_attack(engine, creation.name)
+    assert second["success"] is False
+    assert "出手" in second.get("error", "")
+
+
+def test_creations_do_not_inherit_caster_build():
+    engine, player, _, _ = _engine()
+    player.dao_wen["庇护"] = DaoWenInstance(
         DaoWen(name="庇护", formula="", cost_type="消耗", cost_formula="X",
                effect_formula=""), x_value=0, x_free=True)
-    r = _cast(e, actor, x=2, y=1)
-    assert r["success"] is True, r
-    assert len(e.state.temp_friends) == 2
-    for c in e.state.temp_friends:
-        assert "庇护" in c.dao_wen, "应继承本体的其他道纹"
-        assert "分裂" not in c.dao_wen, "复制体不得持有【分裂】"
+    player.preferences = ["痛苦的偏爱", "时间的偏爱"]
+    player.relics = [Relic(name="测试遗物", effect="不应继承")]
+    player.artifacts = ["测试法器"]
+
+    result = _cast(engine, x=2)
+    assert result["success"] is True, result
+    for creation in engine.state.temp_friends:
+        _assert_minimal_creation(creation, player)
 
 
-def test_monster_can_split_into_enemies():
-    """旧版 entity_type != "怪物" 导致怪物永不分裂；现应正常，且复制体进敌方。"""
-    e, p, m, actor = _engine(actor_is_monster=True)
-    enemies_before = len(e.state.enemies)
-    # 怪物侧通过 prepare/resolve 驱动较复杂，这里直接验证即时创生的分支归属
-    clones = e.combat._spawn_fenlie_clones(actor, 2, 30)
-    assert len(clones) == 2
-    assert len(e.state.enemies) == enemies_before + 2, "怪物复制体应加入敌方"
-    assert all(c.entity_type == "怪物" for c in clones)
-    assert all(c.blood_limit == 30 for c in clones)
+def test_monster_split_adds_x_minimal_creations_to_enemy_side():
+    engine, _, monster, _ = _engine(actor_is_monster=True)
+    enemies_before = len(engine.state.enemies)
+    creations = engine.combat._spawn_fenlie_creations(monster, 3)
+    assert len(creations) == 3
+    assert len(engine.state.enemies) == enemies_before + 3
+    assert engine.state.enemies[-3:] == creations
+    assert all(creation not in engine.state.temp_friends for creation in creations)
+    for creation in creations:
+        _assert_minimal_creation(creation, monster)
 
 
-def test_no_clone_spawned_on_death_anymore():
-    """旧行为废止：[命零]不再凭空产生复制体。"""
-    e, p, m, actor = _engine()
-    e.state._pending_split_clones = 0      # 已无人设置该字段
-    actor.current_hp = 0
-    actor.is_alive = False
-    e.combat._on_entity_death(actor, ctx={})
-    assert len(e.state.temp_friends) == 0, "命零不应再创造复制体"
+def test_repeated_casts_append_distinct_units_x_per_call():
+    engine, _, monster, _ = _engine(actor_is_monster=True)
+    first = engine.combat._spawn_fenlie_creations(monster, 2)
+    second = engine.combat._spawn_fenlie_creations(monster, 3)
+    assert len(first) == 2 and len(second) == 3
+    assert not ({entity.runtime_id for entity in first}
+                & {entity.runtime_id for entity in second})
+    assert len({entity.name for entity in first + second}) == 5
 
 
-# ---------------------------------------------------------------- 流血代价（2026-10-08）
-
-def test_bleed_is_refused_when_current_hp_below_cost():
-    """边界：付不起（当前生命 < 流血X×10Y）不能发动，不扣血、不创造复制体。
-
-    规则正文：道纹发动必须一次性付清全部代价，付不起不能发动（禁止降X发动）。
-    """
-    e, p, m, actor = _engine()
-    p.current_hp = 59          # 需付 3×10×2 = 60
-    r = _cast(e, actor, x=3, y=2)
-    assert r["success"] is False, r
-    assert "流血" in r.get("error", ""), f"错误信息应指出代价不足：{r.get('error')}"
-    assert p.current_hp == 59, "被拒时不得扣血"
-    assert len(e.state.temp_friends) == 0, "被拒时不得创造复制体"
+def test_no_creation_on_caster_death_without_casting():
+    engine, player, _, _ = _engine()
+    player.current_hp = 0
+    player.is_alive = False
+    engine.combat._on_entity_death(player, ctx={})
+    assert engine.state.temp_friends == []
 
 
-def test_bleed_affordability_follows_current_hp_not_blood_limit():
-    """边界：可支付性看**当前生命**，不看[血限]——血限高但血见底同样发动不了。"""
-    e, p, m, actor = _engine()
-    p.blood_limit = 999        # 血限充足
-    p.current_hp = 10          # 但只剩 10 点血
-    r = _cast(e, actor, x=1, y=1)     # 只需付 10
-    assert r["success"] is True, r
-    assert p.current_hp == 0, "恰好付得起：60→…；此处 10 付 10 应归零"
-    assert p.blood_limit == 999, "流血不扣[血限]"
+def test_bleed_is_refused_atomically_when_current_hp_cannot_pay_3x():
+    engine, player, _, _ = _engine()
+    player.current_hp = 8  # X=3需支付9
+    result = _cast(engine, x=3)
+    assert result["success"] is False
+    assert "流血" in result.get("error", "")
+    assert player.current_hp == 8
+    assert engine.state.temp_friends == []
 
 
-def test_paying_the_last_hp_kills_caster_and_clones_still_spawn():
-    """边界：把最后一点血流光 → 施法者[命零]，但复制体已在代价之后即时生成。
+def test_paying_last_hp_kills_caster_but_all_paid_creations_still_enter():
+    engine, player, _, _ = _engine()
+    player.current_hp = 9
+    result = _cast(engine, x=3)
+    assert result["success"] is True, result
+    assert player.current_hp == 0 and player.is_alive is False
+    assert len(engine.state.temp_friends) == 3
+    for creation in engine.state.temp_friends:
+        _assert_minimal_creation(creation, player)
 
-    这是代价从【衰老】改为【流血】的直接后果：衰老只削[血限]（不一定致死），
-    流血付的是**当前生命**，付到 0 就是[命零]。顺序＝先付代价、后出效果。
-    """
-    e, p, m, actor = _engine()
-    p.current_hp = 60          # 恰好等于代价 3×10×2
-    r = _cast(e, actor, x=3, y=2)
-    assert r["success"] is True, r
-    assert p.current_hp == 0 and p.is_alive is False, "付光生命应[命零]"
-    assert len(e.state.temp_friends) == 3, "代价已付，复制体仍应生成"
+
+def test_all_creations_disperse_at_battle_end():
+    engine, player, monster, _ = _engine()
+    result = _cast(engine, x=3)
+    assert result["success"] is True, result
+    assert len(engine.state.temp_friends) == 3
+    monster.current_hp = 0
+    monster.is_alive = False
+    ended = engine.execute_action("battle_end", {})
+    assert ended["success"] is True, ended
+    assert engine.state.temp_friends == []

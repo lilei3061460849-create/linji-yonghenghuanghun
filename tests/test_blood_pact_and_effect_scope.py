@@ -10,7 +10,7 @@ from engine.dice import DiceEngine
 from engine.enums import CombatSubphase, EffectPolarity, EffectScope
 from engine.events import resolve_option_effect
 from engine.models import (Consumable, DaoWen, DaoWenInstance, Entity, GameState,
-                           Relic, StatusEffect)
+                           Relic, Spell, StatusEffect)
 
 
 def _state_with_blood_pact() -> tuple[GameState, CombatEngine, Entity, Entity]:
@@ -31,86 +31,126 @@ def _state_with_blood_pact() -> tuple[GameState, CombatEngine, Entity, Entity]:
     return state, CombatEngine(state, DiceEngine()), player, ally
 
 
-# 2026-10-12 用户令：【共罪】删掉与道纹【透支】重合的「[回始]流血4X换X法力」，
+def _bind_gongzui(caster: Entity, targets: list[Entity]) -> None:
+    """建立与现行道纹一致的支付名额：两个目标之外，发动者始终追加一份。"""
+    slots = list(targets) + [caster]
+    group_ids = [str(entity.runtime_id) for entity in slots]
+    unique = {str(entity.runtime_id): entity for entity in slots}
+    for entity in unique.values():
+        entity.add_status(StatusEffect(
+            name="共罪", value=1, remaining_rounds=10, source="test",
+            effect_data={"group_ids": group_ids, "source_daowen": "共罪"}))
+
+
+def _bind_xueqi(payer: Entity, target: Entity, multiplier: int = 2) -> None:
+    """血契只读取支付名义量，并让目标追加支付同种资源。"""
+    payer.add_status(StatusEffect(
+        name="血契", value=multiplier, remaining_rounds=3, source="test",
+        effect_data={"target_id": str(target.runtime_id), "source_daowen": "血契"}))
+
+
+def _game_with_three_slots(tmp_path):
+    """三个不同实体各占一个名额，并接入真实 GameEngine 物品入口。"""
+    state, combat, player, ally = _state_with_blood_pact()
+    state.relics.clear()
+    second = Entity("第二同伴", "朋友", blood_limit=80, current_hp=80,
+                    mana_limit=20, current_mana=20)
+    state.friends.append(second)
+    _bind_gongzui(player, [ally, second])
+    engine = GameEngine(
+        db_path=str(tmp_path / "rules.db"), save_dir=str(tmp_path / "saves"),
+        death_book_path=str(tmp_path / "death.md"),
+        sealed_candidate_path=str(tmp_path / "sealed.json"), rng_seed=19)
+    engine.state = state
+    engine.combat = combat
+    return engine, player, ally, second
+
+
+# 2026-10-12 用户令：【共罪】删掉与道纹【透支】重合的「[回始]生命4X换X法力」，
 # 只保留平分。原先此处有 3 条测试专测那个回始付费决策，驱动已被删除，
 # 按「唯一驱动是已删机制的测试应删除而非改写」处理；平分功能的覆盖仍在
 # test_blood_pact_shares_every_supported_numeric_cost /
 # test_event_and_daowen_costs_use_blood_pact_bus 等处。
 
 @pytest.mark.parametrize(
-    ("cost_type", "player_field", "ally_field"),
+    ("cost_type", "player_field"),
     [
-        ("流血", "current_hp", "current_hp"),
-        ("衰老", "blood_limit", "blood_limit"),
-        ("枯竭", "mana_limit", "mana_limit"),
-        ("萎缩", "speed_limit", "speed_limit"),
-        ("疲惫", "current_speed", "current_speed"),
-        ("异变", "mutation_count", "mutation_count"),
+        ("生命", "current_hp"),
+        ("血限", "blood_limit"),
+        ("法力", "current_mana"),
+        ("法限", "mana_limit"),
+        ("速度", "current_speed"),
+        ("速限", "speed_limit"),
     ],
 )
 
 def test_blood_pact_shares_every_supported_numeric_cost(
-    cost_type: str, player_field: str, ally_field: str,
+    cost_type: str, player_field: str,
 ):
-    """正常路径：代价5与同伴平分（2/3，余数随机分配），六种数值代价使用同一总线。"""
-    _, combat, player, ally = _state_with_blood_pact()
-    player_before = getattr(player, player_field)
-    ally_before = getattr(ally, ally_field)
+    """六种资源共用总线；两个目标与发动者追加名额共同承担总支付5。"""
+    state, combat, player, ally = _state_with_blood_pact()
+    state.relics.clear()
+    second = Entity("第二同伴", "朋友", blood_limit=80, current_hp=80,
+                    mana_limit=20, current_mana=20, speed_limit=14, current_speed=14)
+    state.friends.append(second)
+    _bind_gongzui(player, [ally, second])
+    members = [player, ally, second]
+    before = [getattr(entity, player_field) for entity in members]
 
-    result = combat.pay_numeric_cost(
-        player, cost_type, 5, cost_share_target_ref="friend:0")
+    result = combat.pay_resource(player, cost_type, 5)
 
-    if cost_type == "异变":
-        gains = [getattr(player, player_field) - player_before,
-                 getattr(ally, ally_field) - ally_before]
-    else:
-        gains = [player_before - getattr(player, player_field),
-                 ally_before - getattr(ally, ally_field)]
-    assert sorted(gains) == [2, 3], "平分规则：总代价5平分，余数1随机分配"
-    assert result["owner"]["paid"] + result["shared_with"]["paid"] == 5
+    losses = [old - getattr(entity, player_field)
+              for old, entity in zip(before, members)]
+    assert sorted(losses) == [1, 2, 2]
+    assert result["owner"]["paid"] + sum(
+        part["paid"] for part in result["shared_with"]) == 5
     assert result["actual_paid"] == 5
 
 
 def test_blood_pact_cost_one_and_dragon_heart_order():
-    """边界：代价1平分（一方1/一方0，余数随机）；龙心先抵消，再拆分剩余后果。"""
+    """代价1只落一个名额；龙心先抵3，再由三个名额平分剩余6。"""
     state, combat, player, ally = _state_with_blood_pact()
-    one = combat.pay_numeric_cost(
-        player, "流血", 1, cost_share_target_ref="friend:0")
-    assert sorted([100 - player.current_hp, 80 - ally.current_hp]) == [0, 1]
-    assert one["owner"]["paid"] + one["shared_with"]["paid"] == 1
+    state.relics.clear()
+    second = Entity("第二同伴", "朋友", blood_limit=80, current_hp=80)
+    state.friends.append(second)
+    _bind_gongzui(player, [ally, second])
+    one = combat.pay_resource(player, "生命", 1)
+    assert sorted([100 - player.current_hp, 80 - ally.current_hp,
+                   80 - second.current_hp]) == [0, 0, 1]
+    assert one["owner"]["paid"] + sum(
+        part["paid"] for part in one["shared_with"]) == 1
 
     heart = Consumable(
-        "流血龙心", "抵消流血", current_uses=3, max_uses=3,
-        kind="dragon_heart", dragon_heart_type="流血")
+        "生命龙心", "抵消生命", current_uses=3, max_uses=3,
+        kind="dragon_heart", dragon_heart_type="生命")
     state.consumables.append(heart)
-    result = combat.pay_numeric_cost(
-        player, "流血", 9, cost_share_target_ref="friend:0", dragon_heart_use=3)
+    result = combat.pay_resource(player, "生命", 9, dragon_heart_use=3)
     assert result["dragon_heart_offset"] == 3
     assert result["remaining"] == 6
-    # 总流血7（1随机分+6平分3/3）：双方合计7，各3或4。
-    assert sorted([100 - player.current_hp, 80 - ally.current_hp]) == [3, 4]
+    # 首次随机1加本次每人2：三人累计承担分别为2/2/3。
+    assert sorted([100 - player.current_hp, 80 - ally.current_hp,
+                   80 - second.current_hp]) == [2, 2, 3]
     assert heart.current_uses == 0
 
 
 def test_blood_pact_rejects_invalid_or_unpayable_share_atomically():
-    """非法输入：无遗物、非法引用或共同承担者资源不足时，任何一方都不扣除。"""
+    """任一名额资源不足或提交旧手动分担引用时，整笔支付原子拒绝。"""
     state, combat, player, ally = _state_with_blood_pact()
-    ally.current_mana = ally.mana_limit = 1
-    before = (player.mana_limit, ally.mana_limit)
-    with pytest.raises(ValueError, match="无法完整承担"):
-        combat.pay_numeric_cost(
-            player, "枯竭", 5, cost_share_target_ref="friend:0")
-    assert (player.mana_limit, ally.mana_limit) == before
-
-    with pytest.raises(ValueError, match="cost_share_target_ref"):
-        combat.pay_numeric_cost(
-            player, "流血", 5, cost_share_target_ref="friend:99")
-    assert player.current_hp == 100
-
     state.relics.clear()
-    with pytest.raises(ValueError, match="共罪"):
-        combat.pay_numeric_cost(
-            player, "流血", 5, cost_share_target_ref="friend:0")
+    second = Entity("第二同伴", "朋友", blood_limit=80, current_hp=80,
+                    mana_limit=20, current_mana=20)
+    state.friends.append(second)
+    _bind_gongzui(player, [ally, second])
+    ally.current_mana = ally.mana_limit = 1
+    before = [(entity.mana_limit, entity.current_mana)
+              for entity in (player, ally, second)]
+    with pytest.raises(ValueError, match="无法完整承担"):
+        combat.pay_resource(player, "法限", 15)
+    assert [(entity.mana_limit, entity.current_mana)
+            for entity in (player, ally, second)] == before
+
+    with pytest.raises(ValueError, match="不接受单目标分担引用"):
+        combat.pay_resource(player, "生命", 5, cost_share_target_ref="friend:99")
     assert player.current_hp == 100 and ally.current_hp == 80
 
 
@@ -121,34 +161,35 @@ def test_blood_pact_rejects_invalid_or_unpayable_share_atomically():
 
 
 def test_event_and_daowen_costs_use_blood_pact_bus(tmp_path):
-    """正常路径：事件与道纹代价均接入同一共罪总线，不只覆盖遗物自身。"""
+    """事件与道纹都走同一个自动共罪组，不需要旧遗物或手动分担参数。"""
     state, combat, player, ally = _state_with_blood_pact()
+    state.relics.clear()
+    second = Entity("第二同伴", "朋友", blood_limit=80, current_hp=80)
+    state.friends.append(second)
+    _bind_gongzui(player, [ally, second])
     engine = GameEngine(db_path=str(tmp_path / "rulings.db"))
     engine.state = state
     engine.combat.state = state
 
-    event = resolve_option_effect(
-        "流血15。", engine, params={"cost_share_target_ref": "friend:0"})
-    assert "error" not in event
-    # 平分规则（2026-08-21）：15平分 → 7/8（余数随机）
-    assert sorted([100 - player.current_hp, 80 - ally.current_hp]) == [7, 8]
+    event = resolve_option_effect("生命15。", engine, params={})
+    assert "error" not in event, event
+    assert [100 - player.current_hp, 80 - ally.current_hp,
+            80 - second.current_hp] == [5, 5, 5]
 
     target = Entity("敌人", "怪物", blood_limit=100, current_hp=100)
     state.enemies.append(target)
     calc = DaoWenEngine.resolve("连击", 5, target=target)
-    combat.apply_daowen_effect(
-        "连击", calc, player, target,
-        cost_share_target_ref="friend:0")
-    # 连击5流血25平分 → 12/13（余数随机）；两次合计 = 15+25 = 40，双方各承担19~21。
-    losses = sorted([100 - player.current_hp, 80 - ally.current_hp])
-    assert sum(losses) == 40
-    assert losses[0] in (19, 20) and losses[1] in (20, 21)
+    combat.apply_daowen_effect("连击", calc, player, target)
+    # 连击5支付生命25，三个名额分为8/8/9；连同事件15，总支付40。
+    losses = sorted([100 - player.current_hp, 80 - ally.current_hp,
+                     80 - second.current_hp])
+    assert losses == [13, 13, 14]
 
 
-def test_blood_pact_daowen_binds_x_targets_who_split_costs(tmp_path):
-    """共罪X：支付流血5X；X个目标组成无限期分担组，代价只在目标间平分。"""
+def test_gongzui_daowen_binds_two_targets_who_share_resource_payments(tmp_path):
+    """两个目标未选发动者时，发动者仍入组；之后三方都承担资源支付份额。"""
     state, combat, player, first = _state_with_blood_pact()
-    state.relics.clear()  # 新能力来自道纹绑定，不靠遗物资格
+    state.relics.clear()
     second = Entity("第二同伴", "朋友", blood_limit=80, current_hp=80,
                     mana_limit=20, current_mana=20, speed_limit=14, current_speed=14)
     state.friends.append(second)
@@ -167,17 +208,51 @@ def test_blood_pact_daowen_binds_x_targets_who_split_costs(tmp_path):
         ],
     })
     assert result["success"] is True, result
-    assert player.current_mana == before_mana
-    assert player.current_hp == 90, "建立共罪组前支付流血10"
-    assert any(effect.get("targets") == [first.name, second.name]
+    assert player.current_mana == before_mana - 2
+    assert any(effect.get("targets") == [first.name, second.name, player.name]
                for effect in result["execution"]["effects"])
-    assert combat._blood_pact_group(player) == [first, second]
+    members = [player, first, second]
+    assert all(member.has_status("共罪") for member in members)
+    assert all(len(member.get_status_effects("共罪")[0].effect_data["group_ids"]) == 3
+               for member in members)
+    assert combat._blood_pact_group(player) == [first, second, player]
+    assert first.get_status_effects("共罪")[0].remaining_rounds == 2
 
-    receipt = combat.pay_numeric_cost(player, "流血", 9)
-    assert player.current_hp == 90, "后续代价由共罪目标组承担，不再扣施法者生命"
-    assert sorted([80 - first.current_hp, 80 - second.current_hp]) == [4, 5]
-    assert receipt["owner"]["paid"] == 0
+    receipt = combat.pay_numeric_cost(player, "生命", 9)
+    assert [100 - player.current_hp, 80 - first.current_hp, 80 - second.current_hp] == [3, 3, 3]
+    assert receipt["owner"]["paid"] == 3, "发动者自己的份额不得记成0或跳过"
     assert receipt["actual_paid"] == 9
+    assert sum(part["paid"] for part in receipt["shared_with"]) == 6
+
+
+def test_gongzui_caster_already_selected_still_pays_own_share(tmp_path):
+    """发动者已入选仍追加一份：同一实体占两个支付名额，扣款合并结算。"""
+    state, combat, player, ally = _state_with_blood_pact()
+    state.relics.clear()
+    player.dao_wen["共罪"] = DaoWenInstance(DaoWen(
+        name="共罪", formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
+    engine = GameEngine(db_path=str(tmp_path / "blood-pact-caster-target.db"))
+    engine.state = state
+    engine.combat.state = state
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "共罪", "x": 2,
+        "dodge_targets": [
+            {"target_ref": "player:0", "dodge": False, "blood_shadow": False},
+            {"target_ref": "friend:0", "dodge": False, "blood_shadow": False},
+        ],
+    })
+    assert result["success"] is True, result
+    assert combat._blood_pact_group(player) == [player, ally, player]
+    player_status = player.get_status_effects("共罪")[0]
+    assert player_status.remaining_rounds == 2, "同一实体两份名额不得把持续翻倍"
+    assert player_status.effect_data["group_ids"].count(str(player.runtime_id)) == 2
+
+    receipt = combat.pay_numeric_cost(player, "生命", 5)
+    player_loss, ally_loss = 100 - player.current_hp, 80 - ally.current_hp
+    assert (player_loss, ally_loss) in {(4, 1), (3, 2)}
+    assert receipt["owner"]["paid"] == player_loss
+    assert receipt["shared_with"][0]["paid"] == ally_loss
+    assert receipt["actual_paid"] == 5
 
 
 def test_regeneration_is_four_x_and_old_contracts_are_removed():
@@ -194,7 +269,7 @@ def test_regeneration_is_four_x_and_old_contracts_are_removed():
 
 
 def test_scoped_ledger_rolls_back_battle_effects_but_keeps_costs(tmp_path):
-    """正常路径：局内面板变化战终逆向清除；同字段上的衰老代价仍然保留。"""
+    """正常路径：局内面板变化战终逆向清除；同字段上的血限代价仍然保留。"""
     state, combat, player, _ = _state_with_blood_pact()
     state.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
     state.current_battle = 1
@@ -206,7 +281,7 @@ def test_scoped_ledger_rolls_back_battle_effects_but_keeps_costs(tmp_path):
         player, "attack_power", 5,
         scope=EffectScope.BATTLE.value, polarity=EffectPolarity.BUFF.value,
         source="全力")
-    combat.pay_numeric_cost(player, "衰老", 3)
+    combat.pay_numeric_cost(player, "血限", 3)
     player.total_healed = 17
     player.no_action_rounds = 4
     player.no_damage_rounds = 3
@@ -220,7 +295,7 @@ def test_scoped_ledger_rolls_back_battle_effects_but_keeps_costs(tmp_path):
     result = engine.execute_action("battle_end", {})
 
     assert result["success"]
-    assert player.blood_limit == 97  # 初始100，仅保留衰老3
+    assert player.blood_limit == 97  # 初始100，仅保留血限3
     assert player.attack_power == 4
     assert player.total_healed == 0
     assert player.no_action_rounds == player.no_damage_rounds == 0
@@ -300,13 +375,8 @@ def test_status_scope_and_polarity_are_explicit():
     assert entity.get_status_effects("全力")[0].polarity == EffectPolarity.BUFF.value
     assert entity.get_status_effects("坏死")[0].polarity == EffectPolarity.DEBUFF.value
 
-def test_blood_pact_is_no_longer_a_round_start_active_relic():
-    """2026-10-12 用户令：共罪的回始付费半已删，它不再是回始主动遗物。
-
-    与【透支】（流血4X 换 X 法力）重合的那半功能移除后：
-      · 回始决策里不得再出现 `共罪` 键（提交它也不该被接受）；
-      · 平分作为其主要功能必须照常可用——走代价提交处的 cost_share_target_ref。
-    """
+def test_legacy_gongzui_relic_has_no_payment_effect():
+    """旧存档即使还留有共罪遗物，也不恢复回始主动或手动分担玩法。"""
     from engine.ai_rules import round_start_relic_choices
     from engine.models import Relic as _Relic
 
@@ -332,18 +402,245 @@ def test_blood_pact_is_no_longer_a_round_start_active_relic():
     r = e.execute_action("round_start", {"relic_choices": choices})
     assert r.get("success"), r
 
-    # ② 平分仍是其主要功能：带 cost_share_target_ref 支付数值代价，由朋友分担一半
+    # 旧遗物既不会自动分摊，也不能通过旧参数手动分摊。
     hp_p, hp_a = e.state.player.current_hp, ally.current_hp
-    e.combat.pay_numeric_cost(e.state.player, "流血", 10,
+    e.combat.pay_resource(e.state.player, "生命", 10)
+    assert e.state.player.current_hp == hp_p - 10
+    assert ally.current_hp == hp_a
+    with pytest.raises(ValueError, match="共罪"):
+        e.combat.pay_resource(e.state.player, "生命", 5,
                               cost_share_target_ref="friend:0")
-    assert e.state.player.current_hp == hp_p - 5, "持有者应承担一半"
-    assert ally.current_hp == hp_a - 5, "朋友应承担另一半"
 
 
-def test_blood_pact_share_still_requires_holding_the_relic():
-    """平分仍由【共罪】授权：没有它就不得提交 cost_share_target_ref。"""
+def test_manual_cost_share_param_is_retired():
+    """没有现行共罪组时，旧cost_share_target_ref一律不能授权分担。"""
     state, combat, player, _ally = _state_with_blood_pact()
     state.relics = [r for r in state.relics if r.name != "共罪"]
     with pytest.raises(ValueError, match="共罪"):
-        combat.validate_numeric_cost(player, "流血", 5,
+        combat.validate_numeric_cost(player, "生命", 5,
                                      cost_share_target_ref="friend:0")
+
+
+def test_active_soil_mana_payment_uses_gongzui_bus(tmp_path):
+    """活性土壤不再直接扣发动者法力；3点由三个支付名额各承担1点。"""
+    engine, player, ally, second = _game_with_three_slots(tmp_path)
+    engine.state.combat_subphase = CombatSubphase.AWAIT_ROUND_START.value
+    engine.state.current_round = 0
+    engine.state.consumables = [Consumable("活性土壤", "", 1, 1)]
+    before = [entity.current_mana for entity in (player, ally, second)]
+    result = engine.execute_action("consume_item", {
+        "name": "活性土壤", "x": 3, "dm_approved": True,
+        "friend": {"name": "新同伴", "attack_count": 1,
+                   "attack_power": 1, "blood_limit": 6},
+    })
+    assert result["success"], result
+    after = [entity.current_mana for entity in (player, ally, second)]
+    assert [old - new for old, new in zip(before, after)] == [1, 1, 1]
+    payment = result["result"]["mana_payment"]
+    assert payment["actual_paid"] == 3 and payment["owner"]["paid"] == 1
+    assert engine.state.friends[-1].name == "新同伴"
+
+
+def test_huangfu_imprint_mana_payment_uses_gongzui_bus(tmp_path):
+    """黄符刻印支付也经过共罪，不在物品处理器里另扣一份。"""
+    engine, player, ally, second = _game_with_three_slots(tmp_path)
+    player.spells = [Spell(name="刻印术", required_daowen=[],
+                           trigger_condition="瞬发", effect_flow="",
+                           rank=3, trigger="瞬发")]
+    engine.state.consumables = [Consumable("黄符", "", 1, 1)]
+    before = sum(entity.current_mana for entity in (player, ally, second))
+    result = engine.execute_action("consume_item", {
+        "name": "黄符", "imprint_spell": "刻印术"})
+    assert result["success"], result
+    after = sum(entity.current_mana for entity in (player, ally, second))
+    assert before - after == 3
+    assert result["result"]["mana_payment"]["actual_paid"] == 3
+    assert "【刻印：刻印术】" in engine.state.consumables[0].effect
+
+
+def test_huangfu_spell_mana_payment_uses_gongzui_bus(tmp_path):
+    """黄符能源与后续杀伐步骤都走总线，合计4点只结算一次。"""
+    engine, player, ally, second = _game_with_three_slots(tmp_path)
+    engine.state.current_round = 1
+    ally.spells = [Spell(name="黄符杀伐", required_daowen=["杀伐"],
+                         trigger_condition="瞬发", effect_flow="发动杀伐X于目标",
+                         rank=3, trigger="瞬发")]
+    engine.state.huangfu_grants().add((ally.runtime_id, "黄符杀伐"))
+    engine.state.enemies = [Entity("靶怪", "怪物", blood_limit=100, current_hp=100)]
+    before = sum(entity.current_mana for entity in (player, ally, second))
+    result = engine.execute_action("cast", {
+        "actor_ref": "friend:0", "huangfu_spell": "黄符杀伐", "flow": "占位",
+        "target_ref": "enemy:0",
+        "steps": [{"x": 1, "target_ref": "enemy:0", "dodge": False,
+                   "trigger_spell_choices": {}}],
+    })
+    assert result["success"], result
+    after = sum(entity.current_mana for entity in (player, ally, second))
+    assert before - after == 4  # 黄符名义3 + 杀伐法力1
+    payment = result["result"]["huangfu_mana_payment"]
+    assert payment["actual_paid"] == 3 and payment["nominal_amount"] == 3
+    assert engine.state.enemies[0].current_hp == 99
+
+
+def test_event_shard_payment_uses_gongzui_bus(tmp_path):
+    """事件的碎片支出同样由共罪名额承担，不再只改轮回者余额。"""
+    engine, player, ally, second = _game_with_three_slots(tmp_path)
+    engine.state.shards = 30
+    ally.shards = second.shards = 20
+
+    result = resolve_option_effect("失去6[碎片]。", engine, params={})
+
+    assert "error" not in result, result
+    assert engine.state.shards == 28
+    assert ally.shards == second.shards == 18
+
+
+def test_active_soil_payment_failure_is_atomic(tmp_path):
+    """任一共罪名额法力不足时，不创生、不耗耐久，也不扣任何名额的法力。"""
+    engine, player, ally, second = _game_with_three_slots(tmp_path)
+    engine.state.combat_subphase = CombatSubphase.AWAIT_ROUND_START.value
+    engine.state.current_round = 0
+    engine.state.consumables = [Consumable("活性土壤", "", 1, 1)]
+    for entity in (player, ally, second):
+        entity.current_mana = 0
+    before_actions = player.actions_used_this_round
+    before_friends = len(engine.state.friends)
+
+    result = engine.execute_action("consume_item", {
+        "name": "活性土壤", "x": 3, "dm_approved": True,
+        "friend": {"name": "不应创生", "attack_count": 1,
+                   "attack_power": 1, "blood_limit": 6},
+    })
+
+    assert result["success"] is False
+    assert "支付失败" in result["error"]
+    assert [entity.current_mana for entity in (player, ally, second)] == [0, 0, 0]
+    assert len(engine.state.friends) == before_friends
+    assert engine.state.consumables[0].current_uses == 1
+    assert player.actions_used_this_round == before_actions
+
+
+def test_huangfu_imprint_payment_failure_is_atomic(tmp_path):
+    """刻印能源不足时不写入刻印、不耗黄符耐久，也不产生部分扣款。"""
+    engine, player, ally, second = _game_with_three_slots(tmp_path)
+    player.spells = [Spell(name="刻印术", required_daowen=[],
+                           trigger_condition="瞬发", effect_flow="",
+                           rank=3, trigger="瞬发")]
+    engine.state.consumables = [Consumable("黄符", "", 1, 1)]
+    for entity in (player, ally, second):
+        entity.current_mana = 0
+    before_actions = player.actions_used_this_round
+
+    result = engine.execute_action("consume_item", {
+        "name": "黄符", "imprint_spell": "刻印术"})
+
+    assert result["success"] is False
+    assert "支付失败" in result["error"]
+    assert [entity.current_mana for entity in (player, ally, second)] == [0, 0, 0]
+    assert engine.state.consumables[0].current_uses == 1
+    assert "【刻印：" not in engine.state.consumables[0].effect
+    assert player.actions_used_this_round == before_actions
+
+
+def test_huangfu_spell_payment_failure_cleans_temp_daowen(tmp_path):
+    """黄符能源支付失败时，不扣出手，且临时授予的杀伐必须收回。"""
+    engine, player, ally, second = _game_with_three_slots(tmp_path)
+    engine.state.current_round = 1
+    ally.spells = [Spell(name="黄符杀伐", required_daowen=["杀伐"],
+                         trigger_condition="瞬发", effect_flow="发动杀伐X于目标",
+                         rank=3, trigger="瞬发")]
+    engine.state.huangfu_grants().add((ally.runtime_id, "黄符杀伐"))
+    engine.state.enemies = [Entity("靶怪", "怪物", blood_limit=100, current_hp=100)]
+    for entity in (player, ally, second):
+        entity.current_mana = 0
+    before_actions = ally.actions_used_this_round
+
+    result = engine.execute_action("cast", {
+        "actor_ref": "friend:0", "huangfu_spell": "黄符杀伐",
+        "target_ref": "enemy:0",
+        "steps": [{"x": 1, "target_ref": "enemy:0", "dodge": False,
+                   "trigger_spell_choices": {}}],
+    })
+
+    assert result["success"] is False
+    assert [entity.current_mana for entity in (player, ally, second)] == [0, 0, 0]
+    assert ally.actions_used_this_round == before_actions
+    assert "杀伐" not in ally.dao_wen
+    assert engine.state.enemies[0].current_hp == 100
+
+
+def test_active_soil_payment_receipt_includes_xueqi(tmp_path):
+    """活性土壤名义法力3触发血契2：目标额外支付法力6并写入同一回执。"""
+    engine, player, _ally, _second = _game_with_three_slots(tmp_path)
+    engine.state.combat_subphase = CombatSubphase.AWAIT_ROUND_START.value
+    engine.state.current_round = 0
+    engine.state.consumables = [Consumable("活性土壤", "", 1, 1)]
+    enemy = Entity("血契目标", "怪物", blood_limit=100, current_hp=100,
+                   mana_limit=20, current_mana=20)
+    engine.state.enemies = [enemy]
+    _bind_xueqi(player, enemy, 2)
+
+    result = engine.execute_action("consume_item", {
+        "name": "活性土壤", "x": 3, "dm_approved": True,
+        "friend": {"name": "新同伴", "attack_count": 1,
+                   "attack_power": 1, "blood_limit": 6},
+    })
+
+    assert result["success"], result
+    payment = result["result"]["mana_payment"]
+    assert payment["nominal_amount"] == 3
+    assert enemy.current_mana == 14
+    echo = payment["blood_pact_effects"][0]
+    assert echo["nominal_amount"] == 3 and echo["multiplier"] == 2
+    assert echo["payment"]["actual_paid"] == 6
+
+
+def test_huangfu_imprint_payment_receipt_includes_xueqi(tmp_path):
+    """黄符刻印的血契追加支付由总线生成，物品入口不另写一套。"""
+    engine, player, _ally, _second = _game_with_three_slots(tmp_path)
+    player.spells = [Spell(name="刻印术", required_daowen=[],
+                           trigger_condition="瞬发", effect_flow="",
+                           rank=3, trigger="瞬发")]
+    engine.state.consumables = [Consumable("黄符", "", 1, 1)]
+    enemy = Entity("血契目标", "怪物", blood_limit=100, current_hp=100,
+                   mana_limit=20, current_mana=20)
+    engine.state.enemies = [enemy]
+    _bind_xueqi(player, enemy, 2)
+
+    result = engine.execute_action("consume_item", {
+        "name": "黄符", "imprint_spell": "刻印术"})
+
+    assert result["success"], result
+    payment = result["result"]["mana_payment"]
+    assert payment["nominal_amount"] == 3
+    assert enemy.current_mana == 14
+    assert payment["blood_pact_effects"][0]["payment"]["actual_paid"] == 6
+
+
+def test_huangfu_spell_payment_receipt_includes_xueqi(tmp_path):
+    """黄符能源与后续效果步骤分别按自己的名义量触发血契。"""
+    engine, _player, ally, _second = _game_with_three_slots(tmp_path)
+    engine.state.current_round = 1
+    ally.spells = [Spell(name="黄符杀伐", required_daowen=["杀伐"],
+                         trigger_condition="瞬发", effect_flow="发动杀伐X于目标",
+                         rank=3, trigger="瞬发")]
+    engine.state.huangfu_grants().add((ally.runtime_id, "黄符杀伐"))
+    enemy = Entity("靶怪", "怪物", blood_limit=100, current_hp=100,
+                   mana_limit=30, current_mana=30)
+    engine.state.enemies = [enemy]
+    _bind_xueqi(ally, enemy, 2)
+
+    result = engine.execute_action("cast", {
+        "actor_ref": "friend:0", "huangfu_spell": "黄符杀伐",
+        "target_ref": "enemy:0",
+        "steps": [{"x": 1, "target_ref": "enemy:0", "dodge": False,
+                   "trigger_spell_choices": {}}],
+    })
+
+    assert result["success"], result
+    payment = result["result"]["huangfu_mana_payment"]
+    assert payment["nominal_amount"] == 3
+    assert payment["blood_pact_effects"][0]["payment"]["actual_paid"] == 6
+    # 能源名义3追加6；杀伐步骤名义1再追加2。
+    assert enemy.current_mana == 22
+    assert enemy.current_hp == 99

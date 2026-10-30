@@ -79,7 +79,7 @@ def handle_resolve_final_duel(engine: Any, params: Dict[str, Any]) -> Dict[str, 
         if player is not None:
             # 死斗败者：这是**战斗已经结束后**的结算落幕，不是战斗内命零，
             # 因此刻意不接 CombatEngine._check_hp_zero_death()——否则会在战斗结束后
-            # 再触发一轮[命零]效果（分裂复制体/焦黑发丝等）。
+            # 再触发一轮[命零]效果（分裂造物/焦黑发丝等）。
             # 后续走 last_death_cause="duel" 与死者之书流程。
             player.current_hp = 0
             player.is_alive = False

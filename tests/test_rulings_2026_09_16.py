@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -69,18 +71,12 @@ def test_true_rejection_counts_match_documented_numbers():
 # B2 副本专属道纹已进正文
 # ========================================================================
 
-def test_dungeon_daowen_are_documented_in_rules_text():
-    """副本专属道纹必须在正文「副本专属道纹」小节有条文。
+def test_dungeon_daowen_are_documented_in_authoritative_source():
+    """已实现副本道纹进通用正文，草案道纹留在各自副本文档。
 
-    期望名单**取自引擎**（engine/gamedata.py::REGION_EXCLUSIVE_DAOWEN），
-    不在测试里抄一份。抄名单的代价是每次增删道纹都得同步改测试，改漏了就是
-    假失败——本用例实际挂了很久，两个原因都出在"抄"上：
-      * 2026-10-03 删【爆裂】【活血】【尸爆】、2026-10-08 删【镇尸】后，
-        名单里还留着这些已删道纹，正文当然查不到；
-      * 2026-10-07 规则正文由 AI_EXPERIENCE.md 迁到 README.md、2026-10-09 再迁到
-        规则正文.md；用例若还读旧文件会直接 StopIteration。
-    改成从引擎取名单后，增删道纹只需改引擎与正文，用例自动跟随。
+    期望名单取自引擎，文档范围取自副本清单；不把沉沦海草案误塞进已实现正文。
     """
+    from engine.dungeons import load_dungeon_manifest
     from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
 
     lines = open("规则正文.md", encoding="utf-8").read().split("\n")
@@ -89,12 +85,21 @@ def test_dungeon_daowen_are_documented_in_rules_text():
     end = next(i for i, line in enumerate(lines)
                if i > start and line.startswith("### "))
     section = "\n".join(lines[start:end])
+    statuses = {entry.name: entry.status
+                for entry in load_dungeon_manifest(Path("副本索引.md"))}
 
     expected = sorted({name for names in REGION_EXCLUSIVE_DAOWEN.values()
                        for name in names})
     assert expected, "引擎没有登记任何副本专属道纹，名单来源可能已改名"
-    for name in expected:
-        assert f"【{name}】" in section, f"正文缺少副本道纹【{name}】"
+    for region, names in REGION_EXCLUSIVE_DAOWEN.items():
+        if statuses[region] == "已实现":
+            for name in names:
+                assert f"【{name}】" in section, f"正文缺少已实现副本道纹【{name}】"
+        else:
+            draft = (Path("副本") / f"{region}.md").read_text(encoding="utf-8")
+            for name in names:
+                assert re.search(rf"^\d+\.{re.escape(name)}X", draft, re.M), \
+                    f"{region}草案缺少道纹【{name}】定义"
 
     # 已删除的道纹不得以**生效条文**的形式残留：删除注记（- ~~【X】~~）允许保留，
     # 但活条文会让人以为它还能用。
@@ -166,7 +171,7 @@ def test_bounty_paid_as_separate_line_item(tmp_path):
 # ========================================================================
 
 def test_duel_monster_defender_is_capped_not_unlimited(tmp_path):
-    """守擂怪物按正文「1攻+1纹」＝2 次封顶，不得无限出手。"""
+    """所有角色基础1出手；守擂怪物同样封顶，不得无限出手。"""
     from tests.test_final_duel import _new_candidate, _finish_battle_7, _cleanup
     from tests.attack_support import resolve_attack
 
@@ -182,7 +187,7 @@ def test_duel_monster_defender_is_capped_not_unlimited(tmp_path):
     ch.state.enemies.append(mob)
     player = ch.state.player
     budget = ch._action_budget_of(mob)
-    assert budget == 2, "怪物出手预算应为 1攻+1纹 = 2"
+    assert budget == 1, "怪物与其他角色一样，基础出手预算为1"
 
     acted = 0
     for _ in range(12):
@@ -222,47 +227,10 @@ def test_blood_splash_removed_from_death_book():
 
 
 # ========================================================================
-# 唯一（轮回级一次性代价）
+# 旧「唯一」支付义项已删除；现行唯一是使用历史禁令，由 resource_daowen 测试覆盖
 # ========================================================================
 
-def test_unique_cost_blocks_reuse_for_the_whole_cycle(tmp_path):
-    """唯一：使用后本次轮回内不能再发动；跨战斗场数也不恢复。"""
-    e = GameEngine(db_path=str(tmp_path / "unique.db"), rng_seed=7)
-    e.execute_action("setup_attributes", {"blood_points": 13, "speed_points": 6,
-                                          "mana_points": 6})
-    finish_initial_daowen(e)
-    p = e.state.player
-    # 造一条「唯一」代价的道纹（正文定义但此前无任何道纹使用，也无结算逻辑）
-    p.dao_wen["一次性"] = DaoWenInstance(
-        DaoWen(name="一次性", formula="", cost_type="代价",
-               cost_formula="唯一", effect_formula=""), x_value=1)
-    assert p.dao_wen["一次性"].can_use() is True
-
-    e.combat.apply_daowen_effect(
-        "一次性", {"dao_wen": "一次性", "x": 1, "cost_type": CostType.UNIQUE.value},
-        caster=p, target=p)
-    assert p.dao_wen["一次性"].spent_unique is True
-    assert p.dao_wen["一次性"].can_use() is False, "唯一：本次轮回内不得再次发动"
-
-    # 战终递减只作用于 cooldown_remaining，唯一不受影响
-    e.state.phase = "in_combat"
-    e.execute_action("battle_end", {})
-    assert p.dao_wen["一次性"].can_use() is False, "唯一跨场不恢复"
-
-
-def test_unique_does_not_affect_other_instances(tmp_path):
-    """唯一只锁本次使用的那个实例，同名的另一份/其它道纹不受影响。"""
-    e = GameEngine(db_path=str(tmp_path / "unique2.db"), rng_seed=7)
-    e.execute_action("setup_attributes", {"blood_points": 13, "speed_points": 6,
-                                          "mana_points": 6})
-    finish_initial_daowen(e)
-    p = e.state.player
-    p.dao_wen["一次性"] = DaoWenInstance(
-        DaoWen(name="一次性", formula="", cost_type="代价",
-               cost_formula="唯一", effect_formula=""), x_value=1)
-    e.combat.apply_daowen_effect(
-        "一次性", {"dao_wen": "一次性", "x": 1, "cost_type": CostType.UNIQUE.value},
-        caster=p, target=p)
-    for name in p.dao_wen:
-        if name != "一次性":
-            assert p.dao_wen[name].can_use() is True, f"{name} 不应被唯一波及"
+def test_legacy_unique_cost_type_is_retired():
+    from engine.enums import SPECIAL_COST_TYPES
+    assert "UNIQUE" not in CostType.__members__
+    assert SPECIAL_COST_TYPES == {"枯竭", "失忆", "异变", "冷却"}

@@ -2,7 +2,7 @@
 """生成 全道纹索引.md（一次性工具：道纹数据源变更后重跑即可）。
 
 数据源（全部取当前版本引擎/文档事实，不抄旧数据）：
-- 效果正文/支付方式：运行时道纹取 engine/rule_engine.py 或 DaoWenEngine.calculate_*；沉沦海2个未接入运行时节点暂由 DRAFT_DAOWEN 提供索引定义
+- 效果正文/支付方式：运行时道纹取 engine/rule_engine.py 或 DaoWenEngine.calculate_*；DRAFT_DAOWEN 仅预留给未来的纯草案节点
 - 归属分类：engine/gamedata.py（通用核心 / ORIGINAL / TRANSFORM / REGION_EXCLUSIVE / RACE_EXCLUSIVE / BLOODLINE_EXCLUSIVE / UNIMPLEMENTED）
 - 残韵闭环：engine/daowen.py DaoWenEngine.CLOSED_LOOPS
 - 承载怪物：已实现副本文档及沉沦海专属网络草案的全部面板行（怪物池 + 事件/雇佣面板）
@@ -26,6 +26,7 @@ from engine.gamedata import (  # noqa: E402
     REGION_TIERS,
     SHAFA_LOOP_DAOWEN,
     UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN,
+    UNIMPLEMENTED_DAOWEN,
     FIRST_EMBRACE_DAOWEN,
     RACE_EXCLUSIVE_DAOWEN,
     BLOODLINE_EXCLUSIVE_DAOWEN,
@@ -34,18 +35,23 @@ from engine.dungeons import load_dungeon_documents  # noqa: E402
 
 DaoWenEngine.register_all()
 
-# 沉沦海闭环中已有规则定义、但尚未注册运行时的两个草案节点。
-# 继续出现在闭环与索引中，但不得当作可运行道纹授予或发动。
+# 纯草案节点只收录定义，不进入DaoWenEngine运行时注册表。
+# 流动与遗忘已于2026-10-29接入运行时，改从DaoWenEngine docstring取正本。
 DRAFT_DAOWEN = {
-    "流动": {
-        "cost": "支付：法力10X",
-        "effect": "将[目标]身上的X个“持续Y”转移至另一名[目标]。",
-        "params": ["target"],
+    "炽热": {
+        "cost": "支付：待定",
+        "effect": "使[目标]所有消耗品当前耐久-X，最低为0。",
+        "params": ["x", "target"],
     },
-    "遗忘": {
-        "cost": "支付：法力20X",
-        "effect": "移除[目标]身上的X种“持续Y”。",
-        "params": ["target"],
+    "熔化": {
+        "cost": "支付：待定",
+        "effect": "销毁[目标]所有当前耐久≤X的消耗品。",
+        "params": ["x", "target"],
+    },
+    "锻造": {
+        "cost": "支付：待定",
+        "effect": "发现一个消耗品，给予其X耐久，持续∞。",
+        "params": ["x"],
     },
 }
 
@@ -79,10 +85,6 @@ for name, fn in DaoWenEngine._registry.items():
         eff = m.group(2)
         effects[name] = (eff + "。") if eff and not eff.endswith("。") else eff
     params_of[name] = list(inspect.signature(fn).parameters)
-
-# 已裁定的新分裂尚未实现，不能让旧计算器覆盖现行定义。
-costs["分裂"] = "支付：流血X+Y"
-effects["分裂"] = "创造一个X（法限）/Y（血限）的造物为你而战。"
 
 for name, draft in DRAFT_DAOWEN.items():
     costs[name] = draft["cost"]
@@ -123,8 +125,12 @@ in_edges = defaultdict(list)
 # 目标需求
 def target_label(name):
     p = params_of[name]
-    if name in ("波及", "共罪"):
+    if name == "波及":
         return "X个（显式提交）"
+    if name == "共罪":
+        return "2个（显式提交）"
+    if name == "超频":
+        return "需显式选定"
     if name == "唤潮":
         return "自身周围X个可用地图格"
     if name == "蜃景":
@@ -149,7 +155,11 @@ def target_label(name):
 # 随进程变化的哈希序——每次重新生成索引，副本专属段与总览表里的行序都会漂移。
 # 这里改为确定口径：先按该副本闭环链的出场顺序，其余按名字排序补齐。
 def region_daowen_order(region: str) -> list:
-    ns = set(REGION_EXCLUSIVE_DAOWEN[region])
+    # 支付待定草案也归入其副本小节，但与可学习/可发动的专属池分开标记。
+    ns = set(REGION_EXCLUSIVE_DAOWEN[region]) | {
+        name for name, owner in UNIMPLEMENTED_DAOWEN.items()
+        if owner == region and name in DRAFT_DAOWEN
+    }
     chain: list = []
     for src, _rtype, dst in ResonanceEngine.CLOSED_LOOPS.get(f"{region}闭环", []):
         for n in (src, dst):
@@ -185,12 +195,16 @@ assert set(CATEGORY) == (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)), (
 
 # 特殊注记（引擎机制，非数值）
 NOTES = {
+    "共罪": "两个目标之外，发动者始终追加一个支付名额；即使发动者已入选也追加。先按名额平分，再按实体合并扣款；特殊机制代价不分摊。",
+    "血契": "按你的名义支付量让目标额外支付X倍同种资源，不是代付；目标资源不足扣至0，生命不足正常命零。血契不能局外生效。",
+    "萎缩": "只禁止获得速度，不削减速限，也不阻止失去或支付速度；与超频是同域反转，既有增殖边保留为显式分叉。",
+    "唯一": "任何方式成功使用过的道纹都进入历史；持续X内不能再次使用。唯一替换原尘封草案。",
     "封印": "玩家支付异变X，使一个显式选定的目标怪物延后X回合再入场；暂离仍阻塞战终，回场当回合沿用增援白板，最终命零正常进入死亡与碎片结算。",
-    # 2026-10-11 修正：旧注记「【命零】时触发」是废止口径。沿革见
-    # engine/daowen.py::calculate_fenlie —— 旧版[命零]触发（2026-09-17 废止）
-    # → 即时发动+代价【衰老】X×10Y → 2026-10-08 用户令改为代价【流血】X×10Y。
-    "分裂": "现行裁定为单个造物，X为法限、Y为血限；初始资源/速度/道纹配置及存续未定。运行时仍是旧流血X×10Y/复制X个，尚未实现新版；不可将旧版数量和继承规则套入新稿。",
-    "招魂": "唤回者为[临时朋友]，[战终]消失。",
+    "分裂": "每次发动创造X个独立造物；三项依次为1血限/当前生命、1速限/当前速度、1法限/当前法力，按通用规则得到1击数与1攻击力；与所有角色共用基础1次出手及通用修正，不另设专用上限，无道纹、不继承施法者构筑，[战终]消散。",
+    "凋零": "一次性瞬发效果，只在施放当次按场上快照判定；不挂持续状态，后续生命变化及新单位入场不会再次触发。只判定除[目标]外其他在场角色的当前生命，施法者并非目标时同样参与判定；直接判死而非伤害。已补入勾魂—招魂之间的主环格。",
+    "压迫": "纯目标限制：除本次显式[目标]外，所有角色仅能显式选择自身为[目标]，持续X回合；状态挂在该目标身上，不检查生命、不判死。与飞行互为反转。",
+    "沉溺": "目标即将进入普通回合或大梦产生的额外回合时消耗1次阻断并跳过该次完整回合；降至0的本次仍跳过。被跳过者不执行回始/回终、主动出手、凡庸计数或状态递减，其他角色与世界回合照常。",
+    "招魂": "唤回者为[造物]，[战终]消失。",
     "真理": "初拥之夜选项5授予的血族专属道纹。X=陈述句数：提出X句陈述，目标须逐句言明真理，任一句无法言明则无法开口，持续X回合；真伪由DM逐句裁定。冷却2场战斗。",
     "原初": "原初新定义：支付异变5X，借用目标身上自身未拥有的随机X种道纹；旧进化接口的指定借一种尚未同步，不可当作新规则已实现。",
 }
@@ -212,9 +226,10 @@ def loop_chain(loop_name):
 L = []
 A = L.append
 A("# 全道纹索引")
-A("\n> 当前命名：大梦＝额外经历X回合；沉溺＝无法经历X回合（支付未定、未接入，不在当前可执行索引中）。旧存档名称迁移尚未验证。")
+A("\n> 当前命名：大梦＝额外经历X回合；沉溺＝支付法力10X，使目标无法经历X个回合（已接入）。旧存档同名记录的迁移尚未验证。")
 A("")
-A(f"本文件是**当前索引收录道纹（{len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)}种）的完整索引**（含{len(DRAFT_DAOWEN)}种尚未接入运行时的沉沦海草案节点）。道纹条目按归属分类：")
+draft_summary = (f"（含{len(DRAFT_DAOWEN)}种尚未接入运行时的草案节点）" if DRAFT_DAOWEN else "")
+A(f"本文件是**当前索引收录道纹（{len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)}种）的完整索引**{draft_summary}。道纹条目按归属分类：")
 category_summary = (
     f"杀伐闭环（通用核心）{len(SHAFA_LOOP_DAOWEN)} ｜ 其他通用道纹 1 ｜ 原始怪物道纹 {len(ORIGINAL_MONSTER_DAOWEN)} ｜ "
     f"怪物转化道纹 {len(MONSTER_TRANSFORM_DAOWEN)} ｜ 副本专属 "
@@ -226,11 +241,13 @@ if BLOODLINE_EXCLUSIVE_DAOWEN:
 category_summary += f" ｜ 初拥专属 {len(FIRST_EMBRACE_DAOWEN)} ｜ 已实现但副本未开放 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。"
 A(category_summary)
 A("")
-A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余已注册道纹取 `engine/daowen.py` `calculate_*` docstring；沉沦海2个未接入运行时节点取 `DRAFT_DAOWEN`。分裂按最新用户裁定覆盖旧计算器文案，注记明确运行时尚未同步。")
+A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余已注册道纹取 `engine/daowen.py` `calculate_*` docstring；纯草案节点才取 `DRAFT_DAOWEN`。")
 A("- **归属与残韵闭环**：`engine/gamedata.py` + `engine/daowen.py`（`CLOSED_LOOPS`）；与规则正文的闭环图一致。\n"
   "  `CLOSED_LOOPS` 里的每条边为**无向边**（2026-10-07 用户令：残韵路径双向）——登记 `(a,类型,b)` 表示 a、b 互为相邻节点，\n"
   "  正反两向都走同一种残韵、同样消耗一次；双向由 `ResonanceEngine.find_transformations` 在查询时展开，边表不重复登记反向边。\n"
-  "  闭环中的 `？？` 专用于道纹遗物化后的旧节点占位，`（待补）` 用于其它待补设计的空位；两类占位均不可作为残韵结果获得。")
+  "  闭环中的 `？？` 专用于道纹遗物化后的旧节点占位，`（待补）` 用于其它待补设计的空位；两类占位均不可作为残韵结果获得。\n"
+  "  同一源道纹、同一残韵类型存在多个真实出口时属于显式分叉，必须提交 `target_daowen`，不得由索引或运行时静默任选。\n"
+  "  语义审计口径：转换＝同构换维度；反转＝同域翻极性；曲解＝保留核心概念但改变作用关系，曲解不是无法归类时的兜底。")
 A("- **承载怪物**：解析自已实现副本与沉沦海专属网络草案的面板行（怪物池 + 事件/雇佣面板）；格式 `怪物名X`。")
 A("- 冲突时：已确认用户裁定及其规则正文优先；引擎与裁定冲突属于实现欠账，不以旧代码反推玩法。规则叙述见 [规则正文](规则正文.md#第四宇宙规则正文) 为准，本索引为派生索引（与两者冲突时应重新生成本文件）。")
 A("- 通用规则（自由规则里的自由控X、[目标]与闪避、代价结算、平分、声明、怪物冷却道纹X≤1等）见 [规则正文](规则正文.md#第四宇宙规则正文)，本文件不重复。")
@@ -270,8 +287,8 @@ A("| --- | --- | --- | --- | --- | --- |")
 CAT_LABEL = {
     "shaifa": "通用核心", "original": "原始", "transform": "转化",
     "扭曲都市": "扭曲专属", "罪孽都市": "罪孽专属", "龙心谷": "龙心专属",
-    "乱葬岗": "乱葬专属", "沉沦海": "沉沦海专属", "鲛族": "鲛族专属",
-    "bloodline": "血族专属", "other": "其他通用", "first_embrace": "初拥专属", "unimpl": "未实现",
+    "乱葬岗": "乱葬专属", "沉沦海": "沉沦海专属", "荒疫古城": "荒疫专属", "鲛族": "鲛族专属",
+    "bloodline": "血族专属", "other": "其他通用", "first_embrace": "初拥专属", "unimpl": "副本未开放",
 }
 for name in sorted(DaoWenEngine._registry, key=lambda n: (list(CATEGORY).index(n), n)):
     pass
@@ -308,7 +325,7 @@ def section(title, names, note_lines=(), loop=None, loop_title=None):
         A(f"### {name}")
         A(f"X：{costs[name]}。{effects[name]}" if effects[name] else f"X：{costs[name]}。")
         meta = [f"[目标]：{target_label(name)}"]
-        if name in DRAFT_DAOWEN or name == "分裂":
+        if name in DRAFT_DAOWEN:
             meta.append("执行状态：当前定义尚未实现")
         if name == "共罪":
             meta.append("残韵路径：—（不属于残韵闭环）")
@@ -360,7 +377,9 @@ for region in REGION_EXCLUSIVE_DAOWEN:
     notes = [f"副本阶级：{'一二三四'[tier-1]}阶。学习门禁：先经残韵从本副本怪物处转化获得至少一种本副本道纹，此后才可学习本副本其它专属道纹；其它副本专属道纹不可学习。"]
     if region == "沉沦海":
         notes.append("【唤潮】【蜃景】不属于闭环，由鲛渊陵墓的两个独立选项获得；怪物面板既有配置保留。")
-        notes.append("【流动】【遗忘】尚未接入运行时；当前不可通过学习或残韵获得，也不能发动。")
+        notes.append("【流动】【遗忘】已接入运行时；流动须另选接收目标，二者均按X选择持续状态，数量不足时拒绝发动。")
+    if region == "龙心谷":
+        notes.append("【炽热】【熔化】【锻造】为用户确认的支付待定草案，不接入闭环，不可学习、通过残韵获得或发动；【锻造】只发现既有固定规格消耗品，不接受自定义物品效果。")
     section(f"{region}专属（{len(ns)}）", list(ns), note_lines=notes,
             loop=f"{region}闭环", loop_title=region)
     if region == "龙心谷":
@@ -399,7 +418,7 @@ A("5. **血族专属转换消耗品**：【逆命筹】当前尚无专属获取�
 A("6. **初拥专属**：【真理】仅由初拥之夜选项5授予，不可通过局外学习、【典当】发现或残韵获得。")
 A("7. **角色道纹唯一**：同名道纹不重复存在；通过残韵获得的道纹X按自由规则（自由控X）自定义。")
 A("8. **道纹默认局内发动**；局外发动须条文明示，当前明示项为【真理】【唤潮】【蜃景】；【唤潮】【蜃景】仅作用于开放地图。")
-A("9. **自由控X（自由规则的下属条文，不单独成规）**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】【共罪】的X还受合法目标数封顶（玩家schema上限按当前存活目标数封顶）。")
+A("9. **自由控X（自由规则的下属条文，不单独成规）**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】的X还受合法目标数封顶；【共罪】固定选择2个目标，X只决定支付与持续。")
 A("")
 
 out = ROOT / "全道纹索引.md"

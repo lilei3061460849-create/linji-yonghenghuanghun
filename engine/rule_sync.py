@@ -152,7 +152,7 @@ class RuleSync:
             return []
         content = full_path.read_text(encoding="utf-8")
 
-        # 限定到通用道纹正文，避免把“冷却X/流血X”等代价定义误识别成道纹。
+        # 限定到通用道纹正文，避免把“冷却X/生命X”等代价定义误识别成道纹。
         # README 自 2026-10-09 起只作入口；精确条文由规则正文.md 提供。
         if full_path.name == COMMON_RULES_FILE and "### 道纹体系\n" in content:
             content = content.split("### 道纹体系\n", 1)[1].split("### 特殊事件", 1)[0]
@@ -485,8 +485,14 @@ class RuleSync:
         file_daowen += self.extract_event_daowen()
         file_names = {item["name"] for item in file_daowen}
         registered = set(DaoWenEngine.list_all())
+        # 已实现副本也可以登记“支付待定”的草案。草案必须显式进入
+        # UNIMPLEMENTED_DAOWEN，单独报告，不能冒充运行时缺口或已注册道纹。
+        from .gamedata import UNIMPLEMENTED_DAOWEN
+        draft_names = set(UNIMPLEMENTED_DAOWEN)
+        file_only = file_names - registered
         return {
-            "in_file_only": sorted(file_names - registered),
+            "in_file_only": sorted(file_only - draft_names),
+            "draft_only": sorted(file_only & draft_names),
             "in_engine_only": sorted(registered - file_names),
             "in_both": sorted(file_names & registered),
             "file_daowen": file_daowen,

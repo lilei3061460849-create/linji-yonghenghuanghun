@@ -30,6 +30,8 @@ def _engine(suffix: str) -> GameEngine:
     e.execute_action("setup_choose_resonance", {"resonance_type": "转换"})
     setup = e.execute_action("setup_choose_region", {"region": "龙心谷"})
     e.execute_action("choose_discovered_relic", {"relic_name": setup["result"]["relic_choices"][0]})
+    # 本文件验证法术生命周期，清空随机遗物以隔离无关被动效果。
+    e.state.relics = []
     return e
 
 

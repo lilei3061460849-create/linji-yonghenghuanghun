@@ -34,13 +34,21 @@ def _new_engine(tmp_path, region="龙心谷"):
     choice = next((name for name in setup["result"]["relic_choices"] if name not in optional),
                   setup["result"]["relic_choices"][0])
     e.execute_action("choose_discovered_relic", {"relic_name": choice})
+    # 排版用例不依赖随机遗物效果，清空以隔离无关被动。
+    e.state.relics.clear()
     # 本文件不测局外经济，直接构造“精力已耗尽”的合法战始前状态。
     e.state.energy = 0
     return e
 
 
 def _resolve_monster_phase(e):
+    if e.state.duel_turn != "opponent_side":
+        skipped = e.execute_action("skip", {"actor_ref": "player:0"})
+        assert skipped["success"], skipped
     prepared = e.execute_action("prepare_monster_phase", {})
+    assert prepared["success"], prepared
+    if prepared["result"].get("token") is None:
+        return prepared
     choices = []
     for actor in prepared["result"]["actors"]:
         attacks = [{"hits": [
@@ -56,6 +64,8 @@ def _resolve_monster_phase(e):
                   "trigger_spell_choices": {}}
             if opt.get("requires_target"):
                 dw["target_ref"] = actor["attack_target_options"][0]["ref"]
+        if dw is not None:
+            attacks = []
         choices.append({"actor_ref": actor["actor_ref"], "daowen": dw,
                         "attack_actions": attacks})
     return e.execute_action("resolve_monster_phase", {
@@ -168,6 +178,9 @@ def test_monster_hits_listed_one_per_line(tmp_path):
     e = _new_engine(tmp_path)
     e.execute_action("battle_start")
     e.execute_action("round_start", {})
+    # 本条只验普攻逐击排版；清空怪物道纹，避免“有合法道纹必须发动”抢走本次行动。
+    for enemy in e.state.enemies:
+        enemy.dao_wen.clear()
     mp = _resolve_monster_phase(e)
     details = mp["result"]["details"]
     assert details, "resolve_monster_phase 必须上抛逐次出手明细"

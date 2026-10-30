@@ -15,6 +15,7 @@ from tests.setup_support import finish_initial_daowen
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
+from engine.mechanisms import Phase
 from engine.models import Consumable, DaoWen, DaoWenInstance, Entity, Relic
 
 
@@ -248,37 +249,39 @@ def test_no_zhesu_means_no_bonus_mana():
 
 
 def test_shouyedeng_bonus_is_its_own_slice():
-    """正常路径（2026-10-25 用户令）：守夜灯[回终]授予等同当前回合数的法力，授予的法力不再清空；
-    一池制下回始本身仍不回填。"""
+    """守夜灯在每次经历回合的[回增]授予当前世界回合数的法力，回终不清空。"""
     engine = _engine("lamp_happy")
     p = engine.state.player
-    engine.state.relics.append(Relic(name="守夜灯", effect="[回终]获得等同于当前回合数的法力"))
+    engine.state.relics.append(Relic(name="守夜灯", effect="[回增]获得当前世界回合数的法力"))
     engine.execute_action("battle_start", {})
-    engine.execute_action("round_start", {})
-    round_no = engine.state.current_round
     # 满池时授予会被[法限]全额吃掉，先花干净才看得到授予量。
     p.spend_mana(p.current_mana)
-    finish_round(engine)
-    assert p.current_mana == min(EXP_MANA, round_no), (
-        f"第{round_no}回合回终应授予{round_no}点（受[法限]{EXP_MANA}截断），实{p.current_mana}")
-    base = p.current_mana
     engine.execute_action("round_start", {})
-    assert p.current_mana == base, f"回始不回填，实{p.current_mana}"
+    round_no = engine.state.current_round
+    expected = min(EXP_MANA, round_no)
+    assert p.current_mana == expected, (
+        f"第{round_no}回合的[回增]应授予{round_no}点（受[法限]{EXP_MANA}截断），实{p.current_mana}")
+    finish_round(engine)
+    assert p.current_mana == expected, "回终不得清空守夜灯已授予的法力"
+    # 下一世界回合也没有通用回填；空池时看到的仍只是新一次守夜灯授予。
+    p.spend_mana(p.current_mana)
+    engine.execute_action("round_start", {})
+    assert p.current_mana == min(EXP_MANA, engine.state.current_round)
 
 
 def test_shouyedeng_refills_a_spent_pool_up_to_limit():
     """边界：守夜灯只把花掉的池子回充，且填不过[法限]。"""
     engine = _engine("lamp_bound")
     p = engine.state.player
-    engine.state.relics.append(Relic(name="守夜灯", effect="[回终]获得等同于当前回合数的法力"))
+    engine.state.relics.append(Relic(name="守夜灯", effect="[回增]获得当前世界回合数的法力"))
     engine.execute_action("battle_start", {"relic_choices": {}})
     engine.state.current_round = 10  # 远超法限，验证截断
     p.spend_mana(p.current_mana)
-    engine.combat._grant_shouyedeng(p)
+    engine.combat._dispatch_phase(Phase.ROUND_INCREASE, target=p)
     assert p.current_mana == EXP_MANA, (
-        f"回终+10（受[法限]{EXP_MANA}截断），实{p.current_mana}")
-    # 满池后再授予：溢出丢弃，不会超过上限。
-    engine.combat._grant_shouyedeng(p)
+        f"回增+10（受[法限]{EXP_MANA}截断），实{p.current_mana}")
+    # 同一世界回合再经历一个回合仍触发；满池时溢出丢弃。
+    engine.combat._dispatch_phase(Phase.ROUND_INCREASE, target=p)
     assert p.current_mana == EXP_MANA, "满池再授予应溢出丢弃"
 
 

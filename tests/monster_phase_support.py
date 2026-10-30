@@ -42,16 +42,34 @@ def resolve_monster_phase(combat, daowen_choices=None, *, dodge=False, target_re
                 # 波及X：恰好提交X个目标（候选全量提交会在候选>X时被拒，2026-08-22）
                 from sim.monster_targets import pick_wave_dodge_targets
                 dao["dodge_targets"] = pick_wave_dodge_targets(option)
+            elif option["resolves_as"] == "冰冻":
+                ice_schema = option.get("extra_choice_schema", {}).get("freeze_daowen", {})
+                dao["freeze_daowen"] = list(ice_schema.get("options", {}).get(
+                    dao.get("target_ref"), []))[:1]  # 怪物冷却型道纹固定X=1
+            elif option["resolves_as"] in {"流动", "遗忘"}:
+                extra_schema = option.get("extra_choice_schema", {})
+                status_options = extra_schema.get("status_indices", {}).get("options", {})
+                dao["status_indices"] = {
+                    ref: [entry["index"] for entry in entries[:int(option.get("x", 1))]]
+                    for ref, entries in status_options.items()
+                }
+                if option["resolves_as"] == "流动":
+                    destination_options = extra_schema.get("flow_target_ref", {}).get(
+                        "options", {}).get(dao.get("target_ref"), [])
+                    if not destination_options:
+                        raise ValueError("流动prepare没有可用接收目标")
+                    dao["flow_target_ref"] = destination_options[0]
             elif option["resolves_as"] == "变形":
                 enemy_index = int(key.split(":", 1)[1])
                 hit_count = combat.state.enemies[enemy_index].attack_power
         attack_target = actor["attack_target_options"][0]["ref"]
         target_option = next(target for target in actor["attack_target_options"]
                              if target["ref"] == attack_target)
+        # 当前每次提交恰1个行动：选择道纹时不得再捆绑一组攻击。
         attacks = [{"hits": [{"target_ref": attack_target, "dodge": bool(dodge),
                                "blood_shadow": False,
                                "spell_choices": _decline_spells(target_option)}
                               for _ in range(hit_count)]}
-                   for _ in range(action_count)]
+                   for _ in range(action_count if dao is None else 0)]
         choices.append({"actor_ref": key, "daowen": dao, "attack_actions": attacks})
     return combat.resolve_monster_phase(choices, prepared=prepared)

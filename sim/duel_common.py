@@ -90,10 +90,12 @@ def _resolve_monster_turn_one(e, skip_refs: set):
                  "spell_choices": _decline_spells(target_option)}
                 for _ in range(actor["base_hits_per_attack"])]
         attacks.append({"hits": hits})
+    # 每次只有1出手：选择道纹时不再附加攻击，否则真实结算与X预演都会被拒。
+    if dao is not None:
+        attacks = []
     choice = {"actor_ref": actor["actor_ref"], "daowen": dao, "attack_actions": attacks}
     # 2026-09-16 用户令（选案 C）：面板不写死 X 时，用预演评分为这只怪挑一个 X。
-    # 必须在**完整 choice 拼好之后**再评分——引擎要求 attack_actions 的逐击命中
-    # 提交完整，只提交道纹会被拒，所以评分用的是带攻击块的真实提交模板。
+    # 在完整 choice 拼好后评分；道纹选择对应一个空攻击块，与真实1出手提交一致。
     if dao is not None and option.get("x_free"):
         from sim.monster_targets import pick_monster_daowen_x
         m_idx = int(actor["actor_ref"].split(":", 1)[1]) if ":" in actor["actor_ref"] else 0

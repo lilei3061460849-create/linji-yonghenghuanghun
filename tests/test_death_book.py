@@ -118,8 +118,13 @@ def test_player_mingling_queues_interrupt_and_approve_writes_file(tmp_path):
     engine.state.enemies.clear()
     engine.state.enemies.append(Entity(
         name="打手", entity_type="怪物", blood_limit=80, current_hp=80,
+        mana_limit=20, current_mana=20, speed_limit=1, current_speed=1,
         attack_count=1, attack_power=20))
+    engine.state.combat_subphase = "player_actions"
+    skipped = engine.execute_action("skip", {"actor_ref": "player:0"})
+    assert skipped["success"], skipped
     prepared = engine.execute_action("prepare_monster_phase", {})
+    assert prepared["success"], prepared
     r = engine.execute_action("resolve_monster_phase", {
         "token": prepared["result"]["token"],
         "choices": [{"actor_ref": "enemy:0", "daowen": None,

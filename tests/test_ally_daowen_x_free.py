@@ -64,9 +64,9 @@ def _engine_and_ally(ally, monster_hp=234):
 def test_mana_pool_is_not_dumped_on_first_cast():
     """一池制：单次发动不得动用超过一半法力池，避免第一回合砸光整池。"""
     ally = _ally("岩行者", hp=54, ac=2, ap=4)      # 法力池 = 攻击力 = 4
-    _give(ally, "背负")                             # 消耗 2X
+    _give(ally, "弱化")                             # 消耗 2X
     assert ally.current_mana == 4
-    x = pick_ally_daowen_x(ally, "背负", ally)
+    x = pick_ally_daowen_x(ally, "弱化", ally)
     assert x == 1, f"池子 4、单次上限 2、代价 2X → 应取 X=1，实得 {x}"
     assert 2 * x <= ally.current_mana // 2 + 1
 
@@ -74,10 +74,10 @@ def test_mana_pool_is_not_dumped_on_first_cast():
 def test_pool_spreads_across_casts_rather_than_one_burst():
     """反复发动时池子被摊开使用，且不会退化成"永远只能发动一次"。"""
     ally = _ally("岩行者", hp=54, ac=2, ap=4)
-    _give(ally, "背负")
+    _give(ally, "弱化")
     picks = []
     for _ in range(4):
-        x = pick_ally_daowen_x(ally, "背负", ally)
+        x = pick_ally_daowen_x(ally, "弱化", ally)
         if x < 1:
             break
         picks.append(x)
@@ -89,9 +89,9 @@ def test_pool_spreads_across_casts_rather_than_one_burst():
 def test_cannot_afford_returns_zero_instead_of_error():
     """连 X=1 都付不起时返回 0，调用方跳过而非硬报错。"""
     ally = _ally("穷光蛋", hp=54, ac=2, ap=0)       # 法力池 0
-    _give(ally, "背负")
+    _give(ally, "弱化")
     assert ally.current_mana == 0
-    assert pick_ally_daowen_x(ally, "背负", ally) == 0
+    assert pick_ally_daowen_x(ally, "弱化", ally) == 0
 
 
 def test_mutation_stays_clear_of_collapse_line():
@@ -115,13 +115,13 @@ def test_mutation_choice_shrinks_as_mutation_accumulates():
 def test_cooldown_daowen_never_locks_for_many_battles():
     """冷却类代价跨战斗生效，X 越大锁的场次越多 —— 一律取 1。"""
     ally = _ally("追求者", hp=96, ac=8, ap=2)
-    assert pick_ally_daowen_x(ally, "固执", ally) == 1
+    assert pick_ally_daowen_x(ally, "全速", ally) == 1
 
 
 def test_duration_scaling_daowen_respects_battle_horizon():
     """duration 随 X 一起涨时，超出战斗视野的持续回合是白付的代价。"""
     ally = _ally("赴火者", hp=60, ac=3, ap=3)
-    x = pick_ally_daowen_x(ally, "贯穿", ally)      # duration = X，受战斗视野上限约束
+    x = pick_ally_daowen_x(ally, "定型", ally)      # duration = X，受战斗视野上限约束
     assert 1 <= x <= 5, f"应压在战斗视野内，实得 {x}"
 
 
@@ -138,8 +138,8 @@ def test_fixed_x_panel_still_uses_the_written_value():
     """面板仍写死 X 时沿用固定值，双向兼容（与怪物侧同口径）。"""
     e, player, monster = _engine_and_ally(_ally("老朋友", hp=54, ac=2, ap=4))
     ally = e.state.friends[0]
-    _give(ally, "背负", x=3)
-    assert e._ally_daowen_x(ally, "背负", monster) == 3
+    _give(ally, "弱化", x=3)
+    assert e._ally_daowen_x(ally, "弱化", monster) == 3
 
 
 def test_x_free_panel_uses_the_chooser_not_hardcoded_one():
@@ -185,8 +185,8 @@ def test_command_ally_refuses_when_unaffordable():
     """付不起时给出明确错误，而不是静默按 X=1 硬上。"""
     e, player, monster = _engine_and_ally(_ally("穷光蛋", hp=54, ac=2, ap=0))
     ally = e.state.friends[0]
-    _give(ally, "背负")
+    _give(ally, "弱化")
     r = e.execute_action("command_ally", {"ally_ref": "friend:0",
-                                           "instruction": "发动 背负 打 测试怪"})
+                                           "instruction": "发动 弱化 打 测试怪"})
     assert r.get("success") is False
     assert "不宜发动" in r.get("error", "")

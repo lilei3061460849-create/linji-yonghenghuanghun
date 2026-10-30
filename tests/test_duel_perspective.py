@@ -172,8 +172,9 @@ def test_speech_enters_report_and_is_not_fact_checked(tmp_path):
     # 不允许出现"欺骗""说谎""其实是""真实目的"等揭穿式旁白
     for tell in ("欺骗", "说谎", "其实是", "真实目的", "谎言", "骗过"):
         assert tell not in text
-    # 但公开可观察的结果（受到伤害）必须仍然存在
-    assert "守擂乙 受到" in text and "点伤害" in text
+    # 但公开可观察的结果（直接失去生命）必须仍然存在，且不得误写成伤害。
+    assert "守擂乙 失去25点生命" in text
+    assert "点伤害" not in text
 
 
 def test_lie_matching_readme_example_exact_shape(tmp_path):
@@ -184,7 +185,7 @@ def test_lie_matching_readme_example_exact_shape(tmp_path):
     DP.record_speech(entries, e.state.current_round, "A", "我准备治疗。")
     res = e.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 10, "target_ref": "enemy:0"})
     assert res["success"]
-    dealt = next(ef["actual_damage"] for ef in res["execution"]["effects"] if ef["type"] == "damage")
+    lost = next(ef["lost"] for ef in res["execution"]["effects"] if ef["type"] == "target_life_loss")
     DP.record_daowen(
         entries, e.state.current_round,
         actor_side="player_side", actor_name="A", result=res,
@@ -200,7 +201,7 @@ def test_lie_matching_readme_example_exact_shape(tmp_path):
     assert "A：「我准备治疗。」" in text
     assert "A欺骗了B" not in text
     assert "杀伐" not in text
-    assert f"B 受到{dealt}点伤害" in text
+    assert f"B 失去{lost}点生命" in text
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +368,7 @@ def test_audit_section_still_complete_after_assembly(tmp_path):
     assert "【后台审计数据】" in text
     # 后台段必须含真实道纹名与完整数值——审计数据不受信息隐藏影响
     assert "杀伐" in text
-    assert "原始伤害" in text or "raw_damage" in text or "damage" in text
+    assert "target_life_loss" in text and "lost=25" in text
     # 前台段（分隔符之前）不得含道纹名
     split_idx = text.index("【后台审计数据】")
     front = text[:split_idx]
@@ -387,7 +388,7 @@ def test_audit_uses_existing_battle_report_functions_unmodified(tmp_path):
     text = "\n".join(lines)
     assert "出手1（挑战者甲）：" in text
     assert "发动【杀伐X=5】" in text
-    assert "原始伤害" in text
+    assert "target_life_loss" in text and "lost=25" in text
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import math
 import os
 import sys
 
-from tests.setup_support import finish_initial_daowen
+from tests.setup_support import finish_initial_daowen, grant_extra_actions
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
@@ -23,6 +23,7 @@ from engine.api import GameEngine
 from engine.consumables import make_wing_item
 from engine.daowen import DaoWenEngine
 from engine.gamedata import learnability_error, learnable_daowen_pool
+from engine.mechanisms import Phase
 from engine.models import Entity, DaoWen, DaoWenInstance, Relic
 
 
@@ -212,9 +213,9 @@ def test_option2_immortal_body_halves_blood_limit_and_blocks_growth():
     assert player.speed_limit == sp_before + 1, "不朽之躯不阻止修行提升速限"
     engine.state.energy = 0
 
-    # 获得的法力无法超过法限：折速战始+24被钳到法限；守夜灯[敌回始]叠加也被钳到法限
+    # 获得的法力无法超过法限：折速战始+24与守夜灯[回增]叠加都被钳到法限
     engine.state.relics.append(Relic(name="折速法印", effect="[战始]可疲惫X获得6X法力"))
-    engine.state.relics.append(Relic(name="守夜灯", effect="[回始]获得等同于[法限]10%的法力"))
+    engine.state.relics.append(Relic(name="守夜灯", effect="[回增]获得当前世界回合数的法力"))
     zhesu = {"折速法印": {"use": True, "x": 4}}
     if any(r.name == "回锋刀" for r in engine.state.relics):
         zhesu["回锋刀"] = {"enemy_index": 0}
@@ -226,9 +227,9 @@ def test_option2_immortal_body_halves_blood_limit_and_blocks_growth():
     engine.execute_action("round_start", {})
     assert player.current_mana == player.mana_limit, \
         f"回始获得法限后仍钳在法限：当前{player.current_mana} 法限{player.mana_limit}"
-    engine.combat._grant_shouyedeng(player)
+    engine.combat._dispatch_phase(Phase.ROUND_INCREASE, target=player)
     assert player.current_mana == player.mana_limit, \
-        f"守夜灯敌回始叠加的法力也被钳到法限：当前{player.current_mana} 法限{player.mana_limit}"
+        f"守夜灯回增加叠的法力也被钳到法限：当前{player.current_mana} 法限{player.mana_limit}"
 
     # 免疫衰老代价
     engine.state.player.dao_wen["透支"] = DaoWenInstance(
@@ -528,15 +529,19 @@ def test_option6_boundary_below_10_does_not_stack():
     # 法点必须偶数（向下取偶后 21 非法）：20 点 → 法限10
     engine = _new_engine(dbsuffix="ice_bound", speed=2, mana=20)
     player = engine.state.player
-    player.speed_limit = player.current_speed = 6  # 同回合允许两次施放
+    grant_extra_actions(player, 1)  # 基础1出手；夹具额外补1手以验证同回合累计。
     # 本条要在同回合花掉 5+25=30 法力；25 点开局预算最多给到法限12，
     # 直接抬法限（本条测的是【无力】按累计法力叠层，与法限定价无关）。
     player.mana_limit = player.current_mana = 40
     _grant(engine, 6)
     enemy = _start_battle_with_enemy(engine, hp=1000)
-    engine.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 5, "target": "怪物甲"})
+    first = engine.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 5, "target": "怪物甲"})
+    assert first["success"], first
     assert enemy.get_status_value("无力") == 0, "未满10点不应叠加"
-    engine.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 25, "target": "怪物甲"})
+    skipped = engine.execute_action("skip", {"actor_ref": "enemy:0"})
+    assert skipped["success"], skipped
+    second = engine.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 25, "target": "怪物甲"})
+    assert second["success"], second
     # 累计5+25=30，跨越3个10 => 3层
     assert enemy.mana_inflicted_this_round == 30
     assert enemy.get_status_value("无力") == 3

@@ -44,7 +44,7 @@ CAUSE_DRAFTS: dict[str, dict[str, str]] = {
     "collapse": {"text": lethal_events.death_cause_text("mishi")},
     "mediocrity": {"text": lethal_events.death_cause_text("fanyong")},
     "duel": {"text": "最终死斗落败"},
-    "bleed": {"text": "代价流血导致命零"},
+    "bleed": {"text": "生命支付导致命零"},
     "cancer": {"text": lethal_events.death_cause_text("aibian")},
     "echo_error": {"text": "回音长廊安魂曲", "title": "错误遗言"},
 }

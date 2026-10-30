@@ -1,5 +1,5 @@
 """CombatEngine 分片：碎片/必中/共罪、数值代价校验与分摊（均摊/波次/塌缩）、pay_numeric_cost、
-流血代价、龙心抵消、连心银行；含类级常量 SHAREABLE_NUMERIC_COSTS
+生命支付、龙心抵消、连心银行；含类级常量 SHAREABLE_NUMERIC_COSTS
 
 方法体自 engine/combat.py 原样搬来（逐字节），行为与对外契约不变；
 CombatEngine 仍是唯一入口（门面类继承本 Mixin）。
@@ -12,7 +12,8 @@ from ..models import Entity, StatusEffect, GameState, DaoWenInstance, DaoWen, Sp
 from ..daowen import DaoWenEngine, ResonanceEngine
 from ..dice import DiceEngine
 from ..enums import (ActionPhase, TriggerTiming, InterruptType, DamageType,
-                     EffectScope, EffectPolarity, CostType)
+                     EffectScope, EffectPolarity, CostType, RESOURCE_TYPES,
+                     SPECIAL_COST_TYPES, LEGACY_COST_ALIASES, normalize_payment_type)
 from ..dm_rulings import Interrupt
 from ..combat_events import CombatEvent, CombatEventType, register_combat_event_observer
 from ..combat_hooks import CombatHookManager
@@ -28,15 +29,19 @@ class CostPaymentMixin:
         """同一份数值代价结算：正常效果与被闪避/血影免去效果的发动共用，不双付。"""
         cost_spec = None
         if "cost_hp" in calc:
-            cost_spec = ("流血", calc["cost_hp"], "bleed_cost")
+            cost_spec = ("生命", calc["cost_hp"], "bleed_cost")
         elif "cost_blood_limit" in calc:
-            cost_spec = ("衰老", calc["cost_blood_limit"], "aging_cost")
+            cost_spec = ("血限", calc["cost_blood_limit"], "aging_cost")
         elif "cost_mana_limit" in calc:
-            # 2026-10-14：【透支】多代价（枯竭通道）。此前没有道纹用枯竭作代价，
-            # 本分支是第一条；走代价总线（【苍白之花】豁免/【共罪】平分照常）。
+            # 枯竭统一登记为下一次[战始]的当前法力损失；【共罪】平分与龙心抵扣
+            # 仍在登记时结算，【净化】可在结算前减少待扣层数。
             cost_spec = ("枯竭", calc["cost_mana_limit"], "exhaust_cost")
+        elif "cost_mana_cap" in calc:
+            cost_spec = ("法限", calc["cost_mana_cap"], "mana_cap_cost")
+        elif "cost_speed_limit" in calc:
+            cost_spec = ("速限", calc["cost_speed_limit"], "speed_cap_cost")
         elif "cost_speed" in calc:
-            cost_spec = ("疲惫", calc["cost_speed"], "fatigue_cost")
+            cost_spec = ("速度", calc["cost_speed"], "fatigue_cost")
         elif "cost_mutation" in calc and caster.entity_type != "怪物":
             # 怪物原始道纹在两阶段怪物流程中已先支付异变5X；此处只补轮回者/同伴的同类代价。
             cost_spec = ("异变", calc["cost_mutation"], "mutation_cost")
@@ -50,7 +55,7 @@ class CostPaymentMixin:
                 cost_context={"timing": timing, "source": name, "source_type": "daowen", "tags": {"active_payment"}},
             )
             cost_effect = {"type": effect_type, **payment}
-            if cost_type == "流血":
+            if cost_type == "生命":
                 # 保留既有公开字段，同时以owner/shared_with暴露共罪拆分详情。
                 cost_effect["actual_damage"] = payment["actual_paid"]
                 cost_effect["hp_after"] = caster.current_hp
@@ -76,8 +81,13 @@ class CostPaymentMixin:
 
 
     def bizhong_remaining(self, entity: Entity) -> int:
-        """必中X剩余可选目标次数。"""
-        return max(0, int(getattr(entity, "_bizhong_left", 0) or 0))
+        """必中X剩余可选目标次数；对应状态被【冰冻】暂停时不可消费。"""
+        raw = max(0, int(getattr(entity, "_bizhong_left", 0) or 0))
+        if raw and not entity.has_status("必中") and any(
+                status.name == "必中"
+                for status in getattr(entity, "paused_status_effects", [])):
+            return 0
+        return raw
 
     def grant_bizhong(self, entity: Entity, x: int) -> int:
         """获得下X次选择[目标]时无法被闪避。次数叠加。"""
@@ -120,55 +130,49 @@ class CostPaymentMixin:
                  "parent_event_id": cost_ctx.event_id if cost_ctx else None})
         return {"target": target.name, **detail}
 
-    SHAREABLE_NUMERIC_COSTS = {"流血", "衰老", "枯竭", "萎缩", "疲惫", "异变"}
+    SHAREABLE_RESOURCE_TYPES = frozenset(RESOURCE_TYPES)
+    # 兼容旧代码引用；现在只有资源支付可由共罪平分，特殊机制代价不在其中。
+    SHAREABLE_NUMERIC_COSTS = SHAREABLE_RESOURCE_TYPES
+    SPECIAL_MECHANISM_COSTS = frozenset(SPECIAL_COST_TYPES)
 
     def _blood_pact_group(self, payer: Optional[Entity]) -> list[Entity]:
-        """返回【共罪】绑定且仍存活的目标组。"""
-        if payer is None:
+        """返回存活的共罪支付名额；同一实体可因发动者追加名额而出现两次。"""
+        if payer is None or getattr(self.state, "phase", "") != "in_combat":
             return []
-        pact = next((st for st in payer.status_effects
-                     if st.name == "共罪" and st.remaining_rounds != 0), None)
-        if pact is None:
+        pacts = [status for status in payer.status_effects
+                 if status.name == "共罪" and not status.is_expired]
+        if not pacts:
             return []
+        pact = sorted(pacts, key=lambda status: getattr(status, "effect_sequence", 0) or 0)[-1]
         import json
-        try:
-            target_ids = json.loads(pact.source or "[]")
-            if not isinstance(target_ids, list):
-                target_ids = [target_ids]
-        except (TypeError, ValueError):
-            # 兼容早期开发版将单个 runtime_id 直接写进 source 的快照。
-            target_ids = [pact.source]
-        ids = {str(value) for value in target_ids if value}
-        return [entity for entity in self._combat_entity_refs().values()
-                if entity.is_alive and str(entity.runtime_id) in ids]
+        raw_ids = pact.effect_data.get("group_ids")
+        if raw_ids is None:
+            try:
+                raw_ids = json.loads(pact.source or "[]")
+            except (TypeError, ValueError):
+                raw_ids = [pact.source]
+        if not isinstance(raw_ids, list):
+            raw_ids = [raw_ids]
+        ids = [str(value) for value in raw_ids if value]
+        payer_id = str(payer.runtime_id)
+        # 旧存档若只记录目标，至少补入实际支付者；新状态的追加名额不去重。
+        if payer_id not in ids:
+            ids.append(payer_id)
+        refs = {str(entity.runtime_id): entity
+                for entity in self._combat_entity_refs().values()}
+        return [refs[value] for value in ids
+                if value in refs and refs[value].is_alive]
 
     def blood_pact_targets(self, payer: Optional[Entity] = None) -> dict[str, Entity]:
-        """当前【共罪】道纹绑定的存活目标组；旧存档遗物仍兼容读取。"""
+        """当前【共罪】道纹绑定的存活目标组；旧遗物不授权支付分担。"""
         payer = payer or self.state.player
-        if payer is None:
+        if payer is None or getattr(self.state, "phase", "") != "in_combat":
             return {}
         group = self._blood_pact_group(payer)
-        if group:
-            refs = self._combat_entity_refs()
-            return {ref: entity for ref, entity in refs.items() if entity in group}
-        # 兼容已有存档/旧测试中的共罪遗物；新遗物池已移除该条目。
-        if payer is self.state.player and self._has_legacy_blood_pact(payer):
-            return {f"{prefix}:{i}": e for prefix, group in
-                    (("friend", self.state.friends), ("employee", self.state.employees))
-                    for i, e in enumerate(group) if e.is_alive}
-        if (payer.entity_type == "轮回者" and self.state.on_enemy_side(payer)
-                and self._has_legacy_blood_pact(payer)):
-            return {f"enemy:{i}": e for i, e in enumerate(self.state.enemies)
-                    if e is not payer and e.is_alive and e.entity_type in ("朋友", "员工")}
-        return {}
-
-    def _has_legacy_blood_pact(self, payer: Entity) -> bool:
-        if payer is self.state.player:
-            return (any(relic.name == "共罪" for relic in self.state.relics)
-                    and self.state.sealed_relics.get("共罪", 0) <= 0)
-        if payer is not None and payer.entity_type == "轮回者" and self.state.on_enemy_side(payer):
-            return any(relic.name == "共罪" for relic in self.state.opponent_relics)
-        return False
+        if not group:
+            return {}
+        refs = self._combat_entity_refs()
+        return {ref: entity for ref, entity in refs.items() if entity in group}
 
     def _has_active_blood_pact(self, payer: Entity) -> bool:
         return bool(self.blood_pact_targets(payer))
@@ -183,16 +187,23 @@ class CostPaymentMixin:
             if ally.current_hp > 5
         ]
 
-    @staticmethod
-    def _cost_capacity(entity: Entity, cost_type: str) -> Optional[int]:
-        return {
-            "流血": entity.current_hp,
-            "衰老": entity.effective_blood_limit(),
-            "枯竭": entity.mana_limit,
-            "萎缩": entity.speed_limit,
-            "疲惫": entity.current_speed,
+    def _cost_capacity(self, entity: Entity, cost_type: str) -> Optional[int]:
+        cost_type = normalize_payment_type(cost_type)
+        capacities = {
+            "生命": entity.current_hp,
+            "血限": entity.effective_blood_limit(),
+            "法力": entity.current_mana,
+            "法限": entity.mana_limit,
+            "速度": entity.current_speed,
+            "速限": entity.speed_limit,
+            "碎片": (self.state.shards if entity is self.state.player else entity.shards),
+            "假碎片": (self.state.fake_shards if entity is self.state.player
+                       else getattr(entity, "fake_shards", 0)),
+            "枯竭": max(0, entity.mana_limit
+                         - int(getattr(entity, "pending_exhaust_mana", 0) or 0)),
             "异变": None,
-        }.get(cost_type)
+        }
+        return capacities.get(cost_type)
 
     def validate_numeric_cost(
         self,
@@ -206,27 +217,33 @@ class CostPaymentMixin:
 
         forced=True 跳过足额校验（共罪资格与存活校验保留）：用于裁定为
         “付不起照扣、正常死亡”的自动代价（2026-10-13 血族血脉）。"""
-        if cost_type not in self.SHAREABLE_NUMERIC_COSTS:
-            raise ValueError(f"{cost_type}不是可共同承担的数值代价")
+        cost_type = normalize_payment_type(cost_type)
+        if cost_type not in set(RESOURCE_TYPES) | {"枯竭", "异变"}:
+            raise ValueError(f"{cost_type}不是可支付的数值资源或特殊机制代价")
         if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
             raise ValueError("数值代价必须是非负整数")
         ally = None
         owner_amount = amount
         ally_amount = 0
-        pact_group = self._blood_pact_group(payer)
+        pact_group = self._blood_pact_group(payer) if cost_type in RESOURCE_TYPES else []
         if pact_group:
             if cost_share_target_ref:
                 raise ValueError("共罪持续期间由绑定目标组自动平分，不接受单目标分担引用")
             parts = self._divide_flat(amount, len(pact_group)) if pact_group else []
+            required = {}
             for entity, part in zip(pact_group, parts):
-                if part <= 0 or forced:
+                if part > 0:
+                    required.setdefault(id(entity), [entity, 0])
+                    required[id(entity)][1] += part
+            for entity, part in required.values():
+                if forced:
                     continue
-                capacity = (None if cost_type == "衰老" and self.state.side_has(entity, "不朽之躯")
+                capacity = (None if cost_type == "血限" and self.state.side_has(entity, "不朽之躯")
                             else self._cost_capacity(entity, cost_type))
                 if capacity is not None and part > capacity:
                     raise ValueError(f"{entity.name}无法完整承担{cost_type}{part}（可支付{capacity}）")
             return payer, 0, None, 0
-        pact_targets = self.blood_pact_targets(payer)
+        pact_targets = self.blood_pact_targets(payer) if cost_type in RESOURCE_TYPES else {}
         if cost_share_target_ref:
             if not self._has_active_blood_pact(payer):
                 raise ValueError("只有持有且未被封印【共罪】的轮回者才能提交cost_share_target_ref")
@@ -240,7 +257,7 @@ class CostPaymentMixin:
                 continue
             if forced:
                 continue  # 强制代价：足额不足照扣，后续结算自然命零，不在此报错。
-            capacity = (None if cost_type == "衰老" and self.state.side_has(entity, "不朽之躯")
+            capacity = (None if cost_type == "血限" and self.state.side_has(entity, "不朽之躯")
                         else self._cost_capacity(entity, cost_type))
             if capacity is not None and part > capacity:
                 raise ValueError(
@@ -251,70 +268,127 @@ class CostPaymentMixin:
         self, payer: Entity, cost_type: str, amount: int,
         cost_context: Optional[EffectContext] = None,
     ) -> dict:
-        """支付一方的已拆分数值代价；不再进行共罪递归。"""
+        """支付一方的已拆分份额；不再进行共罪递归。资源不足时由调用方决定拒绝或强制扣零。"""
+        cost_type = normalize_payment_type(cost_type)
         if amount <= 0:
             return {"payer": payer.name, "cost_type": cost_type, "paid": 0}
-        if cost_type == "流血":
+        if cost_type == "生命":
             detail = self._pay_bleed_cost(payer, amount, cost_context=cost_context)
             return {"payer": payer.name, "cost_type": cost_type,
                     "paid": detail.get("actual_damage", 0), "detail": detail}
-        if cost_type in {"衰老", "枯竭", "萎缩", "疲惫"}:
+
+        if cost_type in {"血限", "法限", "速度", "速限", "枯竭"}:
             ledger = getattr(payer, "reversible_cost_layers", None)
             if ledger is None:
                 payer.reversible_cost_layers = ledger = {}
-            immune = cost_type == "衰老" and self.state.side_has(payer, "不朽之躯")
+            immune = cost_type == "血限" and self.state.side_has(payer, "不朽之躯")
             if not immune:
-                capacity = {"衰老": payer.blood_limit, "枯竭": payer.mana_limit,
-                            "萎缩": payer.speed_limit, "疲惫": payer.current_speed}[cost_type]
-                ledger[cost_type] = ledger.get(cost_type, 0) + min(amount, max(0, capacity))
-        if cost_type == "衰老":
+                if cost_type == "枯竭":
+                    ledger[cost_type] = ledger.get(cost_type, 0) + amount
+                else:
+                    capacity = {"血限": payer.blood_limit, "法限": payer.mana_limit,
+                                "速度": payer.current_speed, "速限": payer.speed_limit}[cost_type]
+                    ledger[cost_type] = ledger.get(cost_type, 0) + min(amount, max(0, capacity))
+
+        detail = {}
+        if cost_type == "血限":
             if self.state.side_has(payer, "不朽之躯"):
                 return {"payer": payer.name, "cost_type": cost_type, "paid": 0, "immune": True}
-            # 衰老是代价，不进局内可回滚账本；但血限变化的来源仍要可追溯。
             payer.blood_limit = max(0, payer.blood_limit - amount)
             self._record_blood_limit_event(
-                payer, -amount, cost_context, source=(cost_context.source if cost_context else "衰老"),
+                payer, -amount, cost_context,
+                source=(cost_context.source if cost_context else "血限"),
                 source_type=(cost_context.source_type if cost_context else "cost"),
-                subtype="aging", tags=(set(cost_context.tags) if cost_context else set()) | {"cost", "blood_limit_loss"})
-            # 血限压迫导致的当前生命下降同样是失血；统一交给
-            # Entity.__setattr__ 的「失去生命后」钩子触发，不再手工接线。
-            # 「失去生命前」：血限压迫即将把当前生命压下来。
+                subtype="blood_limit_payment",
+                tags=(set(cost_context.tags) if cost_context else set()) | {"cost", "blood_limit_loss"})
             if payer.current_hp > payer.effective_blood_limit() and self._attack_after_window_target is not payer:
                 self._fire_before_life_lost(payer, cost_context)
             self._hp_loss_ctx = cost_context
-            # 2026-10-14：【猩红果实】持有者当前生命可超出[血限]，血限被压低时
-            # 不连带削掉溢出部分——与【苍白之花】的【枯竭】处理镜像。
             if not self.state.hp_overflow_exempt(payer):
                 payer.current_hp = min(payer.current_hp, payer.effective_blood_limit())
             self._check_hp_zero_death(payer, ctx=cost_context)
-        elif cost_type == "枯竭":
-            payer.mana_limit = max(0, payer.mana_limit - amount)
-            # 【苍白之花】持有者的当前法力可以超出[法限]（2026-10-11 用户令），
-            # 因此法限被压低时不连带削掉溢出部分——与 clamp_immortal_body 同一条判定。
-            if not self.mana_overflow_exempt(payer):
-                payer.current_mana = min(payer.current_mana, payer.mana_limit)
-        elif cost_type == "萎缩":
-            payer.speed_limit = max(0, payer.speed_limit - amount)
+        elif cost_type == "法限":
+            before = payer.mana_limit
+            payer.mana_limit = max(0, before - amount)
+            payer.current_mana = min(payer.current_mana, payer.mana_limit)
+            detail = {"mana_limit_before": before, "mana_limit_after": payer.mana_limit}
+        elif cost_type == "速限":
+            before = payer.speed_limit
+            payer.speed_limit = max(0, before - amount)
             overflow = max(0, payer.current_speed - payer.speed_limit)
             if overflow:
                 self._lose_current_speed(payer, overflow, ctx=cost_context)
             else:
                 payer.current_speed = min(payer.current_speed, payer.speed_limit)
-        elif cost_type == "疲惫":
-            self._lose_current_speed(payer, amount, ctx=cost_context)
+            detail = {"speed_limit_before": before, "speed_limit_after": payer.speed_limit}
+        elif cost_type == "速度":
+            before = payer.current_speed
+            relic_ref = getattr(self, "_speed_cost_relic_target_ref", None)
+            self._lose_current_speed(
+                payer, amount, relic_ref,
+                require_huifeng=bool(cost_context and cost_context.source == "闪避"
+                                     and self._huifeng_active(payer)),
+                ctx=cost_context)
+            detail = {"speed_before": before, "speed_after": payer.current_speed}
+        elif cost_type == "法力":
+            before = payer.current_mana
+            payer.current_mana = max(0, before - amount)
+            detail = {"mana_before": before, "mana_after": payer.current_mana}
+        elif cost_type in {"碎片", "假碎片"}:
+            pool = self.state if payer is self.state.player else payer
+            field = "shards" if cost_type == "碎片" else "fake_shards"
+            before = max(0, int(getattr(pool, field, 0) or 0))
+            setattr(pool, field, max(0, before - amount))
+            detail = {"resource_before": before, "resource_after": getattr(pool, field)}
+        elif cost_type == "枯竭":
+            payer.pending_exhaust_mana = (
+                int(getattr(payer, "pending_exhaust_mana", 0) or 0) + amount)
         elif cost_type == "异变":
             mutation = payer.add_mutation(amount)
             if mutation.get("lost"):
-                # 非怪物异变达阈值：触发【迷失】——有队友则变怪物开战，否则命零
                 self._resolve_mutation_lost(payer, cost_context)
             self._bank_lianxin(payer, cost_type, amount)
             nail = self._on_cost_paid(payer, cost_context)
             return {"payer": payer.name, "cost_type": cost_type, "paid": amount,
                     "mutation": mutation, "brand_nail": nail}
+        else:
+            raise ValueError(f"未知支付类型：{cost_type}")
+
         self._bank_lianxin(payer, cost_type, amount)
         nail = self._on_cost_paid(payer, cost_context)
-        return {"payer": payer.name, "cost_type": cost_type, "paid": amount,
-                "brand_nail": nail}
+        paid = amount
+        if cost_type in {"法力", "碎片", "假碎片"}:
+            paid = min(amount, int(detail.get("mana_before", detail.get("resource_before", amount))))
+        elif cost_type == "速度":
+            paid = int(detail["speed_before"]) - int(detail["speed_after"])
+        return {"payer": payer.name, "cost_type": cost_type, "paid": paid,
+                "brand_nail": nail, **detail}
+
+    def settle_battle_start_exhaust(self) -> list[dict]:
+        """下一次[战始]结算【枯竭】：当前法力-X，法限不变，待扣额度清零。"""
+        effects = []
+        seen = set()
+        entities = self.state.get_all_player_side() + self.state.get_all_enemy_side()
+        for entity in entities:
+            if id(entity) in seen:
+                continue
+            seen.add(id(entity))
+            pending = max(0, int(getattr(entity, "pending_exhaust_mana", 0) or 0))
+            if pending <= 0:
+                continue
+            before = max(0, int(entity.current_mana))
+            entity.current_mana = max(0, before - pending)
+            entity.pending_exhaust_mana = 0
+            ledger = getattr(entity, "reversible_cost_layers", None)
+            if isinstance(ledger, dict):
+                ledger["枯竭"] = max(0, int(ledger.get("枯竭", 0) or 0) - pending)
+            effects.append({
+                "type": "exhaust_battle_start", "entity": entity.name,
+                "requested": pending, "paid": before - entity.current_mana,
+                "mana_before": before, "current_mana": entity.current_mana,
+                "mana_limit": entity.mana_limit,
+            })
+        return effects
 
     def _lost_context(
         self, entity: Entity, parent: Optional[EffectContext | dict] = None,
@@ -391,7 +465,7 @@ class CostPaymentMixin:
         """非怪物角色异变达到阈值后的【迷失】处理（2026-09-28 用户令）。
 
         判定：
-          * 己方还有其他存活角色（轮回者/朋友/员工/临时朋友）→ 该角色异变为怪物：
+          * 己方还有其他存活角色（轮回者/朋友/员工/造物）→ 该角色异变为怪物：
               - 从原所属列表（friends/employees/temp_friends/enemies...）中移除；
               - 加入 state.enemies，阵营翻转；entity_type 改为 "怪物"；
               - 重置出手/激活状态，立即按怪物激活流程开战。
@@ -512,8 +586,10 @@ class CostPaymentMixin:
         ctx: Optional[EffectContext | dict] = None,
         cost_context: Optional[EffectContext | dict] = None,
         forced: bool = False,
+        nominal_amount: Optional[int] = None,
+        trigger_blood_pact: bool = True,
     ) -> dict:
-        """统一支付可分担的数值代价：龙心先抵消，共罪再拆分剩余后果。
+        """统一资源／特殊机制支付：名义量记账，抵扣与共罪只改实际承担。
 
         forced=True 时跳过足额校验直接结算（付不起则正常死亡），其余管线
         （拆分/反应/记账/烙痕钉）不变。
@@ -523,22 +599,94 @@ class CostPaymentMixin:
         context_warning，避免开发/测试时静默漏掉来源。
         """
 
+        cost_type = normalize_payment_type(cost_type)
+        nominal = amount if nominal_amount is None else nominal_amount
+        if (not isinstance(nominal, int) or isinstance(nominal, bool) or nominal < 0
+                or not isinstance(amount, int) or isinstance(amount, bool) or amount < 0):
+            raise ValueError("支付量与名义支付量必须是非负整数")
+        normalized = normalize_context(ctx if ctx is not None else cost_context)
         # 结算生命周期记账（engine/resolution.py）：代价也是「效果」，同样受限。
         _cost_field = {"生命": "hp", "法力": "mana", "精力": "energy"}.get(cost_type, cost_type)
         _before = {f: getattr(payer, f, None) for f in ("current_hp", "mana", "energy")}
         with resolution_frame(self, KIND_COST, getattr(payer, "name", "?"),
                               cost_type, amount):
             try:
-                return self._pay_numeric_cost_inner(
+                payment = self._pay_numeric_cost_inner(
                     payer, cost_type, amount,
                     cost_share_target_ref=cost_share_target_ref,
                     dragon_heart_use=dragon_heart_use, ctx=ctx,
                     cost_context=cost_context, forced=forced)
+                payment["nominal_amount"] = nominal
+                if trigger_blood_pact and nominal > 0 and cost_type in RESOURCE_TYPES:
+                    payment["blood_pact_effects"] = self._trigger_xueqi_payment(
+                        payer, cost_type, nominal, normalized)
+                return payment
             finally:
                 for attr, field in (("current_hp", "hp"), ("mana", "mana"),
                                     ("energy", "energy")):
                     note_delta(self, field if attr != "current_hp" else _cost_field,
                                _before[attr], getattr(payer, attr, None))
+
+    def pay_resource(
+        self, payer: Entity, resource_type: str, amount: int, *,
+        nominal_amount: Optional[int] = None,
+        cost_share_target_ref: str = "", dragon_heart_use: int = 0,
+        ctx: Optional[EffectContext | dict] = None,
+        cost_context: Optional[EffectContext | dict] = None,
+        forced: bool = False, trigger_blood_pact: bool = True,
+    ) -> dict:
+        """支付一种资源。血契读取名义量，共罪只分摊实际资源支付。"""
+        resource_type = normalize_payment_type(resource_type)
+        if resource_type not in RESOURCE_TYPES:
+            raise ValueError(f"{resource_type}不是可支付资源")
+        return self.pay_numeric_cost(
+            payer, resource_type, amount,
+            cost_share_target_ref=cost_share_target_ref,
+            dragon_heart_use=dragon_heart_use, ctx=ctx, cost_context=cost_context,
+            forced=forced, nominal_amount=nominal_amount,
+            trigger_blood_pact=trigger_blood_pact)
+
+    def _trigger_xueqi_payment(
+        self, payer: Entity, resource_type: str, nominal_amount: int,
+        parent_ctx: Optional[EffectContext],
+    ) -> list[dict]:
+        """血契：自身支付完成后，目标额外支付名义量的X倍；额外支付本身也是支付。"""
+        effects: list[dict] = []
+        if getattr(self.state, "phase", "") != "in_combat":
+            return effects
+        active = [status for status in list(getattr(payer, "status_effects", []))
+                  if status.name == "血契" and not status.is_expired and status.value > 0]
+        active.sort(key=lambda status: getattr(status, "effect_sequence", 0) or 0)
+        refs = self._combat_entity_refs()
+        for status in active:
+            target_id = str(status.effect_data.get("target_id") or status.source or "")
+            target = next((entity for entity in refs.values()
+                           if str(entity.runtime_id) == target_id), None)
+            if target is None or not target.is_alive:
+                continue
+            amount = nominal_amount * int(status.value)
+            ctx = make_context(
+                timing=parent_ctx.timing if parent_ctx else self._current_context_timing(),
+                source="血契", source_type="daowen", actor=payer, target=target,
+                owner=payer, mechanic="cost", subtype="blood_pact_echo", amount=amount,
+                tags=(set(parent_ctx.tags) if parent_ctx else set()) | {"blood_pact_echo"},
+                parent_event_id=parent_ctx.event_id if parent_ctx else None)
+            payment = self.pay_numeric_cost(
+                target, resource_type, amount, forced=True, ctx=ctx)
+            effects.append({"type": "blood_pact_echo", "source": payer.name,
+                            "target": target.name, "resource": resource_type,
+                            "nominal_amount": nominal_amount, "multiplier": status.value,
+                            "payment": payment})
+        return effects
+
+    @staticmethod
+    def _dragon_heart_matches(item: Consumable, cost_type: str) -> bool:
+        if item.kind != "dragon_heart" or item.is_depleted:
+            return False
+        if normalize_payment_type(item.dragon_heart_type) != cost_type:
+            return False
+        legacy = next((old for old, new in LEGACY_COST_ALIASES.items() if new == cost_type), None)
+        return item.name in {f"{cost_type}龙心", f"{legacy}龙心" if legacy else ""}
 
     def _pay_numeric_cost_inner(
         self,
@@ -553,6 +701,7 @@ class CostPaymentMixin:
         forced: bool = False,
     ) -> dict:
         """代价支付的实现体（对外契约见 pay_numeric_cost）。"""
+        cost_type = normalize_payment_type(cost_type)
         if not isinstance(dragon_heart_use, int) or isinstance(dragon_heart_use, bool) or dragon_heart_use < 0:
             raise ValueError("dragon_heart_use必须是非负整数")
         if payer is not self.state.player:
@@ -564,10 +713,7 @@ class CostPaymentMixin:
         offset = 0
         if dragon_heart_use > 0 and amount > 0:
             heart = next((item for item in self.state.consumables
-                          if item.kind == "dragon_heart"
-                          and item.dragon_heart_type == cost_type
-                          and item.name == f"{cost_type}龙心"
-                          and not item.is_depleted), None)
+                          if self._dragon_heart_matches(item, cost_type)), None)
             if heart is not None:
                 offset = min(dragon_heart_use, heart.current_uses, amount)
         remaining = amount - offset
@@ -582,26 +728,47 @@ class CostPaymentMixin:
                 mechanic="cost", subtype=self._cost_context_subtype(cost_type), amount=remaining,
                 tags=normalized_ctx.tags, event_id=normalized_ctx.event_id,
                 parent_event_id=normalized_ctx.parent_event_id)
-        pact_group = self._blood_pact_group(payer)
+        pact_group = self._blood_pact_group(payer) if cost_type in RESOURCE_TYPES else []
         if pact_group:
+            if cost_share_target_ref:
+                raise ValueError("共罪持续期间由全部支付名额自动平分，不接受单目标分担引用")
             parts = self._divide_flat(remaining, len(pact_group))
+            # 先按支付名额分，再按实体合并；同一实体占两份时只扣款/触发一次。
+            shares = []
+            share_indices = {}
+            for entity, part in zip(pact_group, parts):
+                if part <= 0:
+                    continue
+                key = id(entity)
+                if key not in share_indices:
+                    share_indices[key] = len(shares)
+                    shares.append([entity, 0])
+                shares[share_indices[key]][1] += part
             if not forced:
-                for entity, part in zip(pact_group, parts):
-                    if part <= 0:
-                        continue
-                    capacity = (None if cost_type == "衰老" and self.state.side_has(entity, "不朽之躯")
+                for entity, part in shares:
+                    capacity = (None if cost_type == "血限" and self.state.side_has(entity, "不朽之躯")
                                 else self._cost_capacity(entity, cost_type))
                     if capacity is not None and part > capacity:
                         raise ValueError(f"{entity.name}无法完整承担{cost_type}{part}（可支付{capacity}）")
-            shared_details = [self._apply_numeric_cost_part(entity, cost_type, part, normalized_ctx)
-                              for entity, part in zip(pact_group, parts) if part > 0]
+            owner_detail = {"payer": payer.name, "cost_type": cost_type, "paid": 0}
+            shared_details = []
+            total_paid = 0
+            for entity, part in shares:
+                detail = self._apply_numeric_cost_part(entity, cost_type, part, normalized_ctx)
+                total_paid += int(detail.get("paid", 0) or 0)
+                if entity is payer:
+                    owner_detail = detail
+                else:
+                    detail["blood_pact_effects"] = self._trigger_xueqi_payment(
+                        entity, cost_type, part, normalized_ctx)
+                    shared_details.append(detail)
             return {
                 "cost_type": cost_type, "requested": amount,
                 "dragon_heart_offset": offset, "remaining": remaining,
-                "owner": {"payer": payer.name, "cost_type": cost_type, "paid": 0},
+                "owner": owner_detail,
                 "shared_with": shared_details,
                 "cost_share_target_ref": None,
-                "actual_paid": sum(int(detail.get("paid", 0) or 0) for detail in shared_details),
+                "actual_paid": total_paid,
                 "ctx": normalized_ctx.to_dict() if normalized_ctx is not None else None,
             }
         _, owner_amount, ally, ally_amount = self.validate_numeric_cost(
@@ -609,12 +776,15 @@ class CostPaymentMixin:
         owner_detail = self._apply_numeric_cost_part(payer, cost_type, owner_amount, normalized_ctx)
         ally_detail = (self._apply_numeric_cost_part(ally, cost_type, ally_amount, normalized_ctx)
                        if ally is not None else None)
+        if ally is not None and ally_amount > 0 and cost_type in RESOURCE_TYPES:
+            ally_detail["blood_pact_effects"] = self._trigger_xueqi_payment(
+                ally, cost_type, ally_amount, normalized_ctx)
         # 2026-10-23 用户令：真龙之心改为「实际支付的数值型代价自动记门槛」，
         # 不再有龙性货币。只记玩家本人承担的份额（朋友/员工代付不计）。
         _paid_here = int(owner_detail.get("paid", 0) or 0)
         if (_paid_here > 0 and payer is self.state.player
                 and "真龙之心" in self.state.artifacts_owned
-                and cost_type in {"流血", "衰老", "枯竭", "萎缩", "疲惫"}):
+                and cost_type in {"生命", "血限", "法限", "速度", "速限", "枯竭"}):
             self.state.dragon_cost_points += _paid_here
         return {
             "cost_type": cost_type,
@@ -631,14 +801,15 @@ class CostPaymentMixin:
     @staticmethod
     def _cost_context_subtype(cost_type: str) -> str:
         return {
-            "流血": "bleed", "衰老": "aging", "枯竭": "exhaust",
-            "萎缩": "shrink", "疲惫": "fatigue", "异变": "mutation",
-            "冷却": "cooldown", "失忆": "amnesia", "唯一": "unique",
+            "生命": "bleed", "血限": "aging", "枯竭": "exhaust",
+            "法限": "mana_cap", "速限": "speed_cap", "速度": "fatigue",
+            "法力": "mana", "碎片": "shards", "假碎片": "fake_shards",
+            "异变": "mutation", "冷却": "cooldown", "失忆": "amnesia",
         }.get(cost_type, cost_type)
 
     @staticmethod
     def _blood_oath_context_allows(ctx: Optional[EffectContext]) -> bool:
-        """血誓戒只认明确主动流血代价来源；战始/局外/回终自动流血均不触发。"""
+        """血誓戒只认明确主动生命支付来源；战始/局外/回终自动生命损失均不触发。"""
         if ctx is None:
             return False
         if ctx.mechanic != "cost" or ctx.subtype != "bleed":
@@ -652,28 +823,30 @@ class CostPaymentMixin:
         *, cost_context: Optional[EffectContext] = None,
     ) -> dict:
         """
-        支付单个承担者的"流血X"代价；共罪拆分由 pay_numeric_cost 在外层完成。
-        血誓戒：玩家在明确主动时点（回始/玩家行动/反应）首次主动支付流血代价时，
-        获得等同于本次流血的格挡；若支付后生命≤30%[血限]，改为获得等量生命。
+        支付单个承担者的"生命X"资源；共罪拆分由 pay_numeric_cost 在外层完成。
+        血誓戒：玩家在明确主动时点（回始/玩家行动/反应）首次主动支付生命时，
+        获得等同于本次实际支付生命的格挡；若支付后生命≤30%[血限]，改为获得等量生命。
         共罪分担时只按玩家本人实际承担的部分触发。
-        dragon_heart_use：本次希望消耗"流血龙心"抵消的点数(龙心谷"炼心"产出)，抵消后剩余部分才真正支付。
+        dragon_heart_use：本次希望消耗"生命龙心"抵消的点数(龙心谷"炼心"产出)，抵消后剩余部分才真正支付。
         cost_context：代价来源上下文，未显式传入则不触发“主动/时点”监听。
         """
         cost_context = normalize_context(cost_context)
-        actual, offset = self._offset_with_dragon_heart(payer, "流血", amount, dragon_heart_use)
-        # 「失去生命前」自动反应窗口：非攻击流血代价，生命尚未扣减。
+        actual, offset = self._offset_with_dragon_heart(payer, "生命", amount, dragon_heart_use)
+        # 「失去生命前」自动反应窗口：非攻击生命支付，生命尚未扣减。
         life_before_logs: list = []
         if actual > 0 and payer.is_alive and self._attack_after_window_target is not payer:
             life_before_logs = self._fire_before_life_lost(payer, cost_context) or []
         self._hp_loss_recording += 1  # 代价失血由 _record_hp_loss_event 接管，抑制兜底钩子
+        previous_hp_loss_ctx = self._hp_loss_ctx
+        self._hp_loss_ctx = cost_context
         try:
-            # 【第一杯】：代价的「流血X」支付 X（代价语义、血誓戒按 X 结算），
-            # 但持有者**失去的生命**翻倍——代价与落地生命损失在这里分道。
+            # 【第一杯】：名义支付与实际生命损失分开；庇护只拦截后者。
             from ..mechanisms.verbs import apply_verb
             detail = apply_verb(self, "direct_damage", {
                 "target": payer, "amount": actual, "damage_type": "代价"})
         finally:
             self._hp_loss_recording -= 1
+            self._hp_loss_ctx = previous_hp_loss_ctx
         detail["dragon_heart_offset"] = offset
         if life_before_logs:
             detail["reaction_logs"] = life_before_logs
@@ -684,7 +857,7 @@ class CostPaymentMixin:
             detail["hp_loss_ctx"] = hp_loss_ctx
         if (cost_context is None and actual > 0 and payer is self.state.player
                 and self._relic_active(payer, "血誓戒")):
-            detail["context_warning"] = "流血代价缺少EffectContext；需要来源上下文的监听不会触发"
+            detail["context_warning"] = "生命支付缺少EffectContext；需要来源上下文的监听不会触发"
         if detail.get("died"):
             self._check_hp_zero_death(payer, ctx=hp_loss_ctx or cost_context)
         if (payer is self.state.player and actual > 0 and not payer.blood_oath_used_this_round
@@ -702,7 +875,7 @@ class CostPaymentMixin:
             else:
                 payer.gain_shield(actual)
                 detail["blood_oath"] = {"type": "shield", "amount": actual}
-        self._bank_lianxin(payer, "流血", actual)
+        self._bank_lianxin(payer, "生命", actual)
         if actual > 0:
             nail = self._on_cost_paid(payer, cost_context)
             if nail:
@@ -716,10 +889,8 @@ class CostPaymentMixin:
         """
         if dragon_heart_use <= 0 or amount <= 0:
             return amount, 0
-        heart_name = f"{cost_type}龙心"
         heart = next((c for c in self.state.consumables
-                      if c.kind == "dragon_heart" and c.dragon_heart_type == cost_type
-                      and c.name == heart_name and not c.is_depleted), None)
+                      if self._dragon_heart_matches(c, cost_type)), None)
         if heart is None:
             return amount, 0
         offset = min(dragon_heart_use, heart.current_uses, amount)

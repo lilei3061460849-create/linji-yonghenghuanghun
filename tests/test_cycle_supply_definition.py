@@ -14,12 +14,17 @@ class CycleSupplyDefinitionTests(unittest.TestCase):
                          '供能端有限的循环称为**循环**', '供能端无限的循环称为**无限**'):
             self.assertIn(sentence, text)
 
-    def test_extra_rounds_are_dameng_not_new_chengni(self):
+    def test_extra_rounds_are_dameng_and_chenni_is_distinct_blocker(self):
         DaoWenEngine.register_all()
         self.assertIn('大梦', DaoWenEngine._registry)
-        self.assertNotIn('沉溺', DaoWenEngine._registry)
+        self.assertIn('沉溺', DaoWenEngine._registry)
         from engine.gamedata import UNIMPLEMENTED_DAOWEN
-        self.assertIn('沉溺', UNIMPLEMENTED_DAOWEN)
+        self.assertNotIn('沉溺', UNIMPLEMENTED_DAOWEN)
+        target = Entity('靶', '怪物', blood_limit=100, current_hp=100)
+        calc = DaoWenEngine.resolve('沉溺', 2, target=target)
+        self.assertEqual(calc['cost'], 20)
+        self.assertEqual(calc['block_target_rounds'], 2)
+        self.assertNotIn('extra_target_rounds', calc)
 
     def probe(self, world_round):
         state = GameState(phase='in_combat', current_round=world_round)

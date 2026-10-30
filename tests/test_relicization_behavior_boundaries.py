@@ -74,19 +74,50 @@ def test_shishang_xuenang_heals_holder_from_actual_damage_taken_by_anyone():
     assert player.current_hp == 51  # ceil(3 * 20%) = 1
 
 
-def test_chongzhong_jiasuo_cuts_one_action_from_each_living_role():
-    """【沉重枷锁】：所有角色每回合出手次数-1；速度不动（出手预算不再由速度换算）。"""
+def test_chongzhong_jiasuo_only_cuts_saved_action_of_enemy_who_targeted_holder():
+    """跳过只扣本场锁定过持有者的敌方当前剩余出手，不再全场被动减手。"""
     state, player, target, combat = _combat()
-    player.current_speed, target.current_speed = 3, 1
+    bystander = Entity("未选你的怪物", "怪物", blood_limit=20, current_hp=20,
+                       mana_limit=1, current_mana=1, speed_limit=1, current_speed=1)
+    state.enemies.append(bystander)
+    state.relics.append(Relic(name="沉重枷锁", effect="", tags=[]))
+    combat.round_start()
     base_player_actions = combat.single_round_action_count(player)
     base_target_actions = combat.single_round_action_count(target)
-    state.relics.append(Relic(name="沉重枷锁", effect="", tags=[]))
 
+    # 只持有遗物不会削任何人；实际攻击即使零伤害也留下本场目标记录。
+    assert combat.single_round_action_count(player) == base_player_actions == 1
+    assert combat.single_round_action_count(target) == base_target_actions == 1
+    combat.resolve_attack(target, player, allocated_damage=0)
+    assert target.runtime_id in player.hostile_targeters_this_battle
+
+    # 敌人有2手、已用1手并留1手后动；跳过后这份剩余出手立即归0。
+    target.add_status(StatusEffect("疯狂", 1, 1, "test"))
+    target.actions_used_this_round = 1
+    assert combat.single_round_action_count(target) == 2
+    effects = combat.resolve_heavy_shackles_on_skip(player)
+    assert effects and effects[0]["target"] == target.name
+    assert effects[0]["remaining_before"] == 1
+    assert effects[0]["remaining_after"] == 0
+    assert combat.single_round_action_count(target) == 1
+    assert combat.single_round_action_count(bystander) == 1
+    assert combat.single_round_action_count(player) == 1
+
+    # 扣减只限当前回合；本场“曾选过你”的历史保留到后续回合。
     combat.round_start()
+    assert combat.single_round_action_count(target) == 2
+    assert target.runtime_id in player.hostile_targeters_this_battle
 
-    assert player.current_speed == 3 and target.current_speed == 1, "不得再走失速"
-    assert combat.single_round_action_count(player) == max(0, base_player_actions - 1)
-    assert combat.single_round_action_count(target) == max(0, base_target_actions - 1)
+
+def test_chongzhong_jiasuo_does_nothing_when_target_has_no_remaining_action():
+    state, player, target, combat = _combat()
+    state.relics.append(Relic(name="沉重枷锁", effect="", tags=[]))
+    combat.note_target_lock(target, player)
+    target.actions_used_this_round = combat.single_round_action_count(target)
+
+    assert combat.resolve_heavy_shackles_on_skip(player) == []
+    assert target.heavy_shackles_action_penalty == 0
+    assert combat.single_round_action_count(target) == 1
 
 
 def test_shisu_mingdeng_reduces_speed_limit_only_when_speed_is_actually_lost():
@@ -177,7 +208,7 @@ def test_gongsheng_xuenang_uses_actual_life_loss_for_multi_target_damage():
     second = combat._apply_hostile_damage(target2, 9, source=clone)
 
     assert first["actual_damage"] == 3
-    assert second.get("actual_life_loss") == 4  # 超杀部分不计入复制体回复
+    assert second.get("actual_life_loss") == 4  # 超杀部分不计入造物回复
     assert clone.current_hp == 17
     assert creator.current_hp == 50
 

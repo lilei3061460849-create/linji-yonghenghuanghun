@@ -51,13 +51,15 @@ def test_registry_numbers_mirror_shujin_price_and_scale():
 
 
 def test_dianjin_fanzhuan_edge_and_back():
-    """残韵：点金—反转→勒索（正向唯一）；勒索—反转→点金（反向）。"""
+    """点金反转分叉仍双向；勒索另在假钞—点金主环中拥有两条曲解边。"""
     fw = ResonanceEngine.find_transformations("点金", "反转")
     assert [(p["target_daowen"], p["direction"]) for p in fw] == [("勒索", "正向")]
-    back = ResonanceEngine.get_available_resonance("勒索")
-    assert [(p["resonance_type"], p["target_daowen"], p["direction"]) for p in back] == [
-        ("反转", "点金", "反向")]
-    assert len(ResonanceEngine.CLOSED_LOOPS["罪孽都市闭环"]) == 8, "分叉不进环表，环仍8边合拢"
+    back = ResonanceEngine.find_transformations("勒索", "反转")
+    assert [(p["target_daowen"], p["direction"]) for p in back] == [("点金", "反向")]
+    main_ring = ResonanceEngine.find_transformations("勒索", "曲解")
+    assert [(p["target_daowen"], p["direction"]) for p in main_ring] == [
+        ("假钞", "反向"), ("点金", "正向")]
+    assert len(ResonanceEngine.CLOSED_LOOPS["罪孽都市闭环"]) == 7, "分叉不进环表，现行环仍7边合拢"
 
 
 def test_effect_full_pay_destroys_shards_nobody_gains():
@@ -133,9 +135,11 @@ def test_monster_casts_lesuo_debts_the_player():
     assert r["effects"][-1]["type"] == "lesuo_debt"
 
 
-def test_sin_city_exclusive_count_is_eight():
-    """两处地域集同加勒索；原道纹【赌命】改为遗物【灾厄轮盘】后罪孽都市现有8条专属道纹。"""
+def test_sin_city_exclusive_set_matches_current_registry():
+    """两处名单同源；消灾、清算等退役项不得继续影响战始碎片计算。"""
     from engine.combat import CombatEngine
-    assert set(REGION_EXCLUSIVE_DAOWEN["罪孽都市"]) == set(CombatEngine.REGION_EXCLUSIVE_DAOWEN["罪孽都市"])
-    assert len(REGION_EXCLUSIVE_DAOWEN["罪孽都市"]) == 8
-    assert "勒索" in REGION_EXCLUSIVE_DAOWEN["罪孽都市"]
+    current = set(REGION_EXCLUSIVE_DAOWEN["罪孽都市"])
+    assert current == set(CombatEngine.REGION_EXCLUSIVE_DAOWEN["罪孽都市"])
+    assert len(current) == 6
+    assert "勒索" in current
+    assert "消灾" not in current and "清算" not in current

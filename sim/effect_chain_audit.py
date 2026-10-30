@@ -27,7 +27,7 @@ SINKS = {
     "engine/combat_parts/damage_death.py": [
         "_apply_hostile_damage", "_apply_hostile_damage_inner", "_raw_hp_loss",
         "_apply_blood_limit_change", "_check_hp_zero_death", "_on_entity_death",
-        "_spawn_fenlie_clones", "_record_hp_loss_event", "_write_hp_loss_record",
+        "_spawn_fenlie_creations", "_record_hp_loss_event", "_write_hp_loss_record",
     ],
     "engine/models.py": ["apply_heal", "take_damage", "gain_shield", "add_status",
                          "add_mutation", "emit_combat_event", "depart_battle"],
@@ -160,7 +160,7 @@ def cmd_depth(defs, callers) -> int:
         (CombatEngine, ["_apply_hostile_damage", "_check_hp_zero_death",
                         "_on_entity_death", "pay_numeric_cost", "apply_daowen_effect",
                         "_raw_hp_loss", "_apply_blood_limit_change",
-                        "_spawn_fenlie_clones"]),
+                        "_spawn_fenlie_creations"]),
         (GameState, ["apply_heal"]),
         (Entity, ["add_status", "add_mutation", "gain_shield", "depart_battle"]),
         (TriggerBus, ["dispatch"]),

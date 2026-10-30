@@ -5,6 +5,8 @@
 """
 STATUS_DOMAINS = {
     '全力': frozenset({'attack_power'}),
+    '强化': frozenset({'attack_power'}),
+    '弱化': frozenset({'attack_power'}),
     '龙族利爪': frozenset({'attack_power'}),
     '全速': frozenset({'attack_count'}),
     '手雷减攻': frozenset({'attack_count'}),

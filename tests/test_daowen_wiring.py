@@ -28,15 +28,14 @@ def _engine(suffix):
     # 本文件是道纹单元接线测试，直接构造合法战斗阶段，避免随机出怪干扰。
     engine.state.phase = "in_combat"
     p = engine.state.player
-    # 多道纹同回合连发需要 8 手预算。DM裁定 2026-09-10 后轮回者出手固定 2 次、
-    # 不再由速限换算，所以改用【疯狂】+6 把预算抬到 8——本文件测的是道纹接线，
-    # 不是出手预算（预算另有 tests/test_action_budget.py 专测）。
+    # 多道纹同回合连发需要 7 手预算。全体角色基础1次，改用【疯狂】+6
+    # 把预算抬到7——本文件测的是道纹接线，不是出手预算。
     p.speed_limit = 4
     p.current_speed = 4
     p.current_mana = 80
     p.mana_limit = 80
     p.add_status(StatusEffect(name="疯狂", value=6, remaining_rounds=-1, source="test"))
-    assert p.action_count == 8, f"夹具应给出8手预算，实{p.action_count}"
+    assert p.action_count == 7, f"夹具应给出7手预算，实{p.action_count}"
     return engine
 
 
@@ -104,7 +103,7 @@ def test_boba_spreads_damage_equally_with_random_remainder():
     assert r["success"], r
     assert refs["enemy:0"].has_status("波及") and refs["enemy:1"].has_status("波及")
 
-    # 杀伐2X=4点总伤害作用于[目标]敌0+波及目标敌1：2+2。
+    # 杀伐2的X²=4点总生命损失作用于[目标]敌0+波及目标敌1：2+2。
     r2 = engine.execute_action("use_daowen", {
         "daowen_name": "杀伐", "x": 2, "target_ref": "enemy:0",
         "dodge": False, "blood_shadow": False,
@@ -112,9 +111,9 @@ def test_boba_spreads_damage_equally_with_random_remainder():
     assert r2["success"], r2
     spread = r2["execution"].get("wave_spread")
     assert spread and spread["targets"] == [foe_a.name, foe_b.name]
-    dealt = sum(e.get("actual_damage", 0) for e in r2["execution"]["effects"]
-                if e.get("type") == "damage")
-    assert dealt == 4, "总数值不变：4点伤害平分给两个目标（杀伐2→X²=4）"
+    lost = sum(e.get("lost", 0) for e in r2["execution"]["effects"]
+               if e.get("type") == "target_life_loss")
+    assert lost == 4, "总数值不变：4点生命损失平分给两个目标（杀伐2→X²=4）"
     assert foe_a.current_hp == 98 and foe_b.current_hp == 98
 
 
@@ -257,7 +256,7 @@ def test_huaxiang_dingxing_wushen():
 
 
 def test_damage_needle_is_forged_from_dragon_valley_event():
-    """熔炉余火真实支付流血10并发放灼罪钉。"""
+    """熔炉余火真实支付生命10并发放灼罪钉。"""
     engine = _engine("damage_needle_forge")
     engine.state.phase = "pre_battle"
     engine.state.current_region = "龙心谷"
@@ -298,15 +297,17 @@ def test_retired_healing_runes_are_not_registered():
     assert "眩晕" not in DaoWenEngine._registry
 
 
-def test_relicized_trigger_daowen_registry_and_flight_is_not_a_daowen():
-    """已遗物化触发型道纹不可再施放；【飞行】是状态，不出现在道纹注册表。"""
+def test_relicized_trigger_daowen_registry_and_flight_is_real_daowen():
+    """已遗物化触发型道纹不可再施放；【飞行】已恢复为真实道纹。"""
     retired = {
         "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-        "冥气", "退化", "畸变", "缄默", "飞行",
+        "冥气", "退化", "畸变", "缄默",
     }
     assert retired.isdisjoint(DaoWenEngine._registry)
+    assert "飞行" in DaoWenEngine._registry
+    assert DaoWenEngine.resolve("飞行", 2)["cost_type"] == "冷却"
 
-    # 2026-10-25 用户令：飞行是状态，不由【变形】凭空附带（旧实现是自造机制，已删）。
+    # 飞行是独立道纹，仍不得由【变形】凭空附带。
     engine = _engine("bone_angel_no_flight")
     bone_angel = _monster(engine, name="骨天使", hp=30, atk=7, ap=3)
     _give(bone_angel, "变形")
@@ -318,12 +319,12 @@ def test_relicized_trigger_daowen_registry_and_flight_is_not_a_daowen():
 def test_flight_rule_line_matches_the_engine():
     """规则正文的飞行条文与引擎拦目标的口径必须一致。
 
-    2026-10-25 用户令：条文只保留这一句「飞行X：非飞行者无法把飞行者选为[目标]，持续X回合。」
+    最新裁定：飞行支付冷却X，保留非飞行者无法选择飞行者为[目标]。
     """
     rules = Path("规则正文.md").read_text(encoding="utf-8")
     section = rules.split("### 战斗行动", 1)[1].split("\n### ", 1)[0]
-    assert "飞行X：非飞行者无法把飞行者选为[目标]，持续X回合。" in section
-    assert "飞行" not in DaoWenEngine._registry
+    assert "飞行X：支付：冷却X。非飞行者无法把飞行者选为[目标]，持续X回合。" in section
+    assert "飞行" in DaoWenEngine._registry
 
     engine = _engine("flight_targeting")
     p = engine.state.player

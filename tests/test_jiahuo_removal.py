@@ -8,12 +8,14 @@
 
 闭环补位沿用既有先例（删【活血】→逆鳞直连裂变、删【尸爆】→分裂直连缄默）：
 **裂变 —（转换）→ 背负**，龙心谷闭环仍合拢，边数 7 → 6。
+后续加害、龙鳞、裂变、背负等节点已按裁定转换或删除；当前仅以内部「？？」
+占位保留这条六边结构，不把旧名字重新列为可获得的副本专属道纹。
 """
 from __future__ import annotations
 
 import pathlib
 
-from engine.daowen import DaoWenEngine, ResonanceEngine
+from engine.daowen import DaoWenEngine, ResonanceEngine, RELICIZED_DAOWEN_SLOTS, is_reserved_slot
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -35,18 +37,20 @@ def test_jiahuo_is_not_registered():
     from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
 
     assert "嫁祸" not in REGION_EXCLUSIVE_DAOWEN["龙心谷"]
-    assert {"加害", "龙鳞", "裂变", "背负"} == REGION_EXCLUSIVE_DAOWEN["龙心谷"]
+    assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == set()
 
 
 def test_longji_loop_still_closes_with_six_edges():
-    """边界：删【嫁祸】后由【裂变】直连【背负】，闭环仍合拢（入度=出度=1）。"""
+    """旧道纹退出后，六个独立占位节点仍保持单环，不授予旧道纹。"""
     loop = ResonanceEngine.CLOSED_LOOPS["龙心谷闭环"]
-    assert ("裂变", "转换", "背负") in loop
+    assert (RELICIZED_DAOWEN_SLOTS["裂变"], "转换",
+            RELICIZED_DAOWEN_SLOTS["背负"]) in loop
     assert len(loop) == 6
     outs = {a for a, _, _ in loop}
     ins = {c for _, _, c in loop}
     assert outs == ins, "闭环节点入出必须一一对应"
     assert len(outs) == len(loop), "每个节点只能出现一次，否则不是单环"
+    assert all(is_reserved_slot(name) for name in outs)
 
 
 def test_no_runtime_trace_left_in_production_or_sim():

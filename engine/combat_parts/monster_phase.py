@@ -35,10 +35,13 @@ class MonsterPhaseMixin:
         for e in self.state.get_all_player_side() + self.state.get_all_enemy_side():
             e.hp_lost_this_battle = 0
             e.chenglu_paid = 0
+            e.heavy_shackles_action_penalty = 0
+            e.hostile_targeters_this_battle.clear()
         self._monster_activated = {}
         self._monster_evolved = set()  # 进化（原初X）：每场战斗限一次
         self._monster_daowen_round_used = {}
         self._resonance_rewrites = {}
+        self._spell_stack = []
 
     def _monster_round_used(self, monster: Entity) -> set:
         """该怪物本回合已发动的道纹集合（换回合自动清空）。
@@ -70,9 +73,8 @@ class MonsterPhaseMixin:
         高爆手雷修改的是每轮攻击中的"攻击次数"，不再同时削减攻击出手数。
         2026-10-03：【狂暴】道纹删除，原"+1 出手"加成随之移除。
         """
-        n = 1
-        n += m.get_status_value("疯狂")
-        return max(0, n)
+        # 新旧入口共用同一出手预算：疯狂只修正预算，不再额外生成攻击组。
+        return 1 if m.actions_used_this_round < self.single_round_action_count(m) else 0
 
     def _combat_entity_refs(self) -> dict[str, Entity]:
         """为两阶段决策提供本场稳定的显式目标引用，避免同名实体歧义。
@@ -126,8 +128,16 @@ class MonsterPhaseMixin:
             if not monster.is_alive or monster.removed_without_kill:
                 continue
             actor_ref = f"enemy:{index}"
+            if self.chenni_round_blocked(monster):
+                skipped.append({"actor_ref": actor_ref, "monster": monster.name,
+                                "reason": "沉溺：本次回合已中断"})
+                continue
             if not self.can_act(monster):
                 skipped.append({"actor_ref": actor_ref, "monster": monster.name, "reason": "无法行动"})
+                continue
+            if monster.actions_used_this_round >= self.single_round_action_count(monster):
+                skipped.append({"actor_ref": actor_ref, "monster": monster.name,
+                                "reason": "本回合出手已用完"})
                 continue
             activated = self._monster_activated.get(id(monster), set())
             round_used = self._monster_round_used(monster)
@@ -159,6 +169,9 @@ class MonsterPhaseMixin:
                          [target for target in all_targets
                           if self.is_targetable(monster, refs[target["ref"]])])
                         if requires_target else [])
+                    if effective_name == "冰冻":
+                        legal_targets = [option for option in legal_targets
+                                         if refs[option["ref"]].dao_wen]
                     if "龙威" in self.state.dragon_traits and self.state.player and self.state.player.is_alive:
                         legal_targets = [target for target in legal_targets
                                          if (not self.state.on_player_side(refs[target["ref"]])
@@ -218,6 +231,24 @@ class MonsterPhaseMixin:
                     # 降到 X=1 仍可发动（单目标全值），0 个合法目标时上面
                     # `if not dodge_target_options: continue` 已拦截，故此处无需再过滤。
                     # 面板 x 仍是展示口径，wave_effective_x 才是实际标数。
+                    if effective_name in {"流动", "遗忘"}:
+                        wave_target_ids = {id(entity) for entity in self._wave_targets(monster)}
+                        def _enough_status_options(option):
+                            source = refs[option["ref"]]
+                            active_count = sum(not status.is_expired
+                                               for status in source.status_effects)
+                            if active_count < effective_x:
+                                return False
+                            if effective_name == "遗忘":
+                                return True
+                            return any(other is not source and id(other) not in wave_target_ids
+                                       and other.is_alive
+                                       and (other is monster or self.is_targetable(monster, other))
+                                       for other in refs.values())
+                        legal_targets = [option for option in legal_targets
+                                         if _enough_status_options(option)]
+                        if not legal_targets:
+                            continue
                     preview_calc = DaoWenEngine.resolve(
                         effective_name, effective_x, target=preview_target, caster=monster)
                     if not self._monster_can_pay_calc_cost(monster, preview_calc):
@@ -271,6 +302,10 @@ class MonsterPhaseMixin:
             # （与【波及】目标数限制同族：prepare不得给出无法满足的义务）。
             base_actions = (0 if not attack_targets
                             else self._monster_attack_actions(monster, activated))
+            if base_actions <= 0 and not daowen_options:
+                skipped.append({"actor_ref": actor_ref, "monster": monster.name,
+                                "reason": "没有可支付的道纹或合法攻击目标"})
+                continue
             # 2026-10-25 用户令：怪物攻击并入玩家同一套攻击机制——
             # 击数＝当前速度（[攻击次数]＝[当前速度]，对全体同口径），
             # 每击伤害由攻击者在 damage_budget 内自由分配，目标可逐击闪避或招架。
@@ -303,32 +338,36 @@ class MonsterPhaseMixin:
         return {"round": self.state.current_round, "actors": actors, "skipped": skipped}
 
     def _monster_can_pay_calc_cost(self, caster: Entity, calc: dict) -> bool:
-        """怪物发动道纹前校验数值代价是否付得起（不实际支付）。
-
-        残韵改写/状态变化可能让怪物付不起代价（如速度归零后发动
-        【洞察】(疲惫3)）——付不起就不该被 prepare 列为合法项，
-        也不该在 resolve 时硬报错。
-        """
-        if caster is None or not caster.entity_type == "怪物":
+        """怪物候选预检与实际支付共用资源校验；血契额外支付不在此预检。"""
+        if caster is None or caster.entity_type != "怪物":
             return True
-        for key, capacity in (
-                ("cost_hp", getattr(caster, "current_hp", 0)),
-                ("cost_blood_limit", caster.effective_blood_limit()),
-                ("cost_speed", getattr(caster, "current_speed", 0)),
-        ):
-            amount = calc.get(key, 0)
-            if amount and capacity < amount:
+        for key, resource in (
+                ("cost_hp", "生命"), ("cost_blood_limit", "血限"),
+                ("cost_mana_limit", "枯竭"), ("cost_mana_cap", "法限"),
+                ("cost_speed_limit", "速限"), ("cost_speed", "速度"),
+                ("cost_mutation", "异变")):
+            amount = int(calc.get(key, 0) or 0)
+            if not amount:
+                continue
+            try:
+                self.validate_numeric_cost(caster, resource, amount)
+            except ValueError:
                 return False
-        # 2026-10-13：失忆类代价（【点金】X/【典当】2X）按持有道纹种数校验。
-        # 此前怪物侧没有这道闸门：X 超过持有数也能发动（多拿碎片/多发现，
-        # 却只忘记现有的几种）。【典当】进打手/看门犬面板后这条必须补上。
         if calc.get("forget_daowen", 0) > len(getattr(caster, "dao_wen", {}) or {}):
             return False
-        # 2026-09-16 用户令：怪物与轮回者同口径持有[法限]，发动【消耗】类道纹必须付法力。
-        # 旧条文「怪物不持有法力、发动道纹不支付法力」已废止。
         if calc.get("cost_type") == "消耗" and calc.get("cost", 0) > 0:
-            if caster.current_mana < calc["cost"]:
+            try:
+                self.validate_numeric_cost(caster, "法力", caster.mana_cost(calc["cost"]))
+            except ValueError:
                 return False
+        for key, resource in (("cost_real_shards", "碎片"), ("cost_fake_shards", "假碎片"),
+                              ("cost_shards", "碎片")):
+            amount = int(calc.get(key, 0) or 0)
+            if amount:
+                try:
+                    self.validate_numeric_cost(caster, resource, amount)
+                except ValueError:
+                    return False
         return True
 
     # 2026-09-16 用户令：面板不再写死 X，改由怪物 AI 在发动时自选，
@@ -361,9 +400,6 @@ class MonsterPhaseMixin:
                             - getattr(monster, "mutation_count", 0))
                 if calc.get("cost_mutation", 0) >= headroom:
                     break
-            if effective_name == "消灾" and (monster.fake_shards < 50 * x
-                                             and monster.shards < 5 * x):
-                break
             best = x
         return best
 
@@ -436,14 +472,26 @@ class MonsterPhaseMixin:
         else:
             effective_x = inst.x_value
 
+        freeze_choices = None
+        if effective_name == "冰冻":
+            effective_x, freeze_choices = self.prepare_bingdong(
+                target, effective_x, choice.get("freeze_daowen"))
+            if effective_x == 0:
+                return {"monster": monster.name, "daowen_skipped": name,
+                        "resolves_as": effective_name, "reason": "目标没有道纹，冰冻X自动降为0"}
+
         # 先完成完整闪避提交的静态校验，再支付任何代价或改变激活状态。
         calc = DaoWenEngine.resolve(effective_name, effective_x, target=target, caster=monster)
+        if effective_name == "冰冻":
+            calc["freeze_daowen"] = freeze_choices
         if effective_name == "催化":
             self.prepare_catalysis(calc,monster,target,choice,refs)
         if effective_name == "回响":
             self.prepare_huixiang(calc, monster, target, choice, refs)
+        if effective_name in {"流动", "遗忘"}:
+            self.prepare_liudong_yiwang(effective_name, calc, monster, target, choice, refs)
         # 动态代价校验：残韵改写/状态变化后怪物可能付不起代价（如速度归零后
-        # 【洞察】(疲惫3)）——本次视为无法发动并跳过，不硬报错、不占出手。
+        # 【洞察】(速度3)）——本次视为无法发动并跳过，不硬报错、不占出手。
         if not self._monster_can_pay_calc_cost(monster, calc):
             return {"monster": monster.name, "daowen_skipped": name,
                     "resolves_as": effective_name, "reason": "无法支付代价"}
@@ -536,7 +584,10 @@ class MonsterPhaseMixin:
             return {"monster":monster.name,"daowen_skipped":name,"reason":"反应后无法支付代价",
                     "trigger_spell_logs":trigger_logs}
         if calc.get("cost_type")=="消耗" and calc.get("cost",0)>0:
-            monster.spend_mana(calc["cost"])
+            _mana_paid, mana_error = self.pay_daowen_mana(monster, calc, target)
+            if mana_error:
+                return {"monster": monster.name, "daowen_skipped": name,
+                        "reason": mana_error, "trigger_spell_logs": trigger_logs}
 
         # 残韵改写只替换本次结算：不支付源道纹代价，也不将源道纹记为已激活。
         if rewritten_as:
@@ -544,7 +595,8 @@ class MonsterPhaseMixin:
             if consumed != rewritten_as:
                 raise ValueError("残韵改写已变化，请重新prepare_monster_phase")
         # 原始怪物道纹与封印照常支付异变；只有非怪物角色可能触发迷失。
-        elif name in self.ORIGINAL_MONSTER_DAOWEN or name == "封印":
+        elif ((name in self.ORIGINAL_MONSTER_DAOWEN and calc.get("cost_type") != "冷却")
+              or name == "封印"):
             mutation_cost = (self.YUANCHU_COST_RATE * effective_x
                              if name in self.ORIGINAL_MONSTER_DAOWEN else effective_x)
             paid = monster.add_mutation(mutation_cost)
@@ -556,23 +608,13 @@ class MonsterPhaseMixin:
                     "tags": {"daowen", "active_payment"}})
                 return {"monster": monster.name, "lost": name,
                         "note": "支付异变后触发【迷失】"}
-        elif name == "消灾":
-            fake_cost, real_cost = 50 * effective_x, 5 * effective_x
-            if monster.fake_shards >= fake_cost:
-                monster.fake_shards -= fake_cost
-            else:
-                # DM裁定2026-08-22（方案A）：怪物的真碎片类代价允许**透支成负债**——
-                # 余额不足不再拒绝发动，而是把 shards 扣成负数。负债是【还债】路径的
-                # 唯一产生入口；此前余额门禁让怪物碎片守恒≥0，还债在20万+局中零触发
-                # （_shards_of 早已设计"负债不抵消假碎片"语义，缺的就是产生入口）。
-                # 仅怪物适用：玩家/朋友/员工/api 侧维持余额不足拒绝发动。
-                monster.shards -= real_cost
 
         if not rewritten_as:
             activated.add(name)
             self._monster_round_used(monster).add(name)
             # 2026-09-16 用户令：道纹递增（升级）机制已废止。X 恒为面板/借用时写定的值，
             # 重复发动按同一 X 计费，不再随发动次数累加。
+        monster.mark_daowen_used(effective_name)
         monster.actions_used_this_round += 1
         self.consume_tamper(monster,tamper_rule)
         self.pay_daowen_cooldown(effective_name,calc,monster)
@@ -591,7 +633,7 @@ class MonsterPhaseMixin:
                     (wave_marked if marked else wave_unmarked).append(entity.name)
                 elif entry["blood_shadow"]:
                     self.pay_numeric_cost(
-                        entity, "流血", 10,
+                        entity, "生命", 10,
                         cost_share_target_ref=entry.get("cost_share_target_ref", ""),
                         cost_context={"timing": "reaction", "source": "血影", "source_type": "relic", "tags": {"active_payment"}})
                 elif want_dodge:
@@ -613,7 +655,7 @@ class MonsterPhaseMixin:
             elif blood_shadow:
                 self.pay_daowen_numeric_cost(effective_name,calc,monster)
                 self.pay_numeric_cost(
-                    target, "流血", 10,
+                    target, "生命", 10,
                     cost_share_target_ref=choice.get("cost_share_target_ref", ""),
                     cost_context={"timing": "reaction", "source": "血影", "source_type": "relic", "tags": {"active_payment"}})
                 return {"monster": monster.name, "daowen_activated": name,
@@ -668,6 +710,9 @@ class MonsterPhaseMixin:
             target = monster
 
         target, _ = self.resolve_tampered_target(monster, target, effective_name, choice, refs)
+        if effective_name == "冰冻":
+            # 怪物冷却型道纹固定X=1；目标0种时prepare不会给出该选项。
+            self.prepare_bingdong(target, 1, choice.get("freeze_daowen"))
         hostile = self.state.on_player_side(target) != self.state.on_player_side(monster)
         dodge = choice.get("dodge")
         blood_shadow = choice.get("blood_shadow", False)
@@ -713,10 +758,10 @@ class MonsterPhaseMixin:
     def _monster_free_actions(self) -> bool:
         """怪物行动自由化开关（默认关，见 GameState.monster_free_actions）。
 
-        打开后每只怪物每回合 2 个行动槽：1 次攻击 / 1 次道纹各占 1 槽；
-        不再强制发动道纹。关闭时完全走原契约。
+        统一交替出手后不再另设怪物自由化开关；兼容快照始终允许在
+        攻击、道纹或跳过中选一个真实行动，预算仍由通用面板决定。
         """
-        return bool(getattr(self.state, "monster_free_actions", False))
+        return True
 
     def _check_monster_daowen_object(
         self, monster, dao_choice: dict, expected_actor: dict, refs: dict,
@@ -797,10 +842,10 @@ class MonsterPhaseMixin:
             attack_actions = choice.get("attack_actions")
             expected_actions = expected_actor["base_attack_actions"]
             if free:
-                if monster.actions_used_this_round >= 2:
-                    raise ValueError(f"{monster.name}本回合的行动已经用完（2 个槽）")
-                # 行动槽预算（用户裁定 2026-10-03）：1 次攻击＝base_attack_actions 组命中，
-                # 1 次道纹＝1 个 daowen 对象；两者合计 1~2 槽。
+                budget = self.single_round_action_count(monster)
+                if monster.actions_used_this_round >= budget:
+                    raise ValueError(f"{monster.name}本回合的出手已经用完（{budget}）")
+                # 一次兼容提交只能承载一个真实行动；多步施法走cast窗口栈。
                 if not isinstance(attack_actions, list):
                     raise ValueError("attack_actions必须是列表")
                 if expected_actions <= 0:
@@ -808,18 +853,16 @@ class MonsterPhaseMixin:
                         raise ValueError(f"{monster.name}本回合没有合法攻击目标，attack_actions必须为空")
                     attack_slots = 0
                 else:
-                    if (len(attack_actions) % expected_actions
-                            or len(attack_actions) // expected_actions > 2):
+                    if len(attack_actions) not in (0, expected_actions):
                         raise ValueError(
-                            f"{monster.name}自由行动下attack_actions只能是0、"
-                            f"{expected_actions}或{2 * expected_actions}个")
+                            f"{monster.name}的attack_actions只能是0或{expected_actions}个")
                     attack_slots = len(attack_actions) // expected_actions
                 dao_slots = sum(1 for obj in (dao_choice, dao_choice_2)
                                 if isinstance(obj, dict))
-                if not (1 <= attack_slots + dao_slots <= 2):
+                if attack_slots + dao_slots != 1:
                     raise ValueError(
-                        f"{monster.name}本回合必须使用1~2个行动"
-                        f"（攻击/道纹各占1个；收到攻击{attack_slots}＋道纹{dao_slots}）")
+                        f"{monster.name}每次必须提交且只能提交1个行动"
+                        f"（收到攻击{attack_slots}＋道纹{dao_slots}）")
             elif not isinstance(attack_actions, list) or len(attack_actions) != expected_actions:
                 raise ValueError(f"{monster.name}必须提交{expected_actions}个attack_actions")
             legal_attack_options = {
@@ -910,9 +953,10 @@ class MonsterPhaseMixin:
         # （逐出手交替与挑战者侧一致，修复守擂方机制性必胜）。
         # 养蛊场：允许逐个 actor 提交（与死斗同样按「每步只结算 1 个 actor」处理），
         # 否则先手方会连带结算全场，训练出来的策略会带上出手顺序红利。
-        if (not self.state.in_final_duel and not getattr(self.state, "arena_ffa", False)
-                and set(submitted) != set(expected)):
-            raise ValueError(f"必须为全部可行动怪物各提交一次选择；需要{sorted(expected)}，收到{sorted(submitted)}")
+        if len(submitted) != 1 or set(submitted) - set(expected):
+            raise ValueError(
+                f"交替出手中每次必须且只能提交1个快照内角色的1个行动；"
+                f"收到{sorted(submitted)}，可选{sorted(expected)}")
         # 事务一致性（2026-08-19）：先完成全部静态 schema 校验（零副作用），
         # 再执行任何龙息/守夜灯/道纹/攻击。依赖执行后状态的动态校验
         # （hits 命中数、目标速度/存活）在执行阶段进行，失败即快照回滚，
@@ -981,8 +1025,8 @@ class MonsterPhaseMixin:
             # 若本回合只交了道纹而没交攻击，actions_used_this_round 不会自增，
             # 会把回合卡在玩家行动阶段。这里在该怪结算完成后统一标记为「本回合已走完」
             # （≥2 槽）。只在自由行动模式下生效，默认关时一行不改。
-            if free:
-                monster.actions_used_this_round = max(monster.actions_used_this_round, 2)
+            if free and isinstance(dao_choice, dict):
+                monster.actions_used_this_round = max(monster.actions_used_this_round, 1)
             # 出手数按prepare快照校验：2026-08-17疯狂全局裁定后，状态在本actor
             # 道纹结算中即盖到全场，若此处按当前状态重算会把"自下回合生效"提前到
             # 本回合，导致按prepare提交必然失败；快照即契约（两处必须一致）。
@@ -996,10 +1040,9 @@ class MonsterPhaseMixin:
                     if attack_actions:
                         raise ValueError(f"{monster.name}本回合没有合法攻击目标，attack_actions必须为空")
                 elif (len(attack_actions) % expected_actions
-                        or len(attack_actions) // expected_actions > 2):
+                        or len(attack_actions) // expected_actions > 1):
                     raise ValueError(
-                        f"{monster.name}自由行动下attack_actions只能是0、"
-                        f"{expected_actions}或{2 * expected_actions}个")
+                        f"{monster.name}的attack_actions只能是0或{expected_actions}个")
             elif not isinstance(attack_actions, list) or len(attack_actions) != expected_actions:
                 raise ValueError(f"{monster.name}必须提交{expected_actions}个attack_actions")
             # 出手数按 prepare 快照校验（快照即契约）；但**击数与伤害预算在出手时取当前面板**
@@ -1053,8 +1096,14 @@ class MonsterPhaseMixin:
                                 and self.state.on_enemy_side(target) and target is not monster)):
                         raise ValueError("怪物攻击target_ref必须是prepare列出的己方目标"
                                          "（养蛊场下可为其它怪物）")
+                    # 静态预校验后，同阶段先前的道纹可能已让预选目标暂离/失去可选资格
+                    # （例如怪物先封印玩家，再结算自己预选的玩家普攻）。这与预选目标
+                    # 已命零相同：该击跳过，不把整次合法阶段提交回滚成无效行动。
                     if not self.is_targetable(monster, target):
-                        raise ValueError(f"{target.name}当前不可被{monster.name}选中")
+                        results.append({"attacker": monster.name, "target": target.name,
+                                        "skipped": "预选目标已不可选中",
+                                        "hit_index": hit_index + 1})
+                        continue
                     if not target.is_alive:
                         results.append({"attacker": monster.name, "target": target.name,
                                         "skipped": "预选目标已命零", "hit_index": hit_index + 1})

@@ -6,7 +6,7 @@ pytest 风格测试 - 里程碑8：修复5件坏掉/缺失的遗物（血誓戒/
 2026-10-13：【买路财】改制为轮回者【逃跑】行动（一次付清5次出手强制脱战），本文件原 retreat_via_toll 四组用例已删除；逃跑回归见 tests/test_escape_and_diandang.py。
 
 覆盖范围：
-1. 血誓戒：[回始]玩家首次主动支付流血代价获得等量格挡/低血量时改为等量生命，每回合限一次
+1. 血誓戒：[回始]玩家首次主动支付生命代价获得等量格挡/低血量时改为等量生命，每回合限一次
 2. 买路财（已删除，见上）：原覆盖 retreat_via_toll 真正执行撤退(扣碎片/生命、清空战场)，不再只是算个数字
 3. 同魂笔：第二目标的道纹也永久变为变化后的道纹，施法者同时永久获得
 4. 第一杯（2026-09-23 用户令重做）：你受到的[回复]与失去的生命翻倍；
@@ -38,6 +38,8 @@ def _new_engine(db_suffix: str, daowen="杀伐") -> GameEngine:
     choice = next((n for n in setup["result"]["relic_choices"] if n not in optional),
                   setup["result"]["relic_choices"][0])
     engine.execute_action("choose_discovered_relic", {"relic_name": choice})
+    # 各用例自行追加所要验证的遗物，不用随机遗物的被动效果干扰支付与出手。
+    engine.state.relics.clear()
     if daowen != "杀伐":
         _give_daowen(engine.state.player, daowen)
     engine.state.energy = 3
@@ -62,11 +64,28 @@ def _start_with_enemy(engine, enemy):
 # 正常路径
 # ========================================================================
 
+def test_shiming_chike_converts_life_loss_to_blood_limit_payment():
+    """蚀命刻尺不再只挂一个无效状态：实际失血后支付血限1并登记可净化层数。"""
+    engine = _new_engine("shiming_chike")
+    engine.state.relics.append(Relic(name="蚀命刻尺", effect=""))
+    enemy = Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100)
+    _start_with_enemy(engine, enemy)
+
+    detail = engine.combat._apply_hostile_damage(
+        enemy, 5, source=engine.state.player)
+
+    assert detail["actual_damage"] == 5
+    assert enemy.current_hp == 95
+    assert enemy.blood_limit == 99
+    assert enemy.reversible_cost_layers["血限"] == 1
+    assert not enemy.has_status("血限")
+
+
 def test_blood_oath_ring_grants_shield_on_first_bleed_cost():
-    """血誓戒正常路径：本回合首次流血代价，获得等量格挡"""
+    """血誓戒正常路径：本回合首次生命支付，获得等量格挡"""
     engine = _new_engine("oath_shield", daowen="连击")
     engine.state.relics.append(Relic(name="血誓戒", effect=""))
-    _give_daowen(engine.state.player, "连击", cost_type="流血")
+    _give_daowen(engine.state.player, "连击", cost_type="生命")
     _start_with_enemy(engine, Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100))
 
     hp_before = engine.state.player.current_hp
@@ -80,27 +99,27 @@ def test_blood_oath_ring_grants_life_instead_when_low_hp():
     """血誓戒正常路径：支付后生命≤30%时，改为获得等量生命而不是格挡"""
     engine = _new_engine("oath_life", daowen="连击")
     engine.state.relics.append(Relic(name="血誓戒", effect=""))
-    _give_daowen(engine.state.player, "连击", cost_type="流血")
+    _give_daowen(engine.state.player, "连击", cost_type="生命")
     engine.state.player.current_hp = 20  # blood_limit=60, 支付后20-15=5 <= 30%*60=18
     _start_with_enemy(engine, Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100))
 
-    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target": "靶怪"})  # 流血价5X=15
+    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target": "靶怪"})  # 生命价5X=15
     assert r["success"] is True
     assert engine.state.player.shield == 0, "低血量时不应给格挡"
     assert engine.state.player.current_hp == 5 + 15, "应改为获得等量生命(15)"
 
 
 def test_blood_oath_ring_only_once_per_round():
-    """血誓戒正常路径：每回合只在首次流血代价时触发，第二次不再触发"""
+    """血誓戒正常路径：每回合只在首次生命支付时触发，第二次不再触发"""
     engine = _new_engine("oath_once", daowen="连击")
     engine.state.relics.append(Relic(name="血誓戒", effect=""))
-    _give_daowen(engine.state.player, "连击", cost_type="流血")
+    _give_daowen(engine.state.player, "连击", cost_type="生命")
     _start_with_enemy(engine, Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100))
 
     engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target": "靶怪"})
     shield_after_first = engine.state.player.shield
     engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 4, "target": "靶怪"})
-    assert engine.state.player.shield == shield_after_first, "同一回合第二次流血代价不应再给格挡"
+    assert engine.state.player.shield == shield_after_first, "同一回合第二次生命支付不应再给格挡"
 
 
 # 2026-10-13：【买路财】改制为轮回者【逃跑】行动（一次付清5次出手强制脱战），
@@ -117,17 +136,17 @@ def test_tonghunbi_grants_caster_real_daowen_from_second_target():
     engine.execute_action("battle_start", {})
     engine.state.enemies.clear()
     enemy = Entity(name="怪甲", entity_type="怪物", blood_limit=100, current_hp=100)
-    _give_daowen(enemy, "固执", cost_type="冷却")
+    _give_daowen(enemy, "全力", cost_type="异变")
     engine.state.enemies.append(enemy)
     engine.execute_action("round_start", {})
 
     r = engine.execute_action("use_resonance", {
         "source_daowen": "杀伐", "resonance_type": "反转", "target_daowen": "再生",
-        "second_target_ref": "enemy:0", "second_source_daowen": "固执",
+        "second_target_ref": "enemy:0", "second_source_daowen": "全力",
     })
     assert r["success"] is True
-    assert "连击" in engine.state.player.dao_wen, "施法者应永久获得固执反转后的连击"
-    assert "固执" not in enemy.dao_wen and "连击" in enemy.dao_wen
+    assert "弱化" in engine.state.player.dao_wen, "施法者应永久获得全力反转后的弱化"
+    assert "全力" not in enemy.dao_wen and "弱化" in enemy.dao_wen
 
 
 def test_first_cup_doubles_heal_and_no_longer_blocks_cancer():
@@ -172,8 +191,10 @@ def test_wangyouxiang_registered_in_revised_relic_pool():
     engine = _new_engine("wangyou_registered")
     names = {n for n, _ in engine.RELIC_DEFS}
     assert "忘忧香" in names
-    # 2026-10-26：【共罪】转为道纹，遗物池 28 → 27。
-    assert len(engine.RELIC_DEFS) == 27   # 万钧印已改为消耗品；忘忧香属于现行遗物池
+    # 当前池另含【叠鳞甲】与【寂灭面具】，共29件；缄默面具仍是事件遗物。
+    assert len(engine.RELIC_DEFS) == 29
+    assert {"叠鳞甲", "寂灭面具"} <= names
+    assert "缄默面具" not in names
     assert "共罪" not in names
     assert "钱袋" not in names
 

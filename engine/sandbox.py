@@ -102,6 +102,11 @@ COMBAT_RUNTIME_ATTRS = (
     "_dodge_counts",               # 本回合各自动反应路径已用闪避次数
     "_dodge_round",                # 上面那份计数属于哪一回合
     "_branch_owner_token_value",   # 反应法术分支归属 token（惰性创建，只写一次）
+    "_spell_stack",                # 可暂停施法帧；进入沙盒时重建到副本实体
+    "_spell_window_serial",        # 窗口token序号
+    "_priority_passes",            # 普通优先权连续跳过计数
+    "_ended_turn_sides",           # 【跳过】结束当前方回合的阵营标记
+    "_resuming_spell_stack",       # 原法术续跑标记（影响必中闸门）
 )
 
 #: 需要整体换对象再换回的状态根（大对象，深拷贝成本已由 sandbox 口径压低）。

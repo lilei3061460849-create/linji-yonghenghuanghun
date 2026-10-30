@@ -79,6 +79,8 @@ def test_unwired_trigger_is_honestly_labelled_by_production_define_spell(tmp_pat
     assert finish_initial_daowen(e)["success"]
     assert e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})["success"]
     assert e.execute_action("setup_choose_region", {"region": "龙心谷"})["success"]
+    # 本用例验证触发时点接线，清空随机遗物以隔离无关被动效果。
+    e.state.relics = []
     player = e.state.player
     player.dao_wen["庇护"] = DaoWenInstance(
         DaoWen(name="庇护", formula="", cost_type="消耗", cost_formula="X", effect_formula=""),
@@ -93,8 +95,9 @@ def test_unwired_trigger_is_honestly_labelled_by_production_define_spell(tmp_pat
     assert r["result"]["wired"] is False
     assert "暂未接入" in (r["result"].get("warning") or ""), r["result"]
 
-    # 反向对照：已接线时点仍必须 wired=True 且无警告。
+    # 第一手后轮到敌方；让敌方跳过后才轮到玩家做反向对照。
     player.actions_used_this_round = 0
+    assert e.execute_action("skip", {"actor_ref": "enemy:0"})["success"]
     r2 = e.execute_action("define_spell", {"spell": {
         "name": "回始探针", "trigger_condition": "回始", "required_daowen": ["庇护"],
         "effect_flow": "发动庇护X于自身"}})

@@ -1,6 +1,7 @@
 """用户裁定：定型按正文；坏死5X；勾魂不再回始扣法力。"""
 from pathlib import Path
 from engine.daowen import DaoWenEngine
+from engine.models import Entity
 
 
 def test_dingxing_uses_current_main_rule():
@@ -23,18 +24,17 @@ def test_old_gouhun_drain_description_is_removed():
     assert "勾魂X：支付：法力X。使[目标]无法获得[法力]，持续X。" in text
 
 
-def test_drafts_are_not_runtime_implementations():
-    import pytest
+def test_liudong_yiwang_are_runtime_implementations():
     from engine.gamedata import UNIMPLEMENTED_DAOWEN, learnable_daowen_pool
     DaoWenEngine.register_all()
+    target = Entity("目标", "怪物")
     for name in ("流动", "遗忘"):
-        assert name not in DaoWenEngine._registry
-        with pytest.raises(ValueError, match="未知道纹"):
-            DaoWenEngine.resolve(name, 1)
-    # A caller accidentally including draft names in 'known' must not enable learning.
+        assert name in DaoWenEngine._registry
+        assert name not in UNIMPLEMENTED_DAOWEN
+        assert DaoWenEngine.resolve(name, 1, target=target)["dao_wen"] == name
     pool = learnable_daowen_pool(owned={"大梦"}, region="沉沦海",
-                                known=set(DaoWenEngine._registry) | set(UNIMPLEMENTED_DAOWEN))
-    assert not set(UNIMPLEMENTED_DAOWEN).intersection(pool)
+                                known=set(DaoWenEngine._registry))
+    assert {"流动", "遗忘"} <= set(pool)
 
 
 def test_retired_anger_is_not_granted_as_transformed_daowen():

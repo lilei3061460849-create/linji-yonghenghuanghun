@@ -34,8 +34,10 @@ def _new_engine(db_suffix: str) -> GameEngine:
     choice = next((n for n in setup["result"]["relic_choices"] if n not in optional),
                   setup["result"]["relic_choices"][0])
     engine.execute_action("choose_discovered_relic", {"relic_name": choice})
+    # 龙心用例需连续支付代价；清空随机遗物以隔离无关被动效果。
+    engine.state.relics = []
     engine.state.player.dao_wen["连击"] = DaoWenInstance(
-        DaoWen(name="连击", formula="", cost_type="流血", cost_formula="X", effect_formula=""))
+        DaoWen(name="连击", formula="", cost_type="生命", cost_formula="X", effect_formula=""))
     engine.state.energy = 3
     return engine
 
@@ -48,23 +50,30 @@ def _start_with_enemy(engine):
     engine.execute_action("round_start", {})
 
 
+def _use_daowen(engine, params):
+    # 每次支付是独立探针；重置测试行动权，不修改生产1出手／交替规则。
+    engine.state.duel_turn = "player_side"
+    engine.state.player.actions_used_this_round = 0
+    return engine.execute_action("use_daowen", params)
+
+
 # ========================================================================
 # 正常路径
 # ========================================================================
 
 def test_lianxin_converts_next_cost_into_matching_dragon_heart():
-    """正常路径：炼心后，下一次实际支付的流血代价转化为等值的[流血龙心]消耗品"""
+    """正常路径：炼心后，下一次实际支付的生命代价转化为等值的[生命龙心]消耗品"""
     engine = _new_engine("convert_ok")
     r = engine.execute_action("pre_battle_action", {"sub_action": "炼心"})
     assert r["success"] is True
     assert engine.state.pending_lianxin is True
 
     _start_with_enemy(engine)
-    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 8, "target": "靶怪"})
+    _use_daowen(engine, {"daowen_name": "连击", "x": 8, "target": "靶怪"})
     hearts = [c for c in engine.state.consumables if c.kind == "dragon_heart"]
     assert len(hearts) == 1
-    assert hearts[0].name == "流血龙心"
-    assert hearts[0].current_uses == 40 and hearts[0].max_uses == 40  # 连击8流血价5X=40
+    assert hearts[0].name == "生命龙心"
+    assert hearts[0].current_uses == 40 and hearts[0].max_uses == 40  # 连击8生命价5X=40
     assert engine.state.pending_lianxin is False, "转化一次后应清空待生效标记"
 
 
@@ -73,10 +82,10 @@ def test_dragon_heart_offsets_future_same_type_cost():
     engine = _new_engine("offset_ok")
     engine.execute_action("pre_battle_action", {"sub_action": "炼心"})
     _start_with_enemy(engine)
-    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 8, "target": "靶怪"})  # 获得流血龙心(40/40)
+    _use_daowen(engine, {"daowen_name": "连击", "x": 8, "target": "靶怪"})  # 获得生命龙心(40/40)
 
     hp_before = engine.state.player.current_hp
-    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 5, "target": "靶怪", "dragon_heart_use": 3})
+    r = _use_daowen(engine, {"daowen_name": "连击", "x": 5, "target": "靶怪", "dragon_heart_use": 3})
     assert r["success"] is True
     bleed_effect = next(e for e in r["execution"]["effects"] if e["type"] == "bleed_cost")
     assert bleed_effect["dragon_heart_offset"] == 3
@@ -91,10 +100,10 @@ def test_dragon_heart_merges_with_existing_same_name_consumable():
     engine = _new_engine("merge_ok")
     engine.execute_action("pre_battle_action", {"sub_action": "炼心"})
     _start_with_enemy(engine)
-    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 4, "target": "靶怪"})  # 流血龙心(20/20)
+    _use_daowen(engine, {"daowen_name": "连击", "x": 4, "target": "靶怪"})  # 生命龙心(20/20)
 
     engine.state.pending_lianxin = True
-    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 6, "target": "靶怪"})  # 再转化一次
+    _use_daowen(engine, {"daowen_name": "连击", "x": 6, "target": "靶怪"})  # 再转化一次
     hearts = [c for c in engine.state.consumables if c.kind == "dragon_heart"]
     assert len(hearts) == 1, "同名龙心应合并为一个对象，不是并存两个"
     assert hearts[0].current_uses == 50 and hearts[0].max_uses == 50  # 20+30
@@ -125,11 +134,11 @@ def test_lianxin_in_battle_does_not_cost_action_but_defers_energy():
 
 
 
-def _register_aging_probe(engine, monkeypatch, name="衰老样本", amount_per_x=1):
-    """注册一个纯衰老代价的探针道纹。
+def _register_aging_probe(engine, monkeypatch, name="血限样本", amount_per_x=1):
+    """注册一个纯血限代价的探针道纹。
 
-    2026-09-12 起【透支】改为流血5X→X法力，不再是衰老道纹；本测试关心的是
-    「衰老代价 × 龙心」这条通路，与具体哪个道纹无关，故用探针道纹解耦。
+    2026-09-12 起【透支】改为生命5X→X法力，不再是血限道纹；本测试关心的是
+    「血限代价 × 龙心」这条通路，与具体哪个道纹无关，故用探针道纹解耦。
     引擎每次 use_daowen 都会 register_all() 重建注册表，因此这里包一层，
     让探针在每次重建后仍然存在。
     """
@@ -140,7 +149,7 @@ def _register_aging_probe(engine, monkeypatch, name="衰老样本", amount_per_x
         "dao_wen": name, "x": x,
         "cost_type": CostType.AGING.value,
         "cost_blood_limit": amount_per_x * x,
-        "summary": f"衰老{amount_per_x * x}",
+        "summary": f"血限{amount_per_x * x}",
     }
     original = DaoWenEngine.register_all.__func__
 
@@ -152,20 +161,20 @@ def _register_aging_probe(engine, monkeypatch, name="衰老样本", amount_per_x
                         classmethod(register_all_with_probe))
     DaoWenEngine.register_all()
     engine.state.player.dao_wen[name] = DaoWenInstance(
-        DaoWen(name=name, formula="", cost_type="衰老",
+        DaoWen(name=name, formula="", cost_type="血限",
                cost_formula="X", effect_formula=""))
     return name
 
 
 def test_different_cost_types_produce_different_named_hearts(monkeypatch):
-    """正常路径：不同代价类型(流血/衰老/疲惫)炼心后应产生对应命名的独立龙心，互不混用"""
+    """正常路径：不同代价类型(生命/血限/速度)炼心后应产生对应命名的独立龙心，互不混用"""
     engine = _new_engine("types_ok")
     probe = _register_aging_probe(engine, monkeypatch)
     engine.execute_action("pre_battle_action", {"sub_action": "炼心"})
     _start_with_enemy(engine)
-    engine.execute_action("use_daowen", {"daowen_name": probe, "x": 3, "target": "轮回者"})
+    _use_daowen(engine, {"daowen_name": probe, "x": 3, "target": "轮回者"})
     names = {c.name for c in engine.state.consumables if c.kind == "dragon_heart"}
-    assert names == {"衰老龙心"}
+    assert names == {"血限龙心"}
 
 
 # ========================================================================
@@ -177,9 +186,9 @@ def test_dragon_heart_use_capped_by_current_durability():
     engine = _new_engine("cap_durability")
     engine.execute_action("pre_battle_action", {"sub_action": "炼心"})
     _start_with_enemy(engine)
-    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target": "靶怪"})  # 流血龙心(15/15)
+    _use_daowen(engine, {"daowen_name": "连击", "x": 3, "target": "靶怪"})  # 生命龙心(15/15)
 
-    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 10, "target": "靶怪", "dragon_heart_use": 999})
+    r = _use_daowen(engine, {"daowen_name": "连击", "x": 10, "target": "靶怪", "dragon_heart_use": 999})
     bleed_effect = next(e for e in r["execution"]["effects"] if e["type"] == "bleed_cost")
     assert bleed_effect["dragon_heart_offset"] == 15, "最多抵消到当前耐久为止"
     assert bleed_effect["actual_damage"] == 35
@@ -192,9 +201,9 @@ def test_dragon_heart_use_capped_by_raw_cost_not_overdrawn():
     engine = _new_engine("cap_rawcost")
     engine.execute_action("pre_battle_action", {"sub_action": "炼心"})
     _start_with_enemy(engine)
-    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 4, "target": "靶怪"})  # 流血龙心(20/20)
+    _use_daowen(engine, {"daowen_name": "连击", "x": 4, "target": "靶怪"})  # 生命龙心(20/20)
 
-    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target": "靶怪", "dragon_heart_use": 20})
+    r = _use_daowen(engine, {"daowen_name": "连击", "x": 3, "target": "靶怪", "dragon_heart_use": 20})
     bleed_effect = next(e for e in r["execution"]["effects"] if e["type"] == "bleed_cost")
     assert bleed_effect["dragon_heart_offset"] == 15, "本次代价只有15，最多抵消15，不能抵消超过代价本身"
     assert bleed_effect["actual_damage"] == 0
@@ -207,10 +216,10 @@ def test_fully_offset_cost_does_not_trigger_pending_lianxin_banking():
     engine = _new_engine("zero_actual_no_bank")
     engine.execute_action("pre_battle_action", {"sub_action": "炼心"})
     _start_with_enemy(engine)
-    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 10, "target": "靶怪"})  # 流血龙心(50/50)
+    _use_daowen(engine, {"daowen_name": "连击", "x": 10, "target": "靶怪"})  # 生命龙心(50/50)
 
     engine.state.pending_lianxin = True  # 再次准备炼心
-    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 4, "target": "靶怪", "dragon_heart_use": 20})
+    _use_daowen(engine, {"daowen_name": "连击", "x": 4, "target": "靶怪", "dragon_heart_use": 20})
     hearts = [c for c in engine.state.consumables if c.kind == "dragon_heart"]
     assert len(hearts) == 1 and hearts[0].current_uses == 30, "本次代价被完全抵消，不应银行新龙心"
     assert engine.state.pending_lianxin is True, "本次未实际支付，炼心待生效状态应保留，等待下一次真正支付"
@@ -221,27 +230,27 @@ def test_fully_offset_cost_does_not_trigger_pending_lianxin_banking():
 # ========================================================================
 
 def test_dragon_heart_use_wrong_type_does_nothing(monkeypatch):
-    """错误输入：请求用[流血龙心]抵消[衰老]代价这种类型不匹配的情况，应完全不生效"""
+    """错误输入：请求用[生命龙心]抵消[血限]代价这种类型不匹配的情况，应完全不生效"""
     engine = _new_engine("wrong_type")
     probe = _register_aging_probe(engine, monkeypatch)
     engine.execute_action("pre_battle_action", {"sub_action": "炼心"})
     _start_with_enemy(engine)
-    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 8, "target": "靶怪"})  # 流血龙心(40/40)
+    _use_daowen(engine, {"daowen_name": "连击", "x": 8, "target": "靶怪"})  # 生命龙心(40/40)
 
     blood_limit_before = engine.state.player.blood_limit
-    r = engine.execute_action("use_daowen", {"daowen_name": probe, "x": 3, "target": "轮回者", "dragon_heart_use": 5})
+    r = _use_daowen(engine, {"daowen_name": probe, "x": 3, "target": "轮回者", "dragon_heart_use": 5})
     aging_effect = next(e for e in r["execution"]["effects"] if e["type"] == "aging_cost")
-    assert aging_effect["dragon_heart_offset"] == 0, "流血龙心不能抵消衰老代价"
+    assert aging_effect["dragon_heart_offset"] == 0, "生命龙心不能抵消血限代价"
     assert engine.state.player.blood_limit == blood_limit_before - 3
     heart = next(c for c in engine.state.consumables if c.kind == "dragon_heart")
-    assert heart.current_uses == 40, "类型不匹配时不应扣减流血龙心耐久"
+    assert heart.current_uses == 40, "类型不匹配时不应扣减生命龙心耐久"
 
 
 def test_no_pending_lianxin_does_not_create_heart():
     """错误输入/非预期状态：没有发动过炼心时，正常支付代价不应意外生成龙心"""
     engine = _new_engine("no_pending")
     _start_with_enemy(engine)
-    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 5, "target": "靶怪"})
+    _use_daowen(engine, {"daowen_name": "连击", "x": 5, "target": "靶怪"})
     hearts = [c for c in engine.state.consumables if c.kind == "dragon_heart"]
     assert hearts == []
 

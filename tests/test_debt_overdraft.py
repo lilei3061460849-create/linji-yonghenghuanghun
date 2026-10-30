@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from engine.combat import CombatEngine
+from engine.daowen import DaoWenEngine
 from engine.dice import DiceEngine
 from engine.models import DaoWen, DaoWenInstance, Entity, GameState
 
@@ -23,36 +24,39 @@ def _make_combat(monster: Entity) -> CombatEngine:
     return CombatEngine(state, DiceEngine())
 
 
-def _xiaozai_monster(x: int = 1, shards: int = 0, fake: int = 0) -> Entity:
+def _haoduo_monster(x: int = 1, shards: int = 0, fake: int = 0) -> Entity:
     m = Entity(name="刷卡怪", entity_type="怪物", blood_limit=100, current_hp=100,
                attack_count=1, attack_power=5, shards=shards, fake_shards=fake)
-    m.dao_wen["消灾"] = DaoWenInstance(DaoWen(
-        name="消灾", formula="消灾X", cost_type="碎片",
-        cost_formula="50X假/5X真", effect_formula=""), x_value=x)
+    m.dao_wen["豪夺"] = DaoWenInstance(DaoWen(
+        name="豪夺", formula="豪夺X", cost_type="代价",
+        cost_formula="5X碎片", effect_formula=""), x_value=x)
     return m
 
 
-def test_monster_xiaozai_overdraws_real_shards_into_debt():
-    """正常路径：怪物无碎片发动消灾——不再拒绝，真碎片扣成负债。"""
-    combat = _make_combat(_xiaozai_monster(x=1, shards=0, fake=0))
+def _activate_haoduo(combat, monster):
+    return combat._resolve_monster_daowen_choice(
+        monster,
+        {"name": "豪夺", "target_ref": "player:0", "dodge": False, "blood_shadow": False},
+        {"player:0": combat.state.player}, set(), {})
+
+
+def test_monster_haoduo_overdraws_real_shards_into_debt():
+    """正常路径：怪物无碎片发动现役豪夺，5碎片真碎片轨道扣成负债。"""
+    combat = _make_combat(_haoduo_monster(x=1, shards=0, fake=0))
     monster = combat.state.enemies[0]
-    result = combat._resolve_monster_daowen_choice(
-        monster, {"name": "消灾", "dodge": False, "blood_shadow": False}, {}, set(), {})
-    assert result.get("daowen_activated") == "消灾" or "monster" in result
-    assert monster.shards == -5, f"消灾X1 真碎片代价 5，0 余额透支应为 -5，实际 {monster.shards}"
+    result = _activate_haoduo(combat, monster)
+    assert result.get("daowen_activated") == "豪夺" or "monster" in result
+    assert monster.shards == -5, f"豪夺X1代价5，0余额透支应为-5，实际{monster.shards}"
 
 
-def test_xiaozai_chain_reaches_debt_threshold_and_binds_at_settle():
+def test_haoduo_chain_reaches_debt_threshold_and_binds_at_settle():
     """链路：连续透支越过动态负债线→回终结算触发还债→转为员工参战。"""
-    combat = _make_combat(_xiaozai_monster(x=1, shards=0, fake=0))
+    combat = _make_combat(_haoduo_monster(x=1, shards=0, fake=0))
     monster = combat.state.enemies[0]
-    # 2026-09-16：道纹递增已废止，消灾 X 恒为 1、每次真碎片代价恒为 5。
-    # 历史峰值为0，动态阈值为10；两次消灾后余额达到-10。
+    # 道纹递增已废止；历史峰值为0，两次豪夺后余额达到动态阈值-10。
     for _ in range(2):
-        combat._resolve_monster_daowen_choice(
-            monster, {"name": "消灾", "dodge": False, "blood_shadow": False},
-            {}, set(), {})
-        combat._monster_round_used(monster).discard("消灾")  # 跨回合重置使用记录
+        _activate_haoduo(combat, monster)
+        combat._monster_round_used(monster).discard("豪夺")  # 跨回合重置使用记录
     assert monster.shards <= -(combat.DEBT_THRESHOLD + monster.shards_peak)
     results = combat.settle_victory_paths()
     assert any(r.get("type") == "debt_bind" for r in results), f"负债达到动态阈值应触发还债: {results}"
@@ -63,7 +67,7 @@ def test_xiaozai_chain_reaches_debt_threshold_and_binds_at_settle():
 def test_debt_trigger_boundary_9_not_bound_10_bound():
     """历史峰值为0时，负债9不触发、负债10正好触发。"""
     for shards, expect in ((-9, False), (-10, True)):
-        combat = _make_combat(_xiaozai_monster(shards=shards))
+        combat = _make_combat(_haoduo_monster(shards=shards))
         monster = combat.state.enemies[0]
         results = combat.settle_victory_paths()
         bound = any(r.get("type") == "debt_bind" for r in results)
@@ -73,7 +77,7 @@ def test_debt_trigger_boundary_9_not_bound_10_bound():
 def test_debt_threshold_scales_with_historical_peak():
     """历史最高碎片余额100时，负债109不触发，负债110触发。"""
     for shards, expect in ((-109, False), (-110, True)):
-        monster = _xiaozai_monster(shards=100)
+        monster = _haoduo_monster(shards=100)
         monster.shards = shards
         combat = _make_combat(monster)
         results = combat.settle_victory_paths()
@@ -83,13 +87,22 @@ def test_debt_threshold_scales_with_historical_peak():
 
 
 def test_fake_shards_still_preferred_no_debt_when_fake_sufficient():
-    """反向：假碎片充足时优先扣假，不产生负债、不触发还债。"""
-    combat = _make_combat(_xiaozai_monster(x=1, shards=3, fake=100))
+    """反向：豪夺的假碎片优先扣费不产生负债、不触发还债。"""
+    combat = _make_combat(_haoduo_monster(x=1, shards=3, fake=100))
     monster = combat.state.enemies[0]
-    combat._resolve_monster_daowen_choice(
-        monster, {"name": "消灾", "dodge": False, "blood_shadow": False}, {}, set(), {})
-    assert monster.fake_shards == 50 and monster.shards == 3
+    _activate_haoduo(combat, monster)
+    assert monster.fake_shards == 95 and monster.shards == 3
     assert all(r.get("type") != "debt_bind" for r in combat.settle_victory_paths())
+
+
+def test_monster_lianji_real_shard_channel_is_independent_and_can_overdraw():
+    """连击真碎片通道不挪用假碎片；怪物仍按正文允许真碎片负债。"""
+    combat = _make_combat(_haoduo_monster(shards=0, fake=100))
+    monster = combat.state.enemies[0]
+    calc = DaoWenEngine.resolve("连击", 1, target=combat.state.player, cost_channel="碎片")
+    combat.apply_daowen_effect("连击", calc, monster, combat.state.player)
+    assert monster.shards == -5
+    assert monster.fake_shards == 100
 
 
 # ============ 玩家负债期的局外 0 费行动（2026-08-23 死锁修复） ============
@@ -106,7 +119,7 @@ def _debt_engine(tmp_path, debt: int = -25) -> GameEngine:
     冒烟批实测（2026-08-23，当时【逼债】还在）：罪孽都市逼债寄存把玩家 shards
     打到 -15/-76 后，局外所有 0费行动被 'shards < cost' 误拒（-76 < 0），
     pre_battle 精力耗尽不了=死锁。【逼债】已于 2026-10-13 删除，本用例的负债改由
-    消灾透支构造（见上），口径不变。
+    豪夺透支构造（见上），口径不变。
     裁定D口径：负债冻结的是碎片**支出**(cost>0)，0费行动不属于支出。
     """
     e = GameEngine(

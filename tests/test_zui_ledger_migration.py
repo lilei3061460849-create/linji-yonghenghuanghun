@@ -45,25 +45,21 @@ def test_duming_is_no_longer_a_daowen_and_is_in_the_relic_pool():
     with pytest.raises(ValueError):
         DaoWenEngine.resolve("赌命", 1)
 
-    # 遗物化道纹的闭环节点统一用「？？」占位：保留边，但不能作为残韵结果获得。
+    # 假钞—点金之间的原通用空位已补入勒索；不得再把它当成可保留的旧占位边。
     assert RELICIZED_SLOT == "？？"
     assert RELICIZED_SLOT not in DaoWenEngine._registry
     loop = ResonanceEngine.CLOSED_LOOPS["罪孽都市闭环"]
-    assert ("假钞", "曲解", RELICIZED_SLOT) in loop
-    assert (RELICIZED_SLOT, "曲解", "点金") in loop
+    assert ("假钞", "曲解", "勒索") in loop
+    assert ("勒索", "曲解", "点金") in loop
     assert len(loop) == 7 and not any("赌命" in (src, dst) for src, _, dst in loop)
     options = ResonanceEngine.get_available_resonance("假钞")
     assert not any(option["target_daowen"] == "赌命" for option in options)
-    assert any(option["target_daowen"] == RELICIZED_SLOT and option.get("reserved")
+    assert any(option["target_daowen"] == "勒索" and not option.get("reserved")
                for option in options)
     stock = {"曲解": 1}
-    blocked = ResonanceEngine.apply_resonance("假钞", "曲解", True, True, stock)
-    assert blocked["success"] is False and blocked.get("reserved") is True
-    assert stock["曲解"] == 1
-    blocked_explicit = ResonanceEngine.apply_resonance(
-        "假钞", "曲解", True, True, stock, target_daowen=RELICIZED_SLOT)
-    assert blocked_explicit["success"] is False and blocked_explicit.get("reserved") is True
-    assert stock["曲解"] == 1
+    converted = ResonanceEngine.apply_resonance(
+        "假钞", "曲解", True, True, stock, target_daowen="勒索")
+    assert converted["success"] is True and converted["target"] == "勒索"
 
 
 # ==================== 声明映射 ====================
