@@ -160,6 +160,7 @@ class ActionPreview:
         # 引擎侧可变状态（combat 运行态 / 中断 / 行动历史 / 事件池）统一走
         # sandbox 的集中清单保存，退出时原地恢复——见 engine/sandbox.py。
         saved = snapshot_engine_side(eng)
+        spell_runtime = eng._snapshot_combat_runtime()
         # 调试开关（LJ_POLLUTION_GUARD=1）：正式运行是 False，只有一次布尔判断。
         # 长局（事件流很长）自动降级为「只追加事实记录不逐元素比对内容」，避免
         # 打开开关就把模拟变成慢动作；短局仍然全字段比对。
@@ -172,6 +173,7 @@ class ActionPreview:
         combat.state = snap_state
         eng.dice = snap_dice
         combat.dice = snap_dice
+        eng._restore_combat_runtime(spell_runtime)
         results: list = []
         try:
             try:
@@ -229,7 +231,7 @@ class ActionPreview:
         diff["shards_before"] = before.shards
         diff["shards_after"] = after.shards
 
-        # 队友（朋友/员工/临时朋友）按名字对齐对比
+        # 队友（朋友/员工/造物）按名字对齐对比
         def _ally_map(state):
             out = {}
             for group in (state.friends, state.employees, state.temp_friends):

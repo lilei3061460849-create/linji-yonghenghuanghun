@@ -47,7 +47,7 @@ FIXED_CONFIG = {
     "initial_daowen": "杀伐",
     "resonance": "反转",
     "region": "龙心谷",
-    "learn": ["庇护", "再生", "增殖"],
+    "learn": ["庇护", "再生"],
     "spend_shards": True,
     "ai": "sim.relic_winrate.BenchmarkAI (WinOnlyAI + max one Seal activation per battle)",
     "battles": 7,

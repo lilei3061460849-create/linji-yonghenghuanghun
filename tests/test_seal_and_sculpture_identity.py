@@ -3,7 +3,7 @@
 封印X：支付异变X，使一个目标延后X回合再入场；暂离不是死亡或永久离场。
 
 2026-10-08 用户令：封印的目标由"只限怪物"放开为**任意目标**（含[朋友]/[员工]/
-临时朋友/敌对轮回者，以及施法者自己）。回场一律回原阵营原下标。
+造物/敌对轮回者，以及施法者自己）。回场一律回原阵营原下标。
 暂离不是死亡或永久离场。
 雕塑：用户裁定对任何非轮回者（怪物/微光者/赤族等）；轮回者不触发。
 """
@@ -17,6 +17,7 @@ from engine.api import GameEngine
 from engine.combat import CombatEngine
 from engine.dice import DiceEngine
 from engine.models import DaoWen, DaoWenInstance, Entity, GameState
+from tests.monster_phase_support import resolve_monster_phase
 
 
 def _engine(suffix):
@@ -229,6 +230,28 @@ def test_seal_delayed_monster_is_not_an_alt_victory_or_shardless_removal():
     assert end["result"]["death_shard_rewards"]
 
 
+def test_monster_preselected_attack_skips_target_sealed_by_its_own_daowen():
+    """怪物先封印玩家后，其在 prepare 时预选的玩家普攻跳过而非整阶段失败。"""
+    engine = _engine("seal_phase_target_drift")
+    monster = _monster("石背熊", hp=42, atk=1, power=7)
+    monster.dao_wen["封印"] = DaoWenInstance(
+        DaoWen(name="封印", formula="", cost_type="异变", cost_formula="X",
+               effect_formula=""), x_value=1, x_free=False)
+    engine.state.enemies.append(monster)
+    engine.execute_action("round_start", {})
+    hp_before = engine.state.player.current_hp
+
+    results = resolve_monster_phase(
+        engine.combat, {"石背熊": "封印"}, target_refs={"石背熊": "player:0"})
+
+    assert any(entry.get("daowen_activated") == "封印" for entry in results)
+    skipped = [entry for entry in results if entry.get("skipped") == "预选目标已不可选中"]
+    assert len(skipped) == 1
+    assert skipped[0]["attacker"] == "石背熊" and skipped[0]["target"] == "贾凡"
+    assert engine.state.is_sealed_away(engine.state.player)
+    assert engine.state.player.current_hp == hp_before
+
+
 # ========================================================================
 # 雕塑
 # ========================================================================
@@ -279,7 +302,7 @@ def test_sculpture_employee_and_temp_friend_zero_count():
                           speed_limit=1, current_speed=1, mana_limit=1, current_mana=1)
     emp = Entity(name="打手", entity_type="员工", blood_limit=48, current_hp=48,
                  attack_count=0, attack_power=0, is_deployed=True)
-    temp = Entity(name="路人", entity_type="临时朋友", blood_limit=20, current_hp=20,
+    temp = Entity(name="路人", entity_type="造物", blood_limit=20, current_hp=20,
                   attack_count=0, attack_power=0)
     ok = Entity(name="力士", entity_type="朋友", blood_limit=30, current_hp=30,
                 attack_count=3, attack_power=1, is_deployed=True)

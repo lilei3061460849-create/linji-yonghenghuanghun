@@ -19,6 +19,14 @@ from .rule_engine import apply_final_life_loss_cap, validate_damage_amount
 from .rule_engine import apply_final_life_loss_cap
 
 
+# 只在旧实体/旧存档读入边界使用；新实体类型与新文案统一为“造物”。
+LEGACY_ENTITY_TYPE_ALIASES = {"临时朋友": "造物"}
+
+
+def normalize_entity_type(entity_type: str) -> str:
+    return LEGACY_ENTITY_TYPE_ALIASES.get(entity_type, entity_type)
+
+
 @dataclass
 class DaoWen:
     """道纹定义"""
@@ -64,7 +72,8 @@ class DaoWenInstance:
     # x_free=False 表示面板写了固定 X（兼容旧面板，迁移期两种写法都必须能跑）。
     x_free: bool = False
     cooldown_remaining: int = 0 # 冷却剩余
-    is_frozen: bool = False     # 是否被封印
+    is_frozen: bool = False     # 旧封印冻结标记
+    ice_frozen: bool = False    # 【冰冻】冻结；随持续∞状态在本场战终解除
     sha_qi: str = ""            # 旧存档兼容字段；附煞已删除，此字段不再参与运行时结算
     # 【唯一】代价：规则正文「唯一：使用后，本次轮回中无法再次使用」。
     # 与冷却同族但作用域更大——冷却按战斗场数递减，唯一是轮回级一次性，
@@ -74,7 +83,7 @@ class DaoWenInstance:
     cooldown_rounds_remaining: int = 0
 
     def can_use(self) -> bool:
-        return (not self.is_frozen and not self.spent_unique
+        return (not self.is_frozen and not getattr(self, "ice_frozen", False)
                 and self.cooldown_remaining <= 0
                 and getattr(self, "cooldown_rounds_remaining", 0) <= 0)
 
@@ -97,6 +106,9 @@ class Spell:
     # 旧对象未传时由 trigger_condition 懒解析得到；不序列化强制要求，
     # 保持与旧存档 pickled Spell 兼容。
     trigger: Optional[str] = None
+    # 法术完成时登记的全局单调序号。相同触发条件按此序号先来后到，
+    # 不按阵营或当次提交顺序重排；0表示旧存档尚未迁移。
+    completion_order: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -109,6 +121,7 @@ class Spell:
             "automatic": self.automatic,
             "lifecycle": self.lifecycle,
             "trigger": self.trigger,
+            "completion_order": int(getattr(self, "completion_order", 0) or 0),
         }
 
 
@@ -150,7 +163,7 @@ class Consumable:
     # kind: normal(普通) / sculpture(雕塑，1耐久=15伤害或20格挡)
     #       / dragon_heart(龙心谷"炼心"产出，耐久=可抵消的同类型代价点数)
     kind: str = "normal"
-    # dragon_heart 专用：可抵消的代价类型（流血/衰老/疲惫）
+    # dragon_heart 专用：可抵消的代价类型（生命/血限/速度）
     dragon_heart_type: str = ""
     # 计数型消耗品的进度（2026-10-23：血翼「累计失去100%[血限]的生命」）。
     # 满一个阈值即兑换 1 点耐久，余数留在这里继续滚存。
@@ -218,7 +231,7 @@ class StatusEffect:
 
     def __post_init__(self):
         # 即使调用方直接append而不经过Entity.add_status，代价标记也不能被战终误清。
-        if (self.name in {"流血", "衰老", "枯竭", "萎缩", "疲惫", "异变", "迷失"}
+        if (self.name in {"生命", "血限", "枯竭", "法限", "速限", "速度", "异变", "迷失"}
                 and self.scope == EffectScope.BATTLE.value):
             self.scope = EffectScope.COST.value
 
@@ -268,7 +281,7 @@ class StatusEffect:
 @dataclass
 class LongJiXin:
     """龙心（消耗品）"""
-    cost_type: str               # 代价类型（流血/衰老/枯竭/萎缩）
+    cost_type: str               # 代价类型（生命/血限/枯竭/法限）
     current_durability: int
     max_durability: int
     
@@ -296,22 +309,25 @@ class Entity:
     name: str
     entity_type: str
     runtime_id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    # 分裂复制体的创建者身份；供遗物被动追踪归属，不依赖可能重名的实体名称。
+    # 分裂造物的创建者身份；供遗物被动追踪归属，不依赖可能重名的实体名称。
     copy_creator_runtime_id: str = ""
     # 开放世界位置字段：所有角色共用；地图系统尚未分配位置时为None。
     world_region: str = ""
     world_x: Optional[int] = None
     world_y: Optional[int] = None
     is_neutral: bool = False  # 中立特殊角色不会自动进入任一战斗阵营
-    # 怪物/造物共用的固有偏爱；每种偏爱在同一实体上最多出现一次。
+    # 怪物/妖怪共用的固有偏爱；每种偏爱在同一实体上最多出现一次。
     preferences: list[str] = field(default_factory=list)
-    # 造物是具有专属身份的朋友，不是分裂道纹产生的临时朋友。
+    # 【造生】的妖怪是具有专属身份的朋友，不是分裂道纹产生的造物。
+    # 字段名保留 created_being 以兼容既有存档与开放世界记录。
     is_created_being: bool = False
     created_by_runtime_id: str = ""
-    # 造物视野成长值会随存档保存；每次后续造生增加1格。
+    # 妖怪视野范围随存档保存；旧档可能带有历史成长值，现行造生不再提供培养。
     created_being_vision_range: int = 1
-    # 造物只有在主人明确召唤时才加入战斗；世界地图上的独立行动不因此中断。
+    # 妖怪只有在主人明确召唤时才加入战斗；世界地图上的独立行动不因此中断。
     is_summoned: bool = False
+    # 命零后休眠：不是普通死亡；恢复生命不会自动唤醒，须由主人主动唤醒。
+    is_dormant: bool = False
 
     # 基础属性
     blood_limit: int = 0         # 血限
@@ -326,11 +342,15 @@ class Entity:
     attack_power: int = 0        # 攻击力
     
     deferred_damage: list[dict] = field(default_factory=list)  # 缓厄沙漏：下回合要造成的普通伤害；没有禁止再次延期的特殊结算。
+    # 【枯竭】待结算额度：支付时不改当前法力/法限，在下一次[战始]从当前法力扣除。
+    pending_exhaust_mana: int = 0
     death_page_count: int = 10  # 四类资源共用，一页承载一种；与血限无关。
     artifacts: list[str] = field(default_factory=list)
 
     # 道纹与法术
     dao_wen: dict[str, DaoWenInstance] = field(default_factory=dict)
+    # 已成功发动过的道纹名；不限普通、法术、怪物、催化等方式。旧档缺省为空。
+    daowen_use_history: set[str] = field(default_factory=set)
     spells: list[Spell] = field(default_factory=list)
     # 旧存档兼容字段：现行法术系统不读取该字段，法术统一存入 spells。
     armed_spells: list[str] = field(default_factory=list)
@@ -347,6 +367,8 @@ class Entity:
     # 状态
     shield: int = 0              # 格挡
     status_effects: list[StatusEffect] = field(default_factory=list)
+    # 【冰冻】暂停的既有持续状态；不参与任何生效/计时，解除后恢复。
+    paused_status_effects: list[StatusEffect] = field(default_factory=list)
     is_flying: bool = False      # 飞行状态
 
     # 非击杀永久离场标记（雕塑/癌变/还债/逃跑等；【封印】暂离不使用此标记）
@@ -358,6 +380,10 @@ class Entity:
     departure_reason: str = ""   # 离场原因（雕塑/癌变/还债/救赎/逃跑/...）
     hp_lost_this_round: int = 0   # 本回合累计失去的生命（回始归零）
     actions_used_this_round: int = 0  # 本回合已消耗的出手次数（回始归零，用于出手预算校验）
+    # 【沉重枷锁】只扣当前回合尚未使用的出手；回始归零，不累积到下回合。
+    heavy_shackles_action_penalty: int = 0
+    # 本场曾以该角色为目标的敌方 runtime_id；供沉重枷锁跳过触发查询。
+    hostile_targeters_this_battle: set[str] = field(default_factory=set)
     # ---- 蓄锐：消耗1出手换取下回合+1出手 ----
     # 用 Entity.field 方式声明：
     _xurui_pending: int = field(default=0)
@@ -439,7 +465,7 @@ class Entity:
 
     # 出战支援（罪孽都市专属机制1，全局对所有[员工]生效）：
     # [员工]默认待命不占场；is_deployed=True 才计入战场与工资结算。
-    # 玩家/怪物/[朋友]/[临时朋友]与"还债"转化来的[员工]默认直接为True，保持既有行为不变。
+    # 玩家/怪物/[朋友]/[造物]与"还债"转化来的[员工]默认直接为True，保持既有行为不变。
     is_deployed: bool = True
     deployed_at_round: int = 0  # 派遣时 state.current_round 的原始值（用于结算"实际出场回合数"）
 
@@ -453,7 +479,7 @@ class Entity:
     # 但未死亡，[战终]后随存活[朋友]/[员工]一同留存，下一场重置为False可正常参战。
     has_retreated: bool = False
 
-    # 血誓戒：本回合是否已经触发过"首次主动支付流血代价"奖励（回始归零）
+    # 血誓戒：本回合是否已经触发过"首次主动支付生命"奖励（回始归零）
     blood_oath_used_this_round: bool = False
     # [战始]时的血限快照，用于击杀碎片按战始血限结算（增殖等战斗中改变血限不影响此值）
     battle_start_blood_limit: int = 0
@@ -462,7 +488,7 @@ class Entity:
     # 回始归零；每满10点使当前回合出手次数-1（以叠加"无力"状态实现）
     mana_inflicted_this_round: int = 0
 
-    # 血族血脉（初拥之夜遗物）：本回合是否已造成过伤害（[回终]判定：造成过则回复等量，否则流血20）
+    # 血族血脉（初拥之夜遗物）：本回合是否已造成过伤害（[回终]判定：造成过则回复等量，否则支付生命20）
     damage_dealt_this_round: int = 0
     # 特殊事件【凡庸】：连续五回合未出手 / 五回合未能使敌对角色生命减少时触发。
     # 两个条件是"或"关系，故分别计数。多个角色同时达阈值时，非轮回者优先结算。
@@ -473,10 +499,12 @@ class Entity:
     healed_this_battle: int = 0
     # 本场[战始]时的当前生命，作为回复清除后的生命下限
     battle_start_hp: int = 0
-    # 赤族诅咒标记：entity_type=="赤族"的实体[回终]固定流血20；is_chizu_of记录其主人名字(仅用于血食校验)
+    # 赤族诅咒标记：entity_type=="赤族"的实体[回终]固定支付生命20；is_chizu_of记录其主人名字(仅用于血食校验)
     is_chizu_of: str = ""
 
     def __post_init__(self):
+        # 旧面板、旧封存字典与直接构造共用的术语迁移；不追溯修改其它面板字段。
+        self.entity_type = normalize_entity_type(self.entity_type)
         # 每个实体的本局历史最高碎片余额至少包含其初始真实余额。
         # 不能只依赖 __setattr__：dataclass 构造与旧存档恢复路径都要满足同一不变量。
         self.shards_peak = max(0, int(self.shards_peak), int(self.shards))
@@ -528,6 +556,17 @@ class Entity:
                 and any(status.name == "不死" and not status.is_expired
                         for status in self.__dict__.get("status_effects", ()))):
             value = 1
+        # 庇护统一拦截实际生命写入；只有战斗绑定实体具有该判定位。
+        if name == "current_hp" and old is not None and value < old:
+            eng = self.__dict__.get("_hp_engine_ref")
+            owner = eng() if eng is not None else None
+            if owner is not None:
+                value = owner._shelter_hp_loss(self, old, value)
+        # 萎缩：任何来源都不能使当前速度增加；下降、封顶与速限变化不受影响。
+        if (name == "current_speed" and isinstance(old, int) and value > old
+                and any(status.name == "萎缩" and not status.is_expired
+                        for status in self.__dict__.get("status_effects", ()))):
+            value = old
         # 缄默面具：已有实体获得法限时实际增量翻倍；初始化/读档时旧值为None，不重复放大。
         if (name == "mana_limit" and isinstance(old, int) and isinstance(value, int)
                 and value > old and self.__dict__.get("_silent_mask_active", False)):
@@ -552,7 +591,7 @@ class Entity:
             if etype is not None and etype != "轮回者":
                 # **增量**写穿（而非把上限设成绝对值）：attack_power/attack_count 与
                 # 法限/速限在战始是相等的，但战斗中两者会被不同来源各自位移
-                # （共罪分摊、疲惫代价、弱化…），用绝对值会抹掉那些真实消耗。
+                # （共罪分摊、速度支付、弱化…），用绝对值会抹掉那些真实消耗。
                 # 上限同步位移以维持「当前值永远落在 0~上限 闭区间」这条封顶规则。
                 d = value - (old if isinstance(old, int) else 0)
                 if name == "attack_power":
@@ -582,9 +621,25 @@ class Entity:
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        # pickle 不经过 __post_init__，旧档在读入边界显式迁移实体类型。
+        self.__dict__["entity_type"] = normalize_entity_type(
+            self.__dict__.get("entity_type", ""))
         self.__dict__["_hp_engine_ref"] = None
+        self.__dict__.setdefault("daowen_use_history", set())
+        self.__dict__.setdefault("heavy_shackles_action_penalty", 0)
+        self.__dict__.setdefault("hostile_targeters_this_battle", set())
 
     
+    def mark_daowen_used(self, name: str) -> None:
+        history = getattr(self, "daowen_use_history", None)
+        if history is None:
+            history = set()
+            object.__setattr__(self, "daowen_use_history", history)
+        history.add(name)
+
+    def has_used_daowen(self, name: str) -> bool:
+        return name in getattr(self, "daowen_use_history", set())
+
     def effective_attack_count(self) -> int:
         """攻击次数＝ 当前速度。
 
@@ -624,6 +679,8 @@ class Entity:
         power = resolve(self, "attack_power", self.current_mana, {
             "龙族利爪": lambda status, old: self.current_mana*2,
             "全力": lambda status, old: self.mana_limit,
+            "强化": lambda status, old: old + status.value,
+            "弱化": lambda status, old: old - status.value,
             "定型": lambda status, old: status.effect_data.setdefault("attack_power", old),
         })
         return max(0, power)
@@ -652,19 +709,15 @@ class Entity:
 
     @property
     def action_count(self) -> int:
-        """出手次数：**全体角色基础 2 次**。
+        """所有角色基础每回合1次出手；造物不再另设专门上限。
 
-        不再由速限/攻击次数推导——速限已改作攻击次数的来源，再拿它算出手会重复记账；
-        微光者旧的「攻击次数/3」口径同步废止（该式会让高攻次微光者白拿第3、4次出手）。
-        在基础值之上叠加：遗物（含【疯狂】的全体 +1，由战斗层统一查询）、
-        状态【疯狂】/【无力】层数、【蓄锐·增】+1（持续1回合）。
-        LLM 侧按「每个动作槽位一条决策」描述，不得写死每回合固定 2 次。
-        怪物行动仍由CombatEngine的prepare/resolve两阶段接口独立计算。"""
-        base = 2
+        出手预算不由速限/攻击次数推导。疯狂、无力及旧档已有的数值修正
+        对所有角色走同一套通用规则；【跳过】本身不产生任何预算修正。
+        """
+        base = 1
         base += self.get_status_value("疯狂")
         base -= self.get_status_value("无力")
-        # 蓄锐·增：每层+1出手
-        base += self.get_status_value("蓄锐·增")
+        base += self.get_status_value("蓄锐·增")  # 旧档/独立效果兼容，跳过不再产出
         return max(0, base)
 
     @property
@@ -842,9 +895,9 @@ class Entity:
 
         特殊事件【迷失】：
           * 怪物：照常增减异变层数，但无论累积多少层都不会触发【迷失】。
-          * 非怪物角色（轮回者/朋友/员工/临时朋友/赤族等）：达到阈值时不在模型层直接命零，
+          * 非怪物角色（轮回者/朋友/员工/造物/赤族等）：达到阈值时不在模型层直接命零，
             返回 `lost=True` 交由战斗层 _resolve_mutation_lost 判定——
-              - 己方还有其他存活角色（队友/朋友/员工/临时朋友/其他轮回者阵营角色）：
+              - 己方还有其他存活角色（队友/朋友/员工/造物/其他轮回者阵营角色）：
                 该角色异变为怪物，立刻与原队伍开战；
               - 否则：直接[命零]死亡。
         模型层只负责数值与阈值，"变谁的敌/是否命零"由战斗引擎处理。
@@ -974,7 +1027,9 @@ class Entity:
         expired = []
         remaining = []
         for s in self.status_effects:
-            if s.name in skip_names:
+            if s.name in skip_names or s.effect_data.get("manual_round_countdown"):
+                # 【沉溺】等次数型状态只在目标真正即将进入回合时由战斗管线消费；
+                # 普通回终不再额外递减一次，施加后的当前回合也不会误扣次数。
                 remaining.append(s)
                 continue
             if not s.tick():
@@ -1002,8 +1057,8 @@ class Entity:
                 "负岳索", "加速", "愤怒", "蓄锐·增",
             }
             debuffs = {
-                "弱化", "无力", "减速", "全速", "束缚", "封印",
-                "坏死", "退化", "定型", "畸变", "加害", "伤痕",
+                "弱化", "无力", "减速", "全速", "束缚", "封印", "冰冻",
+                "坏死", "退化", "定型", "畸变", "加害", "伤痕", "沉溺",
                 "寄生", "蒙蔽", "手雷减攻", "被背负",   # 2026-10-11 删【衰败】
             }
             if effect.name in buffs:
@@ -1040,6 +1095,7 @@ class Entity:
             "created_by_runtime_id": getattr(self, "created_by_runtime_id", ""),
             "created_being_vision_range": max(1, int(getattr(self, "created_being_vision_range", 1))),
             "is_summoned": bool(getattr(self, "is_summoned", False)),
+            "is_dormant": bool(getattr(self, "is_dormant", False)),
             "blood_limit": "∞" if self.has_status("无限血限") else self.blood_limit,
             "current_hp": self.current_hp,
             "mana_limit": self.mana_limit,
@@ -1076,6 +1132,7 @@ class Entity:
             "reversible_cost_layers": dict(getattr(self, "reversible_cost_layers", {})),
             "death_page_count": self.load_capacity, "pages_used": self.pages_used,
             "deferred_damage": [dict(entry) for entry in getattr(self, "deferred_damage", [])],
+            "pending_exhaust_mana": int(getattr(self, "pending_exhaust_mana", 0) or 0),
             "consumables": [item.to_dict() for item in getattr(self, "consumables", [])],
             "amnesia_refundable": [inst.dao_wen.name for inst in self.refundable_daowen()],
             "daowen_cooldowns": {
@@ -1083,6 +1140,8 @@ class Entity:
                     "rounds": int(getattr(v, "cooldown_rounds_remaining", 0))}
                 for k, v in self.dao_wen.items()
             },
+            "ice_frozen_daowen": [k for k, v in self.dao_wen.items()
+                                  if getattr(v, "ice_frozen", False)],
             "spells": [s.name for s in self.spells],
             "relics": [r.to_dict() for r in self.relics],
             "status_effects": [
@@ -1092,6 +1151,14 @@ class Entity:
                  "effect_sequence": getattr(s, "effect_sequence", 0),
                  "effect_data": dict(getattr(s, "effect_data", {}))}
                 for s in self.status_effects
+            ],
+            "paused_status_effects": [
+                {"name": s.name, "value": s.value, "rounds": s.remaining_rounds,
+                 "source": s.source, "scope": s.scope, "polarity": s.polarity,
+                 "controller_runtime_id": getattr(s, "controller_runtime_id", None),
+                 "effect_sequence": getattr(s, "effect_sequence", 0),
+                 "effect_data": dict(getattr(s, "effect_data", {}))}
+                for s in getattr(self, "paused_status_effects", [])
             ]
         }
 
@@ -1131,6 +1198,8 @@ class GameState:
     current_round: int = 0
     current_battle: int = 0     # 第几场战斗
     current_region: str = ""    # 当前副本
+    # 已完成法术的全局完成序号；同条件触发按完成先来后到。
+    spell_completion_serial: int = 0
     # 过路商人是独立中立角色，不属于轮回者/怪物阵营；库存与世界坐标单独保存。
     merchant: Optional[Entity] = None
     # 开放世界状态采用纯dict快照，避免地图/行动模块与战斗实体模型形成循环依赖。
@@ -1312,7 +1381,7 @@ class GameState:
     #   {"monster": Entity, "return_round": int, "delay_rounds": int,
     #    "home": str, "index": Optional[int]}
     # 暂离不是死亡/永久离场，仍阻塞战终；到达回合始时把原实体放回它原本所在的容器。
-    # 2026-10-08 用户令：【封印】放开到任意目标（含[朋友]/[员工]/临时朋友与施法者
+    # 2026-10-08 用户令：【封印】放开到任意目标（含[朋友]/[员工]/造物与施法者
     # 自己），因此队列不再只装怪物，home/index 记录原址——
     #   * "enemies"/"friends"/"employees"/"temp_friends" —— 从对应 list 摘走再插回原下标；
     #   * "player" —— state.player 是单字段，摘不走，改为就地打 `_delayed_by_seal`
@@ -1598,7 +1667,7 @@ class GameState:
     def life_loss_multiplier(self, entity: Entity) -> int:
         """【第一杯】：该实体失去的生命倍率（非持有者=1）。
 
-        只作用于**有明确数值的失去生命**：伤害、数值型【代价】（流血）、
+        只作用于**有明确数值的失去生命**：伤害、数值型【代价】（生命）、
         直接失血（千荆甲反噬等）。血限被压低导致的当前生命封顶、以及
         「当前生命直接置0」的命零类效果（癌变/迷失·迷失/雕塑等）不带数值、
         也不翻倍——它们不是"失去生命"，是判定归零。

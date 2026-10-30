@@ -42,9 +42,9 @@ def test_blood_pact_is_a_daowen_not_a_relic():
     DaoWenEngine.register_all()
     assert "共罪" in DaoWenEngine._registry
     calc = DaoWenEngine.resolve("共罪", 2)
-    assert calc["cost_type"] == "流血" and calc["cost_hp"] == 10
-    assert "cost" not in calc
-    assert calc["mark_targets"] == 2 and calc["duration"] == -1
+    assert calc["cost_type"] == "消耗" and calc["cost"] == 2
+    assert calc["duration"] == 2
+    assert "mark_targets" not in calc  # 固定两个目标，发动者另占一个支付名额
 
 
 def _engine(relics, *, speed=4, speed_limit=4, alive_enemies=0, sealed=None):

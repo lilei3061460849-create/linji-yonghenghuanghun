@@ -1,9 +1,9 @@
 """守夜灯法力与反应法术。
 
-2026-10-25 用户令：守夜灯改为「[回终]获得等同于当前回合数的法力」，且不清空。
-本文件仍用同一套反应法术夹具，验证：授予量＝当前回合数、法力留存不清空、
+现行规则：守夜灯在持有者每次经历回合的【回增】相位，获得等同于当前世界回合数的法力。
+本文件仍用同一套反应法术夹具，验证：授予量＝世界回合数、法力留存不清空、
 以及"法力不足"在结算期表现为带原因的 interrupted（不是提交错误、不吞成异常）。
-（回合数由引擎在[回始]递增，测试里直接设定 `state.current_round` 取值。）
+（世界回合数由引擎在[回始]递增，测试里直接设定 `state.current_round` 取值。）
 """
 import sys
 import os
@@ -11,8 +11,17 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
+from engine.mechanisms import Phase
 from engine.models import Entity, DaoWen, DaoWenInstance, Relic, Spell
 from tests.setup_support import finish_initial_daowen
+
+
+def _grant_round_increase(e, player):
+    """通过现行声明机制结算一次目标经历回合的回增相位。"""
+    before = player.current_mana
+    logs = [entry for entry in e.combat._dispatch_phase(Phase.ROUND_INCREASE, target=player)
+            if entry]
+    return {"gained": player.current_mana - before, "logs": logs}
 
 
 def _engine(tmp_path):
@@ -79,10 +88,8 @@ def test_shouyedeng_mana_enables_reaction_spell(tmp_path):
     p = e.state.player
     p.current_mana = 0
     p.mana_limit = 20
-    e.state.current_round = 10  # 第10回合回终＝10点法力
-    grant = e.combat._shouyedeng_grant_amount(p)
-    assert grant == 10, f"守夜灯应授予10法力，实{grant}"
-    e.combat._grant_shouyedeng(p)
+    e.state.current_round = 10  # 世界第10回合，每次经历回合授予10点法力
+    assert _grant_round_increase(e, p)["gained"] == 10
     assert p.current_mana == 10
     prepared, choice = _monster_phase_submit(e, spell_x=2)  # 消耗2 ≤ 2
     res = e.combat.resolve_monster_phase([choice], prepared)
@@ -107,30 +114,30 @@ def test_shouyedeng_mana_persists_after_monster_phase(tmp_path):
     p.current_mana = 0
     p.mana_limit = 20
     e.state.current_round = 10
-    e.combat._grant_shouyedeng(p)  # 第10回合＝10点法力
+    _grant_round_increase(e, p)  # 第10回合＝10点法力
     assert p.current_mana == 10
     prepared, choice = _monster_phase_submit(e, spell_x=1)  # 只花1法力
     res = e.combat.resolve_monster_phase([choice], prepared)
     assert not [x for x in res if x.get("type") == "shouyedeng_grant"], \
-        "授予发生在[回终]，怪物阶段不应再授予"
+        "授予发生在经历回合的[回增]，怪物阶段不应再授予"
     assert not [x for x in res if x.get("type") == "shouyedeng_clear"], \
         "守夜灯法力不再清空"
     assert p.current_mana == 9, f"10授予-1消耗=9应留存，实{p.current_mana}"
 
 
-def test_shouyedeng_grants_every_time_without_once_per_round_gate(tmp_path):
-    """每次调用均按当前回合数授予，不设每回合一次门槛；实际法力仍受法限约束。"""
+def test_shouyedeng_grants_for_each_experienced_round(tmp_path):
+    """同一世界回合内每额外经历一个回合均再次授予；实际法力仍受法限约束。"""
     e = _engine(tmp_path)
     e.state.relics.append(Relic(name="守夜灯", effect="", tags=[]))
     p = e.state.player
     p.current_mana = 0
     p.mana_limit = 20
     e.state.current_round = 10
-    first = e.combat._grant_shouyedeng(p)
+    first = _grant_round_increase(e, p)
     assert first["gained"] == 10
     assert p.current_mana == 10
     p.current_mana = 0
-    second = e.combat._grant_shouyedeng(p)
+    second = _grant_round_increase(e, p)
     assert second["gained"] == 10
     assert p.current_mana == 10
 
@@ -143,7 +150,7 @@ def test_insufficient_real_mana_interrupts_at_runtime(tmp_path):
     p.current_mana = 0
     p.mana_limit = 4
     e.state.current_round = 2
-    e.combat._grant_shouyedeng(p)  # 第2回合授予2；先发制人 X=3 需3 > 2
+    _grant_round_increase(e, p)  # 第2回合授予2；先发制人 X=3 需3 > 2
     prepared, choice = _monster_phase_submit(e, spell_x=3)
     res = e.combat.resolve_monster_phase([choice], prepared)
     logs = [lg for hit in res for lg in (hit.get("spell_logs") or [])

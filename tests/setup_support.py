@@ -112,7 +112,7 @@ def grant_extra_actions(entity, extra: int) -> None:
     """给实体临时增加出手预算（等价于【蓄锐】攒下的出手）。
 
     2026-10-25 起法术阶数＝重数：带触发时机的 2 步法术就是 3 阶、要 3 次出手，
-    而全体基础出手只有 2 次。凡测试要连续定义/施展高阶法术，用本函数把预算补足，
+    而全体基础出手只有 1 次。凡测试要连续定义/施展高阶法术，用本函数把预算补足，
     不要去改 `Entity.action_count`——它是只读 property，由基础值与状态层共同决定。
     """
     from engine.models import StatusEffect

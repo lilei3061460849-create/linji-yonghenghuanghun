@@ -4,7 +4,7 @@
 每个迁移测试文件（test_*_migration.py）只验证单个机制 + 相邻一个机制的顺序。
 本文件把 13 个已迁移机制放在**同场战斗的组合场景**里验证：
 
-  - 完整回合一：回始 6 机制 -> 伤害管线（加害/龙鳞）-> 死亡 -> 焦黑发丝 -> 回终（畸变·结算）
+  - 完整回合一：回始 6 机制 -> 伤害管线（加害/叠鳞甲）-> 死亡 -> 焦黑发丝 -> 回终（畸变·结算）
   - 事件流形状（类型序列 / parent_event_id 链 / 数量）
   - 多实体类型（轮回者/朋友/员工/怪物）
   - RNG 确定性（同 seed 事件流逐字节一致；机制不得扰动 RNG）
@@ -72,7 +72,7 @@ def test_full_battle_cycle_all_mechanism_types_fire():
     """同场战斗中：回始5机制 + 伤害加减区 + 两个事件机制 + 回终结算全部生效。
 
     覆盖机制：洞察·结算/畸变·标记（ROUND_START；自愈、狂暴·标记、衰败已随道纹删除）、
-    加害/龙鳞（INCOMING_ADJUST）、洗劫·夺碎片/焦黑发丝（事件）、畸变·结算（ROUND_END）。
+    加害/叠鳞甲（INCOMING_ADJUST）、洗劫·夺碎片/焦黑发丝（事件）、畸变·结算（ROUND_END）。
     """
     state, combat = _arena(shards=0, relics=[Relic("焦黑发丝", "")])
     player = state.player
@@ -84,7 +84,7 @@ def test_full_battle_cycle_all_mechanism_types_fire():
     enemy = state.enemies[0]
     enemy.shards = 20
     _add(enemy, "加害", 2)
-    _add(enemy, "龙鳞", 8)
+    enemy.relics.append(Relic("叠鳞甲", ""))
     _add(enemy, "畸变", 1)
     enemy.attack_count = 2
     enemy.attack_power = 3
@@ -101,9 +101,9 @@ def test_full_battle_cycle_all_mechanism_types_fire():
     # 一池制：回始少了 +法限50 的回填，故 104 → 54
     assert player.current_mana == 54, f"P mana={player.current_mana}"
 
-    # 玩家打敌人 8 点：加害 +2 -> 10，龙鳞 -8 -> 实伤 2；洗劫按实伤 2 夺碎片
-    dmg = combat._apply_hostile_damage(enemy, 8, source=player)
-    assert dmg["actual_damage"] == 2, f"加害+龙鳞调整后实伤={dmg['actual_damage']}"
+    # 玩家打敌人 1 点：加害 +2 -> 3，叠鳞甲 -1 -> 实伤 2；洗劫按实伤 2 夺碎片
+    dmg = combat._apply_hostile_damage(enemy, 1, source=player)
+    assert dmg["actual_damage"] == 2, f"加害+叠鳞甲调整后实伤={dmg['actual_damage']}"
     assert enemy.shards == 18, f"洗劫夺 2 碎片: {enemy.shards}"
     assert state.shards == 2
 
@@ -244,22 +244,25 @@ def test_monster_type_only_for_entity_type_conditions():
 # ==================== 4. INCOMING_ADJUST 真实伤害管线 ====================
 
 def test_incoming_adjust_real_damage_pipeline_matrix():
-    """加害/龙鳞 在真实伤害管线中的组合矩阵（含 0 / 超减 / 代价伤害）。"""
+    """加害/叠鳞甲在真实伤害管线中的组合矩阵（含 0 / 封底 / 代价伤害）。"""
     cases = [
-        ((), 8, "普通", 8),                    # 无状态
-        ((("加害", 2),), 8, "普通", 10),        # 只有加害
-        ((("龙鳞", 8),), 8, "普通", 0),         # 只有龙鳞（减到 0）
-        ((("龙鳞", 15),), 8, "普通", 0),        # 龙鳞超减封底 0
-        ((("加害", 2), ("龙鳞", 8)), 8, "普通", 2),   # 加害先于龙鳞
-        ((("加害", 5), ("龙鳞", 3)), 8, "普通", 10),  # 8+5=13, 13-3=10
-        ((("加害", 2),), 8, "代价", 8),         # 代价不受加害
-        ((("加害", 2),), 0, "普通", 0),         # amount<=0 不改
+        ((), 8, "普通", 8),                           # 无调整
+        ((("加害", 2),), 8, "普通", 10),              # 只有加害
+        ((("叠鳞甲", 1),), 8, "普通", 7),             # 遗物固定减1
+        ((("叠鳞甲", 1),), 1, "普通", 0),             # 最低为0
+        ((("加害", 2), ("叠鳞甲", 1)), 8, "普通", 9), # 加害先于叠鳞甲
+        ((("加害", 5), ("叠鳞甲", 1)), 8, "普通", 12),
+        ((("加害", 2), ("叠鳞甲", 1)), 8, "代价", 8),# 两者都不调整代价
+        ((("加害", 2),), 0, "普通", 0),               # amount<=0 不改
     ]
     for statuses, raw, dtype, expected in cases:
         state, combat = _arena()
         enemy = state.enemies[0]
         for name, val in statuses:
-            _add(enemy, name, val)
+            if name == "叠鳞甲":
+                enemy.relics.append(Relic(name, ""))
+            else:
+                _add(enemy, name, val)
         # 用 combat._apply_hostile_damage 的 damage_type 参数走真实管线
         detail = combat._apply_hostile_damage(
             enemy, raw, source=state.player, damage_type=dtype)
@@ -320,23 +323,19 @@ def test_battle_start_both_relics_sealed_no_trigger():
 
 
 def test_battle_start_partial_seal_one_fires_one_skips():
-    """帮派令被封印、缄默面具未封印：战始都不触发；战终由缄默面具固定[法限]+2。
-
-    2026-09-17 用户令：【缄默面具】由「[战始]+20X 法力」改为「[战终][法限]+X」；
-    2026-10-23 遗物彻底重做：X 取消，固定为每场[战终][法限]+2。
-    """
+    """帮派令被封印、缄默面具未封印：战始只激活面具，后续法限增量翻倍。"""
     state, combat = _arena(relics=[Relic("缄默面具", ""), Relic("帮派令", "")],
                            sealed={"帮派令": 2})
     player = state.player
 
     logs = combat.process_relics("battle_start", {"relic_choices": {}})
-    assert logs == [], f"战始两者都不触发: {logs}"
+    assert logs == ["缄默面具：后续法限增加量翻倍"], logs
     assert not player.has_status("洗劫"), "封印的帮派令不得授予洗劫"
-
     limit_before = player.mana_limit
-    end_logs = combat.process_relics("battle_end")
-    assert any("缄默面具" in line for line in end_logs), end_logs
-    assert player.mana_limit == limit_before + 2
+    assert combat.process_relics("battle_end") == []
+    assert player.mana_limit == limit_before, "面具激活与战终都不直接加法限"
+    player.mana_limit += 2
+    assert player.mana_limit == limit_before + 4
     assert not player.has_status("洗劫"), "封印的帮派令仍不得授予洗劫"
 
 

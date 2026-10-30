@@ -24,7 +24,7 @@ def test_dungeon_daowen_registered():
     2026-10-03 删【尸爆】；2026-10-08 删【镇尸】（与【坏死】硬重复）。
     """
     DaoWenEngine.register_all()
-    for name in ("分裂", "勾魂", "招魂"):
+    for name in ("分裂", "勾魂", "凋零", "招魂"):
         assert name in DaoWenEngine._registry, f"{name} 未注册"
         r = DaoWenEngine.resolve(name, 2, target=Entity("T", "怪物", blood_limit=100, current_hp=100),
                                  caster=Entity("C", "轮回者", blood_limit=60, current_hp=60))
@@ -35,8 +35,8 @@ def test_dungeon_resonance_loop_complete():
     """正常路径：乱葬岗残韵闭环7条路径全部可达。
 
     遗物化的【缄默】【冥气】各自保留为独立「？？」节点，不与相邻道纹直连。
-    2026-10-08 删【镇尸】：勾魂与招魂之间那一格留成**空占位符**，环仍是 7 条边，
-    因此这两条路径查得到，但不可获得（见 test_reserved_slot_not_obtainable）。
+    2026-10-29：既有【凋零】补入勾魂与招魂之间，环仍是7条边；
+    其余遗物化空位继续保留且不可获得。
     """
     DaoWenEngine.register_all()
     slots = RELICIZED_DAOWEN_SLOTS
@@ -45,8 +45,8 @@ def test_dungeon_resonance_loop_complete():
         (slots["缄默"], "曲解", slots["瓦解"]),
         (slots["瓦解"], "转换", slots["冥气"]),
         (slots["冥气"], "反转", "勾魂"),
-        ("勾魂", "曲解", RESERVED_SLOT),
-        (RESERVED_SLOT, "曲解", "招魂"),
+        ("勾魂", "曲解", "凋零"),
+        ("凋零", "曲解", "招魂"),
         ("招魂", "转换", "分裂"),
     ]
     edges = ResonanceEngine.CLOSED_LOOPS["乱葬岗闭环"]
@@ -65,21 +65,23 @@ def test_reserved_slot_not_obtainable():
     不消耗残韵、不改写目标牌面、不授予施法者（2026-10-08 用户令）。
     """
     DaoWenEngine.register_all()
-    stock = {"曲解": 3}
-    r = ResonanceEngine.apply_resonance("勾魂", "曲解", True, True, dict(stock))
+    stock = {"转换": 3, "曲解": 3}
+    r = ResonanceEngine.apply_resonance(
+        "分裂", "转换", True, True, dict(stock),
+        target_daowen=RELICIZED_DAOWEN_SLOTS["缄默"])
     assert r["success"] is False
     assert r.get("reserved") is True
-    assert stock["曲解"] == 3, "走到空占位符不得消耗残韵"
-    # 显式指定空位同样被拒
-    r2 = ResonanceEngine.apply_resonance("招魂", "曲解", True, True, dict(stock),
-                                         target_daowen=RESERVED_SLOT)
-    assert r2["success"] is False and r2.get("reserved") is True
-    assert stock["曲解"] == 3
-    # 空位不是道纹：不得出现在注册表与任何持有集合中
+    assert stock["转换"] == 3, "走到空占位符不得消耗残韵"
+    # 旧待补格现在通向真实道纹【凋零】，不再按空位拒绝。
+    r2 = ResonanceEngine.apply_resonance("勾魂", "曲解", True, True, dict(stock),
+                                         target_daowen="凋零")
+    assert r2["success"] is True and r2["target"] == "凋零"
     assert RESERVED_SLOT not in DaoWenEngine._registry
     from engine.gamedata import REGION_EXCLUSIVE_DAOWEN, MONSTER_TRANSFORM_DAOWEN
     assert RESERVED_SLOT not in REGION_EXCLUSIVE_DAOWEN.get("乱葬岗", set())
     assert RESERVED_SLOT not in MONSTER_TRANSFORM_DAOWEN
+    assert all(RESERVED_SLOT not in (src, dst)
+               for src, _, dst in ResonanceEngine.CLOSED_LOOPS["乱葬岗闭环"])
 
 
 # ---------- 区域与怪物池 ----------
@@ -107,7 +109,7 @@ def test_dungeon_monster_pool_parsed():
 # ---------- 旧附煞行动已删除 ----------
 
 def test_fusha_action_is_removed_in_favor_of_creation_system():
-    """旧附煞菜单已删除；造生/造物承接其设计位置，不再给普通道纹附加煞气。"""
+    """旧附煞菜单已删除；造生/妖怪承接其设计位置，不再给普通道纹附加煞气。"""
     e = GameEngine(db_path="/tmp/test_lz_fusha_removed.db", rng_seed=1)
     e.execute_action("setup_attributes", {
         "name": "贾凡", "blood_points": 11, "speed_points": 8, "mana_points": 6,

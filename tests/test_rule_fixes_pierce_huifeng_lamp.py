@@ -2,7 +2,7 @@
 
 1. 贯穿：你造成的伤害（道纹/遗物/雕塑等）一律无视格挡，不只普攻。
 2. 回锋刀：每失去1点当前速度后对显式[目标]造成3点伤害；折速疲惫必须提交目标。
-3. 守夜灯：[回终]加等同于当前回合数的法力，不清空（2026-10-25 用户令）。
+3. 守夜灯：每经历一个回合，在[回增]加等同于当前世界回合数的法力，不清空。
 
 每条覆盖正常路径 / 边界 / 非法输入。
 """
@@ -18,6 +18,7 @@ from tests.setup_support import begin_battle, begin_round, finish_initial_daowen
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
+from engine.mechanisms import Phase
 from engine.models import DaoWen, DaoWenInstance, Entity, Relic, StatusEffect
 
 
@@ -30,6 +31,8 @@ def _engine(tmp_path, suffix="fix"):
     e.execute_action("setup_choose_resonance", {"resonance_type": "转换"})
     setup = e.execute_action("setup_choose_region", {"region": "罪孽都市"})
     e.execute_action("choose_discovered_relic", {"relic_name": setup["result"]["relic_choices"][0]})
+    # 各用例自行添加目标遗物，清空随机遗物以隔离无关被动效果。
+    e.state.relics.clear()
     e.state.energy = 0
     return e
 
@@ -70,8 +73,8 @@ def _monster_phase_no_attack(engine):
 
 # ---------- 贯穿 ----------
 
-def test_pierce_shaifa_ignores_shield(tmp_path):
-    """正常路径：持贯穿后杀伐打有格挡目标，格挡不动、生命按伤害扣除。"""
+def test_shaifa_direct_life_loss_ignores_shield_with_pierce(tmp_path):
+    """杀伐本身是直接失去生命；持贯穿不会把它重新变成伤害，格挡不动。"""
     e = _engine(tmp_path, "pierce_ok")
     begin_battle(e)
     begin_round(e)
@@ -86,30 +89,31 @@ def test_pierce_shaifa_ignores_shield(tmp_path):
         "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
     })
     assert r["success"], r
-    assert m.shield == sh, "贯穿伤害不得消耗格挡"
-    assert m.current_hp == max(0, hp - 10 * 10)   # 杀伐X：X²（2026-09-13，原 5X）
+    assert m.shield == sh, "杀伐直接失去生命，不消耗格挡"
+    assert m.current_hp == max(0, hp - 10 * 10)   # 杀伐X：直接失去X²生命
 
 
 def test_pierce_does_not_rewrite_cost_damage(tmp_path):
-    """边界：贯穿不把代价改成无视格挡；流血代价仍按代价结算。"""
+    """边界：贯穿不把生命支付改成伤害；支付仍不消耗格挡。"""
     e = _engine(tmp_path, "pierce_bound")
     begin_battle(e)
     p = e.state.player
     p.add_status(StatusEffect(name="贯穿", value=1, remaining_rounds=-1, source="test"))
     p.shield = 30
     hp = p.current_hp
-    e.combat.pay_numeric_cost(p, "流血", 8)
+    e.combat.pay_numeric_cost(p, "生命", 8)
     assert p.shield == 30
     assert p.current_hp == hp - 8
 
 
-def test_pierce_absent_still_blocked_by_shield(tmp_path):
-    """非法/对照：没有贯穿时杀伐仍被格挡吸收。"""
+def test_shaifa_direct_life_loss_ignores_shield_without_pierce(tmp_path):
+    """对照：没有贯穿也一样，杀伐不经过伤害与格挡管线。"""
     e = _engine(tmp_path, "pierce_no")
     begin_battle(e)
     begin_round(e)
     p, m = e.state.player, e.state.enemies[0]
     m.shield = 40
+    m.blood_limit = 80
     m.current_hp = 80
     p.current_mana = 20
     r = e.execute_action("use_daowen", {
@@ -117,9 +121,8 @@ def test_pierce_absent_still_blocked_by_shield(tmp_path):
         "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
     })
     assert r["success"], r
-    dmg = 10 * 10                    # 杀伐X：X²（2026-09-13）；格挡40吸收40，余60落到生命
-    assert m.shield == max(0, 40 - dmg)
-    assert m.current_hp == 80 - max(0, dmg - 40)
+    assert m.shield == 40
+    assert m.current_hp == max(0, 80 - 10 * 10)
 
 
 # ---------- 回锋刀 ----------
@@ -190,51 +193,53 @@ def test_round_start_huifeng_fizzles_when_no_enemy_alive(tmp_path):
 
 # ---------- 守夜灯 ----------
 
-def test_lamp_grants_at_round_start_and_keeps_it(tmp_path):
-    """正常路径（2026-10-25 用户令）：[回终]授予等同当前回合数的法力，怪物阶段不授予也不清空。"""
+def test_lamp_grants_at_round_increase_and_keeps_it(tmp_path):
+    """正常路径：世界回合递增后的[回增]授予法力，怪物阶段不重复授予也不清空。"""
     e = _engine(tmp_path, "lamp_ok")
     e.state.relics.append(Relic("守夜灯", ""))
     begin_battle(e)
     p = e.state.player
-    # 满池时授予会被上限全额吃掉，先花干净再看[回终]授予。
+    # 满池时授予会被上限全额吃掉，先花干净再看自然回合的[回增]授予。
     p.current_mana = 0
     begin_round(e)
     round_no = e.state.current_round
-    assert p.current_mana == 0, "[回始]不再授予（守夜灯已改到[回终]）"
+    expected = min(p.mana_limit, round_no)
+    assert p.current_mana == expected
+    # 所有战斗共用交替优先权：玩家显式跳过后才轮到敌方行动。
+    skipped = e.execute_action("skip", {"actor_ref": "player:0"})
+    assert skipped["success"], skipped
     phase = _monster_phase_no_attack(e)
     assert phase["success"], phase
     assert not [d for d in phase["result"]["details"] if d.get("type") == "shouyedeng_grant"]
     assert not [d for d in phase["result"]["details"] if d.get("type") == "shouyedeng_clear"]
-    # 回终才授予：金额＝当前回合数（受[法限]截断）。
-    granted = e.combat._grant_shouyedeng(p)
-    assert granted and granted["gained"] == min(p.mana_limit, round_no), granted
-    assert p.current_mana == min(p.mana_limit, round_no)
+    assert p.current_mana == expected
 
 
 def test_lamp_grant_is_capped_by_mana_limit(tmp_path):
-    """边界：授予量＝当前回合数，落地后不得超过[法限]。"""
+    """边界：授予量＝当前世界回合数，落地后不得超过[法限]。"""
     e = _engine(tmp_path, "lamp_bound")
     e.state.relics.append(Relic("守夜灯", ""))
     p = e.state.player
     p.mana_limit = 21
     p.current_mana = 0
     e.state.current_round = 11
-    e.combat._grant_shouyedeng(p)
+    e.combat._dispatch_phase(Phase.ROUND_INCREASE, target=p)
     assert p.current_mana == 11
     # 贴着上限时溢出丢弃
     p.current_mana = 20
     e.state.current_round = 21
-    e.combat._grant_shouyedeng(p)
+    e.combat._dispatch_phase(Phase.ROUND_INCREASE, target=p)
     assert p.current_mana == 21
 
 
 def test_lamp_does_not_grant_without_the_relic(tmp_path):
-    """非法/对照：没有守夜灯时[回终]不授予任何法力。"""
+    """非法/对照：没有守夜灯时[回增]不授予任何法力。"""
     e = _engine(tmp_path, "lamp_empty")
+    e.state.relics.clear()
     begin_battle(e)
     e.state.enemies.clear()
     begin_round(e)
     p = e.state.player
     p.current_mana = 0
-    assert e.combat._grant_shouyedeng(p) is None
+    e.combat._dispatch_phase(Phase.ROUND_INCREASE, target=p)
     assert p.current_mana == 0

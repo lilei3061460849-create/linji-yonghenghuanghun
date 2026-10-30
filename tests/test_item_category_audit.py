@@ -53,7 +53,7 @@ COST_AMOUNT_KEYS = ("cost", "cost_shards", "cost_hp", "cost_blood_limit", "cost_
 
 
 def test_daowen_registry_every_daowen_has_positive_cost_channel():
-    """现行道纹 X=1 时必有金额>0 的代价通道（法力/失忆/异变/疲惫/流血/衰老/碎片/枯竭/冷却）。"""
+    """现行道纹 X=1 时必有金额>0 的资源或特殊机制代价通道。"""
     DaoWenEngine.register_all()
     inventory = json.loads((Path(__file__).resolve().parents[1] /
         "docs/全道纹标准审查清单-2026-10-28.json").read_text(encoding="utf-8"))
@@ -62,16 +62,16 @@ def test_daowen_registry_every_daowen_has_positive_cost_channel():
     # 删除/遗物化边界必须是硬约束，防止后续注册时意外复活旧道纹。
     assert "坠落" not in DaoWenEngine._registry
     assert "眩晕" not in DaoWenEngine._registry
-    assert "飞行" not in DaoWenEngine._registry
+    assert "飞行" in DaoWenEngine._registry  # 已恢复为支付冷却X的原始怪物道纹
     for name, fn in sorted(DaoWenEngine._registry.items()):
         kw = {}
         if "target" in inspect.signature(fn).parameters:
             kw["target"] = Entity("代价审计靶", "轮回者", blood_limit=100,current_hp=50,
-                reversible_cost_layers={"衰老":2})
+                reversible_cost_layers={"血限":2})
         if "caster" in inspect.signature(fn).parameters:
             kw["caster"] = None
         if "cost_choices" in inspect.signature(fn).parameters:
-            kw["cost_choices"]=[{"type":"衰老"}]
+            kw["cost_choices"]=[{"type":"血限"}]
         calc = DaoWenEngine.resolve(name, 1, **kw)
         amounts = [(k, calc[k]) for k in COST_AMOUNT_KEYS if k in calc]
         assert amounts, f"{name}：无代价金额键（疑似免费道纹？）"
@@ -229,7 +229,7 @@ def test_pool_relic_text_snapshot():
         "噬伤血囊","倍速齿轮","沉重枷锁","失速冥灯","寂灭面具","衰变沙漏","蚀界残钟",
         "窥隙法匣","逐影胫骨","共生血囊","疯狂","减速"}
     assert set(names)==expected and len(names)==len(expected)
-    # 2026-10-25：引擎早有实现的【共生血囊】补登记；【万魂幡】改归法器并退出本池。
+    # 2026-10-25：引擎早有实现的【共生血囊】补登记；【煌妖幡】（旧名万魂幡）归法器并退出本池。
     assert "共生血囊" in names and "万魂幡" not in names
     for n, fx in defs:
         assert not re.search(r"持续\d*X", fx), f"{n}：遗物不得有持续X"

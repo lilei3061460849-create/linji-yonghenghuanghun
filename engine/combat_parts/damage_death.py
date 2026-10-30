@@ -25,6 +25,7 @@ from ..resolution import (KIND_DEATH, KIND_DAMAGE, KIND_SPLIT,
                            note_delta, resolution_frame)
 from ..models import MONSTER_MANA_RELIC
 from ..rule_engine import DamageResolutionContext, validate_damage_amount
+from ..yaoguai import owned_yaoguai
 
 
 class DamageDeathMixin:
@@ -110,9 +111,9 @@ class DamageDeathMixin:
         """构造一条“实际失去生命”事件并登记到 entity._hp_loss_events。
 
         仅负责记账，不触发任何反应。触发统一由调用方决定：
-          - 既有 ctx-rich 入口（_apply_hostile_damage / _raw_hp_loss / 流血代价……
+          - 既有 ctx-rich 入口（_apply_hostile_damage / _raw_hp_loss / 生命支付……
             已置 _hp_loss_recording>0 抑制兜底）：在 _record_hp_loss_event 里触发；
-          - 其余一切降血（血限压顶/衰老/道纹直接减血/直写 current_hp）经
+          - 其余一切降血（血限压顶/血限支付/道纹直接减血/直写 current_hp）经
             Entity.__setattr__ 兜底钩子 _on_entity_hp_fallen 触发，再把结果写回本账。
 
         parent_ctx 既可能是 EffectContext 也可能是 legacy dict（兜底钩子从
@@ -171,11 +172,21 @@ class DamageDeathMixin:
             source_override=source_override, source_type_override=source_type_override,
             actor_override=actor_override, owner_override=owner_override,
             tags_extra=tags_extra)
-        # 蚀命刻尺订阅统一失血账：每次实际失去生命事件，受损角色增加1层衰老。
-        # 失血点数不会被误当作层数，且代价/反噬/血限压迫等入口共用这一处。
+        # 蚀命刻尺订阅统一失血账：每次实际失去生命，受损角色支付血限1。
+        # 支付继续走统一资源总线；共罪、血契、可净化层数与命零判定不另开旁路。
         if self._any_active_relic("蚀命刻尺"):
-            entity.add_status(StatusEffect(
-                name="衰老", remaining_rounds=-1, value=1, source="蚀命刻尺"))
+            parent = normalize_context(parent_ctx)
+            record["shiming_chike"] = self.pay_numeric_cost(
+                entity, "血限", 1, forced=True,
+                ctx=make_context(
+                    timing=parent.timing if parent else self._current_context_timing(),
+                    source="蚀命刻尺", source_type="relic",
+                    actor=parent.actor if parent else None, target=entity,
+                    owner=parent.owner if parent else None,
+                    mechanic="cost", subtype="blood_limit", amount=1,
+                    tags=(set(parent.tags) if parent else set()) | {"relic"},
+                    parent_event_id=parent.event_id if parent else None,
+                ))
         toll = self._settle_chenglu(entity, amount, parent_ctx)
         if toll:
             record["chenglu"] = toll
@@ -212,8 +223,8 @@ class DamageDeathMixin:
         """承露盏（遗物）：每累计失去10点生命，获得1点法力。本场累计，战始归零。
 
         挂在 _record_hp_loss_event 这条**唯一失血总账**上，所以不区分来源：
-        透支的流血、血影的流血、挨打、爆裂反噬……一律计入。这正是它与卖血流
-        （血炼周天 = 再生⇄透支）配套的地方——透支每轮流血 4X 本来是纯支出，
+        透支的生命支付、血影的生命支付、挨打、爆裂反噬……一律计入。这正是它与卖血循环
+        （血炼周天 = 再生⇄透支）配套的地方——透支每轮支付生命 4X 本来是纯支出，
         现在每满 10 点返还 1 法力。
 
         余数滚存（chenglu_paid 记已兑换过的总额），所以"失去 7 + 失去 5"
@@ -260,6 +271,26 @@ class DamageDeathMixin:
         except TypeError:
             pass  # 兜底：非可弱引用对象不绑定（正常 CombatEngine 均可弱引用）
 
+    def _shelter_hp_loss(self, entity: Entity, old: int, new: int) -> int:
+        """庇护：非目标自身导致的下一次失去生命被免疫；返回允许写入的生命值。"""
+        if new >= old:
+            return new
+        statuses = [status for status in list(getattr(entity, "status_effects", []))
+                    if status.name == "庇护" and not status.is_expired and status.value > 0]
+        if not statuses:
+            return new
+        ctx = normalize_context(getattr(self, "_hp_loss_ctx", None))
+        if ctx is not None and ctx.actor is entity:
+            return new
+        statuses.sort(key=lambda status: getattr(status, "effect_sequence", 0) or 0)
+        status = statuses[0]
+        status.value -= 1
+        status.effect_data["blocked_losses"] = int(status.effect_data.get("blocked_losses", 0)) + 1
+        status.effect_data["last_blocked_source"] = ctx.source if ctx is not None else "未知来源"
+        if status.value <= 0:
+            entity.status_effects.remove(status)
+        return old
+
     def _engine_owns(self, entity: Entity) -> bool:
         if entity is None:
             return False
@@ -290,7 +321,7 @@ class DamageDeathMixin:
         ctx = self._hp_loss_ctx
         self._hp_loss_ctx = None  # 用完即清，避免残留上下文污染后续未接线的降血
         # 只检测“生命下降就触发”，不关心具体成因。触发后把结果登记到同一笔失血账，
-        # 使血限压顶/衰老/道纹直减等“由兜底钩子接管”的降血也可见、可追踪，
+        # 使血限压顶/血限支付/道纹直减等“由兜底钩子接管”的降血也可见、可追踪，
         # 与 ctx-rich 路径（_record_hp_loss_event）保持一致。
         logs = self._fire_after_life_lost(entity, ctx)
         record = None
@@ -304,11 +335,80 @@ class DamageDeathMixin:
         if conversion and record is not None:
             record["blood_wing_conversion"] = conversion
 
+    def _execute_diaoling(self, caster: Entity, exempt_target: Entity,
+                          threshold: int) -> list[dict]:
+        """一次性【凋零】：按施放当次快照，判死除目标外的低生命角色。
+
+        先收齐本次所有对象再进入统一死亡管线；不挂状态，也不因后续生命变化、
+        死亡连锁或新角色入场追加检查。直接判死而非伤害，故绕过生命下限。
+        """
+        threshold = max(0, int(threshold))
+        entities = list({
+            entity.runtime_id: entity
+            for entity in (self.state.get_all_player_side()
+                           + self.state.get_all_enemy_side())
+            if entity is not None and entity.is_alive
+        }.values())
+        pending = [
+            entity for entity in entities
+            if (entity is not exempt_target
+                and not getattr(entity, "is_departed", False)
+                and not getattr(entity, "_death_triggers_emitted", False)
+                and entity.current_hp <= threshold)
+        ]
+        effects = []
+        for target in pending:
+            if not target.is_alive:
+                continue
+            ctx = make_context(
+                timing=self._current_context_timing(),
+                source="凋零", source_type="daowen",
+                actor=caster, target=target, owner=caster,
+                mechanic="death", subtype="diaoling", amount=threshold,
+                tags={"daowen", "execution", "diaoling"},
+            )
+            died = self._check_hp_zero_death(
+                target, ctx=ctx, bypass_hp_floor=True)
+            if died:
+                effects.append({
+                    "type": "diaoling_execution", "target": target.name,
+                    "threshold": threshold, "sources": [caster.name],
+                })
+        return effects
+
     # ========== 统一死亡判定 / 统一血限变化 ==========
+
+    def _enter_yaoguai_dormancy(
+        self, entity: Entity, ctx: Optional[EffectContext | dict] = None,
+    ) -> bool:
+        """妖怪命零转为休眠，不进入普通死亡触发、性格清除或尸体结算。"""
+        if not getattr(entity, "is_created_being", False):
+            return False
+        if getattr(entity, "is_dormant", False):
+            return True
+        parent = normalize_context(ctx)
+        dormant_ctx = make_context(
+            timing=parent.timing if parent else self._current_context_timing(),
+            source="妖怪休眠", source_type="rule",
+            actor=parent.actor if parent else None,
+            target=entity, owner=parent.owner if parent else None,
+            mechanic="death", subtype="yaoguai_dormant", amount=0,
+            tags=set(parent.tags) if parent else {"legacy_context"},
+            parent_event_id=parent.event_id if parent else None,
+        )
+        entity.current_hp = 0
+        entity.is_alive = False
+        entity.is_dormant = True
+        entity.is_summoned = False
+        self._emit(CombatEventType.YAOGUAI_DORMANT,
+                   actor=dormant_ctx.actor, target=entity, ctx=dormant_ctx.to_dict(),
+                   cause=dormant_ctx.subtype)
+        return True
 
     def _check_hp_zero_death(
         self, entity: Optional[Entity],
         ctx: Optional[EffectContext | dict] = None,
+        *, bypass_hp_floor: bool = False,
     ) -> bool:
         """统一“生命归零 → 命零”判定。
 
@@ -322,14 +422,16 @@ class DamageDeathMixin:
         """
         with resolution_frame(self, KIND_DEATH, "命零",
                               getattr(entity, "name", "?")):
-            return self._check_hp_zero_death_inner(entity, ctx)
+            return self._check_hp_zero_death_inner(
+                entity, ctx, bypass_hp_floor=bypass_hp_floor)
 
     def _check_hp_zero_death_inner(
         self, entity: Optional[Entity],
         ctx: Optional[EffectContext | dict] = None,
+        *, bypass_hp_floor: bool = False,
     ) -> bool:
         """命零判定的实现体（对外契约见 _check_hp_zero_death）。"""
-        if entity is None or entity.current_hp > 0:
+        if entity is None or (entity.current_hp > 0 and not bypass_hp_floor):
             return False
         # 永久离场（雕塑/癌变/还债/救赎/逃跑）不是命零，绝不在此处宣布死亡；【封印】暂离不走本管线。
         if getattr(entity, "is_departed", False):
@@ -339,11 +441,18 @@ class DamageDeathMixin:
             return False
         self._hp_loss_recording += 1  # 命零置血=死亡收尾，不触发「失去生命后」
         try:
-            entity.current_hp = 0
+            if bypass_hp_floor:
+                # 【凋零】是直接判死，不是把生命降到0的伤害；【不死】的生命下限
+                # 不把阈值斩杀改写成存活。生命归零与通知仍只走本统一死亡入口。
+                object.__setattr__(entity, "current_hp", 0)
+            else:
+                entity.current_hp = 0
             entity.is_alive = False
         finally:
             self._hp_loss_recording -= 1
         self._on_entity_death(entity, ctx=ctx)
+        if getattr(entity, "is_dormant", False):
+            return True
         # 【自愈X】目标死亡时（2026-10-14 用户裁定）：持有者本场出手选中过的目标死亡
         # 才结算（没打过的不算；命中与否不影响“选中”）。挂统一命零管线内（幂等，一尸一结）；
         # 离场/暂离不走本管线，天然排除。
@@ -702,11 +811,16 @@ class DamageDeathMixin:
                                            "created_round": self.state.current_round})
             return remaining - delayed
 
-        detail = target.take_damage(
-            amount, apply_type,
-            life_loss_multiplier=self.state.life_loss_multiplier(target),
-            status_adjuster=_commit_incoming_rules,
-            damage_deferrer=_defer_damage if defer_active else None)
+        previous_hp_loss_ctx = self._hp_loss_ctx
+        self._hp_loss_ctx = damage_ctx
+        try:
+            detail = target.take_damage(
+                amount, apply_type,
+                life_loss_multiplier=self.state.life_loss_multiplier(target),
+                status_adjuster=_commit_incoming_rules,
+                damage_deferrer=_defer_damage if defer_active else None)
+        finally:
+            self._hp_loss_ctx = previous_hp_loss_ctx
         self._attach_damage_context(detail, damage_ctx, legacy_ctx)
         actual = detail.get("actual_damage", 0)
         actual_life_loss = max(0, detail.get("hp_before", target.current_hp)
@@ -792,8 +906,52 @@ class DamageDeathMixin:
 
         return detail
 
+    def _recover_dormant_yaoguai_on_monster_death(
+        self, monster: Entity, death_ctx: EffectContext,
+    ) -> list[dict]:
+        """以死亡怪物血限为总恢复池，整数平分给当前所有休眠妖怪。
+
+        每份恢复独立受目标血限封顶，溢出不二次分配；此过程只增加生命，
+        绝不清除 is_dormant 或 is_alive=False，唤醒只能走主人的主动行动。
+        """
+        dormant = [entity for entity in owned_yaoguai(self.state)
+                   if getattr(entity, "is_dormant", False)]
+        if not dormant:
+            return []
+        pool = max(0, int(monster.blood_limit))
+        shares = self._divide_flat(pool, len(dormant))
+        recovery = []
+        for being, amount in zip(dormant, shares):
+            detail = being.heal(amount)
+            # 防御性保持休眠不变量，即使未来 Entity.heal 增加其他生命逻辑。
+            being.is_alive = False
+            being.is_dormant = True
+            being.is_summoned = False
+            heal_ctx = make_context(
+                timing=death_ctx.timing, source="妖怪休眠", source_type="rule",
+                actor=death_ctx.actor, target=being, owner=death_ctx.owner,
+                mechanic="heal", subtype="monster_death_recovery", amount=amount,
+                tags={"yaoguai", "dormant_recovery"},
+                parent_event_id=death_ctx.event_id,
+            )
+            detail.update({"yaoguai": being.name, "runtime_id": being.runtime_id,
+                           "recovery_pool": pool, "dormant_count": len(dormant),
+                           "is_dormant": True, "heal_ctx": heal_ctx.to_dict()})
+            self.state.emit_combat_event(
+                CombatEventType.HEAL_APPLIED,
+                actor=death_ctx.actor, target=being, ctx=detail["heal_ctx"],
+                heal_amount=amount, actual_heal=detail["actual_heal"],
+                overheal=detail["overheal"], hp_before=detail["hp_before"],
+                hp_after=detail["hp_after"], dormant_recovery=True,
+                recovery_pool=pool, dormant_count=len(dormant),
+            )
+            recovery.append(detail)
+        return recovery
+
     def _on_entity_death(self, entity: Entity, ctx: Optional[EffectContext | dict] = None) -> None:
-        """统一死亡触发；重复通知通过实体标记幂等。"""
+        """统一死亡触发；妖怪命零改入休眠，重复通知通过实体标记幂等。"""
+        if self._enter_yaoguai_dormancy(entity, ctx):
+            return
         if getattr(entity, "_death_triggers_emitted", False):
             return
         parent = normalize_context(ctx)
@@ -839,44 +997,50 @@ class DamageDeathMixin:
             ember = note_ember_wing_monster_death(self.state, entity)
             if ember:
                 entity._death_ctx["ember_wing_recharge"] = ember
-        # 2026-09-17：【分裂】改为即时创生（见 _spawn_fenlie_clones），
-        # 原「[命零]时按本体 20% 血限创造复制体」的分支已随重做删除。
+            yaoguai_recovery = self._recover_dormant_yaoguai_on_monster_death(entity, death_ctx)
+            if yaoguai_recovery:
+                entity._death_ctx["yaoguai_recovery"] = yaoguai_recovery
+        # 【分裂】只在主动发动时创造造物（见 _spawn_fenlie_creations），
+        # [命零]不再附带创生效果。
 
-    def _spawn_fenlie_clones(self, caster, count: int, clone_hp: int) -> list:
-        """【分裂】即时创造复制体：count 个 clone_hp 血限/生命的自身复制体。
-
-        复制体继承本体除【分裂】外的全部道纹（避免无限套娃），阵营与本体一致
-        （本体是怪物→进 enemies；否则→进 temp_friends）。返回新建的复制体列表。
-        """
+    def _spawn_fenlie_creations(self, caster, count: int) -> list[Entity]:
+        """【分裂】创造 count 个独立的1血限/1速限/1法限造物。"""
         with resolution_frame(self, KIND_SPLIT, "分裂",
                               getattr(caster, "name", "?"), count):
-            return self._spawn_fenlie_clones_inner(caster, count, clone_hp)
+            return self._spawn_fenlie_creations_inner(caster, count)
 
-    def _spawn_fenlie_clones_inner(self, caster, count: int, clone_hp: int) -> list:
-        """分裂的实现体（对外契约见 _spawn_fenlie_clones）。"""
-        clones = []
-        for i in range(max(0, count)):
-            clone = Entity(name=f"{caster.name}·裂{i + 1}",
-                           entity_type=caster.entity_type,
-                           blood_limit=clone_hp, current_hp=clone_hp,
-                           attack_count=caster.attack_count,
-                           attack_power=caster.attack_power,
-                           copy_creator_runtime_id=caster.runtime_id)
-            clone.preferences = list(getattr(caster, "preferences", []))
-            if "痛苦的偏爱" not in clone.preferences:
-                clone.relics = [relic for relic in clone.relics
-                                if relic.name != MONSTER_MANA_RELIC]
-            for dw_name, dw_inst in caster.dao_wen.items():
-                if dw_name == "分裂":
-                    continue      # 复制体无分裂道纹，防止无限分裂
-                clone.dao_wen[dw_name] = dw_inst
-            self._bind_hp_hook(clone)
-            if caster.entity_type == "怪物":
-                self.state.enemies.append(clone)
+    def _spawn_fenlie_creations_inner(self, caster, count: int) -> list[Entity]:
+        """分裂实现体；造物不读取或继承施法者构筑。"""
+        creations = []
+        for _ in range(max(0, count)):
+            existing_names = {
+                entity.name for entity in (
+                    [self.state.player] + list(self.state.friends)
+                    + list(self.state.employees) + list(self.state.temp_friends)
+                    + list(self.state.enemies)
+                ) if entity is not None
+            }
+            base_name = f"{caster.name}·造物"
+            name = base_name
+            suffix = 2
+            while name in existing_names:
+                name = f"{base_name}{suffix}"
+                suffix += 1
+            creation = Entity(
+                name=name, entity_type="造物",
+                blood_limit=1, current_hp=1,
+                mana_limit=1, current_mana=1,
+                speed_limit=1, current_speed=1,
+                attack_count=1, attack_power=1,
+                copy_creator_runtime_id=caster.runtime_id,
+            )
+            self._bind_hp_hook(creation)
+            if self.state.on_enemy_side(caster):
+                self.state.enemies.append(creation)
             else:
-                self.state.temp_friends.append(clone)
-            clones.append(clone)
-        return clones
+                self.state.temp_friends.append(creation)
+            creations.append(creation)
+        return creations
 
     # ---- F2 全量：罪孽/扭曲专属道纹的公共辅助 ----
     def _resolve_reflect_aftermath(self, attacker: Entity, amount: int,
@@ -940,12 +1104,15 @@ class DamageDeathMixin:
         if amount > 0 and entity.is_alive and self._attack_after_window_target is not entity:
             reaction_logs = self._fire_before_life_lost(entity, ctx) or []
         self._hp_loss_recording += 1  # 直接失血由 _record_hp_loss_event 接管，抑制兜底钩子
+        previous_hp_loss_ctx = self._hp_loss_ctx
+        self._hp_loss_ctx = normalize_context(ctx)
         try:
             # 【第一杯】：直接失血（爆裂反射/遗物灾厄轮盘/血影等）同样属于「失去的生命」。
             entity.current_hp = max(
                 0, entity.current_hp - max(0, amount) * self.state.life_loss_multiplier(entity))
         finally:
             self._hp_loss_recording -= 1
+            self._hp_loss_ctx = previous_hp_loss_ctx
         lost = before - entity.current_hp
         entity.hp_lost_this_round += lost
         parent = normalize_context(ctx)
@@ -1040,6 +1207,8 @@ class DamageDeathMixin:
         for holder_list, holder_stolen, sealed_attr in (
             (self.state.relics, self.state.stolen_relics, self.state.sealed_relics),
         ):
+            if self.chenni_round_blocked(self.state.player):
+                break
             # 封印递减
             expired_seals = []
             for name in list(sealed_attr.keys()):
@@ -1076,7 +1245,7 @@ class DamageDeathMixin:
                     returned.append(name)
         # —— 每个非玩家实体：递减其自身 sealed_relics / stolen_relics ——
         for entity in self._combat_entity_refs().values():
-            if entity is self.state.player:
+            if entity is self.state.player or self.chenni_round_blocked(entity):
                 continue
             for attr in ("sealed_relics", "stolen_relics"):
                 d = getattr(entity, attr, None) or {}

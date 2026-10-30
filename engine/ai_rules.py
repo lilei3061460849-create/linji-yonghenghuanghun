@@ -252,7 +252,7 @@ def try_fire_godfather_revolver(engine, commit: bool = True) -> Optional[dict]:
 # 取 1/2 形成几何衰减（4→2→1→1…），池子永不归零。
 MANA_POOL_SPEND_RATIO = 0.5
 
-# 流血：单次发动最多动用当前生命的比例，且绝不把自己流死。
+# 生命支付：单次发动最多动用当前生命的比例，且绝不把自己支付到命零。
 HP_SPEND_RATIO = 0.25
 
 # 异变：累加到 MUTATION_COLLAPSE_THRESHOLD 就【迷失】命零，且跨战斗不回退，

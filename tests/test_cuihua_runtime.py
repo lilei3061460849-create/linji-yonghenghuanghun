@@ -5,6 +5,7 @@ from tests.test_daowen_wiring import _engine,_give,_monster
 
 def setup(suffix):
     e=_engine('cuihua_'+suffix);p=e.state.player
+    e.state.relics=[]  # 隔离随机遗物；本套件不测试其被动效果。
     _give(p,'催化');_give(p,'不死');_give(p,'全速')
     a=_monster(e,'目标',hp=100)
     e.execute_action('round_start',{})
@@ -169,6 +170,6 @@ def test_nested_extra_choices_are_preserved_for_catalysed_step():
     from engine.models import Relic
     e.state.relics.append(Relic('不朽之躯',''))
     hp=p.current_hp
-    result=call(e,[step('透支',x=1,extra={'cost_channel':'衰老'})])
+    result=call(e,[step('透支',x=1,extra={'cost_channel':'血限'})])
     assert result['success'],result
-    assert p.current_hp==hp  # 若丢弃extra而退回流血，会扣4生命。
+    assert p.current_hp==hp  # 若丢弃extra而退回生命，会扣4生命。

@@ -44,7 +44,11 @@ def _engine(starter="杀伐", learn=(), region="龙心谷", seed=1, tmp="/tmp/bv
 
 def test_boba_marks_targets_after_start():
     """正常路径：波及开局后可真实发动并标记目标（X=2 标两个目标；2026-10-09 起 X 下限 repealed，X=1 也合法）。"""
-    e = _engine(starter="波及")
+    e = _engine(starter="杀伐")
+    # 只测现役多目标结算；专属道纹直接注入，不走其它副本的学习门禁。
+    from engine.models import DaoWen, DaoWenInstance
+    e.state.player.dao_wen["波及"] = DaoWenInstance(
+        DaoWen("波及", "", "消耗", "2X", ""))
     assert set(e.state.player.dao_wen) >= {"杀伐", "波及"}
     # 2026-10-12 出怪下界 1→2：第1场可能已有 2 只怪，本条要的靶子是「enemy:0 + 陪标怪」
     # 两个，故先把出怪收敛到 1 只（并清掉增援队列，免得后续回合又进场一只挤掉索引）。
@@ -69,12 +73,12 @@ def test_boba_marks_targets_after_start():
 # 2026-10-12：失忆 已回退为 点金；2026-10-13：【逼债】删除——【典当】不进本表：
 # 本用例只注入被测一条道纹，而典当代价失忆2X（单持付不起），「持有即发动」不变量
 # 对它不成立；其可发动性见 tests/test_escape_and_diandang.py。
-_REGION_OF = {"加害": "龙心谷", "裂变": "龙心谷", "背负": "龙心谷",
+_REGION_OF = {"超频": "扭曲都市", "勾魂": "乱葬岗",
               "坏死": "扭曲都市",
               "点金": "罪孽都市"}
 
 
-@pytest.mark.parametrize("dw", ["加害", "裂变", "背负", "坏死", "点金"])
+@pytest.mark.parametrize("dw", ["超频", "勾魂", "坏死", "点金"])
 def test_ai_uses_region_specific_daowen(dw, monkeypatch):
     """
     正常路径：各副本专属道纹只要持有就应被实际发动。

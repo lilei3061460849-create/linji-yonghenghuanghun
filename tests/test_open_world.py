@@ -899,9 +899,9 @@ def test_learned_daowen_can_be_reserved_for_a_future_friend(tmp_path):
     assert name not in engine.state.pending_learned_daowen
 
 
-def test_ten_thousand_souls_banner_unlocks_creation_outside_graveyard(tmp_path):
+def test_huangyao_banner_unlocks_creation_outside_graveyard(tmp_path):
     from engine.api import GameEngine
-    from engine.models import Entity, Relic
+    from engine.models import Entity
 
     engine = GameEngine(db_path=str(tmp_path / "souls-banner.db"),
                         save_dir=str(tmp_path), rng_seed=111, autosave=False)
@@ -910,10 +910,10 @@ def test_ten_thousand_souls_banner_unlocks_creation_outside_graveyard(tmp_path):
     engine.state.shards = 10
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
     engine.state.current_region = "扭曲都市"
-    engine.state.artifacts_owned.append("万魂幡")  # 法器：允许在乱葬岗外造生
+    engine.state.artifacts_owned.append("煌妖幡")  # 法器：允许在乱葬岗外造生
 
     result = engine.execute_action("pre_battle_action", {
-        "sub_action": "造生", "name": "幡下造物",
+        "sub_action": "造生", "name": "幡下妖怪",
     })
     assert result["success"], result
     assert any(getattr(friend, "is_created_being", False)
@@ -922,7 +922,7 @@ def test_ten_thousand_souls_banner_unlocks_creation_outside_graveyard(tmp_path):
 
 
 def test_creation_outside_graveyard_is_gated_without_the_artifact(tmp_path):
-    """错误输入／边界：万魂幡是法器——没有它时乱葬岗以外不得造生，挂在遗物上也不算。"""
+    """错误输入／边界：煌妖幡是法器——没有它时乱葬岗以外不得造生，挂在遗物上也不算。"""
     from engine.api import GameEngine
     from engine.models import Entity, Relic
 
@@ -934,18 +934,18 @@ def test_creation_outside_graveyard_is_gated_without_the_artifact(tmp_path):
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
     engine.state.current_region = "扭曲都市"
 
-    denied = engine.execute_action("pre_battle_action", {"sub_action": "造生", "name": "越界造物"})
+    denied = engine.execute_action("pre_battle_action", {"sub_action": "造生", "name": "越界妖怪"})
     assert not denied["success"], denied
     assert "乱葬岗" in denied["error"], denied
 
-    # 旧口径（把万魂幡当遗物持有）不得再解锁：它已改归法器。
-    engine.state.relics.append(Relic(name="万魂幡", effect="允许在乱葬岗外造生"))
-    still_denied = engine.execute_action("pre_battle_action", {"sub_action": "造生", "name": "越界造物"})
+    # 把煌妖幡当遗物持有不得解锁：它是法器。
+    engine.state.relics.append(Relic(name="煌妖幡", effect="允许在乱葬岗外造生"))
+    still_denied = engine.execute_action("pre_battle_action", {"sub_action": "造生", "name": "越界妖怪"})
     assert not still_denied["success"], still_denied
     assert engine.state.friends == []
 
 
-def test_creation_builds_one_map_being_then_cultivates_stats_and_vision_not_preferences(tmp_path):
+def test_repeated_zaosheng_creates_another_map_yaoguai_without_growing_the_first(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
 
@@ -961,7 +961,7 @@ def test_creation_builds_one_map_being_then_cultivates_stats_and_vision_not_pref
     assert engine.execute_action("world_initialize", {"width": 21, "height": 21})["success"]
 
     first = engine.execute_action("pre_battle_action", {
-        "sub_action": "造生", "name": "测试造物",
+        "sub_action": "造生", "name": "测试妖怪",
     })
     assert first["success"], first
     assert engine.state.shards == 90
@@ -976,33 +976,34 @@ def test_creation_builds_one_map_being_then_cultivates_stats_and_vision_not_pref
     assert first["result"]["signature_daowen"] == signature_daowen
     assert being.runtime_id in engine.state.world_state["actors"]
 
+    first_id = being.runtime_id
     original_stats = (being.blood_limit, being.mana_limit, being.speed_limit)
     being.current_hp = max(0, being.blood_limit - 3)
     being.current_mana = max(0, being.mana_limit - 1)
     being.current_speed = max(0, being.speed_limit - 1)
     original_resources = (being.current_hp, being.current_mana, being.current_speed)
-    second = engine.execute_action("pre_battle_action", {"sub_action": "造生"})
+    second = engine.execute_action("pre_battle_action", {
+        "sub_action": "造生", "name": "第二只妖怪",
+    })
     assert second["success"], second
-    assert engine.state.shards == 65
+    assert second["result"]["mode"] == "create"
+    assert engine.state.shards == 80
     beings = [friend for friend in engine.state.friends
               if getattr(friend, "is_created_being", False)]
-    assert len(beings) == 1
-    being = beings[0]
+    assert len(beings) == 2
+    second_being = next(entity for entity in beings
+                        if entity.runtime_id == second["result"]["created_being_id"])
+    being = next(entity for entity in beings if entity.runtime_id == first_id)
+    assert second_being.runtime_id in engine.state.world_state["actors"]
+
+    # 再次造生只创造新个体，不培养、治疗或提升第一只的视野。
+    assert (being.blood_limit, being.mana_limit, being.speed_limit) == original_stats
+    assert (being.current_hp, being.current_mana, being.current_speed) == original_resources
+    assert being.created_being_vision_range == 1
+    assert engine.state.world_state["actors"][being.runtime_id]["vision_range"] == 1
     assert len(being.preferences) == 1
-    assert (being.blood_limit, being.mana_limit, being.speed_limit) == tuple(
-        value + growth for value, growth in zip(original_stats, (6, 1, 1)))
-    assert (being.current_hp, being.current_mana, being.current_speed) == tuple(
-        min(limit, current + growth)
-        for limit, current, growth in zip(
-            (being.blood_limit, being.mana_limit, being.speed_limit),
-            original_resources, (6, 1, 1)))
-    assert being.created_being_vision_range == 2
-    actor_data = engine.state.world_state["actors"][being.runtime_id]
-    assert actor_data["vision_range"] == 2
-    assert second["result"]["growth"] == {
-        "blood_limit": 6, "mana_limit": 1, "speed_limit": 1, "vision_range": 1}
-    # 再次造生不新增偏爱，也不会反复抽取/替换专属道纹。
     assert list(being.dao_wen) == [signature_daowen]
+    assert len(second_being.preferences) == 1 and len(second_being.dao_wen) == 1
 
 
 def test_reincarnator_trade_requires_fair_offer_and_transfers_atomically(tmp_path):
@@ -1087,7 +1088,7 @@ def test_created_being_can_follow_and_report_exploration_to_owner(tmp_path):
     engine = GameEngine(db_path=str(tmp_path / "created-being-behavior.db"),
                         save_dir=str(tmp_path), rng_seed=113, autosave=False)
     player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
-    being = Entity("造物", "朋友", blood_limit=30, current_hp=30)
+    being = Entity("妖怪", "朋友", blood_limit=30, current_hp=30)
     being.is_created_being = True
     being.created_by_runtime_id = player.runtime_id
     engine.state.player = player
@@ -1134,7 +1135,7 @@ def test_created_being_joins_combat_only_when_explicitly_summoned():
     from engine.models import Entity, GameState
 
     player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
-    being = Entity("造物", "朋友", blood_limit=30, current_hp=30)
+    being = Entity("妖怪", "朋友", blood_limit=30, current_hp=30)
     being.is_created_being = True
     being.created_by_runtime_id = player.runtime_id
     state = GameState(player=player, friends=[being])
@@ -1153,7 +1154,7 @@ def test_cultivation_points_can_be_assigned_to_created_being(tmp_path):
     engine = GameEngine(db_path=str(tmp_path / "created-being-points.db"),
                         save_dir=str(tmp_path), rng_seed=109, autosave=False)
     player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
-    being = Entity("造物", "朋友", blood_limit=15, current_hp=15)
+    being = Entity("妖怪", "朋友", blood_limit=15, current_hp=15)
     being.is_created_being = True
     being.created_by_runtime_id = player.runtime_id
     engine.state.player = player
@@ -1358,7 +1359,7 @@ def test_world_encounter_handoff_accepts_companions_without_forcing_created_bein
                         save_dir=str(tmp_path), rng_seed=151, autosave=False)
     player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
     monster = Entity("M", "怪物", blood_limit=10, current_hp=10)
-    being = Entity("造物", "朋友", blood_limit=20, current_hp=20)
+    being = Entity("妖怪", "朋友", blood_limit=20, current_hp=20)
     being.is_created_being = True
     being.created_by_runtime_id = player.runtime_id
     engine.state.player = player
@@ -1478,11 +1479,11 @@ def test_created_being_follow_and_guard_orders_override_remembered_loot(
     owner = WorldActorState("p", "玩家", "player", 1, 1,
                             faction="player", mode="manual")
     being = WorldActorState(
-        "b", "造物", "friend", 5, 5, faction="friend", mode="autonomous",
+        "b", "妖怪", "friend", 5, 5, faction="friend", mode="autonomous",
         behavior=behavior, owner_actor_id="p", guard_position=guard_position)
     world.add_actor(owner)
     world.add_actor(being)
-    # 造物已发现东侧碎片，但显式跟随/守卫命令应优先于自主寻宝。
+    # 妖怪已发现东侧碎片，但显式跟随/守卫命令应优先于自主寻宝。
     being.memory.append({
         "kind": "location_sighting", "location_id": "cache",
         "position": [6, 5], "location_kind": "resource",
@@ -2143,7 +2144,7 @@ def test_world_vision_range_expands_with_manhattan_distance_and_respects_walls()
     world_map = _open_map()
     world_map.terrain[world_map.key((2, 1))] = "wall"
     world = WorldState(clock=WorldClock(), map=world_map)
-    world.add_actor(WorldActorState("scout", "造物", "friend", 1, 1,
+    world.add_actor(WorldActorState("scout", "妖怪", "friend", 1, 1,
                                     faction="friend", vision_range=2))
     visible = set(world.visible_cells("scout"))
     assert (1, 1) in visible

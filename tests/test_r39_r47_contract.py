@@ -15,6 +15,7 @@ from engine.api import GameEngine
 from engine.combat import CombatEngine
 from engine.daowen import DaoWenEngine
 from engine.dice import DiceEngine
+from engine.mechanisms import Phase
 from engine.models import Consumable, DaoWen, DaoWenInstance, Entity, GameState, Relic, Spell
 
 
@@ -53,8 +54,16 @@ def _decline_spells(option):
 
 
 def _resolve_empty_monster_phase(engine):
+    # 交替优先权下先由玩家方显式跳过；若双方都已无合法行动，回终门禁已可直接打开。
+    if engine.state.duel_turn != "opponent_side":
+        skipped = engine.execute_action("skip", {"actor_ref": "player:0"})
+        assert skipped["success"], skipped
+        if engine.state.combat_subphase == "await_round_end":
+            return skipped
     prepared = engine.execute_action("prepare_monster_phase", {})
     assert prepared["success"], prepared
+    if prepared["result"].get("token") is None:
+        return prepared
     choices = []
     for actor in prepared["result"]["actors"]:
         target_option = actor["attack_target_options"][0] if actor["attack_target_options"] else None
@@ -171,7 +180,9 @@ def test_r41_illegal_legacy_action_names_not_advertised(tmp_path):
     assert None not in names
     assert not ({"daowen", "spell", "consumable", "attack", "dodge_decision"} & names)
     dispatcher = (Path(__file__).resolve().parents[1] / "engine" / "api.py").read_text(encoding="utf-8")
-    assert all(f'action_type == "{name}"' in dispatcher for name in names)
+    assert all(f'action_type == "{name}"' in dispatcher for name in names - {"skip"})
+    # skip 与旧别名 rest 共用同一分发分支，不是未接线动作。
+    assert "skip" in names and 'action_type in {"skip", "rest"}' in dispatcher
 
 
 # R42：显式法术反应
@@ -229,7 +240,8 @@ def test_r42_target_daowen_trigger_is_explicit(tmp_path):
         ]}}},
     })
     assert result["success"] and result["trigger_spell_logs"]
-    assert player.current_hp == 99 and opponent.current_hp == 99   # 杀伐1→X²=1（2026-09-13）
+    # 玩家受反应杀伐1（1）＋连击1（5×1）共6；对手受玩家杀伐1（1）并另付连击生命5，也为6。
+    assert player.current_hp == 94 and opponent.current_hp == 94
 
 
 # R43：确定性事件
@@ -290,6 +302,9 @@ def test_r43_all_implemented_event_options_have_a_runtime_route(tmp_path):
                             mana_limit=100, current_mana=100, speed_limit=100, current_speed=100)
             for name in set(engine.SPELL_REGISTRY) | {"杀伐", "切割", "庇护", "再生", "连击"}:
                 player.dao_wen[name] = DaoWenInstance(DaoWen(name, "", "消耗", "X", ""))
+            # 本用例只验证所有事件选项均有运行路由；提供充足页数，避免十页承载门禁
+            # 对这些故意注入的大量资源作出与路由无关的合法回滚。
+            player.death_page_count = 100
             engine.state.player = player; engine.state.phase = "pre_battle"
             engine.state.current_region = event["region"] if event["region"] != "通用" else "罪孽都市"
             engine.state.shards = 1000; engine.state.energy = 20
@@ -322,27 +337,27 @@ def test_r43_all_implemented_event_options_have_a_runtime_route(tmp_path):
             assert result["success"], (event_name, option["id"], result)
             assert not result.get("result", {}).get("instructions"), (event_name, option["id"], result)
             checked += 1
-    assert checked == 86  # 当前已接入的事件选项数；删除/迁移事件后同步更新此契约
+    assert checked == 88  # 当前已接入的事件选项数；删除/迁移事件后同步更新此契约
 
 
 # R44：统一向上取整
 
 def test_r44_normal_guard_lamp_ceil(tmp_path):
-    """守夜灯（2026-10-25 用户令）：[回终]获得等同于当前回合数的法力，与法限无关。"""
+    """守夜灯在[回增]获得当前世界回合数的法力，实际获得量受法限截断。"""
     engine = _engine(tmp_path); player, _ = _combat(engine)
     player.mana_limit = 5; player.current_mana = 0
     engine.state.relics = [Relic("守夜灯", "")]
     engine.combat.round_start({})
-    # [回始] 不再授予：一池制下回始不回填，守夜灯已改到回终。
-    assert player.current_mana == 0
+    assert player.current_mana == min(5, engine.state.current_round)
+    player.current_mana = 0
     engine.state.current_round = 4
-    granted = engine.combat._grant_shouyedeng(player)
-    assert granted["gained"] == 4
+    engine.combat._dispatch_phase(Phase.ROUND_INCREASE, target=player)
     assert player.current_mana == 4
-    # 金额随回合数涨，但一律不得超过[法限]：法限 5 时第 9 回合只进 5 点。
+    # 金额随世界回合数涨，但一律不得超过[法限]：法限 5 时第 9 回合只进 5 点。
     player.current_mana = 0
     engine.state.current_round = 9
-    assert engine.combat._grant_shouyedeng(player)["gained"] == 5
+    engine.combat._dispatch_phase(Phase.ROUND_INCREASE, target=player)
+    assert player.current_mana == 5
 
 
 def test_r44_boundary_slow_one_stays_one(tmp_path):

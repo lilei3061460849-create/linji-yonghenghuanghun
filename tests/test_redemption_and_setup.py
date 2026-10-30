@@ -111,19 +111,19 @@ def test_resonance_permanently_converts_and_grants():
     _give(engine.state.player, "杀伐")
     monster = Entity(name="慢怪", entity_type="怪物", blood_limit=80, current_hp=80,
                      attack_count=2, attack_power=4)
-    # 使用仍可获得的【必中】反转为【蒙蔽】，同时验证怪物其余原始道纹保留。
-    _give(monster, "必中")
+    # 使用现役【全力】反转为【弱化】，同时验证怪物其余原始道纹保留。
     _give(monster, "全力")
+    _give(monster, "必中")
     monster._had_monster_daowen = True
     engine.state.enemies[:] = [monster]
     r = engine.execute_action("use_resonance", {
-        "source_daowen": "必中", "resonance_type": "反转", "target_ref": "enemy:0",
+        "source_daowen": "全力", "resonance_type": "反转", "target_ref": "enemy:0",
     })
     assert r["success"]
-    assert "必中" not in monster.dao_wen and "蒙蔽" in monster.dao_wen
-    assert "全力" in monster.dao_wen
-    assert "蒙蔽" in engine.state.player.dao_wen
-    assert "蒙蔽" not in ORIGINAL_MONSTER_DAOWEN
+    assert "全力" not in monster.dao_wen and "弱化" in monster.dao_wen
+    assert "必中" in monster.dao_wen
+    assert "弱化" in engine.state.player.dao_wen
+    assert "弱化" not in ORIGINAL_MONSTER_DAOWEN
     assert not engine.state.pending_redemption
 
 def test_resonance_does_not_duplicate_same_name():
@@ -264,19 +264,18 @@ def test_redemption_fires_at_low_hp_even_with_transform_left():
     engine.state.resonance["反转"] = 1
     monster = Entity(name="脑蜘蛛", entity_type="怪物", blood_limit=204, current_hp=20,
                      attack_count=2, attack_power=11)
-    # 2026-10-11 用户令：【借力】随 A14 删除，【全力】的（转换）出边按用户口径**留空**
-    # 已遗物化的【洞察】不可获得；本用例改用【必中】反转为【蒙蔽】。
-    _give(monster, "必中")
+    # 以现役【全力】反转为【弱化】移除最后一种原始道纹，转化道纹保留。
+    _give(monster, "全力")
     _give(monster, "坏死")
     engine.state.enemies[:] = [monster]
     r = engine.execute_action("use_resonance", {
-        "source_daowen": "必中", "resonance_type": "反转", "target_ref": "enemy:0",
+        "source_daowen": "全力", "resonance_type": "反转", "target_ref": "enemy:0",
     })
     assert r["success"]
     assert r.get("redemption")
     assert engine.state.pending_redemption
-    assert "蒙蔽" in engine.state.pending_redemption["dao_wen"]
-    assert "必中" not in engine.state.pending_redemption["dao_wen"]
+    assert "弱化" in engine.state.pending_redemption["dao_wen"]
+    assert "全力" not in engine.state.pending_redemption["dao_wen"]
     assert not monster.is_alive
     accept = engine.execute_action("resolve_redemption", {"option": "接纳", "name": "微光蛛"})
     assert accept["success"]
@@ -373,6 +372,7 @@ def test_redemption_finish_pays_exactly_the_kill_reward():
         _give(monster, name)
     monster.battle_start_blood_limit = 126
     engine.state.enemies[:] = [monster]
+    engine.state.monster_reinforcements = []
     monster.current_hp = 12
     assert engine.combat.check_redemption(monster) is not None
 
@@ -397,6 +397,7 @@ def test_redemption_finish_is_not_double_counted_when_accepted():
     _give(monster, "坏死")
     monster.battle_start_blood_limit = 126
     engine.state.enemies[:] = [monster]
+    engine.state.monster_reinforcements = []
     monster.current_hp = 12
     assert engine.combat.check_redemption(monster) is not None
     assert engine.execute_action("resolve_redemption", {"option": 1, "name": "壳奴"})["success"]

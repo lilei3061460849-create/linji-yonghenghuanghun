@@ -21,6 +21,7 @@ from .personality import remove_personality
 from .resolution import KIND_EFFECT, ResolutionContext, resolution_frame
 # 常量定义在 models（授予点在 Entity.__post_init__），此处只读取以判定效果。
 from .models import MONSTER_MANA_RELIC
+from .gamedata import REGION_EXCLUSIVE_DAOWEN as REGION_EXCLUSIVE_DAOWEN_DATA
 
 # 【凡庸】连续无所作为的回合阈值：连续 N 回合未出手、或连续 N 回合未能使敌对角色
 # 生命减少 → 凭空全身炸裂。这是**规则层**的反乌龟机制，必须优先于 sim 层的死锁
@@ -47,15 +48,14 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                    DaowenEffectMixin, SpellReactionMixin, MonsterPhaseMixin):
     """战斗计算引擎（门面；实现见 engine/combat_parts/*.py）"""
     
-    # 副本专属道纹
+    # 副本专属道纹：唯一事实源在 gamedata；复制集合避免调用方修改时污染全局配置。
+    # 不再单独维护含已退役【消灾】的第二份名单，战始碎片计算与学习到门禁保持同源。
     REGION_EXCLUSIVE_DAOWEN = {
-        "扭曲都市": {"变形","定型","超频","坏死"},  # 【畸变】【退化】已遗物化
-        "罪孽都市": {"点金","典当","豪夺","抢劫","假钞","消灾","勒索"},   # 2026-10-13 删【逼债】【典当】顶替；2026-10-14 +【勒索】
-        "龙心谷":   set(),  # 【逆鳞】【伤痕】已遗物化
+        region: set(names) for region, names in REGION_EXCLUSIVE_DAOWEN_DATA.items()
     }
     
     # 原始怪物道纹（道纹归属规则：各组起点）——【原初X】可借用范围
-    ORIGINAL_MONSTER_DAOWEN = ("全力", "必中")  # 2026-10-25 用户令：【疯狂】【减速】遗物化
+    ORIGINAL_MONSTER_DAOWEN = ("全力", "必中", "飞行")  # 2026-10-29：飞行恢复为冷却X道纹
     # 原始怪物道纹每次实际发动时支付异变5X（X 恒为面板/借用时写定的值；
     # 2026-09-16 用户令：道纹递增机制已废止）；效果持续期间（未再次发动）不再重复计费。
     # 必中为次数型（下X次选择[目标]无法闪避），余数记在 entity._bizhong_left。
@@ -107,6 +107,12 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         #   _hp_loss_ctx 是当前一次降血的来源上下文，供兜底钩子还原 attacker。
         self._hp_loss_recording = 0
         self._hp_loss_ctx = None
+        # 主动施法的可暂停执行栈；栈顶是当前开放敌方插队的法术。
+        self._spell_stack = []
+        self._spell_window_serial = 0
+        self._resuming_spell_stack = False
+        self._priority_passes = 0
+        self._ended_turn_sides = set()
         # 把本引擎绑定到已有战斗实体上：之后任何 current_hp 下降都会经
         # Entity._fire_hp_loss → _on_entity_hp_fallen 上报（仅对引擎自有的实体生效）。
         self._bind_existing_hp_hooks()
@@ -175,6 +181,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         INCOMING_ADJUST（Hook 路径）与 ROUND_START（本方法）。
         """
         results = []
+        if self._chenni_skips_phase(target, phase):
+            return results
         mechanisms = MECHANISMS.phase_mechanisms(phase)
         for mechanism in sorted(mechanisms, key=lambda item: item.ordering_key(target)):
             ctx = TriggerContext(combat=self, state=self.state, phase=phase,
@@ -209,6 +217,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         ]
         pending.sort(key=lambda row: (*row[0].ordering_key(row[1]), row[2]))
         for mechanism, entity, _ in pending:
+            if self._chenni_skips_phase(entity, phase):
+                continue
             ctx = TriggerContext(combat=self, state=self.state, phase=phase, target=entity)
             if mechanism.condition is not None and not mechanism.condition(ctx):
                 continue
@@ -455,11 +465,19 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     def _spend_dodge_speed(self, entity: Entity, relic_target_ref: Optional[str] = None) -> dict:
         """闪避：先走失速总线，再结算闪避专属句。"""
         extra = {}
-        extra["lost_speed"] = self._lose_current_speed(
-            entity, 1, relic_target_ref, require_huifeng=self._huifeng_active(entity),
-            ctx={"timing": self._current_context_timing(), "source": "闪避", "source_type": "action",
-                 "actor": entity, "target": entity, "mechanic": "speed_change", "subtype": "current_speed",
-                 "amount": -1, "tags": {"dodge", "active_payment"}})
+        before = entity.current_speed
+        previous_ref = getattr(self, "_speed_cost_relic_target_ref", None)
+        self._speed_cost_relic_target_ref = relic_target_ref
+        try:
+            payment = self.pay_resource(
+                entity, "速度", 1,
+                ctx={"timing": self._current_context_timing(), "source": "闪避", "source_type": "action",
+                     "actor": entity, "target": entity, "mechanic": "speed_change", "subtype": "current_speed",
+                     "amount": -1, "tags": {"dodge", "active_payment"}})
+        finally:
+            self._speed_cost_relic_target_ref = previous_ref
+        extra["lost_speed"] = before - entity.current_speed
+        extra["payment"] = payment
         extra.update(self._note_dodge(entity))
         return extra
 
@@ -587,35 +605,66 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 return e
         return None
 
+    def _hostile_targeting(self, actor: Entity, target: Entity) -> bool:
+        """目标记录所用的阵营关系；养蛊场内不同怪物也彼此为敌。"""
+        if actor is None or target is None or actor is target:
+            return False
+        if getattr(self.state, "arena_ffa", False) \
+                and self.state.on_enemy_side(actor) and self.state.on_enemy_side(target):
+            return True
+        return ((self.state.on_player_side(actor) and self.state.on_enemy_side(target))
+                or (self.state.on_enemy_side(actor) and self.state.on_player_side(target)))
+
+    def note_target_lock(self, actor: Entity, target: Entity) -> None:
+        """记录本场真实的敌对目标选择；仅枚举候选目标不调用此入口。"""
+        if not self._hostile_targeting(actor, target):
+            return
+        history = getattr(target, "hostile_targeters_this_battle", None)
+        if history is None:
+            history = set()
+            target.hostile_targeters_this_battle = history
+        history.add(actor.runtime_id)
+
+    def resolve_heavy_shackles_on_skip(self, actor: Entity) -> list[dict]:
+        """主动跳过时，扣减本场曾以持有者为目标者的当前剩余出手。"""
+        if actor is None or not self._relic_active(actor, "沉重枷锁"):
+            return []
+        targeters = getattr(actor, "hostile_targeters_this_battle", set()) or set()
+        effects = []
+        seen = set()
+        for target in self.state.get_all_player_side() + self.state.get_all_enemy_side():
+            if id(target) in seen or target.runtime_id not in targeters:
+                continue
+            seen.add(id(target))
+            if not self._hostile_targeting(actor, target):
+                continue
+            before = self.single_round_action_count(target)
+            remaining_before = max(0, before - target.actions_used_this_round)
+            if remaining_before <= 0:
+                continue
+            target.heavy_shackles_action_penalty = (
+                max(0, int(getattr(target, "heavy_shackles_action_penalty", 0))) + 1)
+            after = self.single_round_action_count(target)
+            effects.append({
+                "type": "heavy_shackles", "target": target.name,
+                "action_budget_before": before, "action_budget_after": after,
+                "remaining_before": remaining_before,
+                "remaining_after": max(0, after - target.actions_used_this_round),
+            })
+        return effects
+
     def single_round_action_count(self, entity: Entity) -> int:
+        """所有角色共用基础1出手与同一套修正，不再按类型分预算。"""
         if entity is None:
             return 0
-        if entity.entity_type == "怪物":
-            n = 2
-            # 状态通道照旧：怪物读自身【疯狂】/【无力】层数。
-            # 2026-10-25 用户令：【疯狂】遗物化——遗物效果见下方全场判定，不是道纹。
-            n += entity.get_status_value("疯狂")
-            n -= entity.get_status_value("无力")
-            if self._relic_active(entity, "癫狂之脑"):
-                n += 1
-            if self._any_active_relic("疯狂"):
-                n += 1
-            # 【沉重枷锁】与【疯狂】对称：出手预算直接 -1，不经速度绕道
-            # （2026-10-25 用户令：出手预算＝基础 2 次，不再由速度换算）。
-            if self._any_active_relic("沉重枷锁"):
-                n -= 1
-            return max(0, n)
-        n = DaoWenEngine.single_round_action_count(entity)
-        # 癫狂之脑（通用遗物池，2026-10-03 新增）：你每回合的出手次数+1。
+        n = entity.action_count
         if self._relic_active(entity, "癫狂之脑"):
             n += 1
-        # 【疯狂】（2026-10-25 遗物化）：所有角色每回合出手次数+1。
         if self._any_active_relic("疯狂"):
             n += 1
-        # 【沉重枷锁】：所有角色每回合出手次数-1。
-        if self._any_active_relic("沉重枷锁"):
-            n -= 1
-        return n
+        # 沉重枷锁不再全场被动减手，只读取主动跳过留下的本回合扣减。
+        n -= max(0, int(getattr(entity, "heavy_shackles_action_penalty", 0)))
+        return max(0, n)
 
     def _current_context_timing(self) -> str:
         forced = getattr(self, "_forced_context_timing", "")
@@ -662,10 +711,13 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         with resolution_frame(self, KIND_EFFECT, "攻击",
                               getattr(attacker, "name", "?"),
                               "->", getattr(target, "name", "?")):
-            return self._resolve_attack_impl(
+            result = self._resolve_attack_impl(
                 attacker, target, hit_index, is_must_hit, dodge, parry, allocated_damage,
                 blood_shadow, spell_choices, entity_refs, dodge_relic_target_ref,
                 cost_share_target_ref, wanjunyin)
+            # 闪避、招架或万钧印改道都不抹掉已完成的攻击目标选择。
+            self.note_target_lock(attacker, target)
+            return result
 
     def _resolve_attack_impl(
         self,
@@ -687,7 +739,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """
         解析一次攻击
         dodge: 目标是否选择闪避（由AI决策）
-        blood_shadow: 目标是否选择用【血影】遗物(流血10取消本次判定)代替常规闪避
+        blood_shadow: 目标是否选择用【血影】遗物(支付生命10取消本次判定)代替常规闪避
         """
         entity_refs = entity_refs or self._combat_entity_refs()
         spell_choices = spell_choices if spell_choices is not None else {"before": {}, "after": {}}
@@ -762,14 +814,14 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         must_hit = (is_must_hit or caster_has_bizhong_buff or target_bizhonged
                     or self.consume_bizhong(attacker))
 
-        # 血影（初拥之夜遗物，仅玩家自身持有）：非必中判定下，可流血10取消本次判定，是常规闪避外的另一选项
+        # 血影（初拥之夜遗物，仅玩家自身持有）：非必中判定下，可支付生命10取消本次判定，是常规闪避外的另一选项
         if (blood_shadow and not must_hit and self.state.side_has(target, "血影")):
             self.pay_numeric_cost(
-                target, "流血", 10,
+                target, "生命", 10,
                 cost_share_target_ref=cost_share_target_ref,
                 cost_context={"timing": "reaction", "source": "血影", "source_type": "relic", "tags": {"active_payment"}})
             result["blood_shadow_success"] = True
-            result["note"] = "血影：流血10，本次判定被取消"
+            result["note"] = "血影：支付生命10，本次判定被取消"
             return result
 
         # 闪避判定
@@ -810,12 +862,19 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             elif target.current_speed < 1:
                 result["parry_fail_reason"] = "速度不足"
             else:
-                target.current_speed -= 1
+                self.pay_resource(
+                    target, "速度", 1,
+                    ctx={"timing": self._current_context_timing(), "source": "招架",
+                         "source_type": "action", "actor": target, "target": target,
+                         "tags": {"parry", "active_payment"}})
                 result["speed_after_parry_cost"] = target.current_speed
                 revealed = (attacker.effective_attack_power()
                             if allocated_damage is None else allocated_damage)
                 if revealed > 0:
-                    target.current_speed = min(target.speed_limit, target.current_speed + 1)
+                    self._gain_speed(target, 1, ctx={
+                        "timing": self._current_context_timing(), "source": "招架",
+                        "source_type": "action", "actor": target, "target": target,
+                        "tags": {"parry", "speed_refund"}})
                     result["parry_success"] = True
                     result["damage_dealt"] = 0
                     result["speed_after_parry"] = target.current_speed
@@ -924,6 +983,78 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
     # ========== 回合管理 ==========
 
+    def chenni_round_blocked(self, entity: Entity | None) -> bool:
+        """目标当前这次回合是否已被【沉溺】标记为中断。"""
+        # 标记在下一次回始统一清除，因此回始递增世界回合数前后的同一批
+        # 目标循环都能识别本次阻断；无需把 world round 当成个人回合计数。
+        return bool(entity is not None
+                    and getattr(entity, "_chenni_blocked_world_round", 0))
+
+    def _chenni_skips_phase(self, target: Entity | None, phase: str) -> bool:
+        return bool(target is not None and self.chenni_round_blocked(target)
+                    and phase in {
+                        Phase.ROUND_START_PREPARE, Phase.ROUND_START,
+                        Phase.ROUND_START_SETTLE, Phase.ROUND_INCREASE,
+                        Phase.ROUND_END, Phase.ROUND_END_POST_MEDIOCRITY,
+                        Phase.ROUND_END_RECONCILE, Phase.ROUND_END_TRACKING,
+                    })
+
+    def chenni_will_block_next_round(self, entity: Entity | None) -> bool:
+        """回始提交前预测下一次阻断；只读状态，不提前消费。"""
+        return bool(entity is not None and entity.is_alive and any(
+            status.name == "沉溺" and status.value > 0
+            for status in entity.status_effects
+        ))
+
+    def _consume_chenni_round(self, target: Entity, *, source: str,
+                              round_number: int | None = None) -> dict | None:
+        """在目标即将进入回合时消费一次阻断；归零的本次仍被中断。"""
+        status = next((item for item in target.status_effects
+                       if item.name == "沉溺" and item.value > 0), None)
+        if status is None:
+            return None
+        status.effect_data["manual_round_countdown"] = True
+        # 与篡改等次数型状态同构：remaining_rounds=-1只表示不按普通回终
+        # 递减，真实剩余次数在 value；永恒的偏爱不会把次数字段永久化抹掉。
+        status.value -= 1
+        if status.value <= 0:
+            target.status_effects.remove(status)
+        remaining = sum(item.value for item in target.status_effects
+                        if item.name == "沉溺" and item.value > 0)
+        effect = {"type": "chenni_round_blocked", "target": target.name,
+                  "interrupted_round": source, "remaining": remaining}
+        if round_number is not None:
+            effect["round"] = round_number
+        return effect
+
+    def _begin_chenni_world_round(self, entities: list[Entity]) -> list[dict]:
+        """标记本世界回合被中断的角色；其他角色和世界回合计数不受影响。"""
+        unique = list({entity.runtime_id: entity for entity in entities
+                       if entity is not None}.values())
+        next_round = self.state.current_round + 1
+        # 旧标记对全场及暂离队列一律清零；只有场上 unique 会在下面消费新次数。
+        # 否则「上轮被沉溺→随后封印→本轮回场」会把上轮阻断错误地带回来。
+        all_known = (
+            ([self.state.player] if self.state.player is not None else [])
+            + list(self.state.friends) + list(self.state.employees)
+            + list(self.state.temp_friends) + list(self.state.enemies)
+            + [entry.get("monster") for entry in
+               getattr(self.state, "delayed_monster_reentries", []) or []]
+        )
+        for entity in all_known:
+            if entity is not None:
+                entity._chenni_blocked_world_round = 0
+        effects = []
+        for entity in unique:
+            if not entity.is_alive:
+                continue
+            effect = self._consume_chenni_round(
+                entity, source="普通回合", round_number=next_round)
+            if effect is not None:
+                entity._chenni_blocked_world_round = next_round
+                effects.append(effect)
+        return effects
+
     def settle_deferred_damage(self, entity: Entity, entries: list[dict]) -> list[dict]:
         """将上回合延后的数值作为普通伤害结算，允许再次触发沙漏。"""
         effects = []
@@ -946,13 +1077,16 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         2. 结算回始类效果
         3. 返回需要决策的信息
         """
-        effects = []
-        # 先取出本回合应造成的伤害；本次新延后的部分留给下一回合。
+        effects = self._begin_chenni_world_round(
+            self.state.get_all_player_side() + self.state.get_all_enemy_side())
+        # 先取出本回合应造成的伤害；被沉溺中断者整笔留到下一次真正经历的回合。
         deferred_due = []
         seen_due = set()
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
             if id(entity) not in seen_due:
                 seen_due.add(id(entity))
+                if self.chenni_round_blocked(entity):
+                    continue
                 deferred_due.append((entity, list(getattr(entity, "deferred_damage", []))))
                 entity.deferred_damage = []
         player = self.state.player
@@ -966,6 +1100,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             if id(e) in seen_entities:
                 continue
             seen_entities.add(id(e))
+            if self.chenni_round_blocked(e):
+                continue
             # 窥隙法匣：成功闪避时记下的法力只在下一回始领取，不与当次闪避即时结算。
             # 它使用独立 pending；绝不能清理洞察状态的 _dongcha_pending。
             pending_kuixi = int(getattr(e, "_kuixi_pending_mana", 0) or 0)
@@ -1009,7 +1145,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             apply_verb(self, "reset_fields", {"target": e, "fields": {
                 "hp_lost_this_round": 0,
                 "_hp_loss_events": [], "_speed_change_events": [], "_blood_limit_events": [],
-                "actions_used_this_round": 0, "blood_oath_used_this_round": False,
+                "actions_used_this_round": 0, "heavy_shackles_action_penalty": 0,
+                "blood_oath_used_this_round": False,
                 "mana_inflicted_this_round": 0, "damage_dealt_this_round": 0}})
         # DM裁定 2026-09-09：[回始]不再回填法力。法力改为**一池制**——[战始]给满
         # 等同[法限]的一池，整场只出不进，[战终]复原（与[速度]同口径）。
@@ -1029,6 +1166,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
         # 结算回始效果
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
+            if self.chenni_round_blocked(entity):
+                continue
             # 蓄锐（2026-09-28）：上回合施放蓄锐积攒的 pending 转成【蓄锐·增】1回 buff（+1出手）。
             pending = int(getattr(entity, "_xurui_pending", 0) or 0)
             if pending > 0:
@@ -1101,6 +1240,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                                 "round": self.state.current_round,
                                 "queued_left": len(self.state.monster_reinforcements)})
 
+        self._priority_passes = 0
+        self._ended_turn_sides.clear()
+        if not self.state.in_final_duel:
+            self.state.duel_turn = "player_side"
         return {
             "round": self.state.current_round,
             "phase": "回始",
@@ -1123,6 +1266,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         cycle_fields = (
             "hp_lost_this_round", "_hp_loss_events", "_speed_change_events",
             "_blood_limit_events", "actions_used_this_round",
+            "heavy_shackles_action_penalty",
             "blood_oath_used_this_round", "mana_inflicted_this_round",
             "damage_dealt_this_round",
         )
@@ -1131,11 +1275,20 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             if hasattr(target, field_name):
                 value = getattr(target, field_name)
                 saved_fields[field_name] = list(value) if isinstance(value, list) else value
+        # 普通世界回合的阻断标记不能泄漏进大梦额外回合；额外回合只按自身
+        # 进入前的沉溺次数决定。结束后恢复原标记，当前普通回终仍按原口径跳过。
+        saved_chenni_marker = getattr(target, "_chenni_blocked_world_round", None)
+        target._chenni_blocked_world_round = 0
 
         try:
             for index in range(rounds):
                 if not target.is_alive or self.state.battle_over():
                     break
+                blocked = self._consume_chenni_round(target, source=source)
+                if blocked is not None:
+                    blocked.update({"index": index + 1, "total": rounds})
+                    effects.append(blocked)
+                    continue
 
                 # 这些字段属于单个角色经历的回合，不是世界时间。每次额外经历都从
                 # 独立的周期记录开始；不运行全场 ROUND_START_SETTLE，因为其中包含
@@ -1148,6 +1301,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 if hasattr(target, "_blood_limit_events"):
                     target._blood_limit_events = []
                 target.actions_used_this_round = 0
+                target.heavy_shackles_action_penalty = 0
                 target.damage_dealt_this_round = 0
                 target.blood_oath_used_this_round = False
                 target.mana_inflicted_this_round = 0
@@ -1195,6 +1349,11 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         finally:
             for field_name, value in saved_fields.items():
                 setattr(target, field_name, value)
+            if saved_chenni_marker is None:
+                if hasattr(target, "_chenni_blocked_world_round"):
+                    delattr(target, "_chenni_blocked_world_round")
+            else:
+                target._chenni_blocked_world_round = saved_chenni_marker
 
         return effects
 
@@ -1209,6 +1368,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         mediocrity_ready: list[tuple[Entity, str]] = []
 
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
+            if self.chenni_round_blocked(entity):
+                continue
             # 蚀界残钟：场上有持有者时，每个角色在回终第一拍失去「当前法力×当前速度」的血限。
             # 保持旧【畸变】的回终锚点，走统一血限变化/命零管线，不手改 current_hp。
             if entity.is_alive and self._any_active_relic("蚀界残钟"):
@@ -1252,6 +1413,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             effects.extend(self._apply_mediocrity(entity, why))
 
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
+            if self.chenni_round_blocked(entity):
+                continue
             # 凡庸之后的原第二实体循环；保持实体优先，不能提前到 ROUND_END。
             effects.extend(self._dispatch_phase(
                 Phase.ROUND_END_POST_MEDIOCRITY, target=entity,
@@ -1270,6 +1433,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         
         # 持续效果递减。
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
+            if self.chenni_round_blocked(entity):
+                continue
             expired = entity.tick_status_effects()
             if expired:
                 # 【增殖】到期后恢复基础血限；若当前生命超出基础血限，按恢复后的血限封顶。
@@ -1428,6 +1593,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     def validate_round_start_relic_choices(self, choices: dict) -> None:
         if not isinstance(choices, dict):
             raise ValueError("relic_choices必须是对象")
+        if (self.chenni_round_blocked(self.state.player)
+                or self.chenni_will_block_next_round(self.state.player)):
+            return
         active = {r.name for r in self.state.relics if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0}
         player = self.state.player
         damage = 3 * max(0, player.speed_limit - player.current_speed) if player else 0
@@ -1465,6 +1633,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         relics = {r.name for r in self.state.relics if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0}
 
         if trigger == "round_start":
+            if self.chenni_round_blocked(player):
+                return logs
             choices = ctx.get("relic_choices", {})
             self.validate_round_start_relic_choices(choices)
             if "回锋刀" in relics:
@@ -1520,8 +1690,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 logs.append("烙痕钉：已锁定目标")
             for ally in self.state.friends + self.state.employees:
                 logs.extend(self._dispatch_phase(Phase.BATTLE_START_AFTER_CHOICES, target=ally))
-        # 机制系统：BATTLE_END 相位分发。位置=战终遗物段顶部（2026-09-17 新增相位，
-        # 首个注册者是改版后的【缄默面具】：[战终]法限+X）。
+        # 机制系统：BATTLE_END 相位分发。位置=战终遗物段顶部；
         # process_relics 只宣布时点，具体机制条件/效果都在声明层。
         if trigger == "battle_end":
             logs.extend(self._dispatch_phase(Phase.BATTLE_END, target=player))
@@ -1623,12 +1792,31 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """
         return (entity.is_alive
                 and not self.state.is_sealed_away(entity)
+                and not self.chenni_round_blocked(entity)
                 and (not entity.has_status("束缚")
                      or action_type in {"cast", "define_spell"}))
 
+    def yapo_target_lock_holder(self, attacker: Entity, target: Entity) -> Optional[Entity]:
+        """返回限制这次选目标的【压迫】持有者；没有压迫限制则返回None。
+
+        压迫只豁免其[目标]本身：其他角色只能选择自己，不能选择压迫持有者或第三方。
+        """
+        if attacker is target:
+            return None
+        entities = (self.state.get_all_player_side() + self.state.get_all_enemy_side())
+        for holder in entities:
+            if holder is attacker or not holder.is_alive or self.state.is_sealed_away(holder):
+                continue
+            if any(status.name == "压迫" and not status.is_expired
+                   for status in holder.status_effects):
+                return holder
+        return None
+
     def is_targetable(self, attacker: Entity, target: Entity) -> bool:
-        """目标是否可被选中：非飞行者无法选中飞行目标。"""
+        """目标是否可被选中：统一结算飞行与压迫的目标限制。"""
         if self.state.is_sealed_away(attacker) or self.state.is_sealed_away(target):
+            return False
+        if self.yapo_target_lock_holder(attacker, target) is not None:
             return False
         if self._is_flying(target):
             return self._is_flying(attacker)

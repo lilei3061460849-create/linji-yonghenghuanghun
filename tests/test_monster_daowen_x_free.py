@@ -28,7 +28,7 @@ def _engine(tmp_path, seed: int = 20260822) -> GameEngine:
     )
 
 
-def _monster(mana: int = 14, free_daowen=("加害",)):
+def _monster(mana: int = 14, free_daowen=("弱化",)):
     m = Entity("测试怪", "怪物", blood_limit=234, current_hp=234,
                attack_count=3, attack_power=mana,
                mana_limit=mana, current_mana=mana, speed_limit=3, current_speed=3)
@@ -50,6 +50,7 @@ def _setup(e: GameEngine, monster: Entity):
     e.state.enemies = [monster]
     e.state.phase = "in_combat"
     e.state.combat_subphase = "player_actions"
+    e.state.duel_turn = "opponent_side"  # 本组直接驱动怪物阶段，显式交给敌方优先权
     e.state.pending_monster_phase = {}
     e.state.current_round = 2      # 跳过白板回合，怪物可发动道纹
     return player
@@ -79,7 +80,7 @@ def _resolve(e, prep, actor, x):
     return e.execute_action("resolve_monster_phase", {
         "token": prep["result"]["token"],
         "choices": [{"actor_ref": actor["actor_ref"], "daowen": dao,
-                     "attack_actions": [{"hits": _hits(actor, atk)}]}],
+                     "attack_actions": []}],  # 1出手：本次选择施法，不同时追加攻击
     })
 
 
@@ -88,7 +89,7 @@ def _resolve(e, prep, actor, x):
 def test_x_free_daowen_accepts_submitted_x_and_scales_cost(tmp_path):
     """正常路径：面板不写 X 时，提交方自选 X，代价按 X 缩放。
 
-    加害是【消耗】类，代价 2X。法限 14 → 上限 X=7，付 2×7=14。
+    弱化是【消耗】类，代价 2X。法限 14 → 上限 X=7，付 2×7=14。
     """
     for x, expected_paid in ((1, 2), (3, 6), (7, 14)):
         e = _engine(tmp_path)
@@ -110,8 +111,8 @@ def test_fixed_x_daowen_unchanged(tmp_path):
     m = Entity("测试怪", "怪物", blood_limit=234, current_hp=234,
                attack_count=3, attack_power=14, mana_limit=14, current_mana=14,
                speed_limit=3, current_speed=3)
-    m.dao_wen["加害"] = DaoWenInstance(
-        DaoWen(name="加害", formula="", cost_type="消耗", cost_formula="X",
+    m.dao_wen["弱化"] = DaoWenInstance(
+        DaoWen(name="弱化", formula="", cost_type="消耗", cost_formula="X",
                effect_formula=""), x_value=2, x_free=False)
     _setup(e, m)
     prep, actor = _prepare(e)
@@ -164,10 +165,10 @@ def test_monster_mutation_daowen_has_no_lost_cap(tmp_path, mutation_before):
 def test_unaffordable_daowen_filtered_from_prepare(tmp_path):
     """边界：连 X=1 都付不起时，prepare 不列出该道纹。"""
     e = _engine(tmp_path)
-    m = _monster(mana=1)                     # 加害 2X，X=1 就要 2 点法力 → 付不起
+    m = _monster(mana=1)                     # 弱化 2X，X=1 就要 2 点法力 → 付不起
     _setup(e, m)
     prep, actor = _prepare(e)
-    assert not [o for o in actor["daowen_options"] if o["name"] == "加害"], \
+    assert not [o for o in actor["daowen_options"] if o["name"] == "弱化"], \
         "付不起的道纹不应出现在 prepare 候选里"
 
 
@@ -196,7 +197,7 @@ def test_missing_x_falls_back_to_max(tmp_path):
     与手操流程当场跑不起来。回退到上限保证旧驱动继续可用。
     """
     e = _engine(tmp_path)
-    m = _monster(mana=14)                    # 加害 2X → 上限 7
+    m = _monster(mana=14)                    # 弱化 2X → 上限 7
     _setup(e, m)
     prep, actor = _prepare(e)
     before = m.current_mana
@@ -245,6 +246,7 @@ def _preview_scenario(tmp_path, dw, *, monster_hp=300, monster_mana=40,
     e.state.enemies = [m]
     e.state.phase = "in_combat"
     e.state.combat_subphase = "player_actions"
+    e.state.duel_turn = "opponent_side"
     e.state.pending_monster_phase = {}
     e.state.current_round = 2
     prep = e.execute_action("prepare_monster_phase", {})
@@ -255,10 +257,6 @@ def _chosen_x(e, m, actor, prep, dw):
     """走 sim 侧完整的提交拼装（含正确的自身/敌方选目标）后取评分选出的 X。"""
     from sim.monster_targets import pick_monster_daowen_target, pick_monster_daowen_x
     opt = next(o for o in actor["daowen_options"] if o["name"] == dw)
-    atk = actor["attack_target_options"][0]
-    hits = [{"target_ref": atk["ref"], "dodge": False, "blood_shadow": False,
-             "spell_choices": _decline_spells(atk)}
-            for _ in range(actor["base_hits_per_attack"])]
     dao = {"name": dw, "dodge": False, "blood_shadow": False,
            "trigger_spell_choices": {}}
     # 必须用怪物 AI 的选目标：把自身回血打到玩家身上等于喂养敌方，
@@ -266,8 +264,7 @@ def _chosen_x(e, m, actor, prep, dw):
     if opt["requires_target"]:
         dao["target_ref"] = pick_monster_daowen_target(e, actor["actor_ref"], opt)
     choice = {"actor_ref": actor["actor_ref"], "daowen": dao,
-              "attack_actions": [{"hits": hits}
-                                 for _ in range(actor["base_attack_actions"])]}
+              "attack_actions": []}  # 预演也遵守每次1出手，施法不附带攻击
     return pick_monster_daowen_x(e, m, opt, choice, prep["result"]["token"])
 
 

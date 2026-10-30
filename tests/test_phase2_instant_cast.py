@@ -81,11 +81,34 @@ def _ref(engine, entity):
 
 
 def _cast(engine, flow, steps, target=None, **extra):
+    """旧语义测试显式让对方跳过所有空档，再检查完整执行结果。
+
+    生产API每步后都会暂停；本辅助只在测试中提交真实skip行动，不让引擎代跳。
+    """
     params = {"flow": flow, "steps": steps}
     if target is not None:
         params["target_ref"] = _ref(engine, target)
     params.update(extra)
-    return engine.execute_action("cast", params)
+    resp = engine.execute_action("cast", params)
+    if not resp.get("success"):
+        return resp
+    while engine.combat._spell_stack:
+        side = engine.state.duel_turn
+        actor_ref = next(
+            ref for ref, entity in engine.combat._combat_entity_refs().items()
+            if entity.is_alive and engine.state.on_player_side(entity) == (side == "player_side"))
+        skipped = engine.execute_action("skip", {"actor_ref": actor_ref})
+        assert skipped.get("success"), skipped
+        progress = skipped.get("spell_progress") or []
+        if progress:
+            latest = progress[-1]
+            resp["result"].update({
+                "step_results": latest["step_results"],
+                "execution_status": latest["execution_status"],
+                "interrupt_reason": latest["interrupt_reason"],
+                "interrupt_detail": latest["interrupt_detail"],
+            })
+    return resp
 
 
 def _statuses(resp):
@@ -238,8 +261,8 @@ def test_instant_first_step_mana_insufficient_stops():
     assert foe.current_hp == hp_foe0
     assert player.current_hp == hp0
     assert player.current_mana == 1
-    # 施法动作已发生（结构合法），出手照扣——2阶付清2次，且中断不退
-    assert player.actions_used_this_round == used0 + 2
+    # 逐步支付：只为已尝试的第一步付1出手，未开始的第二步不预付。
+    assert player.actions_used_this_round == used0 + 1
 
 
 # ---------------------------------------------------------------------------
@@ -501,7 +524,7 @@ def test_cast_kind_daowen_unchanged():
 # ---------------------------------------------------------------------------
 # 2026-09-29 用户裁定：法术本质上就是依次发动多种道纹。
 # 瞬发的每一步都与 use_daowen 走同一套"发动道纹"环节：
-# 敌方「目标发动道纹前」反应、无神、缄默面具、消灾碎片代价；
+# 敌方「目标发动道纹前」反应、无神、缄默面具、连击假碎片通道；
 # 施法失败（中途中断）出手照扣，不退。
 # ---------------------------------------------------------------------------
 
@@ -570,7 +593,7 @@ def test_instant_caster_killed_by_reaction_is_normal_interrupt():
     assert sr[0]["reason"] == InterruptReason.CASTER_DEAD.value
     assert resp["result"]["execution_status"] == EXECUTION_INTERRUPTED
     assert foe.current_hp == foe_hp0                          # 杀伐没有发出去
-    assert player.actions_used_this_round == used0 + 2        # 2阶照扣2次，不退
+    assert player.actions_used_this_round == used0 + 1        # 仅已尝试的第一步收费
 
 
 def test_instant_missing_trigger_choices_rejected_without_consuming_action():
@@ -603,28 +626,29 @@ def test_instant_silence_mask_interrupts_cost_daowen_step():
     assert foe.current_hp < hp_foe0          # 第一步保留
 
 
-def test_instant_xiaozai_shards_insufficient_is_normal_interrupt():
-    engine = _setup("p2_xiaozai")
+def test_instant_lianji_fake_shards_insufficient_is_normal_interrupt():
+    engine = _setup("p2_lianji_shards")
     player, foe = engine.state.player, engine.state.enemies[0]
-    _give(player, "消灾")
+    _give(player, "连击")
     engine.state.fake_shards = 0
     engine.state.shards = 0
     used0 = player.actions_used_this_round
-    resp = _cast(engine, "发动消灾X于自身", [{"x": 1}], target=foe)
+    resp = _cast(engine, "发动连击X于目标",
+                 [{"x": 1, "cost_channel": "假碎片", "dodge": False}], target=foe)
     assert resp["success"], resp
     assert resp["result"]["step_results"][0]["reason"] == REASON_SHARDS_INSUFFICIENT
     assert resp["result"]["execution_status"] == EXECUTION_INTERRUPTED
-    assert engine.dice.rerolls_pending == 0
     assert player.actions_used_this_round == used0 + 1  # 施法失败出手照扣
 
 
-def test_instant_xiaozai_pays_fake_shards_like_use_daowen():
-    engine = _setup("p2_xiaozai_ok")
+def test_instant_lianji_pays_fake_shards_like_use_daowen():
+    engine = _setup("p2_lianji_shards_ok")
     player, foe = engine.state.player, engine.state.enemies[0]
-    _give(player, "消灾")
+    _give(player, "连击")
     engine.state.fake_shards = 60
-    resp = _cast(engine, "发动消灾X于自身", [{"x": 1}], target=foe)
+    resp = _cast(engine, "发动连击X于目标",
+                 [{"x": 1, "cost_channel": "假碎片", "dodge": False}], target=foe)
     assert resp["success"], resp
     assert resp["result"]["execution_status"] == EXECUTION_COMPLETED
     assert engine.state.fake_shards == 10
-    assert engine.dice.rerolls_pending == 1
+    assert foe.current_hp == foe.blood_limit - 5

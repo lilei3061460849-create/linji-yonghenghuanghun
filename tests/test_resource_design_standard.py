@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine, OUT_OF_COMBAT_DAOWEN  # noqa: E402
 from engine.daowen import DaoWenEngine  # noqa: E402
-from engine.models import Consumable, DaoWen, DaoWenInstance  # noqa: E402
+from engine.models import Consumable, DaoWen, DaoWenInstance, Entity  # noqa: E402
 from tests.setup_support import finish_initial_daowen  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -132,9 +132,9 @@ def test_daowen_x_scales_strength_or_duration():
     flat = []
     for name in sorted(DaoWenEngine._registry):
         kwargs = {"cost_choices": [{"type": "异变"}]} if name == "净化" else {}
-        if name == "大梦":
-            from engine.models import Entity
-            kwargs["target"] = Entity("审查靶", "怪物", blood_limit=100, current_hp=100)
+        kwargs["target"] = Entity("审查靶", "怪物", blood_limit=100, current_hp=100)
+        if name == "净化":
+            kwargs["target"].mutation_count = 100
         low, high = DaoWenEngine.resolve(name, 1, **kwargs), DaoWenEngine.resolve(name, 3, **kwargs)
         if all(low.get(k) == high.get(k) for k in low if k not in ignore):
             flat.append(name)
@@ -236,7 +236,7 @@ def test_artifact_section_exists_and_entries_are_unique():
 
     relic_names = {n for n, _ in GameEngine.RELIC_DEFS}
     overlap = relic_names & set(names)
-    # 【万魂幡】2026-10-25 用户令归法器，已退出 RELIC_DEFS：法器与遗物池不得再有任何重名。
+    # 【煌妖幡】（旧名万魂幡）归法器，已退出 RELIC_DEFS：法器与遗物池不得再有任何重名。
     assert not overlap, f"法器与遗物池重名：{sorted(overlap)}"
 
 

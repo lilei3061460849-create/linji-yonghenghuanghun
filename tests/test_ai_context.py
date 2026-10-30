@@ -102,10 +102,11 @@ def test_mechanics_digest_covers_daowen_relics_spells_and_regions():
 
     for marker in ("杀伐：支付：法力X。", "封印：支付：异变X", "透支：支付：", "变形：支付：法力X。"):
         assert marker in daowen, marker
-    for name in ("不死", "出土", "篡改", "催化", "净化"):
+    for name in ("不死", "出土", "篡改", "催化", "净化", "流动", "遗忘"):
         assert f"{name}：" in daowen, "已实装效果不能因所属副本尚未开放而被摘要丢弃"
-    for name in ("流动", "遗忘", "分裂"):
-        assert f"{name}：" not in daowen, "未实装现行定义不能被摘要当作可执行规则"
+    assert "分裂：支付：生命3X。创造X个1/1/1的造物为你而战。" in daowen
+    assert "凋零：支付：法力10X。除[目标]外，当前生命≤X的角色立即死亡。" in daowen
+    assert "沉溺：支付：法力10X。使[目标]无法经历X个回合。" in daowen
 
     for marker in ("守夜灯：", "万钧印：", "回锋刀：", "痛苦的偏爱：", "猩红果实："):
         assert marker in relics, marker

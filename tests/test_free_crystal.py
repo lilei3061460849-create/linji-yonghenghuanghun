@@ -2,8 +2,8 @@
 
 规则口径（物品索引·自由结晶；规则正文·凡庸/救赎）：
 - 凡庸怪物炸裂掉落【自由结晶】（1/1）；
-- 对[目标]使用后，使其随机付出一种代价，共计10（随机池＝流血/衰老/枯竭/
-  萎缩/疲惫/失忆/异变/冷却八种数值代价；唯一不入池）；
+- 对[目标]使用后，使其随机付出一种代价，共计10（随机池＝生命/血限/枯竭/
+  萎缩/速度/失忆/异变/冷却八种数值代价；唯一不入池）；
 - 若目标是生命≤20%[血限]的怪物，代价结算后仍存活的，强制触发救赎事件
   （无视「没有原始怪物道纹」条件）；
 - 消耗品不占主动出手，1/1 用完即耗尽。
@@ -75,8 +75,8 @@ def test_mediocrity_drops_free_crystal_with_new_effect(tmp_path):
 
 
 def test_free_crystal_aging_cost_on_healthy_monster(tmp_path, single_cost):
-    """正常路径：对健康怪物使用→付出衰老10（血限-10），不触发救赎。"""
-    single_cost("衰老")
+    """正常路径：对健康怪物使用→付出血限10（血限-10），不触发救赎。"""
+    single_cost("血限")
     engine = _engine(tmp_path)
     _battle_state(engine)
     monster = Entity("靶怪", "怪物", blood_limit=200, current_hp=200,
@@ -88,7 +88,7 @@ def test_free_crystal_aging_cost_on_healthy_monster(tmp_path, single_cost):
         "name": "自由结晶", "target_ref": "enemy:0"})
 
     assert r["success"], r
-    assert r["result"]["cost_type"] == "衰老"
+    assert r["result"]["cost_type"] == "血限"
     assert r["result"]["cost_amount"] == 10
     assert monster.blood_limit == 190
     assert r["result"]["redemption"] is None, "生命>20%血限不得触发救赎"
@@ -98,7 +98,7 @@ def test_free_crystal_aging_cost_on_healthy_monster(tmp_path, single_cost):
 
 def test_free_crystal_forces_redemption_on_low_hp_monster(tmp_path, single_cost):
     """正常路径：生命≤20%血限的怪物被强制救赎——即使持有原始道纹。"""
-    single_cost("疲惫")
+    single_cost("速度")
     engine = _engine(tmp_path)
     _battle_state(engine)
     monster = Entity("垂死怪", "怪物", blood_limit=100, current_hp=20,
@@ -114,7 +114,7 @@ def test_free_crystal_forces_redemption_on_low_hp_monster(tmp_path, single_cost)
         "name": "自由结晶", "target_ref": "enemy:0"})
 
     assert r["success"], r
-    assert monster.current_speed == 0, "疲惫10应扣光当前速度"
+    assert monster.current_speed == 0, "速度10应扣光当前速度"
     assert r["result"]["redemption"] is not None, "≤20%血限必须强制救赎"
     assert engine.state.pending_redemption is not None
     assert engine.state.pending_redemption["cause"] == "free_crystal"
@@ -135,14 +135,15 @@ def test_free_crystal_no_redemption_above_twenty_percent(tmp_path, single_cost):
         "name": "自由结晶", "target_ref": "enemy:0"})
 
     assert r["success"], r
-    assert monster.mana_limit == 2, "枯竭10应削减法限"
+    assert (monster.current_mana, monster.mana_limit) == (12, 12)
+    assert monster.pending_exhaust_mana == 10, "枯竭10应登记下一次战始扣蓝"
     assert r["result"]["redemption"] is None
     assert not engine.state.pending_redemption
 
 
 def test_free_crystal_bleed_can_kill_before_redemption(tmp_path, single_cost):
-    """边界：代价先结算——流血致死时怪物按命零死亡，不再进入救赎。"""
-    single_cost("流血")
+    """边界：代价先结算——生命致死时怪物按命零死亡，不再进入救赎。"""
+    single_cost("生命")
     engine = _engine(tmp_path)
     _battle_state(engine)
     monster = Entity("残血怪", "怪物", blood_limit=100, current_hp=5,
@@ -154,14 +155,14 @@ def test_free_crystal_bleed_can_kill_before_redemption(tmp_path, single_cost):
         "name": "自由结晶", "target_ref": "enemy:0"})
 
     assert r["success"], r
-    assert not monster.is_alive, "流血10应直接命零"
+    assert not monster.is_alive, "生命10应直接命零"
     assert r["result"]["redemption"] is None
     assert not engine.state.pending_redemption
 
 
 def test_free_crystal_usable_on_reincarnator(tmp_path, single_cost):
     """正常路径：自由结晶可对轮回者使用（只付代价，不涉及救赎）。"""
-    single_cost("萎缩")
+    single_cost("法限")
     engine = _engine(tmp_path)
     player = _battle_state(engine)
     _grant_crystal(engine)
@@ -170,13 +171,14 @@ def test_free_crystal_usable_on_reincarnator(tmp_path, single_cost):
         "name": "自由结晶", "target_ref": "player:0"})
 
     assert r["success"], r
-    assert player.speed_limit == 0, "萎缩10应削减速限"
+    assert player.mana_limit == 2 and player.current_mana == 2
+    assert player.speed_limit == 10, "旧萎缩支付已迁为法限，不再削减速限"
     assert r["result"]["redemption"] is None
 
 
 def test_free_crystal_requires_living_combat_target(tmp_path, single_cost):
     """错误输入：无合法目标时拒绝使用，不扣耐久。"""
-    single_cost("衰老")
+    single_cost("血限")
     engine = _engine(tmp_path)
     _battle_state(engine)
     crystal = _grant_crystal(engine)
@@ -216,18 +218,19 @@ def test_settle_free_crystal_cost_covers_all_eight_types(tmp_path):
     engine._settle_free_crystal_cost(mutated, "异变", 10)
     assert mutated.mutation_count == 10
 
-    # 流血：失去10生命
-    bled = Entity("流血靶", "怪物", blood_limit=100, current_hp=100)
-    engine._settle_free_crystal_cost(bled, "流血", 10)
+    # 生命：失去10生命
+    bled = Entity("生命靶", "怪物", blood_limit=100, current_hp=100)
+    engine._settle_free_crystal_cost(bled, "生命", 10)
     assert bled.current_hp == 90
 
-    # 衰老/枯竭/萎缩/疲惫：分别削减对应面板
-    aged = Entity("衰老靶", "怪物", blood_limit=100, current_hp=100,
+    # 血限/法限/速度结算对应面板；枯竭只登记下一次战始扣蓝。
+    aged = Entity("血限靶", "怪物", blood_limit=100, current_hp=100,
                   mana_limit=20, current_mana=20, speed_limit=8, current_speed=8)
-    engine._settle_free_crystal_cost(aged, "衰老", 10)
+    engine._settle_free_crystal_cost(aged, "血限", 10)
     engine._settle_free_crystal_cost(aged, "枯竭", 10)
-    engine._settle_free_crystal_cost(aged, "萎缩", 10)
-    engine._settle_free_crystal_cost(aged, "疲惫", 10)
+    engine._settle_free_crystal_cost(aged, "萎缩", 10)  # 旧存档输入迁移为法限
+    engine._settle_free_crystal_cost(aged, "速度", 10)
     assert aged.blood_limit == 90
     assert aged.mana_limit == 10 and aged.current_mana == 10
-    assert aged.speed_limit == 0 and aged.current_speed == 0
+    assert aged.pending_exhaust_mana == 10
+    assert aged.speed_limit == 8 and aged.current_speed == 0

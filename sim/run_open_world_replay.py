@@ -112,19 +112,31 @@ def fight(engine: GameEngine, encounter_id: str, timeline: list[dict[str, Any]],
     guard = 0
     while engine.state.player.is_alive and _has_remaining_enemies(engine):
         guard += 1
-        if guard > 40:
-            raise RuntimeError("combat exceeded 40 rounds or queued reinforcements did not settle")
-        while (engine.state.player.is_alive
-               and engine.state.player.actions_used_this_round
-                   < engine._action_budget_of(engine.state.player)
-               and any(enemy.is_alive and not enemy.is_departed for enemy in engine.state.enemies)):
+        if guard > 400:
+            raise RuntimeError("combat exceeded 400 actions or queued reinforcements did not settle")
+        if engine.state.pending_redemption:
+            redemption = call(engine, "resolve_redemption", {"option": "终结"})
+            timeline.append({"type": "redemption", "result": redemption})
+            continue
+        if engine.state.combat_subphase == "await_round_end":
+            call(engine, "round_end")
+            if engine.state.pending_redemption:
+                redemption = call(engine, "resolve_redemption", {"option": "终结"})
+                timeline.append({"type": "redemption", "result": redemption})
+            if not engine.state.player.is_alive:
+                return {"encounter_id": encounter_id, "result": "defeat",
+                        "player_hp": engine.state.player.current_hp}
+            call(engine, "round_start")
+            continue
+        if engine.state.duel_turn == "player_side":
             prepared = call(engine, "prepare_attack")["result"]
             refs = engine.combat._combat_entity_refs()
             target = next((candidate for candidate in prepared["target_options"]
                            if refs.get(candidate["ref"]) is not None
                            and refs[candidate["ref"]].is_alive), None)
             if target is None:
-                break
+                call(engine, "skip", {"actor_ref": "player:0"})
+                continue
             remaining = int(prepared["damage_budget"])
             hits = []
             for _ in range(int(prepared["hit_count"])):
@@ -136,29 +148,12 @@ def fight(engine: GameEngine, encounter_id: str, timeline: list[dict[str, Any]],
             resolved = call(engine, "resolve_attack", {"token": prepared["token"], "hits": hits})
             timeline.append({"type": "player_attack", "battle": engine.state.current_battle,
                              "round": engine.state.current_round, "result": resolved})
-            if engine.state.pending_redemption:
-                redemption = call(engine, "resolve_redemption", {"option": "终结"})
-                timeline.append({"type": "redemption", "result": redemption})
-        if not engine.state.player.is_alive or not _has_remaining_enemies(engine):
-            break
-        monster_result = _resolve_monster_turn_with_spells(engine)
-        if not monster_result.get("success"):
-            raise RuntimeError(f"monster phase failed: {monster_result}")
-        timeline.append({"type": "monster_phase", "battle": engine.state.current_battle,
-                         "round": engine.state.current_round, "result": monster_result})
-        if engine.state.pending_redemption:
-            redemption = call(engine, "resolve_redemption", {"option": "终结"})
-            timeline.append({"type": "redemption", "result": redemption})
-        if not engine.state.player.is_alive or not _has_remaining_enemies(engine):
-            break
-        call(engine, "round_end")
-        if engine.state.pending_redemption:
-            redemption = call(engine, "resolve_redemption", {"option": "终结"})
-            timeline.append({"type": "redemption", "result": redemption})
-        call(engine, "round_start")
-        if engine.state.pending_redemption:
-            redemption = call(engine, "resolve_redemption", {"option": "终结"})
-            timeline.append({"type": "redemption", "result": redemption})
+        else:
+            monster_result = _resolve_monster_turn_with_spells(engine)
+            if not monster_result.get("success"):
+                raise RuntimeError(f"monster phase failed: {monster_result}")
+            timeline.append({"type": "monster_phase", "battle": engine.state.current_battle,
+                             "round": engine.state.current_round, "result": monster_result})
     if engine.state.pending_redemption:
         redemption = call(engine, "resolve_redemption", {"option": "终结"})
         timeline.append({"type": "redemption", "result": redemption})

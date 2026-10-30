@@ -145,8 +145,8 @@ def test_drawn_monster_panel_matches_readme_exactly():
     pools = parse_monster_pool(DUNGEON_INDEX_PATH)
     known = next(m for m in pools["龙心谷"] if m["name"] == "熔岩蜥")
     assert (known["attack_count"], known["attack_power"], known["blood_limit"]) == (3, 6, 42)
-    # 2026-10-03：【狂暴】删除，熔岩蜥面板剩 加害/波及（道纹数待用户裁定后补位）
-    assert known["dao_wen"] == {"加害": None, "波及": None}
+    # 当前独立面板仅余【波及】；原【加害】已转换为消耗品【灼罪钉】。
+    assert known["dao_wen"] == {"波及": None}
 
 
 def test_seven_battles_match_per_battle_draw_totals():

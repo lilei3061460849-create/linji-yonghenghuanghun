@@ -66,6 +66,8 @@ def _new_candidate(db_suffix, sealed_path, speed_points=8, region="龙心谷", n
     engine.execute_action("setup_choose_resonance", {"resonance_type": "转换"})
     setup = engine.execute_action("setup_choose_region", {"region": region})
     engine.execute_action("choose_discovered_relic", {"relic_name": setup["result"]["relic_choices"][0]})
+    # 死斗预算/交替测试会显式放置所需遗物；随机开局遗物不得抢占一手或改变伤害。
+    engine.state.relics = []
     engine.state.player.dao_wen["杀伐"] = DaoWenInstance(
         DaoWen(name="杀伐", formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
     return engine

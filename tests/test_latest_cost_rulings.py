@@ -1,4 +1,4 @@
-"""2026-10-27 最新裁定：单项净化不凭空增加属性，增殖支付衰老。"""
+"""2026-10-27 最新裁定：单项净化不凭空增加属性，增殖支付血限。"""
 import pytest
 from engine.daowen import DaoWenEngine
 from tests.test_daowen_wiring import _engine, _give, _monster
@@ -13,14 +13,14 @@ def test_zengzhi_aging_and_infinite_limit():
     r = e.execute_action("use_daowen", {"daowen_name": "增殖", "x": 2, "target": m.name})
     assert r["success"], r
     assert p.blood_limit == before - 2
-    assert p.reversible_cost_layers["衰老"] == 2
+    assert p.reversible_cost_layers["血限"] == 2
     assert m.has_status("无限血限")
     assert m.to_dict()["blood_limit"] == "∞"
     assert DaoWenEngine.resolve("增殖", 2)["duration"] == 2
 
 
-@pytest.mark.parametrize("kind,attr", [("衰老", "blood_limit"), ("枯竭", "mana_limit"),
-                                        ("萎缩", "speed_limit"), ("疲惫", "current_speed")])
+@pytest.mark.parametrize("kind,attr", [("血限", "blood_limit"), ("枯竭", "mana_limit"),
+                                        ("法限", "mana_limit"), ("速度", "current_speed")])
 def test_purification_requires_owned_cost_and_cannot_inflate(kind, attr):
     e = _engine("latest_" + kind)
     _give(e.state.player, "净化")
@@ -102,9 +102,9 @@ def test_refund_history_survives_full_entity_snapshot():
     _give(p, "固执")
     p.dao_wen["固执"].cooldown_remaining = 3
     p.forget_for_cost("固执")
-    p.reversible_cost_layers["衰老"] = 2
+    p.reversible_cost_layers["血限"] = 2
     restored = e._deserialize_entity_full(e._serialize_entity_full(p))
-    assert restored.reversible_cost_layers == {"衰老": 2}
+    assert restored.reversible_cost_layers == {"血限": 2}
     assert restored.refundable_daowen()[0].dao_wen.name == "固执"
     assert restored.refundable_daowen()[0].cooldown_remaining == 3
 
@@ -138,7 +138,7 @@ def test_dianjin_ally_purification_amnesia_loop_is_blocked():
     assert ally.actions_used_this_round == 0
 
 
-@pytest.mark.parametrize("kind", ["流血", "失忆", "冷却", "唯一", "法力"])
+@pytest.mark.parametrize("kind", ["生命", "失忆", "冷却", "唯一", "法力"])
 def test_non_numeric_cost_types_are_rejected_by_calculator(kind):
     with pytest.raises(ValueError, match="仅支持数值类代价"):
         DaoWenEngine.resolve("净化", 1, cost_choices=[{"type": kind}])

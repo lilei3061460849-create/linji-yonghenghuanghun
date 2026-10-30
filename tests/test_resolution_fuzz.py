@@ -51,6 +51,8 @@ ENGINES = 12
 FUZZ_CASES = max(1000, int(os.environ.get("LJ_FUZZ_CASES", "2000")))
 STEPS_PER_ENGINE = max(10, FUZZ_CASES // ENGINES)
 STEP_TIME_LIMIT = 3.0        # 单步墙钟上限（秒）：终止性证据
+# 测试监听器不是游戏内资源；轮换保留20个，避免测试装置无限累积后自行撞生产保险丝。
+MAX_ACTIVE_FUZZ_MECHANISMS = 20
 
 DAOWEN_POOL = ["杀伐", "再生", "庇护", "连击", "坠落", "透支", "分裂", "压制",
                "贯穿", "增殖", "变形", "迷失", "焦热", "咆哮"]
@@ -162,8 +164,8 @@ def _op_split(engine, rng):
     if not monsters:
         return {"action": "split", "result": "no_target"}
     caster = rng.choice(monsters)
-    clones = engine.combat._spawn_fenlie_clones(caster, rng.choice([1, 2, 3]), 3)
-    return {"action": "split", "clones": len(clones), "result": "ok"}
+    creation = engine.combat._spawn_fenlie_creations(caster, 1)[0]
+    return {"action": "split", "creations": 1, "name": creation.name, "result": "ok"}
 
 
 def _op_evolve(engine, rng):
@@ -236,6 +238,8 @@ def _run_fuzz(engine, rng, steps: int, log: dict):
     for step in range(steps):
         _refill(engine)
         if rng.random() < 0.25:                 # 随机挂一个触发机制
+            if len(mechanisms) >= MAX_ACTIVE_FUZZ_MECHANISMS:
+                engine.combat.mechanism_bus.unregister(mechanisms.pop(0))
             mechanism = _make_random_mechanism(rng, log["mechanisms"])
             engine.combat.mechanism_bus.register(mechanism)
             mechanisms.append(mechanism)

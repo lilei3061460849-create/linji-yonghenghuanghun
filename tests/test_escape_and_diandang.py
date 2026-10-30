@@ -30,7 +30,7 @@ def _new_engine(db_suffix: str) -> GameEngine:
     setup = engine.execute_action("setup_choose_region", {"region": "罪孽都市"})
     engine.execute_action("choose_discovered_relic",
                           {"relic_name": setup["result"]["relic_choices"][0]})
-    engine.state.relics = []   # 开局随机遗物与本文件断言无关，清空钉死环境
+    engine.state.relics.clear()   # 保留列表身份，让死者之页绑定同步看到空遗物栏
     engine.state.energy = 3
     return engine
 
@@ -116,7 +116,9 @@ def test_diandang_x2_forgets_4_and_pends_2_groups_with_capacity_gate():
     """正常+边界：典当X=2 失忆4种、pending 两组；承载满时拒收不消费，腾额后可重试。"""
     engine = _new_engine("dd2")
     player = engine.state.player
-    assert player.daowen_capacity == 2   # 血限66 → 2种
+    # 现行承载按死者之页计算，与血限无关；用2页小预算构造满载边界。
+    player.death_page_count = 2
+    assert player.daowen_capacity == 2
     _grant(engine, ["典当", "庇护", "再生", "束缚"])   # 连初始杀伐共5种
     assert len(player.dao_wen) == 5
     m = Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100)
@@ -145,8 +147,8 @@ def test_diandang_x2_forgets_4_and_pends_2_groups_with_capacity_gate():
     assert "承载" in r3["error"]
     assert len(engine.state.pending_diandang_discoveries) == 1
 
-    # 血限提升腾出额度后重试成功
-    player.blood_limit = 120
+    # 增加一张死者之页腾出额度后重试成功。
+    player.death_page_count = 3
     r4 = engine.execute_action("choose_diandang_daowen", {"daowen_name": second})
     assert r4["success"], r4
     assert second in player.dao_wen

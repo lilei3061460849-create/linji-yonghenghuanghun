@@ -453,9 +453,9 @@ def _blood_lineage_effect(ctx: TriggerContext, targets: list) -> dict:
             "tags": {"relic", "round_end"}})
         return {"type": "blood_lineage_heal", "entity": entity.name,
                 "amount": detail["actual_heal"], "heal_ctx": detail.get("heal_ctx")}
-    # 2026-10-13 用户裁定：自动流血付不起照扣，正常命零，不报错中断回终。
+    # 2026-10-13 用户裁定：自动生命支付付不起照扣，正常命零，不报错中断回终。
     payment = apply_verb(ctx.combat, "cost", {
-        "payer": entity, "cost_type": "流血", "amount": 20, "forced": True,
+        "payer": entity, "cost_type": "生命", "amount": 20, "forced": True,
         "cost_share_target_ref": (ctx.picks.get("blood_lineage_cost_share_target_ref", "")
                                   if entity is ctx.state.player else ""),
         "cost_context": {"timing": "round_end", "source": "血族血脉", "source_type": "relic", "tags": {"automatic"}}})

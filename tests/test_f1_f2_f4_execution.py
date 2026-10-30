@@ -60,12 +60,15 @@ def test_zengzhi_cast_pays_aging_without_pending():
 def test_zengzhi_settles_at_battle_end_and_stacks():
     engine = _setup()
     player = engine.state.player
+    from engine.models import StatusEffect
+    player.add_status(StatusEffect(name="疯狂", value=1, remaining_rounds=-1, source="test"))
     _grant(engine, ["增殖"])
     f = Entity("友", "朋友", blood_limit=30, current_hp=30)
     engine.state.friends = [f]
     m = _add_monster(engine)
     assert engine.execute_action(
         "use_daowen", {"daowen_name": "增殖", "x": 1, "target_ref": "friend:0"})["success"]
+    assert engine.execute_action("skip", {"actor_ref": "enemy:0"})["success"]
     assert engine.execute_action(
         "use_daowen", {"daowen_name": "增殖", "x": 2, "target_ref": "friend:0"})["success"]
     m.is_alive = False
@@ -108,12 +111,12 @@ def test_zengzhi_pending_void_on_escape():
     engine = _setup()
     _grant(engine, ["增殖"])
     _add_monster(engine)
+    from engine.models import StatusEffect
+    engine.state.player.add_status(StatusEffect(name="疯狂", value=5, remaining_rounds=-1, source="test"))
     assert engine.execute_action(
         "use_daowen", {"daowen_name": "增殖", "x": 1, "target_ref": "enemy:0"})["success"]
     assert "zengzhi_pending" not in engine.state.event_modifiers
-    from engine.models import StatusEffect
-    engine.state.player.add_status(StatusEffect(name="疯狂", value=4, remaining_rounds=-1, source="test"))
-    engine.state.player.actions_used_this_round = 0
+    assert engine.execute_action("skip", {"actor_ref": "enemy:0"})["success"]
     esc = engine.execute_action("declare_escape", {})
     assert esc["success"], esc
     assert "zengzhi_pending" not in engine.state.event_modifiers
@@ -169,12 +172,13 @@ def test_touzhi_aging_channel_costs_blood_limit():
     assert player.current_mana == 1
 
 
-def test_touzhi_exhaust_channel_costs_mana_limit():
-    """正常路径：枯竭通道 枯竭X → X法力。"""
+def test_touzhi_exhaust_channel_registers_next_battle_mana_loss():
+    """正常路径：枯竭通道登记下一次战始法力-X，本次获得的X法力仍到账。"""
     engine, player, snap, r = _cast_touzhi("枯竭")
     assert r["success"], r
-    assert player.mana_limit == snap["ml"] - 1
-    assert player.current_mana == 1  # 先扣法限再涨法力，1 点仍到账
+    assert player.mana_limit == snap["ml"]
+    assert player.pending_exhaust_mana == 1
+    assert player.current_mana == 1
 
 
 def test_touzhi_fatigue_channel_costs_speed():
@@ -216,16 +220,16 @@ def test_touzhi_rejects_illegal_channel_whole_cast():
 
 
 def test_touzhi_fatigue_channel_cannot_outpace_chaopin():
-    """核心约束（原【搏命】永动护栏）：透支·疲惫 + 超频的闭环必须净亏速度。
+    """核心约束（原【搏命】永动护栏）：透支·速度 + 超频的闭环必须净亏速度。
 
-    倍率 k=1（疲惫X→X法力）：卖 X 速度得 X 法力，经超频买回 X/2 速度，
+    倍率 k=1（速度X→X法力）：卖 X 速度得 X 法力，经超频买回 X/2 速度，
     净变化恒负，不得永动。改倍率前先看这条。
     """
     from engine.daowen import DaoWenEngine
     DaoWenEngine.register_all()
     for x in (1, 2, 4, 8):
-        sold = DaoWenEngine.resolve("透支", x, target=None, caster=None, cost_channel="疲惫")
-        assert sold["cost_type"] == "疲惫" and sold["cost_speed"] == x
+        sold = DaoWenEngine.resolve("透支", x, target=None, caster=None, cost_channel="速度")
+        assert sold["cost_type"] == "速度" and sold["cost_speed"] == x
         assert sold["mana_gain"] == x
         mana = sold["mana_gain"]
         bought = 0
@@ -233,7 +237,7 @@ def test_touzhi_fatigue_channel_cannot_outpace_chaopin():
                                    caster=None)["cost"] <= mana:
             bought += 1
         net = bought - sold["cost_speed"]
-        assert net < 0, (f"透支·疲惫{x}卖{sold['cost_speed']}速度换{mana}法力，"
+        assert net < 0, (f"透支·速度{x}卖{sold['cost_speed']}速度换{mana}法力，"
                          f"经超频买回{bought}速度，净{net:+d}——非负即可无限永动")
 
 
@@ -316,7 +320,7 @@ def test_ganshi_bell_summons_two_and_dissolves_at_battle_end():
     assert r["success"], r
     assert [(t.blood_limit, t.attack_power, t.attack_count) for t in engine.state.temp_friends] == [
         (36, 1, 4), (36, 1, 4)]
-    assert all(t.entity_type == "临时朋友" for t in engine.state.temp_friends)
+    assert all(t.entity_type == "造物" for t in engine.state.temp_friends)
     engine.state.enemies[0].is_alive = False
     engine.state.enemies = []
     assert engine.execute_action("battle_end", {})["success"]
@@ -365,7 +369,9 @@ def test_huangfu_imprint_and_deliver_and_command_cast():
     assert r["success"], r
     assert m.current_hp < 100
     assert f.current_mana == 8  # 1黄符能源 + 1杀伐步骤消耗
-    assert "杀伐" not in f.dao_wen  # 临时授予已收回
+    assert "杀伐" in f.dao_wen  # 最后空档尚未结束，暂停栈仍保留临时授予
+    assert engine.execute_action("skip", {"actor_ref": "enemy:0"})["success"]
+    assert "杀伐" not in f.dao_wen  # 施法结束后临时授予已收回
 
 
 def test_huangfu_rejects_unlearned_reactive_and_double_imprint():

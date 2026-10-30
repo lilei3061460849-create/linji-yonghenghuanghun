@@ -8,9 +8,7 @@
 2. 只豁免法力——当前生命/当前速度仍受上限约束（不得顺手放开另外两项）；
 3. 不持有者照旧被钳制（这条全局钳制是 2026-09-13 的用户裁定，不能被本遗物削弱）；
 4. 遗物被封存时豁免同时失效（`CombatEngine.mana_overflow_exempt` 读 `sealed_relics`）；
-5. 豁免不只作用于全局钳制，也作用于**代价路径**：【枯竭】压低[法限]时不得连带削掉溢出
-   （`engine/combat_parts/cost_payment.py` 与 `clamp_immortal_body` 共用同一条判定，
-   避免两处各写一份而漂移）。
+5. 【枯竭】只登记下一次[战始]的当前法力损失，不压低法限，也不在支付时削掉溢出法力。
 """
 from __future__ import annotations
 
@@ -81,16 +79,20 @@ def test_mana_overflow_exempt_is_a_single_shared_predicate():
     assert combat_bare.mana_overflow_exempt(player_bare) is False
 
 
-def test_kujie_cost_does_not_eat_the_overflow_for_holders():
-    """代价路径：【枯竭】压低[法限]后，持有者的溢出法力保留（非持有者照旧被削）。"""
+def test_kujie_cost_defers_mana_loss_without_changing_mana_limit():
+    """支付只登记待扣额度；下一次战始扣当前法力，持有者的溢出同样只减4。"""
     _, combat, player = _arena(relic=True)
     player.current_mana = 25          # 溢出 15
     combat.pay_numeric_cost(player, "枯竭", 4)
-    assert player.mana_limit == 6, f"法限应降到6，实际 {player.mana_limit}"
-    assert player.current_mana == 25, f"溢出应保留，实际 {player.current_mana}"
+    assert player.mana_limit == 10
+    assert player.current_mana == 25
+    assert player.pending_exhaust_mana == 4
+    combat.settle_battle_start_exhaust()
+    assert (player.current_mana, player.mana_limit) == (21, 10)
 
     _, combat_bare, player_bare = _arena(relic=False)
     player_bare.current_mana = 10
     combat_bare.pay_numeric_cost(player_bare, "枯竭", 4)
-    assert player_bare.mana_limit == 6
-    assert player_bare.current_mana == 6, f"非持有者仍被削到法限，实际 {player_bare.current_mana}"
+    assert (player_bare.current_mana, player_bare.mana_limit) == (10, 10)
+    combat_bare.settle_battle_start_exhaust()
+    assert (player_bare.current_mana, player_bare.mana_limit) == (6, 10)

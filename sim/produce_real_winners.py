@@ -163,11 +163,17 @@ def _resolve_monster_turn_with_spells(engine):
     prepared = engine.execute_action("prepare_monster_phase", {})
     if not prepared.get("success"):
         return prepared
+    if prepared.get("result", {}).get("token") is None:
+        return prepared  # 整方无合法行动，API已按【跳过】结束敌方回合
     choices = []
     dodge_budget = 0
     refs = engine.combat._combat_entity_refs()
     player_ref = "player:0"
-    for actor in prepared["result"]["actors"]:
+    actors = [actor for actor in prepared["result"]["actors"]
+              if actor["daowen_options"] or actor["base_attack_actions"] > 0]
+    actors.sort(key=lambda actor: 0 if actor["daowen_options"] else 1)
+    # 交替出手：每次只选择一个怪物的一个行动；道纹与攻击不再打包。
+    for actor in actors[:1]:
         dao = None
         action_count = actor["base_attack_actions"]
         hit_count = actor["base_hits_per_attack"]
@@ -184,6 +190,7 @@ def _resolve_monster_turn_with_spells(engine):
                 dao["dodge_targets"] = pick_wave_dodge_targets(option)
             # Use the hit count from prepare_monster_phase. Attack power is damage,
             # not the number of hit choices required by the engine.
+            action_count = 0  # 本次已选择道纹，不再同时提交攻击
         monster = refs.get(actor["actor_ref"])
         per_hit = monster.attack_power if monster is not None else 0
         target_ref = choose_attack_target(actor["attack_target_options"], refs)
@@ -221,7 +228,7 @@ def _resolve_monster_turn_with_spells(engine):
         return result
     # 原子失败后兜底：退回不触发法术（与 build_learner 一致），避免把可继续的模拟误记为异常
     fallback = []
-    for actor in prepared["result"]["actors"]:
+    for actor in actors[:1]:
         dao = None
         hit_count_fb = actor["base_hits_per_attack"]
         if actor["daowen_options"]:
@@ -242,7 +249,7 @@ def _resolve_monster_turn_with_spells(engine):
             "target_ref": target_ref, "dodge": False, "blood_shadow": False,
             "spell_choices": _decline_spells(target_option),
         } for _ in range(hit_count_fb)]}
-            for _ in range(actor["base_attack_actions"])]
+            for _ in range(0 if dao is not None else actor["base_attack_actions"])]
         fallback.append({"actor_ref": actor["actor_ref"], "daowen": dao,
                          "attack_actions": attacks})
     fallback.sort(key=lambda choice: 0 if "dodge_targets" in (choice.get("daowen") or {}) else 1)

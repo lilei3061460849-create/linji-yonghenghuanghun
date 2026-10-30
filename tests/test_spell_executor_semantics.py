@@ -53,6 +53,10 @@ def _daowen_sequence(execution):
     return [r.daowen for r in execution.results]
 
 
+def _shelter_charges(entity):
+    return sum(s.value for s in entity.status_effects if s.name == "庇护" and not s.is_expired)
+
+
 # ---------------------------------------------------------------------------
 # IF：执行期求值
 # ---------------------------------------------------------------------------
@@ -77,7 +81,8 @@ def test_if_is_evaluated_when_reached_not_precomputed():
     execution2 = _cast(combat2, player2, enemy2, flow,
                        [{"x": 1}, {"x": 1, "dodge": False}, {"x": 2}])
     assert _daowen_sequence(execution2) == ["再生", "庇护"]
-    assert player2.shield > 0 and enemy2.current_hp == 100
+    assert player2.shield == 0 and _shelter_charges(player2) == 2
+    assert enemy2.current_hp == 100
 
 
 def test_nested_if_is_evaluated_at_runtime():
@@ -91,7 +96,8 @@ def test_nested_if_is_evaluated_at_runtime():
                       [{"x": 3}, {"x": 1, "dodge": False}, {"x": 2}, {"x": 2}])
     # 生命 62>60 → 进则分支；再生3 把法力 5 花到 2 → 内层"法力大于2"为假 → 庇护
     assert _daowen_sequence(execution) == ["再生", "庇护"]
-    assert player.shield > 0 and enemy.current_hp == 100
+    assert player.shield == 0 and _shelter_charges(player) == 2
+    assert enemy.current_hp == 100
 
 
 def test_loop_re_evaluates_condition_every_round():
@@ -152,7 +158,7 @@ def test_loop_stops_when_caster_has_no_resource_left():
     assert [r.status for r in execution.results] == [
         StepStatus.COMPLETED, StepStatus.COMPLETED, StepStatus.INTERRUPTED]
     assert execution.results[-1].reason == InterruptReason.MANA_INSUFFICIENT
-    assert player.shield == 4  # 两次庇护的成果保留
+    assert player.shield == 0 and _shelter_charges(player) == 2  # 两次X=1的免疫次数保留
 
 
 # ---------------------------------------------------------------------------
@@ -234,29 +240,30 @@ def test_event_path_applies_silence_mask_to_step():
     assert player.current_hp == 60  # 没有流血代价
 
 
-def test_event_path_pays_xiaozai_shard_cost_and_interrupts_when_short():
-    """消灾X 的碎片代价在事件型法术步骤里同样支付/拦截。"""
+def test_event_path_pays_lianji_fake_shard_cost_and_interrupts_when_short():
+    """连击假碎片通道在事件型法术步骤里同样支付/拦截。"""
     state, combat, player, enemy = _state(player_hp=60, mana=20)
     state.fake_shards = 0
     state.shards = 0
-    _give(player, "消灾")
-    player.spells.append(Spell(name="消灾", required_daowen=["消灾"],
-                               trigger_condition="失去生命后", effect_flow="发动消灾X于自身"))
+    _give(player, "连击")
+    player.spells.append(Spell(name="连击", required_daowen=["连击"],
+                               trigger_condition="失去生命后", effect_flow="发动连击X于攻击者"))
     refs = combat._combat_entity_refs()
+    decision = {"use": True, "steps": [{
+        "x": 1, "target_ref": "enemy:0", "cost_channel": "假碎片", "dodge": False,
+    }]}
     logs = combat._resolve_spell_reactions(
-        "失去生命后", player, enemy,
-        {"消灾": {"use": True, "steps": [{"x": 1, "target_ref": "player:0"}]}}, refs)
-    entry = next(lg for lg in logs if lg.get("spell") == "消灾")
+        "失去生命后", player, enemy, {"连击": decision}, refs)
+    entry = next(lg for lg in logs if lg.get("spell") == "连击")
     assert entry["interrupted"] == InterruptReason.SHARDS_INSUFFICIENT.value
-    assert combat.dice.rerolls_pending == 0
+    assert enemy.current_hp == 100
 
     state.fake_shards = 60
     logs2 = combat._resolve_spell_reactions(
-        "失去生命后", player, enemy,
-        {"消灾": {"use": True, "steps": [{"x": 1, "target_ref": "player:0"}]}}, refs)
-    assert any(lg.get("spell") == "消灾" and lg.get("execution") for lg in logs2)
+        "失去生命后", player, enemy, {"连击": decision}, refs)
+    assert any(lg.get("spell") == "连击" and lg.get("execution") for lg in logs2)
     assert state.fake_shards == 10
-    assert combat.dice.rerolls_pending == 1
+    assert enemy.current_hp == 95
 
 
 def test_event_path_flight_blocks_step_with_explicit_reason():
@@ -291,7 +298,8 @@ def test_multiple_independent_reactions_on_one_event():
     }, refs)
     assert any(lg.get("spell") == "自愈" and lg.get("execution") for lg in logs)
     assert any(lg.get("spell") == "加固" and lg.get("execution") for lg in logs)
-    assert player.current_hp == 64 and player.shield == 2
+    assert player.current_hp == 64 and player.shield == 0
+    assert _shelter_charges(player) == 1
 
 
 def test_reaction_resolution_does_not_chain_into_itself():
@@ -348,11 +356,13 @@ def test_same_interruption_reason_and_detail_as_use_daowen():
     engine.state.relics.clear()
     engine.state.fake_shards = 0
     engine.state.shards = 0
-    _give(player, "消灾")
+    _give(player, "连击")
     direct2 = engine.execute_action("use_daowen", {
-        "daowen_name": "消灾", "x": 1, "target_ref": "player:0"})
-    assert not direct2["success"] and "碎片不足" in direct2["error"]
+        "daowen_name": "连击", "x": 1, "target_ref": "enemy:0",
+        "lianji_cost": "假碎片", "dodge": False})
+    assert not direct2["success"] and "无法完整承担假碎片50" in direct2["error"]
     execution2 = _cast(engine.combat, player, engine.state.enemies[0],
-                       "发动消灾X于自身", [{"x": 1}], target=None)
+                       "发动连击X于目标",
+                       [{"x": 1, "cost_channel": "假碎片", "dodge": False}], target=None)
     assert execution2.results[0].reason == InterruptReason.SHARDS_INSUFFICIENT
-    assert "碎片不足" in execution2.results[0].detail
+    assert "无法完整承担假碎片50" in execution2.results[0].detail

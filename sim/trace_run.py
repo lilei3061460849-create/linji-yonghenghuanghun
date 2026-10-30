@@ -181,7 +181,7 @@ def run_one(seed):
             killn += 1  # 简化：本场怪均视为击杀计碎片（雕塑等移出路径不产）
             reward += math.ceil(d["hp"]*0.02) + len(d["dw"])*5
         shards += reward
-        log.append(f"  [战终] 碎片+{reward}(基础)→共{shards}；速度复原；精力回3；临时朋友消散。贾凡HP{p.current_hp}/{p.blood_limit}\n")
+        log.append(f"  [战终] 碎片+{reward}(基础)→共{shards}；速度复原；精力回3；造物消散。贾凡HP{p.current_hp}/{p.blood_limit}\n")
     log.append(f"【通关】贾凡历经7场，完成一阶罪孽都市！遗物：{relics}，结余碎片{shards}，终态HP{p.current_hp}/{p.blood_limit}")
     return log, True, 8
 

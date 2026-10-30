@@ -65,17 +65,30 @@ class EffectPolarity(Enum):
 
 
 class CostType(Enum):
-    """代价类型"""
-    MANA = "消耗"           # 法力消耗
-    BLEED = "流血"          # 失去X点生命
-    AGING = "衰老"          # 失去X点血限
-    EXHAUST = "枯竭"        # 失去X点法限
-    SHRINK = "萎缩"         # 失去X点速限
-    FATIGUE = "疲惫"        # 失去X点当前速度
+    """支付类型。资源直接写资源名；只有特殊机制保留独立代价名。"""
+    MANA = "消耗"           # 法力资源支付（兼容既有 calc 标记）
+    BLEED = "生命"          # 当前生命-X（旧名：流血）
+    AGING = "血限"          # 血限-X（旧名：衰老）
+    EXHAUST = "枯竭"        # 下一次[战始]当前法力-X
+    SHRINK = "法限"         # 法限-X（旧名：萎缩，旧效果为速限-X）
+    FATIGUE = "速度"        # 当前速度-X（旧名：疲惫）
+    SPEED_LIMIT = "速限"    # 速限-X
     AMNESIA = "失忆"        # 永久失去X种道纹
     MUTATION = "异变"       # 获得X层异变(怪物)
     COOLDOWN = "冷却"       # 冷却X场
-    UNIQUE = "唯一"         # 本次轮回只能用一次
+
+
+RESOURCE_TYPES = frozenset({"生命", "血限", "法力", "法限", "速度", "速限", "碎片", "假碎片"})
+OUT_OF_COMBAT_RESOURCE_TYPES = frozenset({"精力", "耐久", "残韵", "属性点"})
+SPECIAL_COST_TYPES = frozenset({"枯竭", "失忆", "异变", "冷却"})
+LEGACY_COST_ALIASES = {
+    "流血": "生命", "衰老": "血限", "疲惫": "速度", "萎缩": "法限",
+}
+
+
+def normalize_payment_type(name: str) -> str:
+    """读取旧存档/旧调用时迁移支付类型，不让旧别名重新进入现行规则。"""
+    return LEGACY_COST_ALIASES.get(name, name)
 
 
 class InterruptType(Enum):
@@ -103,4 +116,13 @@ class EntityType(Enum):
     MONSTER = "怪物"
     FRIEND = "朋友"
     EMPLOYEE = "员工"
-    TEMP_FRIEND = "临时朋友"
+    CREATION = "造物"
+    # 兼容旧代码可能引用的枚举成员名；新实体与新文案统一使用 CREATION。
+    TEMP_FRIEND = "造物"
+
+    @classmethod
+    def _missing_(cls, value):
+        # 旧存档若以枚举值保存“临时朋友”，读入时归一为“造物”。
+        if value == "临时朋友":
+            return cls.CREATION
+        return None

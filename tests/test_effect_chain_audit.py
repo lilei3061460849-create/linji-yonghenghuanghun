@@ -26,6 +26,7 @@ from engine.combat_hooks import (
     AfterDamageEffectsHook,
 )
 from engine.dice import DiceEngine
+from engine.daowen import DaoWenEngine
 from engine.enums import EffectPolarity
 from engine.mechanisms import MECHANISMS, MechanismHookAdapter
 from engine.models import Entity, GameState, Relic, StatusEffect
@@ -137,16 +138,18 @@ def test_b_lethal_reflect_death_is_traceable():
 # ==================== C. 三层链：道纹 → 血限变化 → 命零 ====================
 
 def test_c_three_layer_chain_daowen_blood_limit_death():
-    """瓦解100%：道纹结算 → 血限归零 → 生命归零 → 统一命零，父链连续。"""
+    """通用道纹血限字段：结算 → 血限归零 → 生命归零 → 统一命零，父链连续。"""
     _, combat, player, enemy = _arena(enemy_hp=20, enemy_bl=20)
 
-    result = combat.apply_daowen_effect("瓦解", {"x": 10, "blood_limit_pct": 100}, player, enemy)
+    # 直接注入通用效果字段，只审计结算管线；不再假借已删除的【瓦解】。
+    result = combat.apply_daowen_effect(
+        "测试道纹", {"x": 10, "blood_limit_reduction": 20}, player, enemy)
 
     root_id = result["daowen_ctx"]["event_id"]
     bl_events = enemy._blood_limit_events
     assert len(bl_events) == 1
     assert bl_events[0]["mechanic"] == "blood_limit_change"
-    assert bl_events[0]["source"] == "瓦解"
+    assert bl_events[0]["source"] == "测试道纹"
     assert bl_events[0]["parent_event_id"] == root_id, "第二层必须指向道纹结算"
 
     assert enemy.blood_limit == 0 and enemy.current_hp == 0
@@ -339,7 +342,7 @@ def test_e_non_monster_lost_still_uses_unified_death():
 def test_f_hook_order_is_explicit_and_unchanged():
     """priority 只是把重构前的字面顺序固化，绝不允许改动相对次序。
 
-    【加害】【龙鳞】均已迁移为声明式 Mechanism（priority 20/30），经
+    【加害】【叠鳞甲】均已迁移为声明式 Mechanism（priority 20/30），经
     MechanismHookAdapter 挂在原位置执行——本测试同时钉死"迁移不改变顺序"。
     """
     manager = CombatHookManager()
@@ -347,7 +350,7 @@ def test_f_hook_order_is_explicit_and_unchanged():
     assert order == [
         "MechanismHookAdapter",  # 龙族血脉乘区（priority 10）
         "MechanismHookAdapter",  # 【加害】迁移后：原 JiahaiHook 位置（priority 20）
-        "MechanismHookAdapter",  # 【龙鳞】迁移后：原 LonglinHook 位置（priority 30）
+        "MechanismHookAdapter",  # 【叠鳞甲】：原 LonglinHook 位置（priority 30）
         "MechanismHookAdapter",  # 【固执】也接入同一伤害相位（priority 40）
         "QianjingjiaHook",
         "BifenglingHook",
@@ -359,33 +362,27 @@ def test_f_hook_order_is_explicit_and_unchanged():
     assert priorities == sorted(priorities)
     adapter_priorities = [h.priority for h in manager.hooks()
                           if isinstance(h, MechanismHookAdapter)]
-    assert adapter_priorities == [10, 20, 30, 40], "加害(20)先于龙鳞(30)，固执(40)位于其后"
+    assert adapter_priorities == [10, 20, 30, 40], "加害(20)先于叠鳞甲(30)，固执(40)位于其后"
 
 
-def test_f_jiahai_before_longlin_is_rule_relevant():
-    """钉死顺序敏感性：反过来结算会得到不同伤害。"""
+def test_f_jiahai_and_dielinjia_fixed_arithmetic():
+    """固定加害与叠鳞甲仍按20/30执行；正数伤害下 +2/-1 的结果可交换。"""
     manager = CombatHookManager()
-
-    class _State:
-        def side_has(self, entity, name):
-            return False
-
+    state = GameState()
     target = Entity("T", "怪物", blood_limit=50, current_hp=50)
     target.add_status(StatusEffect("加害", value=2, remaining_rounds=-1, source="x"))
-    target.add_status(StatusEffect("龙鳞", value=8, remaining_rounds=-1, source="x"))
+    target.relics.append(Relic("叠鳞甲", ""))
 
     adapters = [h for h in manager.hooks() if isinstance(h, MechanismHookAdapter)]
     jiahai_adapter = next(a for a in adapters if a.mechanism.name == "加害")
-    longlin_adapter = next(a for a in adapters if a.mechanism.name == "龙鳞")
+    armor_adapter = next(a for a in adapters if a.mechanism.name == "叠鳞甲")
 
-    # 输入 5：加害先结算为 7，再被龙鳞削至 0。
-    assert manager.apply_incoming_adjust(target, 5, "普通", None, _State()) == 0
-    # 反过来先结算龙鳞，5 被压到 0；加害仍会继续调整中间值，结果为 2。
-    # 这同时钉死“中间值归零不短路后续状态”的现行语义。
+    # 输入 8：加害先结算为 10，再由叠鳞甲固定减1为9。
+    assert manager.apply_incoming_adjust(target, 8, "普通", None, state) == 9
     reversed_result = jiahai_adapter.on_incoming_adjust(
-        target, longlin_adapter.on_incoming_adjust(target, 5, "普通", None, _State()),
-        "普通", None, _State())
-    assert reversed_result == 2
+        target, armor_adapter.on_incoming_adjust(target, 8, "普通", None, state),
+        "普通", None, state)
+    assert reversed_result == 9
 
 
 def test_f_register_hook_respects_priority():
@@ -698,6 +695,7 @@ def test_j_purify_negative_mutation_never_collapses():
     """净化（负异变）不得因为 collapsed 判定而误杀。"""
     state, combat, player, enemy = _arena()
     enemy.mutation_count = 20
-    combat.apply_daowen_effect("净化", {"x": 5, "mutation_reduction": 5}, player, enemy)
+    calc = DaoWenEngine.resolve("净化", 5, cost_choices=[{"type": "异变"}])
+    combat.apply_daowen_effect("净化", calc, player, enemy)
     assert enemy.mutation_count == 15 and enemy.is_alive is True
     assert _events(combat, CombatEventType.ENTITY_DIED) == []

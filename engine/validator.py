@@ -370,8 +370,8 @@ class RuleValidator:
                 return {
                     "severity": "warning",
                     "rule_name": "代价致死",
-                    "rule_text": "流血代价导致死亡，需要确认是否有龙心等抵消手段",
-                    "violation_description": f"支付流血代价后死亡",
+                    "rule_text": "生命支付导致死亡，需要确认是否有龙心等抵消手段",
+                    "violation_description": f"支付生命后死亡",
                     "context": {"effect": effect}
                 }
         return None
@@ -460,7 +460,7 @@ class RuleValidator:
             name = action.get("params", {}).get("daowen_name", "")
             if state.player and name in state.player.dao_wen:
                 dw = state.player.dao_wen[name]
-                if dw.is_frozen:
+                if dw.is_frozen or getattr(dw, "ice_frozen", False):
                     return {
                         "severity": "error",
                         "rule_name": "道纹封印",

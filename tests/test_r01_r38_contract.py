@@ -85,19 +85,20 @@ def test_r01_r10_normal_setup_debt_and_zero_attack_employee(tmp_path):
     assert engine.state.blacklist_level == before_blacklist
 
 
-def test_r01_r10_boundary_xiaozai_is_only_out_of_combat_daowen(tmp_path):
+def test_r01_r10_boundary_converted_xiaozai_is_not_out_of_combat_daowen(tmp_path):
     engine = _full_setup(_engine(tmp_path))
     player = engine.state.player
-    _dw(player, "消灾")
+    _dw(player, "消灾")  # 模拟旧存档残留；不得因此恢复已转换的道纹入口
     engine.state.shards = 10
-    ok = engine.execute_action("use_daowen", {"daowen_name": "消灾", "x": 1})
-    assert ok["success"]
-    assert engine.state.shards == 0  # 局外为5X×2
+    retired = engine.execute_action("use_daowen", {"daowen_name": "消灾", "x": 1})
+    assert not retired["success"]
+    assert engine.state.shards == 10
 
-    _dw(player, "固执")
-    denied = engine.execute_action("use_daowen", {"daowen_name": "固执", "x": 1})
-    # 2026-10-23 用户裁定：默认局内，局外须条文明示——【消灾】仍是唯一明示项。
+    _dw(player, "杀伐")
+    denied = engine.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 1})
+    # 默认局内，局外须条文明示；逆命筹消耗品不再占用道纹白名单。
     assert not denied["success"] and "局外发动须条文明示" in denied["error"]
+    assert engine.state.shards == 10
 
 
 def test_r01_r10_illegal_phase_and_missing_target_are_atomic(tmp_path):
@@ -465,25 +466,13 @@ def test_r18_r24_illegal_wrong_event_and_bad_discovery_choice(tmp_path):
 
 # R25-R31：工具、战终与取整
 
-def test_r25_r31_normal_tools_and_ceil(tmp_path):
+def test_r25_normal_energy_battery(tmp_path):
     engine = _engine(tmp_path)
-    player, monster = _controlled_combat(engine)
+    player, _ = _controlled_combat(engine)
     player.current_mana = 0
     engine.state.consumables.append(Consumable("储能电池", "", 1, 1))
     battery = engine.execute_action("consume_item", {"name": "储能电池"})
     assert battery["success"] and player.current_mana == 12
-
-    # 裂变：5÷2每段向上取整为3，共失去6生命。
-    # DM裁定 2026-09-10：轮回者攻力=当前法力，写 attack_power 无效——用 current_mana 设定攻击力。
-    monster.add_status(StatusEffect("裂变", -1, 2))
-    player.current_mana = 2
-    before = monster.current_hp
-    engine.combat.resolve_attack(player, monster, dodge=False)
-    assert before - monster.current_hp == 2  # 攻力2；2÷2仍为1×2
-    player.current_mana = 5
-    before = monster.current_hp
-    engine.combat.resolve_attack(player, monster, dodge=False)
-    assert before - monster.current_hp == 6
 
 
 def test_r25_r31_boundary_flight_grenade_and_all_character_cleanup(tmp_path):

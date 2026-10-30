@@ -425,7 +425,7 @@ class DeepSeekBackend(AIBackend):
 # 遗物 → 它能把哪类代价/资源转化为收益（读效果文本判定，不写死遗物名单）
 _RELIC_SYNERGY_KEYS = (
     ("速度", ("失去1点速度", "失速", "速度归零", "当前速度")),
-    ("流血", ("流血",)),
+    ("生命", ("生命",)),
     ("碎片", ("碎片",)),
     ("残韵", ("残韵",)),
     ("异变", ("异变",)),
@@ -448,7 +448,7 @@ def _relic_synergy_tags(relics) -> set:
 
 
 # 道纹 cost_type → 对应的资源标签（与遗物标签同一命名空间）
-_COST_TO_TAG = {"疲惫": "速度", "流血": "流血", "碎片": "碎片",
+_COST_TO_TAG = {"速度": "速度", "生命": "生命", "碎片": "碎片",
                 "假碎片": "碎片", "异变": "异变"}
 
 
@@ -597,6 +597,24 @@ class PlaceholderBackend(AIBackend):
                                    holder: {spell["spell_name"]: {"use": False} for spell in spells}
                                    for holder, spells in option.get("trigger_spell_options", {}).items()}}
                         if option["requires_target"]: dao["target_ref"] = option["target_options"][0]["ref"]
+                        if option.get("resolves_as") == "冰冻":
+                            ice_schema = option.get("extra_choice_schema", {}).get("freeze_daowen", {})
+                            ice_options = ice_schema.get("options", {}).get(dao.get("target_ref"), [])
+                            # 怪物冷却型道纹固定X=1；prepare已排除0种道纹的目标。
+                            dao["freeze_daowen"] = list(ice_options[:1])
+                        if option.get("resolves_as") in {"流动", "遗忘"}:
+                            extra_schema = option.get("extra_choice_schema", {})
+                            status_options = extra_schema.get("status_indices", {}).get("options", {})
+                            dao["status_indices"] = {
+                                ref: [entry["index"] for entry in entries[:int(option.get("x", 1))]]
+                                for ref, entries in status_options.items()
+                            }
+                            if option.get("resolves_as") == "流动":
+                                destination_options = extra_schema.get("flow_target_ref", {}).get(
+                                    "options", {}).get(dao.get("target_ref"), [])
+                                if not destination_options:
+                                    raise ValueError("流动prepare没有可用接收目标")
+                                dao["flow_target_ref"] = destination_options[0]
                         if option["dodge_submission"] == "per_target":
                             # 波及X：必须恰好提交X个目标（候选全量提交会在候选>X时被拒）。
                             dao["dodge_targets"] = pick_wave_dodge_targets(option)

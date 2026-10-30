@@ -1,9 +1,9 @@
 {
   "name": "续命",
   "category": "道纹",
-  "uniqueness": "现有再生固定 4X 回复；续命以流血为代价换 2X 回复，属于自伤换续航，且 X 同时抬高代价与回复。",
-  "summary": "流血 X，为[目标]回复 2X",
-  "cost": {"type": "流血", "amount": "X"},
+  "uniqueness": "现有再生固定 4X 回复；续命以生命为代价换 2X 回复，属于自伤换续航，且 X 同时抬高代价与回复。",
+  "summary": "生命 X，为[目标]回复 2X",
+  "cost": {"type": "生命", "amount": "X"},
   "target": "target",
   "out_of_combat": false,
   "effects": [

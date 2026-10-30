@@ -30,7 +30,8 @@ INDEX = ROOT / "全道纹索引.md"
 def test_daowen_index_is_up_to_date_with_the_engine():
     """索引必须等于当前生成器输出；漏重生成即为失败。"""
     index_text = INDEX.read_text(encoding="utf-8")
-    assert "当前索引收录道纹（39种）" in index_text
+    assert "当前索引收录道纹（51种）" in index_text
+    assert "（含3种尚未接入运行时的草案节点）" in index_text
     assert "（反转）→？？（反向）" in index_text
     assert "（反转）→加害（反向）" not in index_text
     if not INDEX.exists():
@@ -54,7 +55,7 @@ def test_generator_has_no_notes_for_deleted_daowen():
     """
     # 草案道纹：规则已写进副本文档、但刻意不接入运行时，因此不在引擎注册表里。
     # 这类条目是"规划中"，不是"已删除"，不算漂移（见生成器「未实现（荒疫古城·1）」段：
-    # 「感染/出土/篡改/尘封/催化/重演/原初等草案道纹，均不在当前版本引擎内」）。
+    # 「感染/重演/原初等草案道纹，均不在当前版本引擎内」）。唯一已替换尘封并接入。
     DRAFT_ONLY = {"原初"}
 
     src = GEN.read_text(encoding="utf-8")

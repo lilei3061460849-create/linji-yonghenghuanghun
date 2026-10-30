@@ -27,7 +27,7 @@ ALLY_SUGGESTIONS: dict[str, str] = {
     "hold": "guard",         # 原地待命（= 守卫当前格）
 }
 
-# 关系基础采纳率：临时朋友是被胁迫来的，听话程度最低。
+# 关系基础采纳率：造物是被胁迫来的，听话程度最低。
 ALLY_BASE_ACCEPTANCE: dict[str, int] = {
     "friend": 65,
     "employee": 55,
@@ -48,7 +48,7 @@ def suggestion_acceptance_percent(
 
     这是**建议**不是命令：玩家提交的只是意向，是否照做由本单位按自身处境判定。
     影响因素都是单位自己能感知的事实：
-      * 关系基础值（朋友 > 员工 > 临时朋友）；
+      * 关系基础值（朋友 > 员工 > 造物）；
       * 自身伤势：健康照做，重伤先自保；
       * 建议与其当前行为一致 → 顺水推舟；
       * 玩家的处境：队长快死了，跟着他没好处；
@@ -278,10 +278,10 @@ class WorldActorState:
     alive: bool = True
     faction: str = "neutral"
     mode: str = "autonomous"
-    # 造物行为模式：explore=自主探索，follow=跟随主人，guard=守卫指定格。
+    # 妖怪行为模式：explore=自主探索，follow=跟随主人，guard=守卫指定格。
     behavior: str = "explore"
     owner_actor_id: str = ""
-    # 视野半径按上下左右的曼哈顿距离计；造物每次培养提高1。
+    # 视野半径按上下左右的曼哈顿距离计；妖怪读取实体记录的视野范围。
     vision_range: int = 1
     guard_position: Coord | None = None
     # 上一格位置：只用于避免自主单位在障碍前两格来回横跳（见跟随/守卫分支）。
@@ -710,7 +710,7 @@ class WorldState:
                           if p not in occupied]
             if not candidates:
                 continue
-            # 造物可自主探索、跟随主人或守卫指定地点。行为只使用已知主人坐标与本地寻路。
+            # 妖怪可自主探索、跟随主人或守卫指定地点。行为只使用已知主人坐标与本地寻路。
             destination = None
             # 追踪最近亲眼目击的敌对单位，但只使用记忆中的位置；情报超过3回合便失效，
             # 避免NPC凭空读取迷雾里的实时坐标，也避免无限追逐过期目标。
@@ -761,7 +761,7 @@ class WorldState:
             if (destination is None
                     and actor.faction in {"enemy", "friend", "employee", "temp_friend"}
                     and not (self.final_duel_search and actor_id in self.final_duel_finalists)
-                    # 明确指挥造物跟随/守卫时，服从命令优先于自主搜刮资源。
+                    # 明确指挥妖怪跟随/守卫时，服从命令优先于自主搜刮资源。
                     and not (actor.kind in ALLY_KINDS and actor.owner_actor_id
                              and actor.behavior in {"follow", "guard"})):
                 remembered_goals = [
@@ -803,7 +803,7 @@ class WorldState:
                                 self.map.key(pos) in actor.visited_cells,
                                 pos[1], pos[0]))
                         break
-            # 2026-10-24：朋友/员工/临时朋友也上地图自主行动（此前 mode=manual 原地不动）。
+            # 2026-10-24：朋友/员工/造物也上地图自主行动（此前 mode=manual 原地不动）。
             # 玩家只能"建议"，是否照做由单位自己按 `suggestion_acceptance_percent` 判定。
             if (actor.kind in ALLY_KINDS and actor.owner_actor_id):
                 owner = self.actors.get(actor.owner_actor_id)

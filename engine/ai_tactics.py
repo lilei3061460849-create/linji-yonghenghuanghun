@@ -48,7 +48,7 @@ _KIND_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("shield",   ("格挡",)),
     ("control",  ("无法行动", "束缚", "蒙蔽", "无法出手", "攻击次数固定",
                   "强制目标", "缄默", "沉默")),
-    ("debuff",   ("削弱", "受到伤害+", "失去生命", "衰老", "弱化", "退化", "衰减")),
+    ("debuff",   ("削弱", "受到伤害+", "失去生命", "血限", "弱化", "退化", "衰减")),
     ("ramp",     ("重置随机", "获得法力", "法力+")),
     ("buff",     ("获得", "提升", "免疫", "翻倍", "速度+", "血限+")),
     ("damage",   ("伤害",)),
@@ -307,8 +307,8 @@ class TacticalAI:
     def _dmg_at(self, name: str, x: int, target: Optional[str]) -> int:
         """预演指定 X 的实际伤害（事件流 raw_damage 口径），失败返回 0。
 
-        为什么不能用「X=1 单价 × X」外推：伤害公式未必线性。【杀伐】自
-        2026-09-13 起为 X² 点伤害，按 X=1（1 点）线性外推会把斩杀所需 X
+        为什么不能用「X=1 单价 × X」外推：输出公式未必线性。【杀伐】自
+        2026-09-13 起令目标失去 X² 点生命，按 X=1（1 点）线性外推会把斩杀所需 X
         算成实际值的平方倍 —— 收割档因此被「买不起」剪掉，AI 明明一发就能
         打死也不出手。这里对具体 X 直接预演，让事实说话。
         """
@@ -519,7 +519,7 @@ class TacticalAI:
                         kill_x = _kx
                         xs.add(_kx)
                         # 收割档只受「买得起」约束，不受均分预算的 cap 裁剪：
-                        # 超线性伤害（杀伐 X²）下击杀所需 X 常高于 budget_x，
+                        # 超线性失去生命（杀伐 X²）下击杀所需 X 常高于 budget_x，
                         # 被 cap 剪掉就等于 AI 根本看不见「这一发能打死它」。
                         if cost <= 0 or _kx * cost <= self.mana():
                             harvest_cap = max(harvest_cap, _kx)
@@ -529,6 +529,21 @@ class TacticalAI:
                 targets = ([t for t in (self._top_enemy_name(),) if t]
                            if probe.get("target_name") in (None, self._top_enemy_name())
                            else [probe.get("target_name")])
+            if name == "冰冻":
+                refs = self.engine.combat._combat_entity_refs()
+                targets = [target_name for target_name in targets
+                           if any(entity.is_alive and entity.dao_wen and entity.name == target_name
+                                  for entity in refs.values())]
+                if not targets:
+                    continue
+            if name in {"流动", "遗忘"}:
+                refs = self.engine.combat._combat_entity_refs()
+                targets = [target_name for target_name in targets
+                           if any(entity.is_alive and entity.name == target_name
+                                  and any(not status.is_expired for status in entity.status_effects)
+                                  for entity in refs.values())]
+                if not targets:
+                    continue
             xs = sorted((x for x in xs if 1 <= x <= max(harvest_cap, 1)), reverse=True)[:4]
             for t in targets or [None]:
                 for x in xs:
@@ -575,6 +590,29 @@ class TacticalAI:
             if len(candidates) >= x:
                 p["dodge_targets"] = candidates[:x]
                 p["target_ref"] = candidates[0]["target_ref"]
+        if name == "冰冻":
+            target_entity = self.engine.combat._combat_entity_refs().get(p.get("target_ref"))
+            if target_entity is not None:
+                p["freeze_daowen"] = list(target_entity.dao_wen)[:min(x, len(target_entity.dao_wen))]
+        if name in {"流动", "遗忘"}:
+            refs = self.engine.combat._combat_entity_refs()
+            target_entity = refs.get(p.get("target_ref"))
+            if target_entity is not None:
+                p["status_indices"] = {
+                    ref: [index for index, status in enumerate(entity.status_effects)
+                          if not status.is_expired][:x]
+                    for ref, entity in refs.items()
+                }
+                if name == "流动":
+                    wave_target_ids = {id(entity) for entity in
+                                       self.engine.combat._wave_targets(self.player)}
+                    destination_ref = next((ref for ref, entity in refs.items()
+                                            if entity is not target_entity and id(entity) not in wave_target_ids
+                                            and entity.is_alive
+                                            and (entity is self.player
+                                                 or self.engine.combat.is_targetable(self.player, entity))), None)
+                    if destination_ref is not None:
+                        p["flow_target_ref"] = destination_ref
         return p
 
     def _resonance_candidates(self) -> list[tuple[float, dict]]:
@@ -1568,7 +1606,7 @@ def monster_threat(entity) -> int:
     """怪物视角的目标威胁分：物理输出 + 道纹持有加成（引擎可见事实，不查表）。
 
     施法型道纹（cost_type=消耗，如杀伐/庇护/再生）是可反复发动的主动手段，
-    威胁 +10；代价型（异变/冷却/流血等）+4；空 cost_type（纯被动/触发）+0。
+    威胁 +10；代价型（异变/冷却/生命等）+4；空 cost_type（纯被动/触发）+0。
     """
     if entity is None:
         return 0
