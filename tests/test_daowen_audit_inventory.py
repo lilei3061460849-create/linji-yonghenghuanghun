@@ -280,12 +280,16 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
 
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
-        for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
-                       '疑义处理', '坏死禁止回复', '勾魂禁止获得法力',
+        # 正文只留玩法边界与例子；判定指引（按语义判定、疑义处理）搬到《教案-涌现案例.md》附二。
+        for phrase in ('允许：持续规则', '不允许：内嵌触发', '坏死禁止回复', '勾魂禁止获得法力',
                        '共罪分担代价', '波及平分道纹效果',
                        '回终回复生命', '受击后获得法力', '状态结束时再生效'):
             self.assertIn(phrase, rules)
         self.assertNotIn('在事件发生时改写结算的效果，不符合道纹定义', rules)
+        self.assertNotIn('按规则语义而非写法判定', rules, '判定指引不该再写在正文里')
+        lesson = (ROOT / '教案-涌现案例.md').read_text(encoding='utf-8')
+        for phrase in ('按结算语义判定，不按写法判定', '判不清就标待定'):
+            self.assertIn(phrase, lesson)
         # 文本护栏只防止已裁定边界漂移，不是任意效果的自动语义判定器。
 
 
