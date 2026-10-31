@@ -52,10 +52,14 @@ def test_real_slow_duel_reports_resource_timeout_without_a_verdict(tmp_path):
 
     def slow_action():
         calls.append(1)
-        time.sleep(0.03)
+        time.sleep(0.25)
         return True
 
-    result = run_duel_pvp(e, slow_action, use_tactical=False, max_wall_seconds=0.015,
+    # 预算必须大于「进入内层循环之前的那段准备」（回始 start_round 等），
+    # 否则机器一忙，墙钟会抢在第一次出手之前就到点，calls 空、断言假失败
+    # （2026-10-31 全量并行时实测复现）。0.2s 对准备阶段足够宽，慢行动
+    # 0.25s 仍必然越界——断言口径不变：真的执行了慢行动，且只报超时不判胜负。
+    result = run_duel_pvp(e, slow_action, use_tactical=False, max_wall_seconds=0.2,
                           max_rounds=2, max_steps=5)
     assert calls, "必须真的执行慢行动，不只是把墙钟改成零"
     assert result.get("timeout") and result.get("timeout_kind") == "wall_clock", result

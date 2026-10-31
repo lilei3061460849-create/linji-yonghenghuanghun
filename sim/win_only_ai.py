@@ -30,6 +30,45 @@ def _enabled() -> bool:
     return os.environ.get("LJ_WIN_ONLY", "1") != "0"
 
 
+def _frozen(value):
+    """把候选参数冻结成可哈希形态（参数里允许出现列表/字典）。
+
+    【波及】提交 `dodge_targets=[{...}, {...}]`、【冰冻】提交
+    `freeze_daowen=[...]`、【流动/遗忘】提交 `status_indices={ref: [i, ...]}`，
+    这些参数天然是列表或「字典里装列表」。用它们直接拼元组做集合键会
+    `TypeError: unhashable type: 'list'`（2026-10-31 死斗实锤），
+    所以键一律先冻结：dict→按键排序的元组、list/tuple/set→元组。
+    """
+    if isinstance(value, dict):
+        return tuple(sorted(((k, _frozen(v)) for k, v in value.items()),
+                            key=lambda kv: str(kv[0])))
+    if isinstance(value, (list, tuple)):
+        return tuple(_frozen(v) for v in value)
+    if isinstance(value, (set, frozenset)):
+        return tuple(sorted((_frozen(v) for v in value), key=repr))
+    return value
+
+
+def _candidate_key(cand: dict):
+    """提案去重键：动作名 + 冻结后的参数。仅用于「爬梯候选是否已在提案里」。"""
+    return (cand.get("action"), _frozen(cand.get("params") or {}))
+
+
+def _merge_ladder(proposals: list, ladder: list) -> list:
+    """把爬梯候选并入提案席：同 (动作, 冻结参数) 已在提案里的那一格不重复入席。
+
+    参数里带列表是常态（波及的 `dodge_targets`、冰冻的 `freeze_daowen`、
+    流动/遗忘的 `status_indices`），所以去重键必须先冻结再比较。
+    """
+    have = {_candidate_key(c) for c in proposals}
+    for cand in ladder:
+        key = _candidate_key(cand)
+        if key not in have:
+            have.add(key)
+            proposals.append(cand)
+    return proposals
+
+
 _PLAYOUT_DEPTH = [0]          # 推演世界嵌套深度（_swap_world 维护，诊断工具读取）
 
 
@@ -393,12 +432,7 @@ class WinOnlyAI(TacticalAI):
         # 爬梯候选直通推演席（不受启发式排序门槛限制）：改写自己的 kit 沿闭环
         # 向 透支/封印 推进——「用其他道纹解决」的设计路径（用户裁定 2026-09-10）。
         ladder = self._ladder_candidates()
-        have = {(c.get("action"), tuple(sorted((c.get("params") or {}).items())))
-                for c in proposals}
-        for c in ladder:
-            key = (c.get("action"), tuple(sorted((c.get("params") or {}).items())))
-            if key not in have:
-                proposals.append(c)
+        proposals = _merge_ladder(proposals, ladder)
         if not proposals:
             return None
         best, best_s, best_ladder, best_surv = None, -2, 99, -1
