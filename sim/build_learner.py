@@ -270,8 +270,9 @@ def _resolve_pending_choices(e) -> None:
             e.execute_action("resolve_redemption", {"option": "终结"})
             acted = True
         if st.pending_relic_choices:
-            e.execute_action("choose_discovered_relic",
-                             {"relic_name": st.pending_relic_choices[0]})
+            # 承载上限已满时「选择」会被拒，而引擎又要求必须先选 1 件：
+            # 走 _take_discovered_relic 的裁定③出口（替换 → 放弃），否则就是死局。
+            _take_discovered_relic(e)
             acted = True
         if st.pending_item_choices:
             e.execute_action("choose_discovered_item",
@@ -578,11 +579,20 @@ def _resolve_pending_event(engine):
                 "item_name": engine.state.pending_item_choices[0],
             })
             if not chosen.get("success"):
-                return chosen
+                # 死者之页承载不足 → 换下一个候选，全都不行就放弃本次发现
+                # （与遗物的裁定③出口对称：发现不等于必须拿走）。
+                for name in list(engine.state.pending_item_choices)[1:]:
+                    chosen = engine.execute_action("choose_discovered_item",
+                                                   {"item_name": name})
+                    if chosen.get("success"):
+                        break
+                if not chosen.get("success"):
+                    chosen = engine.execute_action("discard_discovered_item", {})
+                if not chosen.get("success"):
+                    return chosen
         if engine.state.pending_relic_choices:
-            chosen = engine.execute_action("choose_discovered_relic", {
-                "relic_name": engine.state.pending_relic_choices[0],
-            })
+            # 承载/死者之页不足时「选择」会被拒；走裁定③出口（替换 → 放弃）。
+            chosen = _take_discovered_relic(engine)
             if not chosen.get("success"):
                 return chosen
     return {"success": True}
@@ -1020,7 +1030,10 @@ def _take_discovered_relic(e, prefer: Optional[str] = None):
     r = e.execute_action("choose_discovered_relic", {"relic_name": name})
     if r.get("success"):
         return r
-    if "超出承载" not in (r.get("error") or ""):
+    # 除「遗物承载上限」外，死者之页容量不足同样会让选择被拒；
+    # 两者都走裁定③的同一出口（替换 → 放弃），否则 pending 池永远清不掉。
+    err = r.get("error") or ""
+    if "超出承载" not in err and "死者之页承载不足" not in err:
         return r
     p = e.state.player
     held = next((x.name for x in e.state.relics if x.name != name), None)

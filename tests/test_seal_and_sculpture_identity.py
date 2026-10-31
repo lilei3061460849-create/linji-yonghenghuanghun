@@ -230,26 +230,56 @@ def test_seal_delayed_monster_is_not_an_alt_victory_or_shardless_removal():
     assert end["result"]["death_shard_rewards"]
 
 
-def test_monster_preselected_attack_skips_target_sealed_by_its_own_daowen():
-    """怪物先封印玩家后，其在 prepare 时预选的玩家普攻跳过而非整阶段失败。"""
+def test_sealing_a_target_removes_it_from_later_monster_choices():
+    """怪物封印玩家后，玩家从后续 prepare 的可选目标中消失；旧 token 也不会照打。
+
+    2026-10-31：单行动契约下「同一只怪先封印、再顺势打同一目标」已不可能
+    （一手只能是道纹或一次攻击），原用例的「同一笔提交里预选攻击被跳过」失去前提。
+    现行可发生的路径是：封手先封印玩家 → 其他怪物这一阶段已无合法目标可打。
+    """
     engine = _engine("seal_phase_target_drift")
-    monster = _monster("石背熊", hp=42, atk=1, power=7)
-    monster.dao_wen["封印"] = DaoWenInstance(
+    sealer = _monster("封手", hp=42, atk=1, power=1)
+    sealer.dao_wen["封印"] = DaoWenInstance(
         DaoWen(name="封印", formula="", cost_type="异变", cost_formula="X",
                effect_formula=""), x_value=1, x_free=False)
-    engine.state.enemies.append(monster)
-    engine.execute_action("round_start", {})
+    attacker = _monster("石背熊", hp=42, atk=1, power=7)
+    engine.state.enemies.extend([sealer, attacker])
+    assert engine.execute_action("round_start", {})["success"]
     hp_before = engine.state.player.current_hp
 
-    results = resolve_monster_phase(
-        engine.combat, {"石背熊": "封印"}, target_refs={"石背熊": "player:0"})
+    # 交出玩家侧优先权，进入怪物阶段：prepare 快照里两只怪都把玩家列为可选目标。
+    assert engine.execute_action("skip", {"actor_ref": "player:0"})["success"]
+    prepared = engine.execute_action("prepare_monster_phase", {})
+    assert prepared["success"], prepared
+    for actor in prepared["result"]["actors"]:
+        assert "player:0" in [t["ref"] for t in actor["attack_target_options"]]
+    token = prepared["result"]["token"]
 
-    assert any(entry.get("daowen_activated") == "封印" for entry in results)
-    skipped = [entry for entry in results if entry.get("skipped") == "预选目标已不可选中"]
-    assert len(skipped) == 1
-    assert skipped[0]["attacker"] == "石背熊" and skipped[0]["target"] == "贾凡"
+    sealed = engine.execute_action("resolve_monster_phase", {
+        "token": token,
+        "choices": [{"actor_ref": "enemy:0",
+                     "daowen": {"name": "封印", "target_ref": "player:0",
+                                "dodge": False, "blood_shadow": False},
+                     "attack_actions": []}],
+    })
+    assert sealed["success"], sealed.get("error")
     assert engine.state.is_sealed_away(engine.state.player)
+
+    # 同一 token 再提交另一只怪打玩家：明确被拒，不产生任何伤害。
+    blocked = engine.execute_action("resolve_monster_phase", {
+        "token": token,
+        "choices": [{"actor_ref": "enemy:1", "daowen": None, "attack_actions": [{"hits": [
+            {"target_ref": "player:0", "dodge": False, "blood_shadow": False,
+             "spell_choices": {"before": {}, "after": {}}},
+        ]}]}],
+    })
+    assert not blocked["success"], blocked
     assert engine.state.player.current_hp == hp_before
+
+    # 重新 prepare：封印中的玩家不再产生任何可提交的怪物行动。
+    again = engine.execute_action("prepare_monster_phase", {})
+    assert again["success"], again.get("error")
+    assert again["result"]["actors"] == []
 
 
 # ========================================================================

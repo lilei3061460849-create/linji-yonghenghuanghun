@@ -20,9 +20,8 @@ def duel_with_monster(tmp_path, seed=30601):
                   mana_limit=5, current_mana=5, speed_limit=2, current_speed=2)
     monster = Entity("多攻次怪", "怪物", blood_limit=100, current_hp=100,
                      attack_count=2, attack_power=7, mana_limit=10, current_mana=10)
-    monster.dao_wen["变形"] = DaoWenInstance(DaoWen(
-        name="变形", formula="", cost_type="异变", cost_formula="5X", effect_formula=""),
-        x_value=1)
+    # 单行动契约：一手只能是道纹或一次攻击。这里要验「命中提交随实时 attack_count
+    # 漂移」，因此这只怪这一手走攻击，不再额外挂【变形】道纹。
     e.state.enemies = [lord, monster]
     e.state.in_final_duel = True
     e.state.phase = "in_combat"
@@ -39,7 +38,7 @@ def test_duel_monster_submits_all_hits_after_shape_change(tmp_path, seed):
     assert result.get("success"), result
     assert acted_ref == "enemy:1"
     assert e.state.enemies[1].attack_count == 2
-    assert e.state.player.current_hp == 300 - 2 * 2
+    assert e.state.player.current_hp == 300 - 2 * e.state.enemies[1].effective_attack_power()
     assert sum("hit_index" in item for item in result["result"]["details"]) == 2
 
 
@@ -97,8 +96,9 @@ def test_duel_recovers_real_hit_schema_drift_without_double_execution(tmp_path, 
     assert ref == "enemy:1"
     details = result["result"]["details"]
     assert sum("hit_index" in item for item in details) == 3
-    assert sum("daowen_activated" in item for item in details) == 1
-    assert e.state.player.current_hp == 300 - 3 * 3
+    # 攻击提交里不应出现道纹结算（防止重复执行同一出手）。
+    assert sum("daowen_activated" in item for item in details) == 0
+    assert e.state.player.current_hp == 300 - 3 * e.state.enemies[1].effective_attack_power()
 
 
 def test_play_does_not_reclassify_a_timeout_as_invalid_or_log_a_loss(monkeypatch):

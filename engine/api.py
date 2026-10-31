@@ -1625,7 +1625,8 @@ class GameEngine:
                          " discard_discovered_relic 放弃，或在选择时带 replace 参数换掉一件）",
                 "choices": list(self.state.pending_relic_choices),
             }
-        if self.state.pending_item_choices and action_type != "choose_discovered_item":
+        if self.state.pending_item_choices and action_type not in (
+                "choose_discovered_item", "discard_discovered_item"):
             return {
                 "success": False,
                 "error": "必须先从发现候选中选择1件消耗品",
@@ -1979,6 +1980,8 @@ class GameEngine:
             return self._action_choose_discovered_relic(params)
         elif action_type == "discard_discovered_relic":
             return self._action_discard_discovered_relic(params)
+        elif action_type == "discard_discovered_item":
+            return self._action_discard_discovered_item(params)
         elif action_type == "choose_discovered_item":
             return self._action_choose_discovered_item(params)
         elif action_type == "repay_debt_employee":
@@ -4586,6 +4589,22 @@ class GameEngine:
         self.state.pending_item_source = ""
         return {"success": True, "action": "选择发现消耗品",
                 "result": {"item": choice, "durability": durability, "source": source}}
+
+    def _action_discard_discovered_item(self, params: dict) -> dict:
+        """放弃本次消耗品发现（与 discard_discovered_relic 对称的出口）。
+
+        死者之页承载不足时「选择」会被事务拒掉，而「必须先选 1 件」的门禁又拦住
+        其他一切动作——没有这个出口就是死局。发现不等于必须拿走。
+        """
+        choices = list(self.state.pending_item_choices)
+        if not choices:
+            return {"success": False, "error": "当前没有待选择的消耗品发现"}
+        source = self.state.pending_item_source
+        self.state.pending_item_choices = []
+        self.state.pending_item_source = ""
+        return {"success": True, "action": "放弃发现消耗品",
+                "result": {"discarded_choices": choices, "source": source,
+                           "note": "本次发现不取任何消耗品，待选列表已清空"}}
 
     def _build_custom_spell(self, actor: Entity, definition: dict, *, allow_predefined: bool = False) -> dict:
         """自创法术的唯一构建入口（三大法则校验 + 组装 Spell）。

@@ -232,6 +232,10 @@ class MonsterPhaseMixin:
                                 and monster.shards < 5 * inst.x_value):
                             continue
                         effective_x = inst.x_value
+                    # 面板 X 不合法（0/负数）＝这道纹此刻没有可结算的 X：
+                    # 不能先把 0 递进 prepare 让 resolve 抛「X必须为正整数」。
+                    if not isinstance(effective_x, int) or effective_x < 1:
+                        continue
                     # 【波及】实际标得到的目标数 = min(面板X, 合法目标数)（DM裁定
                     # 2026-08-23 自适应降 X）。2026-10-09 用户令：X 下限 repealed——
                     # 降到 X=1 仍可发动（单目标全值），0 个合法目标时上面
