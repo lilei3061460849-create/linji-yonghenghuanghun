@@ -126,7 +126,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
         self.assertIn('6.共罪X', dungeon)
         self.assertIn('支付：生命5X', dungeon)
-        self.assertIn('7.血契X（环外，不占主环格）：支付：法力X。你支付资源时，[目标]额外支付X倍同种名义资源，持续X；', dungeon)
+        self.assertIn('7.血契X：支付：法力X。你支付资源时，[目标]额外支付X倍同种名义资源，持续X。', dungeon)
         self.assertNotIn('使[目标]替你支付代价', dungeon)
         self.assertIn('获得道纹[共罪]', dungeon)
         by_name = {r['name']: r for r in self.rows}

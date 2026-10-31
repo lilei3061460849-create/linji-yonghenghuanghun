@@ -128,7 +128,7 @@ def target_label(name):
     if name == "波及":
         return "X个（显式提交）"
     if name == "共罪":
-        return "2个（显式提交）"
+        return "X个非自身（显式提交）"
     if name == "超频":
         return "需显式选定"
     if name == "唤潮":
@@ -172,7 +172,7 @@ def region_daowen_order(region: str) -> list:
 CATEGORY = {}
 for n in SHAFA_LOOP_DAOWEN:
     CATEGORY[n] = "shaifa"
-CATEGORY["共罪"] = "other"
+CATEGORY["共罪"] = "unimpl"
 for n in ORIGINAL_MONSTER_DAOWEN:
     CATEGORY[n] = "original"
 for n in MONSTER_TRANSFORM_DAOWEN:
@@ -195,7 +195,6 @@ assert set(CATEGORY) == (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)), (
 
 # 特殊注记（引擎机制，非数值）
 NOTES = {
-    "共罪": "两个目标之外，发动者始终追加一个支付名额；即使发动者已入选也追加。先按名额平分，再按实体合并扣款；特殊机制代价不分摊。",
     "血契": "按你的名义支付量让目标额外支付X倍同种资源，不是代付；目标资源不足扣至0，生命不足正常命零。血契不能局外生效。",
     "萎缩": "只禁止获得速度，不削减速限，也不阻止失去或支付速度；与超频是同域反转，既有增殖边保留为显式分叉。",
     "唯一": "任何方式成功使用过的道纹都进入历史；持续X内不能再次使用。唯一替换原尘封草案。",
