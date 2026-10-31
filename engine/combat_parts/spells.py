@@ -1528,7 +1528,10 @@ class SpellReactionMixin:
             return False
         if self.state.on_player_side(holder) == self.state.on_player_side(target):
             return False
-        dmg = calc.get("target_damage") or calc.get("total_damage") or 0
+        # 反打同样是「选中敌方为目标」，敌方照常享有闪避窗口；
+        # 失去生命类效果（杀伐的生命-X²）也算需要权衡的威胁值。
+        dmg = (calc.get("target_damage") or calc.get("total_damage")
+               or calc.get("target_life_loss") or 0)
         if not dmg:
             return False
         if self.bizhong_remaining(holder) > 0:

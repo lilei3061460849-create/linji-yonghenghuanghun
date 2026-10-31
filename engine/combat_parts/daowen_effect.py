@@ -735,7 +735,10 @@ class DaowenEffectMixin:
         result.update(self.pay_daowen_cooldown(name,calc,caster))
 
         # 蒙蔽(施法者伤害类道纹归零) / 坏死(目标禁疗)
-        mengbi_blocked = caster.has_status("蒙蔽") and ("target_damage" in calc or "aoe_damage" in calc)
+        # 强光探照灯（原【蒙蔽】）：使目标「造成的伤害」无效——伤害类输入；
+        # 只造成[失去生命]的效果（如杀伐的生命-X²）不属于伤害，因此不被挡。
+        mengbi_blocked = caster.has_status("蒙蔽") and any(
+            key in calc for key in ("target_damage", "aoe_damage", "total_damage", "hits"))
         if mengbi_blocked:
             for s in caster.status_effects:
                 if s.name == "蒙蔽" and s.value > 0:

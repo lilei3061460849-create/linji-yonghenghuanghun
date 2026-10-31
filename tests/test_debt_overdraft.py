@@ -40,23 +40,27 @@ def _activate_haoduo(combat, monster):
         {"player:0": combat.state.player}, set(), {})
 
 
-def test_monster_haoduo_overdraws_real_shards_into_debt():
-    """正常路径：怪物无碎片发动现役豪夺，5碎片真碎片轨道扣成负债。"""
-    combat = _make_combat(_haoduo_monster(x=1, shards=0, fake=0))
+def test_haoduo_is_refused_when_caster_cannot_pay_shards():
+    """豪夺是「支付5X碎片去夺遗物」，不是抢碎片：自己付不起就是发不动。
+
+    负债只由目标侧的失去碎片产生（勒索/抢劫），施法者自己的碎片代价不能透支。
+    """
+    combat = _make_combat(_haoduo_monster(x=1, shards=0, fake=100))
     monster = combat.state.enemies[0]
     result = _activate_haoduo(combat, monster)
-    assert result.get("daowen_activated") == "豪夺" or "monster" in result
-    assert monster.shards == -5, f"豪夺X1代价5，0余额透支应为-5，实际{monster.shards}"
+    assert result.get("daowen_skipped") == "豪夺" and result.get("reason") == "无法支付代价", result
+    assert monster.shards == 0 and monster.fake_shards == 100, "付不起时两个池子都不许动"
 
 
-def test_haoduo_chain_reaches_debt_threshold_and_binds_at_settle():
-    """链路：连续透支越过动态负债线→回终结算触发还债→转为员工参战。"""
+def test_lingshou_debt_reaches_threshold_and_binds_at_settle():
+    """链路：勒索把一个 0 碎片的怪物打成负债→越过动态负债线→回终结算触发还债→转为员工参战。"""
     combat = _make_combat(_haoduo_monster(x=1, shards=0, fake=0))
     monster = combat.state.enemies[0]
-    # 道纹递增已废止；历史峰值为0，两次豪夺后余额达到动态阈值-10。
-    for _ in range(2):
-        _activate_haoduo(combat, monster)
-        combat._monster_round_used(monster).discard("豪夺")  # 跨回合重置使用记录
+    player = combat.state.player
+    player.mana_limit = player.current_mana = 30
+    calc = DaoWenEngine.resolve("勒索", 1, target=monster, caster=player)
+    combat.apply_daowen_effect("勒索", calc, player, monster)
+    assert monster.shards == -10, f"勒索X1应让目标失去10碎片，实{monster.shards}"
     assert monster.shards <= -(combat.DEBT_THRESHOLD + monster.shards_peak)
     results = combat.settle_victory_paths()
     assert any(r.get("type") == "debt_bind" for r in results), f"负债达到动态阈值应触发还债: {results}"
@@ -86,23 +90,28 @@ def test_debt_threshold_scales_with_historical_peak():
         assert monster.shards_peak == 100
 
 
-def test_fake_shards_still_preferred_no_debt_when_fake_sufficient():
-    """反向：豪夺的假碎片优先扣费不产生负债、不触发还债。"""
+def test_fake_shards_do_not_pay_a_real_shard_cost():
+    """碎片与假碎片是两个独立池子：假碎片再多也付不了真碎片的代价，也不产生负债。"""
     combat = _make_combat(_haoduo_monster(x=1, shards=3, fake=100))
     monster = combat.state.enemies[0]
-    _activate_haoduo(combat, monster)
-    assert monster.fake_shards == 95 and monster.shards == 3
+    result = _activate_haoduo(combat, monster)
+    assert result.get("daowen_skipped") == "豪夺", result
+    assert monster.shards == 3 and monster.fake_shards == 100
     assert all(r.get("type") != "debt_bind" for r in combat.settle_victory_paths())
 
 
-def test_monster_lianji_real_shard_channel_is_independent_and_can_overdraw():
-    """连击真碎片通道不挪用假碎片；怪物仍按正文允许真碎片负债。"""
+def test_lianji_shard_channel_cannot_borrow_from_fake_shards():
+    """连击的「碎片5X」通道只能用真碎片：真碎片不足时发不动，假碎片分文不动。"""
     combat = _make_combat(_haoduo_monster(shards=0, fake=100))
     monster = combat.state.enemies[0]
     calc = DaoWenEngine.resolve("连击", 1, target=combat.state.player, cost_channel="碎片")
-    combat.apply_daowen_effect("连击", calc, monster, combat.state.player)
-    assert monster.shards == -5
-    assert monster.fake_shards == 100
+    try:
+        combat.apply_daowen_effect("连击", calc, monster, combat.state.player)
+    except ValueError as exc:
+        assert "无法完整承担" in str(exc), exc
+    else:
+        raise AssertionError("真碎片不足时连击的碎片通道不应结算成功")
+    assert monster.shards == 0 and monster.fake_shards == 100
 
 
 # ============ 玩家负债期的局外 0 费行动（2026-08-23 死锁修复） ============
@@ -215,5 +224,5 @@ def test_event_option_zero_cost_not_blocked_by_debt(tmp_path):
     assert not ok.get("error"), ok
     # 正碎片选项负债仍拒（支出冻结语义不变）
     blocked = resolve_option_effect("失去10碎片，获得力量", e, "通用事件", {})
-    assert "碎片不足" in str(blocked.get("error")), blocked
+    assert "无法完整承担碎片" in str(blocked.get("error")), blocked
     assert e.state.shards == -1, "被拒选项不得扣碎片"
