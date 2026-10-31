@@ -14,6 +14,13 @@ from typing import Any
 Coord = tuple[int, int]
 DIRECTIONS: tuple[Coord, ...] = ((0, -1), (0, 1), (-1, 0), (1, 0))
 
+# 【最终的冠冕】：世界事件，不是第8场强制死斗。
+# 到点后在地图随机可通行格刷新；任何角色踩中即持有；
+# 持有者连续存活 CROWN_HOLD_WORLD_TURNS 个世界回合后自动脱离副本。
+CROWN_NAME = "最终的冠冕"
+CROWN_SPAWN_WORLD_TURNS = 5
+CROWN_HOLD_WORLD_TURNS = 5
+
 # 地图上会自主行动的友方单位类别（2026-10-24）。玩家对它们只能提"建议"。
 ALLY_KINDS: frozenset[str] = frozenset({"friend", "employee", "temp_friend"})
 # 建议必须说得出口：超过这个曼哈顿距离就传不过去。
@@ -348,6 +355,13 @@ class WorldState:
     final_duel_started: bool = False
     final_duel_complete: bool = False
     final_duel_winner: str = ""
+    # 【最终的冠冕】世界事件状态（替代已删除的第8场强制死斗）。
+    crown_spawn_turn: int = 0        # 预定刷新回合；0＝尚未排定
+    crown_spawned: bool = False
+    crown_location_id: str = ""
+    crown_holder_id: str = ""        # 持有者（踩着冠冕格子的单位）
+    crown_taken_turn: int = 0        # 取得时的世界回合（存活计时起点）
+    crown_exited: bool = False       # 本副本已因冠冕结束
     # 雇佣信号跨回合保存；轮回者可以离开信号发出地点继续行动。
     hiring_signals: list[dict[str, Any]] = field(default_factory=list)
     # 单位最近踩过的格子（只保留最近若干步）：跟随者可以"沿路"找主人，不偷看迷雾。
@@ -1153,6 +1167,12 @@ class WorldState:
             "final_duel_started": self.final_duel_started,
             "final_duel_complete": self.final_duel_complete,
             "final_duel_winner": self.final_duel_winner,
+            "crown_spawn_turn": self.crown_spawn_turn,
+            "crown_spawned": self.crown_spawned,
+            "crown_location_id": self.crown_location_id,
+            "crown_holder_id": self.crown_holder_id,
+            "crown_taken_turn": self.crown_taken_turn,
+            "crown_exited": self.crown_exited,
             "hiring_signals": [dict(signal) for signal in self.hiring_signals],
             "trails": {key: [list(cell) for cell in cells]
                        for key, cells in self.trails.items()},
@@ -1183,6 +1203,12 @@ class WorldState:
             final_duel_started=bool(data.get("final_duel_started", False)),
             final_duel_complete=bool(data.get("final_duel_complete", False)),
             final_duel_winner=str(data.get("final_duel_winner", "") or ""),
+            crown_spawn_turn=int(data.get("crown_spawn_turn", 0) or 0),
+            crown_spawned=bool(data.get("crown_spawned", False)),
+            crown_location_id=str(data.get("crown_location_id", "") or ""),
+            crown_holder_id=str(data.get("crown_holder_id", "") or ""),
+            crown_taken_turn=int(data.get("crown_taken_turn", 0) or 0),
+            crown_exited=bool(data.get("crown_exited", False)),
             hiring_signals=[dict(signal) for signal in data.get("hiring_signals", [])],
             trails={str(key): [(int(cell[0]), int(cell[1])) for cell in cells]
                     for key, cells in (data.get("trails") or {}).items()},

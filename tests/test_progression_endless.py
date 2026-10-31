@@ -82,7 +82,12 @@ def _finish_seventh_no_candidate(e: GameEngine, region: str = "扭曲都市"):
     e.state.monster_reinforcements = []
     e.state.delayed_monster_reentries = []
     e.state.phase = "in_combat"
-    return e.execute_action("battle_end", {})
+    result = e.execute_action("battle_end", {})
+    # 第8场死斗不再由战终自动触发（规则改为【最终的冠冕】世界事件）；
+    # 本文件测阶级推进/封存槽，故显式走旧入口。
+    if result.get("success") and "final_crown" not in (result.get("result") or {}):
+        result.setdefault("result", {})["final_crown"] = e._trigger_final_crown()
+    return result
 
 
 def _win_duel(e: GameEngine, terminal_choice: int = 2):
@@ -92,7 +97,9 @@ def _win_duel(e: GameEngine, terminal_choice: int = 2):
     e.state.monster_reinforcements = []
     e.state.phase = "in_combat"
     crown = e.execute_action("battle_end", {})
-    assert crown["success"] is True and crown["result"]["final_crown"]["outcome"] == "duel_start"
+    assert crown["success"] is True
+    final_crown = (crown.get("result") or {}).get("final_crown") or e._trigger_final_crown()
+    assert final_crown["outcome"] == "duel_start", final_crown
     r = e.execute_action("resolve_final_duel", {"outcome": "victory"})
     assert r["success"] is True
     assert r["result"]["pending_terminal_choice"]

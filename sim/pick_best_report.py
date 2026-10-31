@@ -364,6 +364,8 @@ def play_and_record(region: str, seed: int, battles: int = 7):
             if battle_no == battles:
                 lines.append("")
                 lines.append(f"### 【最终的冠冕】触发前 · 当前生命 {hp_now}")
+                if e.state.current_battle == 7 and "final_crown" not in (be.get("result") or {}):
+                    be.setdefault("result", {})["final_crown"] = e._trigger_final_crown() or {}
                 crown = be["result"].get("final_crown")
                 if crown:
                     lines.append(f"结算：{crown}")

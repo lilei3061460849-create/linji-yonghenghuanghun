@@ -142,7 +142,10 @@ def test_crimson_fang_triggers_first_embrace_then_seals():
     engine.state.enemies.clear()
     engine.state.monster_reinforcements.clear()
     engine.state.phase = "in_combat"
-    engine.execute_action("battle_end", {})  # 无候选，直接封存
+    engine.execute_action("battle_end", {})
+    # 第7场战终不再自动封存（改为【最终的冠冕】世界事件）；本文件测终音法器，
+    # 显式走旧的封存入口。
+    engine._trigger_final_crown()  # 无候选，直接封存
 
     challenger = _new_engine("扭曲都市", name="挑战者", speed=12, dbsuffix="fang_challenger", sealed=sealed)  # 速点必须偶数
     challenger.state.current_battle = 7
@@ -150,6 +153,7 @@ def test_crimson_fang_triggers_first_embrace_then_seals():
     challenger.state.monster_reinforcements.clear()
     challenger.state.phase = "in_combat"
     challenger.execute_action("battle_end", {})
+    challenger._trigger_final_crown()
     assert challenger.state.in_final_duel
     challenger.execute_action("resolve_final_duel", {"outcome": "victory"})
 

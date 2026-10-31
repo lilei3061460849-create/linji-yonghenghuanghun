@@ -2102,6 +2102,197 @@ class GameEngine:
                      merchant_actor_id=merchant.actor_id, position=list(merchant.position))
         return True
 
+    # ==================== 最终的冠冕（世界事件） ====================
+
+    def _spawn_world_crown(self, world: WorldState) -> dict:
+        """把【最终的冠冕】放到地图上一个随机可通行格。
+
+        刷新点由骰子引擎在候选格里随机决定（种子可复现、有滚动记录），
+        不预设"固定房间"或"必定在玩家附近"这类特例。
+        """
+        from .world import CROWN_NAME
+
+        cells = [
+            (x, y)
+            for y in range(world.map.height)
+            for x in range(world.map.width)
+            if world.map.is_passable((x, y)) and world.map.terrain_at((x, y)) != "water_current"
+        ]
+        if not cells:
+            raise ValueError("地图上没有可刷新的落脚点")
+        roll = self.dice.world_roll("最终的冠冕刷新点", cells,
+                                   context=f"世界回合{world.clock.turn}：最终的冠冕随机刷新")
+        # 骰子结果以 record.selected_index（0 基）为唯一口径，与其它随机点一致。
+        position = cells[int(roll["record"]["selected_index"])]
+        location_id = f"crown-{world.clock.turn}"
+        world.map.locations[location_id] = {
+            "kind": "crown", "name": CROWN_NAME,
+            "x": int(position[0]), "y": int(position[1]), "active": True,
+        }
+        world.map.version += 1
+        world.crown_spawned = True
+        world.crown_location_id = location_id
+        world.record("crown_spawned", None, location_id=location_id,
+                     position=[int(position[0]), int(position[1])])
+        return {"location_id": location_id, "position": [int(position[0]), int(position[1])]}
+
+    def _collect_world_crown(self, world: WorldState) -> str:
+        """任何踩在冠冕格上的真实单位都会持有它（不区分玩家/NPC）。"""
+        location = world.map.locations.get(world.crown_location_id)
+        if not location or not location.get("active", True):
+            return ""
+        position = (int(location.get("x", -1)), int(location.get("y", -1)))
+        holders = sorted((actor for actor in world.actors.values()
+                          if actor.alive and actor.position == position),
+                         key=lambda actor: actor.actor_id)
+        if not holders:
+            return ""
+        holder = holders[0]
+        world.crown_holder_id = holder.actor_id
+        world.crown_taken_turn = world.clock.turn
+        location["active"] = False
+        location["collected"] = True
+        location["collected_by"] = holder.actor_id
+        location["collected_turn"] = world.clock.turn
+        world.deactivate_location_sightings(world.crown_location_id, reason="collected")
+        world.record("crown_taken", holder.actor_id, position=list(position),
+                     name=holder.name)
+        return holder.actor_id
+
+    def _drop_world_crown(self, world: WorldState) -> None:
+        """持有者死亡/离场：冠冕掉回地图（原格或持有者最后位置），计时清零。"""
+        holder = world.actors.get(world.crown_holder_id)
+        position = holder.position if holder is not None else None
+        if position is None or not world.map.is_passable(position):
+            position = next(((x, y) for y in range(world.map.height)
+                             for x in range(world.map.width)
+                             if world.map.is_passable((x, y))), None)
+        previous = world.crown_holder_id
+        world.crown_holder_id = ""
+        world.crown_taken_turn = 0
+        if position is None:
+            return
+        location_id = f"crown-{world.clock.turn}-drop"
+        world.map.locations[location_id] = {
+            "kind": "crown", "name": "最终的冠冕",
+            "x": int(position[0]), "y": int(position[1]), "active": True,
+        }
+        world.map.version += 1
+        world.crown_location_id = location_id
+        world.crown_spawned = True
+        world.record("crown_dropped", previous or None, position=[int(position[0]), int(position[1])])
+
+    def _exit_dungeon_with_crown(self, world: WorldState, holder) -> dict:
+        """持有【最终的冠冕】并活过计时 → 自动脱离副本。
+
+        退出只做"离开副本"这一件事：副本战斗清空、阶段回到局外、地图单位离场，
+        角色本身（面板/道纹/遗物）原样保留。是否因此进入下一阶、如何发奖，
+        规则未写，故不在此臆造。
+        """
+        from .world import CROWN_HOLD_WORLD_TURNS, CROWN_NAME
+
+        held_turns = max(0, world.clock.turn - world.crown_taken_turn)
+        payload = {
+            "reason": CROWN_NAME,
+            "actor_id": holder.actor_id,
+            "actor_name": holder.name,
+            "world_turn": world.clock.turn,
+            "held_world_turns": held_turns,
+            "required_world_turns": CROWN_HOLD_WORLD_TURNS,
+        }
+        world.crown_exited = True
+        holder.alive = False   # 已离开副本，不再是地图上的活动单位
+        # 冠冕随人离开：地图上不再有可争夺的冠冕。
+        world.crown_holder_id = ""
+        world.crown_location_id = ""
+        self._depart_crown_carrier(holder)
+        # payload 里已有 actor_id，record 的第二个位置参数也是 actor_id，重复会 TypeError。
+        world.record("dungeon_exited", holder.actor_id,
+                     **{k: v for k, v in payload.items() if k != "actor_id"})
+        self.state.dungeon_exit = dict(payload)
+        self.state.enemies.clear()
+        self.state.delayed_monster_reentries = []
+        self.state.monster_reinforcements.clear() if hasattr(self.state, "monster_reinforcements") else None
+        self.state.pending_monster_phase = {}
+        self.state.combat_subphase = ""
+        self.state.current_battle = 0
+        self.state.phase = "pre_battle"
+        return payload
+
+    def _depart_crown_carrier(self, holder) -> None:
+        """让携带冠冕的单位真正离场。
+
+        离场不是击杀：走统一离场入口（depart_battle），不产生击杀/碎片奖励，
+        地图单位也会随 entity.is_alive/is_departed 同步（见 _sync_world_*）。
+        """
+        from .world import CROWN_NAME
+
+        entities = [self.state.player] if self.state.player is not None else []
+        for group_name in ("friends", "employees", "temp_friends", "enemies"):
+            entities.extend(getattr(self.state, group_name, None) or [])
+        entity = next((item for item in entities
+                       if getattr(item, "runtime_id", "") == holder.actor_id), None)
+        if entity is not None and not entity.is_departed:
+            entity.depart_battle(CROWN_NAME)
+
+    def _leave_world_with_crown(self, world: WorldState, holder) -> dict:
+        """非玩家持有者带冠冕离场。
+
+        别人抱走冠冕不等于玩家通关：这里只结算地图事实（冠冕离开、持有者离场），
+        不动 state.phase/enemies，也不写 state.dungeon_exit；随后按刷新周期
+        重新排一颗冠冕，避免地图事件被一次偶然的拾取永久消耗掉。
+        """
+        from .world import CROWN_NAME, CROWN_SPAWN_WORLD_TURNS
+
+        location_id = world.crown_location_id
+        if location_id and location_id in world.map.locations:
+            world.map.locations[location_id]["active"] = False
+            world.map.locations[location_id]["removed_with_crown"] = True
+        holder.alive = False
+        self._depart_crown_carrier(holder)
+        world.crown_holder_id = ""
+        world.crown_taken_turn = 0
+        world.crown_location_id = ""
+        world.crown_spawned = False
+        world.crown_spawn_turn = world.clock.turn + CROWN_SPAWN_WORLD_TURNS
+        world.record("crown_left_world", holder.actor_id, name=holder.name,
+                     reason=CROWN_NAME)
+        return {"holder_id": holder.actor_id, "left_world": True}
+
+    def _resolve_world_crown(self, world: WorldState) -> dict | None:
+        """【最终的冠冕】世界事件主循环：排期 → 刷新 → 拾取 → 存活计时 → 脱离副本。
+
+        用户裁定：不再有第8场强制死斗。冠冕改为地图上按时间随机刷新的争夺目标，
+        持有者连续存活 CROWN_HOLD_WORLD_TURNS 个世界回合就自动离开副本。
+        """
+        from .world import CROWN_HOLD_WORLD_TURNS, CROWN_SPAWN_WORLD_TURNS
+
+        if world.crown_exited:
+            return None
+        if not world.crown_spawn_turn:
+            world.crown_spawn_turn = world.clock.turn + CROWN_SPAWN_WORLD_TURNS
+            world.record("crown_scheduled", None, spawn_turn=world.crown_spawn_turn)
+        if not world.crown_spawned and world.clock.turn >= world.crown_spawn_turn:
+            self._spawn_world_crown(world)
+        if not world.crown_holder_id and world.crown_spawned:
+            self._collect_world_crown(world)
+        if not world.crown_holder_id:
+            return None
+        holder = world.actors.get(world.crown_holder_id)
+        if holder is None or not holder.alive:
+            self._drop_world_crown(world)
+            return None
+        # 「活过」的判定只在自由身时成立：正被卷在遭遇战里的持有者不当场消失，
+        # 否则会留下"参与者已离场"的半截战斗。
+        if any(encounter.active and holder.actor_id in encounter.participants
+               for encounter in world.encounters.values()):
+            return None
+        if world.clock.turn - world.crown_taken_turn >= CROWN_HOLD_WORLD_TURNS:
+            if holder.kind == "player":
+                return self._exit_dungeon_with_crown(world, holder)
+            self._leave_world_with_crown(world, holder)
+        return None
+
     def _refresh_world_final_duel(self, world: WorldState) -> dict:
         """在地图存活状态变化后，启动或结算最后两名轮回者的自然会合阶段。"""
         player = self.state.player
@@ -2326,6 +2517,9 @@ class GameEngine:
             self._resolve_world_hiring_signals(world)
             self._resolve_world_temporary_alliances(world)
             self._share_created_being_vision(world)
+            self._resolve_world_crown(world)
+            if world.crown_exited:
+                break   # 持有者已带冠冕脱离副本，本次等待不再继续
         return advanced
 
     def _resolve_world_shard_pickups(self, world: WorldState) -> list[dict]:
@@ -3047,6 +3241,7 @@ class GameEngine:
             # NPC在本回合移动后踩中资源/遗物，也会真正拾取；隐藏NPC所得不会回传给玩家。
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
+            self._resolve_world_crown(world)
             self._resolve_world_consumable_pickups(world)
             npc_trades = self._resolve_world_npc_merchant_trades(world)
             if npc_trades:
@@ -3090,6 +3285,7 @@ class GameEngine:
             self._advance_world_turns(world, actor_id, turns)
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
+            self._resolve_world_crown(world)
             self._resolve_world_consumable_pickups(world)
             self._resolve_world_hiring_signals(world)
             self._resolve_world_temporary_alliances(world)
@@ -3102,13 +3298,35 @@ class GameEngine:
             if active_encounter is None:
                 self._open_adjacent_merchant_session(world)
             self.state.world_state = world.to_dict()
-            return {"success": True, "action": "world_wait",
-                    "result": {"world_turn": world.clock.turn, "turns": elapsed,
-                               "requested_turns": turns,
-                               "interrupted_by_encounter": active_encounter is not None,
-                               "encounter_id": active_encounter.encounter_id if active_encounter else None}}
+            crown_status = self._world_crown_status(world)
+            payload = {"world_turn": world.clock.turn, "turns": elapsed,
+                       "requested_turns": turns,
+                       "interrupted_by_encounter": active_encounter is not None,
+                       "encounter_id": active_encounter.encounter_id if active_encounter else None,
+                       "final_crown": crown_status}
+            if world.crown_exited and self.state.dungeon_exit:
+                payload["dungeon_exit"] = dict(self.state.dungeon_exit)
+            return {"success": True, "action": "world_wait", "result": payload}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
+
+    def _world_crown_status(self, world: WorldState) -> dict:
+        """【最终的冠冕】的公开状态：只给玩家可见的事实与倒计时。"""
+        from .world import CROWN_HOLD_WORLD_TURNS
+
+        status = {
+            "spawn_turn": world.crown_spawn_turn,
+            "spawned": world.crown_spawned,
+            "exited": world.crown_exited,
+            "holder_id": world.crown_holder_id,
+            "held_world_turns": (max(0, world.clock.turn - world.crown_taken_turn)
+                                 if world.crown_holder_id else 0),
+            "required_world_turns": CROWN_HOLD_WORLD_TURNS,
+        }
+        location = world.map.locations.get(world.crown_location_id) or {}
+        if world.crown_spawned and not world.crown_holder_id and location.get("active", True):
+            status["position"] = [int(location.get("x", -1)), int(location.get("y", -1))]
+        return status
 
     def _action_world_status(self, params: dict) -> dict:
         """只返回玩家已知信息，不把全地图、隐藏单位或完整事实账本交给AI。"""
@@ -3786,6 +4004,7 @@ class GameEngine:
             self._advance_world_turns(world, player_id, 1)
             self._resolve_world_shard_pickups(world)
             self._resolve_world_relic_pickups(world)
+            self._resolve_world_crown(world)
             self._resolve_world_consumable_pickups(world)
             self._resolve_world_hiring_signals(world)
             self._resolve_world_temporary_alliances(world)
@@ -3895,6 +4114,7 @@ class GameEngine:
         self._advance_world_turns(world, player_id, duration)
         self._resolve_world_shard_pickups(world)
         self._resolve_world_relic_pickups(world)
+        self._resolve_world_crown(world)
         self._resolve_world_consumable_pickups(world)
         self._resolve_world_hiring_signals(world)
         self._resolve_world_temporary_alliances(world)
@@ -8648,7 +8868,14 @@ class GameEngine:
         return int(REGION_TIERS.get(self.state.current_region, 1))
 
     def _trigger_final_crown(self) -> dict:
-        """完成第7场后自动触发【最终的冠冕】。
+        """旧入口：封存候选人 / 开启第8场死斗（**只在显式调用时发生**）。
+
+        2026-10-31 用户裁定：死斗不再是强硬规则 —— 第7场战终**不再**自动调用本方法，
+        收尾条件改由【最终的冠冕】世界事件承载（`_resolve_world_crown`：地图随机刷新 +
+        持有存活 5 个世界回合即自动脱离副本）。
+
+        保留本方法只作为**显式**入口：封存候选队列与阶级推进的既有机制、以及
+        死斗脚手架（sim/*、回归用例）仍需它。任何自动分支都不得调用它。
 
         死斗规则：封存按阶级分槽，每个阶级槽是一份候选队列。
         挑战者只能与自身副本阶级的队首候选死斗；通过死斗者进入下一阶级封存槽
@@ -9824,9 +10051,9 @@ class GameEngine:
             "player_dead": (not self.state.player.is_alive) if self.state.player else False,
         }
 
-        # 最终的冠冕：完成第7场后自动触发，不消耗精力、不经玩家选择
-        if not world_battle and self.state.current_battle == 7:
-            battle_end_result["final_crown"] = self._trigger_final_crown()
+        # 【最终的冠冕】不再由第7场战终强制触发（用户裁定：删除第8场强制死斗）。
+        # 它改为世界事件：由 `_resolve_world_crown` 在世界回合推进时按时间随机刷新，
+        # 持有者连续存活满 5 个世界回合即自动脱离副本（见 engine/world.py 常量）。
 
         return {
             "success": True,

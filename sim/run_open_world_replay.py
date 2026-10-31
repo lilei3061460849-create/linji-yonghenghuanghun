@@ -129,7 +129,16 @@ def fight(engine: GameEngine, encounter_id: str, timeline: list[dict[str, Any]],
             call(engine, "round_start")
             continue
         if engine.state.duel_turn == "player_side":
-            prepared = call(engine, "prepare_attack")["result"]
+            prepared_result = engine.execute_action("prepare_attack", {})
+            if not prepared_result.get("success"):
+                # 场上只剩够不着的目标（如【飞行】：非飞行者不可选中）时，本 driver
+                # 没有可执行的真实攻击；交出这次出手等对手行动，而不是崩掉整局。
+                skipped = call(engine, "skip", {"actor_ref": "player:0"})
+                timeline.append({"type": "player_skip", "battle": engine.state.current_battle,
+                                 "round": engine.state.current_round,
+                                 "reason": prepared_result.get("error"), "result": skipped})
+                continue
+            prepared = prepared_result["result"]
             refs = engine.combat._combat_entity_refs()
             target = next((candidate for candidate in prepared["target_options"]
                            if refs.get(candidate["ref"]) is not None
@@ -169,6 +178,11 @@ def fight(engine: GameEngine, encounter_id: str, timeline: list[dict[str, Any]],
         ended = call(engine, "battle_end")
         timeline.append({"type": "battle_end", "world_turn": world.clock.turn,
                          "result": ended})
+        # 2026-10-31 规则变更：第7场战终不再自动开启死斗（改为【最终的冠冕】世界事件）。
+        # 本 replay 目前仍演绎"旧终局"，故在此显式走旧入口；终局改为冠冕后整段删除。
+        if (engine.state.current_battle == 7 and not engine.state.in_final_duel
+                and "final_crown" not in (ended.get("result") or {})):
+            engine._trigger_final_crown()
     return outcome
 
 

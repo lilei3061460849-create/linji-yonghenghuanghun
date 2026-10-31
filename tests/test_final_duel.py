@@ -74,10 +74,19 @@ def _new_candidate(db_suffix, sealed_path, speed_points=8, region="龙心谷", n
 
 
 def _finish_battle_7(engine):
+    """把角色推进到"第7场战终"并（显式）走旧封存/死斗入口。
+
+    2026-10-31 规则变更：【最终的冠冕】不再是第7场后的强制死斗，而是世界地图上
+    按时间刷新的争夺目标（见 engine/world.py 与 tests/test_final_crown.py）。
+    战终不再自动触发死斗，因此本文件（测死斗机制本身）显式调用旧入口。
+    """
     engine.state.current_battle = 7
     engine.state.enemies.clear()
     engine.state.phase = "in_combat"
-    return engine.execute_action("battle_end", {})
+    result = engine.execute_action("battle_end", {})
+    if result.get("success") and "final_crown" not in (result.get("result") or {}):
+        result.setdefault("result", {})["final_crown"] = engine._trigger_final_crown()
+    return result
 
 
 # ========================================================================

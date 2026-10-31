@@ -1501,6 +1501,10 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
 
         # 第7场战终触发【最终的冠冕】：第一名封存；第二名进入第8场死斗。
         # 死斗胜利后须领取终音法器（choose_terminal_artifact）才算完整通关并封存。
+        # 2026-10-31：战终不再自动开启死斗（改由冠冕世界事件承载）；本学习器是死斗
+        # 脚手架，显式走旧入口以保留 tier 推进的采样口径。
+        if e.state.current_battle == 7 and "final_crown" not in (ended.get("result") or {}):
+            ended.setdefault("result", {})["final_crown"] = e._trigger_final_crown() or {}
         crown = ended.get("result", {}).get("final_crown", {})
         outcome = crown.get("outcome")
         if outcome == "sealed":

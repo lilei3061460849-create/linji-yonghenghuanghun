@@ -114,8 +114,12 @@ def traced_duel(challenger_path: str, defender_path: str, seed: int,
         guard += 1
         if guard > 5:
             break
+    # 2026-10-31：第7场战终不再自动开启死斗（改由【最终的冠冕】世界事件承载），
+    # 本追溯脚手架显式走旧入口进入死斗。
+    if "final_crown" not in (be.get("result") or {}):
+        e._trigger_final_crown()
     crown = (be.get("result") or {}).get("final_crown", {})
-    if crown.get("outcome") != "duel_start":
+    if crown.get("outcome") != "duel_start" and not e.state.in_final_duel:
         print("未进入死斗:", crown.get("outcome"), str(be.get("error"))[:200])
         return {}
 

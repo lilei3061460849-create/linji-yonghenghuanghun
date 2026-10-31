@@ -2162,7 +2162,9 @@ def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
     # 怪物道纹口径与出怪配方调整后，SEED 那局会在会合前先被世界威胁淘汰掉另一名候选
     # （终局走 sole survivor 分支）；本用例固定验证「真打满一场终局决斗」的路径。
     # 贯穿退出发现池、地图新增消耗品后重新固定仍覆盖完整终局的种子。
-    duel_seed = 3
+    # 2026-10-31：冠冕世界事件加入地图后，旧种子 3 已改走 sole survivor 分支；
+    # 重新钉一个仍能打满整场终局的种子（seed 1：玩家方胜）。
+    duel_seed = 1
     replay = run_playthrough(duel_seed, include_winner_snapshot=True,
                              blood_points=11, speed_points=6, mana_points=8)
     final = replay["final_state"]
@@ -2246,8 +2248,10 @@ def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
 def test_replay_waits_for_rivals_when_no_hostile_is_reachable():
     from sim.run_open_world_replay import run_playthrough, validate_complete_playthrough
 
+    # 2026-10-31：冠冕世界事件改变地图事实后，seed 12 该局提前阵亡；
+    # 改用仍能演完「无可达敌手 → 等待对手会合」的种子。
     replay = run_playthrough(
-        seed=12, region="龙心谷", player_name="测试轮回者",
+        seed=5, region="龙心谷", player_name="测试轮回者",
         blood_points=11, speed_points=6, mana_points=8,
     )
 
