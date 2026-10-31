@@ -54,15 +54,15 @@ def test_normal_option1_grants_dragon_nature():
 
 
 def test_normal_option2_grants_dragon_heart_consumable():
-    """正常路径：选项2「拾取龙心残骸」获得衰老龙心(6/6)。"""
+    """正常路径：选项2「拾取龙心残骸」获得血限龙心(6/6)。（代价类旧名「衰老」现行写作「血限」）"""
     engine = _engine("heart")
     _set_event(engine)
     r = _resolve(engine, 2)
     assert r["success"], r
     heart = next((c for c in engine.state.consumables if c.kind == "dragon_heart"), None)
     assert heart is not None, "应获得龙心消耗品"
-    assert heart.name == "衰老龙心" and heart.current_uses == 6 and heart.max_uses == 6
-    assert heart.dragon_heart_type == "衰老"
+    assert heart.name == "血限龙心" and heart.current_uses == 6 and heart.max_uses == 6
+    assert heart.dragon_heart_type == "血限"
 
 
 def test_normal_option3_is_reject():

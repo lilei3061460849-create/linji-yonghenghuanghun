@@ -564,6 +564,11 @@ def test_cooldown_blocks_reuse_in_same_battle():
     e.execute_action("round_start", {})
     m = e.state.enemies[0]
     e.execute_action("use_daowen", {"daowen_name": "束缚", "x": 2, "target": m.name})
+    # 交替出手：第二次发动要落在「轮回者再出手」的位置，先让敌方按规则【休整】。
+    # 否则先被优先权闸门拒绝，测不到冷却本身。
+    from tests.setup_support import advance_to_player_turn
+    advanced = advance_to_player_turn(e)
+    assert advanced["success"], advanced
     r2 = e.execute_action("use_daowen", {"daowen_name": "束缚", "x": 2, "target": m.name})
     assert not r2["success"], "冷却中的道纹被重复发动"
     assert "冷却" in r2["error"] or "不可用" in r2["error"]

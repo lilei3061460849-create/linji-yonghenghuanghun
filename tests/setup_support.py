@@ -121,3 +121,74 @@ def grant_extra_actions(entity, extra: int) -> None:
         return
     entity.add_status(StatusEffect(name="蓄锐·增", value=int(extra), remaining_rounds=1,
                                    source="测试夹具"))
+
+
+def opponent_passes(engine) -> dict:
+    """让当前获得出手权的敌方以【跳过】结束其本回合，把出手权交回轮回者。
+
+    「交替出手」下，连续两次主动行动之间必须经过敌方的行动或【跳过】。
+    本夹具只执行规则内的【跳过】：不消耗敌方出手，也不改动其状态与资源；
+    它不是绕过优先权的旁路，也不改变世界回合数。
+    """
+    if engine.state.duel_turn != "opponent_side":
+        return {"success": True, "skipped": False, "note": "当前本就不在敌方出手权"}
+    refs = engine.combat._combat_entity_refs()
+    ref = next((ref for ref, entity in refs.items()
+                if entity.is_alive and engine.state.on_enemy_side(entity)), None)
+    if ref is None:
+        return engine.execute_action("prepare_monster_phase", {})
+    return engine.execute_action("rest", {"actor_ref": ref})
+
+
+def hand_priority_to_enemy(engine) -> dict:
+    """把「本回合优先权」直接标记给敌方，使 `prepare_monster_phase` 可用。
+
+    「交替出手」下 `prepare_monster_phase` 只在敌方持有优先权时可用。夹具若只关心
+    怪物阶段本身，就用本函数把状态声明成「轮回者这一手已经交出去了」——它不执行
+    任何行动，也不改任何资源，因此不会像真实【跳过】那样触发【沉重枷锁】之类
+    「对方跳过时」的遗物，把被测数值改写成另一套机制。
+
+    这是夹具的状态声明，不是绕过闸门：生产代码里的优先权检查一行未改，
+    真正越过优先权的提交仍会被拒（见 `tests/test_priority_gate.py`）。
+    """
+    if engine.state.duel_turn == "opponent_side":
+        return {"success": True, "changed": False, "note": "优先权已在敌方"}
+    engine.state.duel_turn = "opponent_side"
+    # 与真实【跳过】一致：轮回者这一侧本回合不再有出手（否则怪物行动后子阶段会
+    # 停在 player_actions 等一个夹具里根本不存在的玩家行动）。
+    engine.combat._ended_turn_sides.add("player_side")
+    return {"success": True, "changed": True}
+
+
+def player_passes(engine) -> dict:
+    """让轮回者以规则内的【跳过】交出出手权（会触发「对方跳过」类遗物）。"""
+    if engine.state.duel_turn == "opponent_side":
+        return {"success": True, "skipped": False, "note": "优先权已在敌方"}
+    result = engine.execute_action("skip", {})
+    assert result.get("success"), result
+    return result
+
+
+def advance_to_player_turn(engine) -> dict:
+    """把战斗推进到「轮回者可以再次主动行动」的位置（跨过敌方一手）。
+
+    「交替出手」下同一侧不能连续主动行动：一次玩家行动之后出手权归敌方，
+    玩家要把下一次行动落到规则允许的位置，必须经过敌方的行动/【跳过】，
+    若双方本回合余手都已用尽还要走一次回终。本夹具只做这三步规则内动作
+    （【休整】→ 回终 → 回始），不直接改写 `duel_turn`，也不是优先权旁路。
+    """
+    from engine.enums import CombatSubphase
+
+    steps = []
+    if engine.state.duel_turn == "opponent_side":
+        steps.append(("enemy_pass", opponent_passes(engine)))
+    subphase = engine.state.combat_subphase
+    if subphase == CombatSubphase.AWAIT_ROUND_END.value:
+        steps.append(("round_end", engine.execute_action("round_end", {})))
+        subphase = engine.state.combat_subphase
+    if subphase == CombatSubphase.AWAIT_ROUND_START.value:
+        steps.append(("round_start", begin_round(engine)))
+    failed = [(name, res) for name, res in steps if not res.get("success")]
+    if failed:
+        return {"success": False, "steps": steps, "failed": failed}
+    return {"success": True, "steps": steps, "duel_turn": engine.state.duel_turn}

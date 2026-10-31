@@ -95,12 +95,12 @@ def test_conversion_applies_to_every_character():
     assert m.current_mana == 15, "怪物战始法力给满=[法限]"
 
 
-def test_action_count_is_fixed_two():
-    """正常路径：轮回者出手固定 2 次，不再由速限推导。"""
+def test_action_count_is_fixed_one():
+    """正常路径：所有角色基础出手 1 次（单行动契约），不由速限推导。"""
     for suffix, pts in (("fast", dict(blood_points=1, speed_points=16, mana_points=8)),
                         ("slow", dict(blood_points=17, speed_points=4, mana_points=4))):
         p = _engine(suffix, **pts).state.player
-        assert p.action_count == 2, (suffix, p.speed_limit, p.action_count)
+        assert p.action_count == 1, (suffix, p.speed_limit, p.action_count)
 
 
 # ==================== 3. 普攻落地 ====================

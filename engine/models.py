@@ -316,6 +316,13 @@ class Entity:
     world_x: Optional[int] = None
     world_y: Optional[int] = None
     is_neutral: bool = False  # 中立特殊角色不会自动进入任一战斗阵营
+    # 参战单位：false＝旁观者（不占出手权、不进入任何合法目标）。这是通用属性，
+    # 任何场景（养蛊场观众、观战NPC）都靠它表达「不在场上」，引擎不按模式分支。
+    in_combat: bool = True
+    # 阵营标识：空字符串＝按二元敌我（player_side/opponent_side）推导。
+    # 敌对关系一律按「阵营不同即敌对」判定；多阵营场景（如养蛊场每只怪物自成一营）
+    # 只需给实体填不同的 camp，不需要额外的模式开关。
+    camp: str = ""
     # 怪物/妖怪共用的固有偏爱；每种偏爱在同一实体上最多出现一次。
     preferences: list[str] = field(default_factory=list)
     # 【造生】的妖怪是具有专属身份的朋友，不是分裂道纹产生的造物。
@@ -1263,6 +1270,8 @@ class GameState:
     relic_pool_initialized: bool = False
     # 【发现】：随机列出3个未持有候选后，必须由角色显式选1件。
     pending_relic_choices: list[str] = field(default_factory=list)
+    # 【交易】剩余待发现的轮数（每完成一次3选1递减；0=没有排队）。
+    pending_relic_discovery_rounds: int = 0
     pending_relic_source: str = ""
     # 开局从杀伐闭环【发现】初始道纹。
     pending_initial_daowen_choices: list[str] = field(default_factory=list)
@@ -1392,13 +1401,12 @@ class GameState:
 
     # 养蛊场（怪物互斗）训练模式：开启后怪物阶段的合法目标从「玩家侧」扩为「其它怪物」，
     # 并允许逐个 actor 提交（严格交替，避免先手方一次结算全场）。默认 False——
-    # 正式玩法与既有测试完全不受影响，只有训练沙盒会打开它。
-    arena_ffa: bool = False
     # 怪物行动自由化：打开后不再强制怪物发动道纹，
     # 每只怪物每回合有 2 个「行动槽」——1 次攻击或 1 次道纹各占 1 槽，
     # 允许「连续两次攻击」「连续两次道纹」「一攻一道纹」，也可以只出 1 槽。
     # 默认 False——正式玩法与既有测试完全不受影响。
-    monster_free_actions: bool = False
+    # 【最终的冠冕】世界事件的结算记录（脱离副本时写入；reason/actor/世界回合）。
+    dungeon_exit: dict = field(default_factory=dict)
     # 最终的冠冕/第8场死斗：进行中标记 + 当前该谁出手("player_side"/"opponent_side")
     in_final_duel: bool = False
     duel_turn: str = ""
@@ -1647,6 +1655,27 @@ class GameState:
             if e is entity:
                 return True
         return False
+
+    def camp_of(self, entity: Entity) -> str:
+        """阵营的唯一口径：实体自填的 `camp` 优先，否则按二元敌我推导。
+
+        敌对＝阵营不同。二元战斗下这就是「玩家侧 vs 敌方」，多阵营场景
+        （养蛊场里每只怪物自成一营）不需要任何模式开关，只需填 `camp`。
+        """
+        if entity is None:
+            return ""
+        camp = getattr(entity, "camp", "") or ""
+        if camp:
+            return camp
+        return "player_side" if self.on_player_side(entity) else "opponent_side"
+
+    def are_hostile(self, actor: Entity, target: Entity) -> bool:
+        """两个实体是否敌对：同一实体不算，参战者之间只按阵营判定。"""
+        if actor is None or target is None or actor is target:
+            return False
+        if not getattr(actor, "in_combat", True) or not getattr(target, "in_combat", True):
+            return False
+        return self.camp_of(actor) != self.camp_of(target)
 
     # ---- 【第一杯】倍率----
     # 旧条文「每次回复额外+50%、[回终]未回复则流血10、免疫癌变」全部废止；
@@ -1979,6 +2008,8 @@ class GameState:
             "pending_learned_daowen": list(getattr(self, "pending_learned_daowen", [])),
             "pending_relic_choices": list(self.pending_relic_choices),
             "pending_relic_source": self.pending_relic_source,
+            "pending_relic_discovery_rounds": int(
+                getattr(self, "pending_relic_discovery_rounds", 0) or 0),
             "pending_initial_daowen_choices": list(self.pending_initial_daowen_choices),
             "pending_initial_daowen_source": self.pending_initial_daowen_source,
             "pending_diandang_discoveries": [list(g) for g in self.pending_diandang_discoveries],

@@ -129,11 +129,20 @@ def _resolve_monster_plight(engine, rng) -> list:
 def _resolve_monster_turn(engine):
     """平衡模拟器的怪物AI：从prepare合法项中提交完整选择，不调用旧自动入口。"""
     from engine.ai_tactics import choose_dodge, choose_attack_target
+    if engine.state.combat_subphase == "await_round_end":
+        # 双方都已无出手权：本阶段无事可做（调用方靠子阶段判断是否收手）。
+        return {"success": True, "result": {"details": []},
+                "skipped": True, "player_dead": not engine.state.player.is_alive}
     prepared = engine.execute_action("prepare_monster_phase", {})
     if not prepared.get("success"):
         return prepared
+    if not prepared["result"].get("actors"):
+        # prepare 无事可做：这一侧已经收手（可能已推进到 await_round_end）。
+        return {"success": True, "result": {"details": []}, "skipped": True,
+                "player_dead": not engine.state.player.is_alive}
     choices = []
-    for actor in prepared["result"]["actors"]:
+    # 交替出手：每次 resolve 只提交一个快照内角色。
+    for actor in prepared["result"]["actors"][:1]:
         dao = None
         action_count = actor["base_attack_actions"]
         hit_count = actor["base_hits_per_attack"]
@@ -157,7 +166,8 @@ def _resolve_monster_turn(engine):
         target_option = next((option for option in actor["attack_target_options"] if option["ref"] == target_ref), None)   # 无合法攻击目标时为None（引擎prepare已置base_attack_actions=0）
         dodge_budget = 0
         attacks = []
-        for _ in range(action_count):
+        # 单行动契约：选了道纹就不再附带攻击。
+        for _ in range(0 if dao is not None else action_count):
             hits = []
             for _ in range(hit_count):
                 want_dodge = choose_dodge(engine, per_hit, budget_used=dodge_budget)
@@ -208,10 +218,14 @@ def play_and_record(region: str, seed: int, battles: int = 7):
 
         def _advance_empty_round():
             """当前没有活跃敌人但仍有待入场增援/封印回场时，推进回合而非误结算战斗。"""
-            # 即使本阶段没有怪物，也要走完空的怪物阶段，才能进入 await_round_end。
-            monster_phase = _resolve_monster_turn(engine)
-            if not monster_phase.get("success"):
-                return {"invalid": True, "reason": f"monster_phase:{monster_phase.get('error')}"}
+            # 即使本阶段没有怪物，也要走完空的怪物阶段，才能进入 await_round_end；
+            # 每次只结算一个 actor，因此要推进到双方都无出手权为止。
+            for _ in range(12):
+                if engine.state.combat_subphase == "await_round_end":
+                    break
+                monster_phase = _resolve_monster_turn(engine)
+                if not monster_phase.get("success"):
+                    return {"invalid": True, "reason": f"monster_phase:{monster_phase.get('error')}"}
             result = engine.execute_action("round_end", {})
             if not result.get("success"):
                 return {"invalid": True, "reason": f"round_end:{result.get('error')}"}
@@ -331,10 +345,18 @@ def play_and_record(region: str, seed: int, battles: int = 7):
                     lines.extend(BR.format_round_end({}, engine.state.player,
                                                      engine.state.enemies))
                     break
-                mp = _resolve_monster_turn(engine)
-                if not mp.get("success"):
-                    return {"invalid": True, "reason": f"monster_phase:{mp.get('error')}"}
-                lines.extend(BR.format_monster_hits(idx, mp["result"].get("details", [])))
+                # 每次只结算一个 actor：推进到双方都无出手权（await_round_end）。
+                details: list = []
+                mp = {"result": {}}
+                for _ in range(12):
+                    if engine.state.combat_subphase == "await_round_end":
+                        break
+                    mp = _resolve_monster_turn(engine)
+                    if not mp.get("success"):
+                        return {"invalid": True,
+                                "reason": f"monster_phase:{mp.get('error')}"}
+                    details.extend(mp.get("result", {}).get("details", []))
+                lines.extend(BR.format_monster_hits(idx, details))
                 re_ = engine.execute_action("round_end", {})
                 if not re_.get("success"):
                     # 怪物阶段致轮回者命零：死者之页中断挡住 round_end 属正常结局，
@@ -364,6 +386,8 @@ def play_and_record(region: str, seed: int, battles: int = 7):
             if battle_no == battles:
                 lines.append("")
                 lines.append(f"### 【最终的冠冕】触发前 · 当前生命 {hp_now}")
+                if e.state.current_battle == 7 and "final_crown" not in (be.get("result") or {}):
+                    be.setdefault("result", {})["final_crown"] = e._trigger_final_crown() or {}
                 crown = be["result"].get("final_crown")
                 if crown:
                     lines.append(f"结算：{crown}")

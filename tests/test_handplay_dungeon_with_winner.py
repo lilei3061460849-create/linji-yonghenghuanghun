@@ -51,16 +51,22 @@ def test_handplay_resolves_wave_before_an_earlier_actor_can_kill_its_targets(
     engine = _wave_phase_engine(tmp_path)
     monkeypatch.setattr(handplay, "choose_dodge", lambda *args, **kwargs: False)
 
-    result = _resolve_monster_turn_hand(engine, [])
+    log = []
+    result = _resolve_monster_turn_hand(engine, log)
 
     assert result["success"], result
-    assert result["result"]["player_dead"] is True  # 合法战败，不应变成阶段提交错误
+    # 交替出手：一步只结算一个行动者，波及必须先手落地（其标记目标仍全部存活）。
     details = result["result"]["details"]
     wave = next(entry for entry in details if entry.get("daowen_activated") == "波及")
     assert wave["execution"]["wave_marked"] == ["测试轮回者", "先手杀手"]
-    assert details.index(wave) < next(
-        i for i, entry in enumerate(details)
-        if entry.get("attacker") == "先手杀手" and entry.get("target_died"))
+    assert details.index(wave) == 0
+    assert not any(entry.get("attacker") == "先手杀手" for entry in details)
+
+    # 轮回者跳过优先权，敌方再拿走下一个行动者：先手杀手正常击杀（合法战败）。
+    assert engine.execute_action("skip", {})["success"]
+    second = _resolve_monster_turn_hand(engine, log)
+    assert second["success"], second
+    assert second["result"]["player_dead"] is True
 
 
 def test_placeholder_ai_orders_wave_before_target_killing_actor(tmp_path):
@@ -73,8 +79,23 @@ def test_placeholder_ai_orders_wave_before_target_killing_actor(tmp_path):
         {"action_type": "resolve_monster_phase", **prepared["result"]},
     )
     choices = decision.params["choices"]
-    assert [choice["actor_ref"] for choice in choices] == ["enemy:1", "enemy:0"]
+    # 交替出手：每次只提交1个行动者；波及使用者排在最前。
+    assert [choice["actor_ref"] for choice in choices] == ["enemy:1"]
     assert len(choices[0]["daowen"]["dodge_targets"]) == 2
+    assert choices[0]["attack_actions"] == []  # 用道纹就不能再普攻
+    result = engine.execute_action(decision.action_type, decision.params)
+    assert result["success"], result
+    assert result["result"]["player_dead"] is False
+
+    # 轮回者跳过 → 敌方下一个行动者（先手杀手）击杀轮回者，合法战败。
+    assert engine.execute_action("skip", {})["success"]
+    prepared = engine.execute_action("prepare_monster_phase", {})
+    assert prepared["success"], prepared
+    decision = PlaceholderBackend().decide(
+        {"state": engine.state.to_dict()},
+        {"action_type": "resolve_monster_phase", **prepared["result"]},
+    )
+    assert [c["actor_ref"] for c in decision.params["choices"]] == ["enemy:0"]
     result = engine.execute_action(decision.action_type, decision.params)
     assert result["success"], result
     assert result["result"]["player_dead"] is True
@@ -103,6 +124,7 @@ def test_handplay_fallback_resubmits_wave_dodge_targets(tmp_path, monkeypatch):
     assert retry_choices[0]["actor_ref"] == "enemy:1"  # 波及在先手行动，避免快照目标先死亡
     wave_dao = retry_choices[0]["daowen"]
     assert len(wave_dao["dodge_targets"]) == 2
+    assert retry_choices[0]["attack_actions"] == []
     assert "首提被拒" in log[0]
 
 

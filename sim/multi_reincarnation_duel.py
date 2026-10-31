@@ -321,6 +321,9 @@ def run_three_generations():
             _resolve_monster_turn_smart(e2)
             e2.execute_action("round_end", {})
         e2.execute_action("battle_end", {})
+        # 2026-10-31：战终不再自动开启死斗；本脚本显式走旧入口。
+        if not e2.state.in_final_duel:
+            e2._trigger_final_crown()
 
     print(f"Gen 2: 苏星河通关7场，触发【最终的冠冕】(in_final_duel={e2.state.in_final_duel})，迎战初代胜者贾希希！")
     opp1 = e2.state.enemies[0]
@@ -527,6 +530,9 @@ def run_three_generations():
 
         be = e3.execute_action("battle_end", {})
         b_lines.extend(BR.format_battle_end(be.get("result") or be))
+        # 2026-10-31：战终不再自动开启死斗；本脚本显式走旧入口。
+        if not e3.state.in_final_duel:
+            e3._trigger_final_crown()
         battle_blocks.append("\n".join(b_lines))
 
     # -------------------------------------------------------------

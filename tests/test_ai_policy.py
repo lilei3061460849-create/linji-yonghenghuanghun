@@ -88,7 +88,7 @@ def test_six_scenarios_contain_exact_mechanic_details():
     assert "【失去生命后】B 触发循环法术【千刀万剐】（第 1 轮循环，X=2）" in spells
     assert "【失去生命后】B 触发循环法术【千刀万剐】（第 2 轮循环，X=2）" in spells
     assert "【失去生命后】B 触发循环法术【千刀万剐】（第 3 轮循环，X=2）" in spells
-    assert "【中断检查】：B 当前法力为 0，无法支付【再生2】的 2 点法力，循环自然中断" in spells
+    assert "【中断检查】：B 当前法力为 0，无法支付下一轮【再生2】的 2 点法力" in spells
 
 
 # ---------- 错误输入 / 非法配置 ----------

@@ -1,7 +1,8 @@
 """清算及扣盾账本彻底退出，不替换成消耗品；灾厄轮盘保留。"""
 import pytest
 from pathlib import Path
-from engine.daowen import DaoWenEngine, ResonanceEngine, is_reserved_slot
+from engine.daowen import (RELICIZED_DAOWEN_SLOTS, DaoWenEngine, ResonanceEngine,
+                           is_reserved_slot)
 from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
 from engine.mechanisms import MECHANISMS
 from engine.mechanisms.ledger import ledger_names, ledger_of
@@ -19,8 +20,12 @@ def test_registry_mechanisms_ledger_and_slot_retired():
     assert ledger_names() == []
     assert MECHANISMS.get("灾厄轮盘·结算") is not None
     with pytest.raises(ValueError): DaoWenEngine.resolve("清算", 2)
-    loop = ResonanceEngine.CLOSED_LOOPS["罪孽都市闭环"]
-    assert any(is_reserved_slot(n) and "清算" in n for src, _, dst in loop for n in (src, dst))
+    # 2026-10-31：环重画为八条实纹边，清算不再保留任何占位节点。
+    assert not any("清算" in n for n in RELICIZED_DAOWEN_SLOTS.values())
+    for loop in ResonanceEngine.CLOSED_LOOPS.values():
+        for src, _, dst in loop:
+            assert "清算" not in src and "清算" not in dst
+            assert not (is_reserved_slot(src) and "清算" in src)
 
 
 def test_even_unmigrated_legacy_status_and_ledger_cannot_drain_shield():

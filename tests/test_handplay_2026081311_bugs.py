@@ -93,7 +93,7 @@ def test_evolution_only_corpses_rejected():
 # ========================================================================
 
 def test_refuse_gaizao_applies_bleed_and_shards_without_wushi():
-    """正常路径：医生「拒绝改造」流血6、+8碎片，不记无事发生。"""
+    """正常路径：医生「拒绝改造」失去生命6（现行代价名：生命）、+8碎片，不记无事发生。"""
     engine = _engine("doc_happy")
     p = engine.state.player
     p.current_hp = 56
@@ -102,7 +102,7 @@ def test_refuse_gaizao_applies_bleed_and_shards_without_wushi():
     r = engine.execute_action("resolve_event", {"event": "医生", "option_id": 2})
     assert r["success"], r
     applied = r["result"]["applied"]
-    assert "流血6" in applied
+    assert "生命6" in applied
     assert any("碎片" in a for a in applied)
     assert "无事发生" not in applied
     assert p.current_hp == 50

@@ -67,12 +67,12 @@ def test_before_damage_taken_fires_on_daowen_damage():
 
 
 def test_after_damage_taken_fires_on_daowen_damage():
-    """受到伤害后：敌方道纹对玩家造伤落地后，护佑（庇护→自身）获得格挡。"""
+    """受到伤害后：敌方道纹对玩家造伤落地后，护佑（庇护→自身）获得免疫次数。"""
     _, combat, player, enemy = _state()
     _add_spell(player, "庇护", "受到伤害后", "发动庇护 X于自身")
     detail = combat._apply_hostile_damage(player, 8, source=enemy, ctx=_daowen_ctx(enemy, player))
     assert _has_execution(detail, "庇护-受到伤害后")
-    assert player.shield > 0, "受到伤害后应获得格挡"
+    assert player.get_status_value("庇护") > 0, "受到伤害后应获得庇护免疫次数（非格挡）"
 
 
 def test_before_life_lost_fires_on_daowen_damage():

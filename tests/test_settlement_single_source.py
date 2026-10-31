@@ -100,6 +100,24 @@ def _bleed_cost(combat: CombatEngine, ent: Entity, amount: int) -> None:
         "subtype": "bleed", "amount": amount, "tags": {"active_payment"}})
 
 
+def _life_loss(eff: dict) -> int:
+    """一笔效果对目标生命的实际减少量。
+
+    《规则正文·道纹体系》杀伐X＝「使目标生命-X²；这是直接失去生命，不是伤害，
+    不消耗格挡」——引擎据此记为 `target_life_loss`（字段 `lost`），
+    与普通伤害（`damage` / `actual_damage`）区分开。本文件只关心「三处数字一致」，
+    因此统一从这两类记录里取实际扣血。
+    """
+    if eff.get("type") == "target_life_loss":
+        return eff.get("lost", 0)
+    return eff.get("actual_damage", 0)
+
+
+def _hurt_effect(effects: list) -> dict:
+    return next(e for e in effects
+                if e.get("type") in ("damage", "target_life_loss"))
+
+
 # ===========================================================================
 # 1. 普通伤害：杀伐 → 生命变化
 # ===========================================================================
@@ -121,15 +139,16 @@ def test_plain_damage_numbers_match_the_state_and_the_report(tmp_path):
     r = e.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 2,
                                         "target_ref": _ref(e, foe)})
     assert r["success"], r
-    damages = [x for x in r["execution"]["effects"] if x["type"] == "damage"]
+    damages = [x for x in r["execution"]["effects"]
+               if x["type"] in ("damage", "target_life_loss")]
     assert damages, r["execution"]["effects"]
     d = damages[0]
 
     # 返回的数值 == 实体真实状态
     assert d["hp_before"] == hp_before
     assert d["hp_after"] == foe.current_hp
-    assert hp_before - foe.current_hp == d["actual_damage"] + d.get("shield_absorbed", 0)
-    assert d["actual_damage"] > 0, "X=2 的杀伐必须真的掉血"
+    assert hp_before - foe.current_hp == _life_loss(d) + d.get("shield_absorbed", 0)
+    assert _life_loss(d) > 0, "X=2 的杀伐必须真的掉血"
 
     # 战报只翻译、不推导：渲染出的数字就是引擎给出的那组
     text = "\n".join(BR.format_player_action(1, p.name, r))
@@ -147,12 +166,14 @@ def test_daowen_damage_is_not_double_counted_anywhere(tmp_path):
     r = e.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 3,
                                         "target_ref": _ref(e, foe)})
     assert r["success"], r
-    d = next(x for x in r["execution"]["effects"] if x["type"] == "damage")
+    d = _hurt_effect(r["execution"]["effects"])
     # 失血事件（失血总账的唯一写入点）记的数 == 实际掉的数：不多记也不少记
-    assert d["hp_loss_ctx"]["amount"] == d["actual_damage"], (
-        d["hp_loss_ctx"], d["actual_damage"])
-    assert d["hp_loss_ctx"]["parent_event_id"] == d["ctx"]["event_id"], (
-        "失血事件必须挂在本次伤害事件之下，因果链才连得起来")
+    assert d["hp_loss_ctx"]["amount"] == _life_loss(d), (
+        d["hp_loss_ctx"], _life_loss(d))
+    # 直接失血记录走 `hp_loss_ctx`（不带效果级 `ctx`）：父事件必须就是本次道纹结算事件。
+    parent_event_id = r["execution"]["daowen_ctx"]["event_id"]
+    assert d["hp_loss_ctx"]["parent_event_id"] == parent_event_id, (
+        d["hp_loss_ctx"], parent_event_id)
 
 
 # ===========================================================================
@@ -208,11 +229,11 @@ def test_layered_trigger_chain_settles_each_layer_once(tmp_path):
                  for h in hits_result for log in (h.get("spell_logs") or [])
                  if isinstance(log, dict)
                  for eff in ((log.get("execution") or {}).get("effects") or []))
-    countered = sum(eff.get("actual_damage", 0)
+    countered = sum(_life_loss(eff)
                     for h in hits_result for log in (h.get("spell_logs") or [])
                     if isinstance(log, dict)
                     for eff in ((log.get("execution") or {}).get("effects") or [])
-                    if eff.get("type") == "damage")
+                    if eff.get("type") in ("damage", "target_life_loss"))
     assert foe.current_hp == 300 - dealt + healed, (foe.current_hp, dealt, healed)
     assert p.current_hp == 300 - countered, (p.current_hp, countered)
     assert healed > 0 and countered > 0, "第二层（再生）与第三层（杀伐）都必须真的结算了"
@@ -413,8 +434,8 @@ def _one_daowen_hit(e: GameEngine, foe: Entity, x: int) -> dict:
     r = e.execute_action("use_daowen", {"daowen_name": "杀伐", "x": x,
                                         "target_ref": _ref(e, foe)})
     assert r["success"], r
-    d = next(x2 for x2 in r["execution"]["effects"] if x2["type"] == "damage")
-    return {"hp": foe.current_hp, "dmg": d["actual_damage"],
+    d = _hurt_effect(r["execution"]["effects"])
+    return {"hp": foe.current_hp, "dmg": _life_loss(d),
             "shield": d.get("shield_absorbed", 0),
             "mana": e.state.player.current_mana,
             "used": e.state.player.actions_used_this_round}
@@ -424,9 +445,8 @@ def _one_spell_hit(e: GameEngine, foe: Entity, x: int) -> dict:
     r = e.execute_action("cast", {"flow": "发动杀伐X于目标", "steps": [{"x": x}],
                                   "target_ref": _ref(e, foe)})
     assert r["success"], r
-    d = next(x2 for x2 in r["result"]["steps"][0]["execution"]["effects"]
-             if x2["type"] == "damage")
-    return {"hp": foe.current_hp, "dmg": d["actual_damage"],
+    d = _hurt_effect(r["result"]["steps"][0]["execution"]["effects"])
+    return {"hp": foe.current_hp, "dmg": _life_loss(d),
             "shield": d.get("shield_absorbed", 0),
             "mana": e.state.player.current_mana,
             "used": e.state.player.actions_used_this_round}
@@ -467,7 +487,9 @@ def test_spell_step_and_plain_daowen_share_the_mana_payment_rule(tmp_path):
 
     r_dw = e.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 5,
                                            "target_ref": _ref(e, foe)})
-    assert not r_dw["success"] and "法力不足" in r_dw["error"]
+    # 付不起就是不能发动（《规则正文》：道纹发动必须一次性付清全部代价）。
+    # 具体文案由统一支付通道给出（如「无法完整承担法力5（可支付1）」），只锁语义。
+    assert not r_dw["success"] and "法力" in r_dw["error"], r_dw
     assert p.current_mana == 1 and foe.current_hp == hp_before
 
     r_sp = e.execute_action("cast", {"flow": "发动杀伐X于目标", "steps": [{"x": 5}],

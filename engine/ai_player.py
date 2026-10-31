@@ -217,7 +217,7 @@ SYSTEM_PROMPT = """你是第四宇宙游戏的AI玩家。你的任务是根据�
 - declare_evolution（怪物进化·发动原初X）
 - focus：聚能，1次出手→恢复50%已损法力（向上取整）
 - rest：蓄锐，1次出手→下[回始]获得【蓄锐·增】（出手+1，持续1回合）
-- prepare_monster_phase / resolve_monster_phase：怪物阶段两阶段接口（为每个actors条目提交完整选择）。同一resolve里的choices按数组顺序结算；若选择包含波及dodge_targets，必须把该actor排在可能杀死这些目标的actor之前（prepare快照内的波及目标在阶段执行中可能先阵亡）
+- prepare_monster_phase / resolve_monster_phase：怪物阶段两阶段接口。交替出手下每次只能提交1个行动者的1个行动（道纹或普攻，二选一）；提交后重新prepare继续下一个行动者，直到行动权交回轮回者侧。波及使用者优先提交（prepare快照内的波及目标在阶段执行中可能先阵亡）
 - battle_start / round_start / round_end / battle_end：阶段推进；存在候选时必须显式提交
   relic_choices / spell_choices，不能省略（无候选时不用传）
 - 其余动作（use_resonance / consume_item / command_ally / resolve_ally_phases / deploy_employee /
@@ -585,59 +585,66 @@ class PlaceholderBackend(AIBackend):
                 return AIDecision("resolve_attack", {"token": available_actions["token"], "hits": hits},
                                   "提交完整攻击选择")
             if pending_type == "resolve_monster_phase":
-                choices = []
-                for actor in available_actions.get("actors", []):
-                    dao = None
-                    action_count = actor["base_attack_actions"]
-                    hit_count = actor["base_hits_per_attack"]
-                    if actor["daowen_options"]:
-                        option = actor["daowen_options"][0]
-                        dao = {"name": option["name"], "dodge": False, "blood_shadow": False,
-                               "trigger_spell_choices": {
-                                   holder: {spell["spell_name"]: {"use": False} for spell in spells}
-                                   for holder, spells in option.get("trigger_spell_options", {}).items()}}
-                        if option["requires_target"]: dao["target_ref"] = option["target_options"][0]["ref"]
-                        if option.get("resolves_as") == "冰冻":
-                            ice_schema = option.get("extra_choice_schema", {}).get("freeze_daowen", {})
-                            ice_options = ice_schema.get("options", {}).get(dao.get("target_ref"), [])
-                            # 怪物冷却型道纹固定X=1；prepare已排除0种道纹的目标。
-                            dao["freeze_daowen"] = list(ice_options[:1])
-                        if option.get("resolves_as") in {"流动", "遗忘"}:
-                            extra_schema = option.get("extra_choice_schema", {})
-                            status_options = extra_schema.get("status_indices", {}).get("options", {})
-                            dao["status_indices"] = {
-                                ref: [entry["index"] for entry in entries[:int(option.get("x", 1))]]
-                                for ref, entries in status_options.items()
-                            }
-                            if option.get("resolves_as") == "流动":
-                                destination_options = extra_schema.get("flow_target_ref", {}).get(
-                                    "options", {}).get(dao.get("target_ref"), [])
-                                if not destination_options:
-                                    raise ValueError("流动prepare没有可用接收目标")
-                                dao["flow_target_ref"] = destination_options[0]
-                        if option["dodge_submission"] == "per_target":
-                            # 波及X：必须恰好提交X个目标（候选全量提交会在候选>X时被拒）。
-                            dao["dodge_targets"] = pick_wave_dodge_targets(option)
-                    target = (actor["attack_target_options"][0]
-                              if actor["attack_target_options"] else None)
-                    if target is None:
-                        # 无合法攻击目标：本回合不出手（引擎prepare已置base_attack_actions=0）
-                        attacks = []
-                    else:
-                        spell_choices = {timing: {spell["spell_name"]: {"use": False}
-                                                  for spell in target.get("spell_options", {}).get(timing, [])}
-                                         for timing in ("before", "after", "damage_after", "life_before")}
-                        attacks = [{"hits": [{"target_ref": target["ref"], "dodge": False,
-                                               "blood_shadow": False, "spell_choices": spell_choices}
-                                              for _ in range(hit_count)]}
-                                   for _ in range(action_count)]
-                    choices.append({"actor_ref": actor["actor_ref"], "daowen": dao,
-                                    "attack_actions": attacks})
-                # 波及的dodge_targets冻结在prepare快照；先结算这些标记，避免前序攻击杀死目标。
-                choices.sort(key=lambda choice: 0 if "dodge_targets" in (choice.get("daowen") or {}) else 1)
+                # 交替出手：每次只能提交1个行动者的1个行动（道纹或普攻，二选一）。
+                # 波及的dodge_targets冻结在prepare快照，故先交波及使用者，避免前序攻击杀死目标。
+                actors = list(available_actions.get("actors", []))
+                actors.sort(key=lambda a: 0 if any(
+                    o.get("dodge_submission") == "per_target"
+                    for o in (a.get("daowen_options") or [])) else 1)
+                if not actors:
+                    return AIDecision("noop", {}, "怪物阶段没有可提交的行动者")
+                actor = actors[0]
+                dao = None
+                action_count = actor["base_attack_actions"]
+                hit_count = actor["base_hits_per_attack"]
+                if actor["daowen_options"]:
+                    option = actor["daowen_options"][0]
+                    dao = {"name": option["name"], "dodge": False, "blood_shadow": False,
+                           "trigger_spell_choices": {
+                               holder: {spell["spell_name"]: {"use": False} for spell in spells}
+                               for holder, spells in option.get("trigger_spell_options", {}).items()}}
+                    if option["requires_target"]: dao["target_ref"] = option["target_options"][0]["ref"]
+                    if option.get("resolves_as") == "冰冻":
+                        ice_schema = option.get("extra_choice_schema", {}).get("freeze_daowen", {})
+                        ice_options = ice_schema.get("options", {}).get(dao.get("target_ref"), [])
+                        # 怪物冷却型道纹固定X=1；prepare已排除0种道纹的目标。
+                        dao["freeze_daowen"] = list(ice_options[:1])
+                    if option.get("resolves_as") in {"流动", "遗忘"}:
+                        extra_schema = option.get("extra_choice_schema", {})
+                        status_options = extra_schema.get("status_indices", {}).get("options", {})
+                        dao["status_indices"] = {
+                            ref: [entry["index"] for entry in entries[:int(option.get("x", 1))]]
+                            for ref, entries in status_options.items()
+                        }
+                        if option.get("resolves_as") == "流动":
+                            destination_options = extra_schema.get("flow_target_ref", {}).get(
+                                "options", {}).get(dao.get("target_ref"), [])
+                            if not destination_options:
+                                raise ValueError("流动prepare没有可用接收目标")
+                            dao["flow_target_ref"] = destination_options[0]
+                    if option["dodge_submission"] == "per_target":
+                        # 波及X：必须恰好提交X个目标（候选全量提交会在候选>X时被拒）。
+                        dao["dodge_targets"] = pick_wave_dodge_targets(option)
+                target = (actor["attack_target_options"][0]
+                          if actor["attack_target_options"] else None)
+                if dao is not None:
+                    attacks = []  # 用道纹就不能再普攻（同一提交只能1个行动）
+                elif target is None:
+                    # 无合法攻击目标：本回合不出手（引擎prepare已置base_attack_actions=0）
+                    attacks = []
+                else:
+                    spell_choices = {timing: {spell["spell_name"]: {"use": False}
+                                              for spell in target.get("spell_options", {}).get(timing, [])}
+                                     for timing in ("before", "after", "damage_after", "life_before")}
+                    attacks = [{"hits": [{"target_ref": target["ref"], "dodge": False,
+                                           "blood_shadow": False, "spell_choices": spell_choices}
+                                          for _ in range(hit_count)]}
+                               for _ in range(action_count)]
                 return AIDecision("resolve_monster_phase",
-                                  {"token": available_actions["token"], "choices": choices},
-                                  "提交完整怪物阶段选择")
+                                  {"token": available_actions["token"],
+                                   "choices": [{"actor_ref": actor["actor_ref"], "daowen": dao,
+                                                "attack_actions": attacks}]},
+                                  "提交单个行动者的怪物阶段选择")
             actions = available_actions.get("actions", [])
             for action in actions:
                 action_type = action.get("action_type")

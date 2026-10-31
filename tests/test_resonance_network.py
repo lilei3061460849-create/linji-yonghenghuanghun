@@ -143,7 +143,8 @@ def test_region_loops_present():
     # 2026-10-11：龙心谷删【嫁祸】（效果与遗物【贪婪契约】重复），由【裂变】直连【背负】，7 → 6 条边。
     # 2026-10-14：扭曲都市删【搏命】（并入【透支】），该格留成空占位符（镇尸先例），仍 7 条边。
     # 2026-10-29：沉沦海在遗忘—大梦间接入冰冻，主环5 → 6条边。
-    expected = {"扭曲都市闭环": 7, "罪孽都市闭环": 7, "龙心谷闭环": 6, "沉沦海闭环": 6}
+    # 2026-10-31：罪孽都市删【抢劫】【勒索】，重画为八条实纹边，7 → 8 条边。
+    expected = {"扭曲都市闭环": 7, "罪孽都市闭环": 8, "龙心谷闭环": 6, "沉沦海闭环": 6}
     for loop, n in expected.items():
         assert loop in R.CLOSED_LOOPS, f"缺少 {loop}"
         assert len(R.CLOSED_LOOPS[loop]) == n, f"{loop} 应有{n}条边"
@@ -164,11 +165,11 @@ def test_monster_daowen_now_transformable():
 
 def test_disaster_ward_is_removed_from_sin_city_loop():
     edges = R.CLOSED_LOOPS["罪孽都市闭环"]
-    assert len(edges) == 7
+    assert len(edges) == 8
     assert not any(src == "消灾" or dst == "消灾" for src, _, dst in edges)
     assert R.get_available_resonance("消灾") == []
-    assert R.find_transformation("勒索", "曲解", target_daowen="点金") == "点金"
-    assert R.find_transformation("假钞", "曲解", target_daowen="勒索") == "勒索"
+    assert R.find_transformation("假钞", "曲解", target_daowen="交易") == "交易"
+    assert R.find_transformation("交易", "转换", target_daowen="赦免") == "赦免"
 
 
 def test_region_loops_are_closed():

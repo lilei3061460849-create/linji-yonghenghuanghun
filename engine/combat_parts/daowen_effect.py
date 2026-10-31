@@ -10,13 +10,14 @@ import weakref
 import uuid
 from typing import Optional, Any
 from ..models import Entity, StatusEffect, GameState, DaoWenInstance, DaoWen, Spell, Consumable
-from ..daowen import DaoWenEngine, ResonanceEngine
+from ..daowen import DaoWenEngine, ResonanceEngine, PURIFIABLE_COST_KINDS, purifiable_cost_layers
 from ..dice import DiceEngine
 from ..enums import (ActionPhase, TriggerTiming, InterruptType, DamageType,
                      EffectScope, EffectPolarity, CostType)
 from ..dm_rulings import Interrupt
 from ..combat_events import CombatEvent, CombatEventType, register_combat_event_observer
 from ..combat_hooks import CombatHookManager
+from ..resolution import note_delta
 from ..effect_context import EffectContext, make_context, normalize_context
 from ..mechanisms import MECHANISMS, Phase, TriggerBus, TriggerContext
 from ..personality import remove_personality
@@ -628,9 +629,14 @@ class DaowenEffectMixin:
     ) -> dict:
         """应用道纹效果；aoe_targets_override用于绑定两阶段决策的目标快照。"""
         if name == "净化":
-            kinds = set(calc.get("cost_reductions", {}))
-            if len(kinds) != 1 or not kinds <= {"血限", "枯竭", "法限", "速度", "异变"}:
-                raise ValueError("净化仅允许减少一种数值类代价，不支持失忆或冷却")
+            reductions = calc.get("cost_reductions", {})
+            kinds = set(reductions)
+            if not kinds or not kinds <= set(PURIFIABLE_COST_KINDS):
+                raise ValueError("净化仅允许减少数值类代价（血限/枯竭/法限/速度/异变），不支持失忆或冷却")
+            if any(int(layers) < 1 for layers in reductions.values()):
+                raise ValueError("净化层数必须为正整数")
+            if sum(int(layers) for layers in reductions.values()) > int(calc.get("x", 0) or 0):
+                raise ValueError("净化总层数不得超过X")
         if name == "催化" and "catalysis_plan" not in calc:
             raise ValueError("催化须在支付前通过共用前置入口准备完整调用计划")
         if name == "回响" and "huixiang_selected" not in calc:
@@ -730,7 +736,10 @@ class DaowenEffectMixin:
         result.update(self.pay_daowen_cooldown(name,calc,caster))
 
         # 蒙蔽(施法者伤害类道纹归零) / 坏死(目标禁疗)
-        mengbi_blocked = caster.has_status("蒙蔽") and ("target_damage" in calc or "aoe_damage" in calc)
+        # 强光探照灯（原【蒙蔽】）：使目标「造成的伤害」无效——伤害类输入；
+        # 只造成[失去生命]的效果（如杀伐的生命-X²）不属于伤害，因此不被挡。
+        mengbi_blocked = caster.has_status("蒙蔽") and any(
+            key in calc for key in ("target_damage", "aoe_damage", "total_damage", "hits"))
         if mengbi_blocked:
             for s in caster.status_effects:
                 if s.name == "蒙蔽" and s.value > 0:
@@ -756,7 +765,10 @@ class DaowenEffectMixin:
             for life_target, amount in zip(life_targets, pieces):
                 if life_target is None or not life_target.is_alive:
                     continue
+                hp_before = life_target.current_hp
                 loss = self._raw_hp_loss(life_target, amount, ctx=daowen_ctx)
+                # trace 要能回答「它为什么没死」：失去生命同样必须记下 hp 变化。
+                note_delta(self, "hp", hp_before, life_target.current_hp)
                 result["effects"].append({"type": "target_life_loss", "target": life_target.name,
                                           "requested": amount, **loss})
         if "target_damage" in calc:
@@ -930,6 +942,7 @@ class DaowenEffectMixin:
 
         # ---- 再生的攻击力代价：发动者失去攻击力，随后按正常目标结算回复 ----
         if calc.get("cost_type") == "攻击力" and calc.get("cost_attack", 0) > 0:
+            self._refuse_blocked_payment(caster, "攻击力")
             amount = int(calc["cost_attack"])
             available = max(0, int(caster.effective_attack_power()))
             if amount > available:
@@ -993,15 +1006,19 @@ class DaowenEffectMixin:
             for wt in wave_status_targets:
                 if not wt.is_alive:
                     continue
-                reductions = dict(calc["cost_reductions"])
-                ledger = getattr(wt, "reversible_cost_layers", {})
+                reductions = {kind: int(layers)
+                              for kind, layers in calc["cost_reductions"].items()}
+                if not set(reductions) <= set(PURIFIABLE_COST_KINDS):
+                    raise ValueError("净化仅允许减少数值类代价（血限/枯竭/法限/速度/异变）")
+                max_total = int(calc.get("x", 0) or 0)
+                if sum(reductions.values()) > max_total:
+                    raise ValueError("净化总层数不得超过X")
+                ledger = getattr(wt, "reversible_cost_layers", None)
                 applied = {}
                 for kind in list(reductions):
-                    owned = (wt.mutation_count if kind == "异变" else
-                             int(getattr(wt, "pending_exhaust_mana", 0) or 0)
-                             if kind == "枯竭" else ledger.get(kind, 0))
+                    owned = purifiable_cost_layers(wt, kind)
                     reductions[kind] = min(reductions[kind], max(0, owned))
-                    if kind != "异变":
+                    if kind != "异变" and isinstance(ledger, dict):
                         ledger[kind] = max(0, owned - reductions[kind])
                 if reductions.get("血限", 0) > 0:
                     amount = int(reductions["血限"])
@@ -1293,7 +1310,7 @@ class DaowenEffectMixin:
                 })
                 result["effects"].append({"type": "speed_halved", "target": wt.name,
                                           "speed": wt.current_speed})
-        if "speed_penalty" in calc and (name != "抢劫" or self._shards_of(target) <= 0):
+        if "speed_penalty" in calc:
             self._lose_current_speed(target, calc["speed_penalty"], ctx={
                 "timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
                 "source": name, "source_type": "daowen", "actor": caster, "target": target,
@@ -1308,6 +1325,7 @@ class DaowenEffectMixin:
         # 当前统一执行接口没有额外的选纹决策槽，按持有顺序优先失去发动道纹以外的道纹；
         # 数量不足时发动失败应由上层预检，本处只结算已确认的代价。
         if "forget_daowen" in calc:
+            self._refuse_blocked_payment(caster, "失忆")
             count = int(calc["forget_daowen"])
             owned = list(caster.dao_wen)
             chosen = [n for n in owned if n != name][:count]
@@ -1322,33 +1340,33 @@ class DaowenEffectMixin:
             self._settle_diandang_discovery(caster, calc["discover_daowen"], result)
 
         # ---- 碎片系（罪孽）----
-        if "shard_steal" in calc and self._shards_of(target) > 0:
-            # 抢劫是“有碎片则夺取，若无碎片才失速”的二选一；不得把不足额偷取扩成负债。
-            gained = min(self._shards_of(target), calc["shard_steal"])
-            self._lose_shards_of(target, gained)
-            if caster is self.state.player:
-                self.state.shards += gained
-            else:
-                caster.shards += gained
-            result["effects"].append({"type": "shard_steal", "target": target.name, "gained": gained})
-        if "shard_debt" in calc:
-            # 2026-10-14【勒索】：与抢劫同价同量形状不同——碎片是销毁（谁都不获得），
-            # 不足部分记负债（真碎片扣负，可触发【还债】）。走 shards 动词统一口径
-            # （= 旧逼债块字面约定：够则扣，不够则假碎片优先+差额扣负）。
-            need = calc["shard_debt"]
-            paid = apply_verb(self, "shards", {
-                "target": target, "delta": -need,
-                "ctx": {"source": "勒索", "source_type": "daowen", "actor": caster,
-                        "target": target, "mechanic": "cost", "subtype": "lesuo",
-                        "amount": -need, "tags": {"daowen", "shards"}},
-            })
-            if paid["paid"]:
-                result["effects"].append({"type": "lesuo", "target": target.name,
-                                          "lost_shards": need})
-            else:
-                result["effects"].append({"type": "lesuo_debt", "target": target.name,
-                                          "obligation": need, "shards_now": paid["shards_now"],
-                                          "debt_now": paid["debt"]})
+        if "shard_burn" in calc:
+            # 【烁金】：目标碎片减少10X；不足时减到 0，不记负债（与已删的【勒索】不同）。
+            burned = min(max(0, self._shards_of(target)), int(calc["shard_burn"]))
+            if burned:
+                self._lose_shards_of(target, burned)
+            result["effects"].append({"type": "shard_burn", "target": target.name,
+                                      "lost": burned})
+        if "relic_enable" in calc:
+            names = [str(n) for n in (calc.get("relic_names") or []) if n]
+            pool = self.state.relics if caster is self.state.player else getattr(caster, "relics", [])
+            changed = []
+            for relic in pool:
+                if relic.name in names and not getattr(relic, "enabled", True):
+                    relic.enabled = True
+                    changed.append(relic.name)
+            result["effects"].append({"type": "relic_enable", "target": caster.name,
+                                      "enabled": changed})
+        if "relic_disable" in calc:
+            names = [str(n) for n in (calc.get("relic_names") or []) if n]
+            pool = self.state.relics if target is self.state.player else getattr(target, "relics", [])
+            changed = []
+            for relic in pool:
+                if relic.name in names and getattr(relic, "enabled", True):
+                    relic.enabled = False
+                    changed.append(relic.name)
+            result["effects"].append({"type": "relic_disable", "target": target.name,
+                                      "disabled": changed})
         if "shard_gain" in calc:  # 点金：支付失忆X后获得80X真碎片
             if caster is self.state.player:
                 self.state.shards += calc["shard_gain"]
@@ -1599,7 +1617,8 @@ class DaowenEffectMixin:
               and not (name == "变形" and bianxing_blocked)
               # 波及标记由 use_daowen/怪物结算逐目标处理，不走通用状态块
               # 乱葬岗道纹已在上方乱葬岗段自行 add_status，跳过通用状态处理避免重复叠加
-              and name not in ("勾魂", "冥气", "缄默", "波及", "共罪", "血契", "庇护", "强化", "弱化", "冰冻")):
+              and name not in ("勾魂", "冥气", "缄默", "波及", "共罪", "血契", "庇护", "强化", "弱化", "冰冻",
+                               "怜悯")):
             duration = calc["duration"]  # 0不生效；只有显式-1表示持续∞。
             effect_target = target if target else caster
             # 自身作用型道纹（变形/超频等）作用于施法者
@@ -1667,13 +1686,33 @@ class DaowenEffectMixin:
                 advanced = self.advance_target_rounds(st_target, int(calc["extra_target_rounds"]), source="大梦")
                 result["effects"].extend(advanced)
 
+        if name == "怜悯":
+            kind = calc.get("blocked_payment_type")
+            if not kind:
+                raise ValueError("怜悯缺少封锁的支付途径")
+            if target is None:
+                raise ValueError("怜悯需要显式目标")
+            target.add_status(self._daowen_status(
+                daowen_order=daowen_order, name="怜悯", value=1,
+                remaining_rounds=calc.get("duration", x), source=caster.name,
+                effect_data={"blocked_type": kind}))
+            result["effects"].append({"type": "payment_block", "target": target.name,
+                                      "blocked_type": kind,
+                                      "duration": calc.get("duration", x)})
+
         if name == "共罪":
-            # 两个目标之外，发动者始终追加一个支付名额；同一实体可以占两份。
+            # 2026-10-31 用户裁定：X 个非自身目标之外，发动者始终追加一个支付名额；
+            # 同一实体可以因追加而占两份。
             import json
-            targets = [calc.get("target1"), calc.get("target2")]
-            if (any(entity is None for entity in targets) or targets[0] is targets[1]
-                    or any(not entity.is_alive for entity in targets)):
-                raise ValueError("共罪需要两个不同的存活目标")
+            targets = list(calc.get("targets") or [])
+            expected = int(calc.get("x", 0) or 0)
+            if (not targets
+                    or (expected and len(targets) != expected)
+                    or any(entity is None for entity in targets)
+                    or len({id(entity) for entity in targets}) != len(targets)
+                    or any(not entity.is_alive for entity in targets)
+                    or any(entity is caster for entity in targets)):
+                raise ValueError("共罪需要X个互不相同的存活非自身目标")
             group_slots = targets + [caster]
             group_ids = [str(entity.runtime_id) for entity in group_slots]
             encoded = json.dumps(group_ids, ensure_ascii=False)

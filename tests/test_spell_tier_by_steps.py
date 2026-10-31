@@ -67,7 +67,7 @@ def test_both_branches_of_condition_count():
 # ---------------------------------------------------------------- 错误输入
 
 def test_definition_rejected_when_actions_insufficient(tmp_path):
-    """出手不足：拒绝定义、不写入 spells，也不白扣出手。"""
+    """出手不足：本回合出手已花完时拒绝定义，不写入 spells，也不白扣出手。"""
     engine = GameEngine(db_path=str(tmp_path / "tier.db"), rng_seed=3,
                         sealed_candidate_path=str(tmp_path / "tier.json"))
     engine.execute_action("setup_attributes", {"name": "甲", "blood_points": 11,
@@ -81,7 +81,8 @@ def test_definition_rejected_when_actions_insufficient(tmp_path):
     engine.state.combat_subphase = "player_actions"
     engine.state.enemies.append(Entity("靶怪", "怪物", blood_limit=50, current_hp=50,
                                        attack_count=1, attack_power=1))
-    used = player.actions_used_this_round  # 基础出手 2 次，3 阶法术必然放不下
+    player.actions_used_this_round = player.action_count  # 本回合出手已花完
+    used = player.actions_used_this_round
 
     result = engine.execute_action("define_spell", {"spell": {
         "name": "血炼周天·自定", "required_daowen": ["再生", "透支"],
@@ -89,13 +90,13 @@ def test_definition_rejected_when_actions_insufficient(tmp_path):
         "effect_flow": "发动再生X于自身→发动透支X于自身→循环"}})
 
     assert not result["success"], result
-    assert "3次出手" in result["error"], result
+    assert "仅剩0次" in result["error"], result
     assert player.spells == []
     assert player.actions_used_this_round == used, "被拒的定义不得扣出手"
 
 
 def test_definition_charges_one_action_per_tier(tmp_path):
-    """补足出手后：3 阶法术正好扣 3 次出手。"""
+    """定义法术固定消耗 1 次出手；阶数只用于定义约束与施展分步，不再预付出手。"""
     engine = GameEngine(db_path=str(tmp_path / "tier_ok.db"), rng_seed=4,
                         sealed_candidate_path=str(tmp_path / "tier_ok.json"))
     engine.execute_action("setup_attributes", {"name": "乙", "blood_points": 11,
@@ -119,4 +120,4 @@ def test_definition_charges_one_action_per_tier(tmp_path):
 
     assert result["success"], result
     assert result["result"]["tier"] == 3
-    assert player.actions_used_this_round == used + 3
+    assert player.actions_used_this_round == used + 1

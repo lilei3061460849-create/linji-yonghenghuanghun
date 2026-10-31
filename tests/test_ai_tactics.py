@@ -49,9 +49,10 @@ def test_ai_uses_full_action_budget(tmp_path):
             monster.dao_wen["全力"] = DaoWenInstance(
                 DaoWen("全力", "", "异变", "5X", ""), x_value=1)
     ai = TacticalAI(e)
+    # 单行动契约：每回合就是 1 次出手（攻击次数只是这一次攻击里的段数）。
+    expected = max(1, ai.remaining_actions())
     results = ai.take_turn()
-    expected = max(1, e.state.player.action_count)
-    assert len(results) >= 2, f"只出手{len(results)}次，未用满预算(应为{expected}次)"
+    assert len(results) == expected, f"只出手{len(results)}次，未用满预算(应为{expected}次)"
 
 
 def test_ai_shields_when_facing_lethal_damage(tmp_path):

@@ -9,9 +9,11 @@
     python sim/monster_arena.py --compare 777 --matches 12 --monsters 3   # holdout 对比
 
 设计（与用户 2026-10-03 的要求逐条对应）：
-  · 怪物之间互相攻击——引擎侧新增 `state.arena_ffa` 开关（默认 False，正式玩法不受影响）：
-    打开后怪物阶段的合法目标从「玩家侧」扩为「其它存活怪物」，并允许逐个 actor 提交
-    （严格交替，避免先手方一次结算全场）。
+  · 怪物之间互相攻击——不靠模式开关，靠基础规则：
+    敌对＝阵营（`Entity.camp`）不同。养蛊场给每只怪物填唯一 camp（自成一营），
+    于是怪物阶段的合法目标按通用规则自然变成「其它参战者」；观众用通用属性
+    `Entity.in_combat = False` 表达「不在场上」，既不占出手权也不进合法目标。
+    每次提交仍只结算 1 个行动者的 1 个行动（严格交替，避免先手方一次结算全场）。
   · 赢了加分——存活到最后 +1；每击杀 +0.3。
   · 自己行动导致自己死亡＝失败品——两条路径都记为 self_kill 并在报告里单列：
     ① 自己出手之后自己没了（自伤/反噬/自爆）；② 回合结算时被【凡庸】一类"自己折腾出来的"
@@ -104,11 +106,15 @@ def build_arena(lineup: list[dict], *, seed: int = 0, rng_seed: int = 7,
         m.current_hp = m.blood_limit
         monsters.append(m)
     e.state.enemies = monsters
-    # 观众不进合法目标（arena_ffa 只把「其它怪物」加进目标集）
-    e.state.arena_ffa = True
-    # 行动自由化（2026-10-03 用户裁定，规则实验）：怪物不再被强制发动道纹，
-    # 每回合 2 个槽——攻击/道纹各占 1 槽，可「连续两次攻击」「连续两次道纹」。
-    e.state.monster_free_actions = bool(free_actions)
+    # 用通用属性表达这件事，引擎里没有任何「养蛊场模式」分支：
+    #   · 观众 `in_combat=False` —— 不占出手权、不进任何合法目标；
+    #   · 每只怪物自成一营（camp 唯一）—— 敌对＝阵营不同，于是它们互相攻击，
+    #     而不会去打观众（观众本来也不在场上）。
+    e.state.player.in_combat = False
+    for index, monster in enumerate(monsters):
+        monster.camp = f"arena:{index}"
+    # 「行动自由化 2 槽」已随统一交替出手废止（规则：每次只提交一个行动），
+    # 因此这里不再有任何开关；`free_actions` 参数保留只为兼容旧命令行调用。
     return e
 
 
@@ -124,9 +130,10 @@ def _side_resources(ent) -> dict:
 def _candidates(actor: dict, rivals: list[dict]) -> list[dict]:
     """把 prepare 给出的合法选项展开成候选提交（确定性顺序，性能闸门截断）。
 
-    默认契约（free_actions=False）：必须发 1 个道纹 + 1 组攻击。
-    自由行动（free_actions=True，2026-10-03 用户裁定）：每回合 2 个槽，
-    攻击/道纹各占 1 槽——空过 / 1 次攻击 / 1 次道纹 / 攻击×2 / 道纹×2 / 一攻一道纹。
+    契约：一次提交＝一个真实行动（攻击组或一个道纹，不打包）。
+    free_actions 参数仅为兼容旧命令行保留（引擎里已无自由行动开关），
+    两槽（攻击×2／道纹×2／一攻一道纹）的旧候选族
+    已随该裁定废止。
     """
     out: list[dict] = []
     free = bool(actor.get("free_actions"))
@@ -140,18 +147,18 @@ def _candidates(actor: dict, rivals: list[dict]) -> list[dict]:
                 for _ in range(groups * times)]
 
     if free:
-        # 道纹对象（每个候选＝一个 daowen 提交）
+        # 2026-10-30：交替出手统一后，引擎一次提交只接受一个真实行动
+        # （《规则正文·战斗行动》第 7 条／怪物条目：攻击与道纹不得打包成同一次提交；
+        #  combat_parts/monster_phase.py 的 attack_slots + dao_slots != 1 校验）。
+        # 因此候选只保留「单槽」：一组攻击，或一个道纹——每回合能有几次由通用出手
+        # 预算（Entity.action_count）决定，不再有「攻击×2／道纹×2」的候选。
         dao_objs: list[dict] = []
         for opt in daowen_opts:
-            # X 下限恒为 1（2026-10-09 用户令 repealed 了波及 X≥2；prepare 已不再暴露
-            # min_x 字段，这里兜底 1）。波及 X=1 合法——单目标全值。
             min_x = max(1, int(opt.get("min_x") or 1))
-            # 波及的显式目标要按 dodge_target_options 取（含非攻击目标，如观众/友方），
-            # 不是 attack_target_options；x 也不得超过可用目标数，否则 API 会拒收。
             wave_refs = ([t["ref"] for t in (opt.get("dodge_target_options") or [])]
                          or [r["ref"] for r in rivals]) if opt["name"] == "波及" else []
             if opt["name"] == "波及" and len(wave_refs) < min_x:
-                continue          # 合法目标不足下限 → 本场景无法发动
+                continue
             xs = ([min_x, max(min_x, (opt.get("max_x") or 1) // 2), opt.get("max_x") or 1]
                   if opt.get("x_free") else [opt.get("x") or 1])
             targets = ([t["ref"] for t in (opt.get("target_options") or [])]
@@ -169,43 +176,24 @@ def _candidates(actor: dict, rivals: list[dict]) -> list[dict]:
                                                  for r in wave_refs[:x]]
                     dao_objs.append(cand)
         can_atk = bool(rivals) and groups > 0
-        # 四类候选分桶，再轮转交错取前 MAX_CANDIDATES 个——避免"某一类把配额吃光"
-        # （例如按对手轮询时，道纹×2 的候选会被排到配额之外，等于永远不被考虑）。
-        buckets: dict[str, list[dict]] = {"攻击×2": [], "道纹×2": [], "一攻一道纹": [], "单槽": []}
-        for rival in rivals:
-            if can_atk:
-                buckets["攻击×2"].append({"actor_ref": actor["actor_ref"], "daowen": None,
-                                          "attack_actions": attacks(2)})
-                for dao_obj in dao_objs:
-                    buckets["一攻一道纹"].append({"actor_ref": actor["actor_ref"], "daowen": dao_obj,
-                                                  "attack_actions": attacks(1)})
-        for i, d1 in enumerate(dao_objs):
-            for d2 in dao_objs[i + 1:]:
-                if d1["name"] == d2["name"]:
-                    continue
-                buckets["道纹×2"].append({"actor_ref": actor["actor_ref"], "daowen": d1,
-                                          "daowen_2": d2, "attack_actions": []})
-        # 两槽都不可能时才退到单槽（保证任何 prepare 结果都有合法提交可选）
-        if not any(buckets[k] for k in ("攻击×2", "道纹×2", "一攻一道纹")):
-            if can_atk:
-                buckets["单槽"].append({"actor_ref": actor["actor_ref"], "daowen": None,
-                                        "attack_actions": attacks(1)})
-            for dao_obj in dao_objs[:1]:
-                buckets["单槽"].append({"actor_ref": actor["actor_ref"], "daowen": dao_obj,
-                                        "attack_actions": []})
-        order = ["攻击×2", "一攻一道纹", "道纹×2", "单槽"]
-        idx = {k: 0 for k in order}
-        while len(out) < MAX_CANDIDATES:
-            progressed = False
-            for k in order:
-                if idx[k] < len(buckets[k]):
-                    out.append(buckets[k][idx[k]])
-                    idx[k] += 1
-                    progressed = True
-                    if len(out) >= MAX_CANDIDATES:
-                        break
-            if not progressed:
-                break
+        attacks_out: list[dict] = []
+        if can_atk:
+            for rival in rivals:
+                attacks_out.append({"actor_ref": actor["actor_ref"], "daowen": None,
+                                    "attack_actions": attacks(1)})
+        dao_out = [{"actor_ref": actor["actor_ref"], "daowen": d, "attack_actions": []}
+                   for d in dao_objs]
+        # 交替取前 MAX_CANDIDATES 个（避免攻击候选把道纹候选挤出配额）
+        out = []
+        i = 0
+        while len(out) < MAX_CANDIDATES and (i < len(attacks_out) or i < len(dao_out)):
+            if i < len(attacks_out):
+                out.append(attacks_out[i])
+            if len(out) < MAX_CANDIDATES and i < len(dao_out):
+                out.append(dao_out[i])
+            i += 1
+        if not out:
+            out = [{"actor_ref": actor["actor_ref"], "daowen": None, "attack_actions": []}]
         return out
 
     has_daowen = bool(daowen_opts)

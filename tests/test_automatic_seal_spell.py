@@ -60,34 +60,35 @@ def test_defined_seal_spell_triggers_at_own_turn_end():
     e = _engine()
     _arm_seal_spell(e)
     p = e.state.player
-    monster = e.state.enemies[0]
     assert e.execute_action("round_start", {})["success"]
+    monster = e.state.enemies[0]
 
     speed_before = p.current_speed
-    # 真实 TacticalAI 先执行本回合主动行动；镇魔印不应被当作主动封印候选。
+    mutation_before = p.mutation_count
+    # 真实 TacticalAI 执行本回合主动行动；镇魔印不应被当作主动封印候选。
     actions = TacticalAI(e).take_turn()
-    assert len(actions) == 2, actions
-    assert all("攻击" in item.get("action", "") for item in actions), actions
-    assert p.actions_used_this_round == p.action_count == 2
+    assert len(actions) == 1, actions
+    assert "攻击" in actions[0].get("action", ""), actions
+    assert p.actions_used_this_round == p.action_count == 1
     assert p.current_speed == speed_before, "普攻不应消耗速度"
     assert monster.current_hp < monster.blood_limit, "普攻必须先造成真实伤害"
 
-    prepared = e.execute_action("prepare_monster_phase", {})
-    assert prepared["success"], prepared
-    logs = prepared["result"]["spell_logs"]
+    # 「自身回合结束」触发点：本侧最后一次出手后自动结算，不需要手动 spell_choices。
+    side_logs = actions[-1]["result"].get("side_turn_end_spell_logs", {})
+    logs = side_logs.get("player_side", [])
     assert any(log.get("spell") == "镇魔印" and log.get("target") == monster.name
-               for log in logs), logs
-    assert p.mutation_count == 1
+               for log in logs), side_logs
+    assert p.mutation_count == mutation_before + 1, "封印的异变X必须由法术自己付"
     assert e.state.enemies == [], "自动法术结算后当前怪物应暂离"
     assert len(e.state.delayed_monster_reentries) == 1
-    assert p.actions_used_this_round == 2, "自动法术不应额外消耗主动出手"
+    assert p.actions_used_this_round == 1, "自动法术不应额外消耗主动出手"
 
 
 def test_automatic_seal_spell_does_not_need_manual_spell_choices():
     e = _engine()
     _arm_seal_spell(e)
     assert e.execute_action("round_start", {})["success"]
-    assert resolve_attack(e)["success"]
+    # 单行动契约：一轮一次出手；这一手打完后「自身回合结束」法术即自动结算。
     assert resolve_attack(e)["success"]
 
     # prepare_monster_phase 不提交 spell_choices；已定义的“自身回合结束”法术

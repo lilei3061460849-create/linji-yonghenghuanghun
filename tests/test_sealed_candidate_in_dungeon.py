@@ -118,12 +118,15 @@ def test_sealed_candidate_fights_in_dungeon():
         if not e.state.player.is_alive:
             break
         _drain_redemption()
-        mp = _resolve_monster_turn(e)
-        assert mp["success"], mp
+        for _ in range(12):
+            if e.state.combat_subphase == "await_round_end":
+                break
+            mp = _resolve_monster_turn(e)
+            assert mp["success"], mp
         if not e.state.player.is_alive:
             break
         _drain_redemption()
-        e.execute_action("round_end", {})
+        assert e.execute_action("round_end", {})["success"]
         if not [x for x in e.state.enemies if x.is_alive]:
             survived = True
             break

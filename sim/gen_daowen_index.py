@@ -128,7 +128,7 @@ def target_label(name):
     if name == "波及":
         return "X个（显式提交）"
     if name == "共罪":
-        return "2个（显式提交）"
+        return "X个非自身（显式提交）"
     if name == "超频":
         return "需显式选定"
     if name == "唤潮":
@@ -172,7 +172,8 @@ def region_daowen_order(region: str) -> list:
 CATEGORY = {}
 for n in SHAFA_LOOP_DAOWEN:
     CATEGORY[n] = "shaifa"
-CATEGORY["共罪"] = "other"
+CATEGORY["共罪"] = "unimpl"
+CATEGORY["怜悯"] = "other"
 for n in ORIGINAL_MONSTER_DAOWEN:
     CATEGORY[n] = "original"
 for n in MONSTER_TRANSFORM_DAOWEN:
@@ -195,7 +196,6 @@ assert set(CATEGORY) == (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)), (
 
 # 特殊注记（引擎机制，非数值）
 NOTES = {
-    "共罪": "两个目标之外，发动者始终追加一个支付名额；即使发动者已入选也追加。先按名额平分，再按实体合并扣款；特殊机制代价不分摊。",
     "血契": "按你的名义支付量让目标额外支付X倍同种资源，不是代付；目标资源不足扣至0，生命不足正常命零。血契不能局外生效。",
     "萎缩": "只禁止获得速度，不削减速限，也不阻止失去或支付速度；与超频是同域反转，既有增殖边保留为显式分叉。",
     "唯一": "任何方式成功使用过的道纹都进入历史；持续X内不能再次使用。唯一替换原尘封草案。",
@@ -292,7 +292,7 @@ CAT_LABEL = {
 }
 for name in sorted(DaoWenEngine._registry, key=lambda n: (list(CATEGORY).index(n), n)):
     pass
-order = (list(SHAFA_LOOP_DAOWEN) + ["共罪"] + sorted(ORIGINAL_MONSTER_DAOWEN)
+order = (list(SHAFA_LOOP_DAOWEN) + ["共罪", "怜悯"] + sorted(ORIGINAL_MONSTER_DAOWEN)
          + sorted(MONSTER_TRANSFORM_DAOWEN)
          + [n for r in REGION_EXCLUSIVE_DAOWEN for n in region_daowen_order(r)]
          + [n for pool in RACE_EXCLUSIVE_DAOWEN.values() for n in sorted(pool)]
@@ -343,8 +343,8 @@ section(f"杀伐闭环（通用核心·{len(SHAFA_LOOP_DAOWEN)}）", list(SHAFA_
                     "通用核心道纹为人类侧基础概念，局外可经学习/残韵获得。"],
         loop="杀伐闭环")
 
-section("其他通用道纹（1）", ["共罪"],
-        note_lines=["该类道纹不属于杀伐闭环，但属于当前可用通用道纹。"])
+section("其他通用道纹（1）", ["怜悯"],
+        note_lines=["不属于杀伐闭环，也不属于任何副本闭环。"])
 
 section(f"原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）", sorted(ORIGINAL_MONSTER_DAOWEN),
         note_lines=[
@@ -418,7 +418,7 @@ A("5. **血族专属转换消耗品**：【逆命筹】当前尚无专属获取�
 A("6. **初拥专属**：【真理】仅由初拥之夜选项5授予，不可通过局外学习、【典当】发现或残韵获得。")
 A("7. **角色道纹唯一**：同名道纹不重复存在；通过残韵获得的道纹X按自由规则（自由控X）自定义。")
 A("8. **道纹默认局内发动**；局外发动须条文明示，当前明示项为【真理】【唤潮】【蜃景】；【唤潮】【蜃景】仅作用于开放地图。")
-A("9. **自由控X（自由规则的下属条文，不单独成规）**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】的X还受合法目标数封顶；【共罪】固定选择2个目标，X只决定支付与持续。")
+A("9. **自由控X（自由规则的下属条文，不单独成规）**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】的X还受合法目标数封顶；【共罪】的目标数随X（X个非自身目标），持续∞。")
 A("")
 
 out = ROOT / "全道纹索引.md"

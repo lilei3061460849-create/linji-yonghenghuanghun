@@ -196,6 +196,7 @@ def test_gongzui_daowen_binds_two_targets_who_share_resource_payments(tmp_path):
     player.dao_wen["共罪"] = DaoWenInstance(DaoWen(
         name="共罪", formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
     before_mana = player.current_mana
+    before_hp = player.current_hp
 
     engine = GameEngine(db_path=str(tmp_path / "blood-pact-daowen.db"))
     engine.state = state
@@ -208,7 +209,9 @@ def test_gongzui_daowen_binds_two_targets_who_share_resource_payments(tmp_path):
         ],
     })
     assert result["success"] is True, result
-    assert player.current_mana == before_mana - 2
+    # 2026-10-31：共罪支付改为流血（生命）5X → X=2 扣 10 点生命，法力不动。
+    assert player.current_hp == before_hp - 10
+    assert player.current_mana == before_mana
     assert any(effect.get("targets") == [first.name, second.name, player.name]
                for effect in result["execution"]["effects"])
     members = [player, first, second]
@@ -216,17 +219,23 @@ def test_gongzui_daowen_binds_two_targets_who_share_resource_payments(tmp_path):
     assert all(len(member.get_status_effects("共罪")[0].effect_data["group_ids"]) == 3
                for member in members)
     assert combat._blood_pact_group(player) == [first, second, player]
-    assert first.get_status_effects("共罪")[0].remaining_rounds == 2
+    # 持续∞ 记 -1（与既有 ∞ 口径一致：仍只代表本场战斗内的无限）。
+    assert first.get_status_effects("共罪")[0].remaining_rounds == -1
 
+    # 基线取发动后的血量：共罪自身代价（生命5X）已经扣过，不能算进这次分摊。
+    hp_after_cast, first_hp_after_cast, second_hp_after_cast = (
+        player.current_hp, first.current_hp, second.current_hp)
     receipt = combat.pay_numeric_cost(player, "生命", 9)
-    assert [100 - player.current_hp, 80 - first.current_hp, 80 - second.current_hp] == [3, 3, 3]
+    assert [hp_after_cast - player.current_hp,
+            first_hp_after_cast - first.current_hp,
+            second_hp_after_cast - second.current_hp] == [3, 3, 3]
     assert receipt["owner"]["paid"] == 3, "发动者自己的份额不得记成0或跳过"
     assert receipt["actual_paid"] == 9
     assert sum(part["paid"] for part in receipt["shared_with"]) == 6
 
 
-def test_gongzui_caster_already_selected_still_pays_own_share(tmp_path):
-    """发动者已入选仍追加一份：同一实体占两个支付名额，扣款合并结算。"""
+def test_gongzui_targets_must_be_non_self_and_caster_still_adds_a_slot(tmp_path):
+    """2026-10-31：共罪改选 X 个非自身目标；发动者仍额外占一个支付名额。"""
     state, combat, player, ally = _state_with_blood_pact()
     state.relics.clear()
     player.dao_wen["共罪"] = DaoWenInstance(DaoWen(
@@ -241,15 +250,45 @@ def test_gongzui_caster_already_selected_still_pays_own_share(tmp_path):
             {"target_ref": "friend:0", "dodge": False, "blood_shadow": False},
         ],
     })
-    assert result["success"] is True, result
-    assert combat._blood_pact_group(player) == [player, ally, player]
-    player_status = player.get_status_effects("共罪")[0]
-    assert player_status.remaining_rounds == 2, "同一实体两份名额不得把持续翻倍"
-    assert player_status.effect_data["group_ids"].count(str(player.runtime_id)) == 2
+    # 自身不再可作为共罪目标（条文改「选择X个非自身目标」）。
+    assert result["success"] is False and "非自身目标" in result["error"], result
 
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "共罪", "x": 2,
+        "dodge_targets": [
+            {"target_ref": "friend:0", "dodge": False, "blood_shadow": False},
+            {"target_ref": "friend:0", "dodge": False, "blood_shadow": False},
+        ],
+    })
+    assert result["success"] is False, result
+
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "共罪", "x": 2,
+        "dodge_targets": [
+            {"target_ref": "friend:0", "dodge": False, "blood_shadow": False},
+        ],
+    })
+    assert result["success"] is False and "恰好2个" in result["error"], result
+
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "共罪", "x": 1,
+        "dodge_targets": [
+            {"target_ref": "friend:0", "dodge": False, "blood_shadow": False},
+        ],
+    })
+    assert result["success"] is True, result
+    # 一个非自身目标 + 发动者追加一份 = 两个支付名额。
+    assert combat._blood_pact_group(player) == [ally, player]
+    player_status = player.get_status_effects("共罪")[0]
+    assert player_status.remaining_rounds == -1, "持续∞记 -1"
+    assert player_status.effect_data["group_ids"].count(str(player.runtime_id)) == 1
+
+    # 共罪自身代价 5 点生命已扣（X=1 → 5）；之后 5 点生命由两名额平分。
+    hp_after_cast, ally_hp_after_cast = player.current_hp, ally.current_hp
     receipt = combat.pay_numeric_cost(player, "生命", 5)
-    player_loss, ally_loss = 100 - player.current_hp, 80 - ally.current_hp
-    assert (player_loss, ally_loss) in {(4, 1), (3, 2)}
+    player_loss, ally_loss = hp_after_cast - player.current_hp, ally_hp_after_cast - ally.current_hp
+    # 两个名额平分 5：余数按随机分配，方向不固定（(3,2)/(2,3) 都合法）。
+    assert sorted((player_loss, ally_loss)) == [2, 3]
     assert receipt["owner"]["paid"] == player_loss
     assert receipt["shared_with"][0]["paid"] == ally_loss
     assert receipt["actual_paid"] == 5

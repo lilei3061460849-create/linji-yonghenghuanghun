@@ -40,11 +40,11 @@ def test_setup():
         "blood_points": 11, "speed_points": 8, "mana_points": 6
     })
     assert result["success"], f"属性分配失败: {result}"
-    # DM裁定 2026-09-10：1属性点=6[血限]、2属性点=1[速限]=1[法限]；轮回者出手固定2次
+    # 1属性点=6[血限]、2属性点=1[速限]=1[法限]；所有角色基础出手 1 次（单行动契约）
     assert engine.state.player.blood_limit == 66, f"血限错误: {engine.state.player.blood_limit}"
     assert engine.state.player.speed_limit == 4, f"速限错误: {engine.state.player.speed_limit}"
     assert engine.state.player.mana_limit == 3, f"法限错误: {engine.state.player.mana_limit}"
-    assert engine.state.player.action_count == 2, "出手次数错误：轮回者固定2次"
+    assert engine.state.player.action_count == 1, "出手次数错误：基础出手应为 1 次"
     assert engine.state.shards == 20, "初始碎片错误"
     relic_choices = list(engine.state.pending_relic_choices)
     assert result["result"]["relic_choices"] == relic_choices
@@ -112,14 +112,14 @@ def test_daowen_calculations():
     target = Entity(name="目标", entity_type=EntityType.MONSTER.value, blood_limit=100, current_hp=100)
     result = DaoWenEngine.resolve("杀伐", 3, target=target)
     assert result["cost"] == 3, f"杀伐消耗错误: {result['cost']}"
-    assert result["target_damage"] == 9, f"杀伐伤害错误: {result['target_damage']}"   # X²=3²
+    assert result["target_life_loss"] == 9, f"杀伐伤害错误: {result['target_life_loss']}"   # X²=3²
     print("  ✓ 杀伐X=3: 消耗3，伤害15（DM裁定 2026-09-10：5X）")
     
     # 测试庇护
     result = DaoWenEngine.resolve("庇护", 5, target=target)
     assert result["cost"] == 5
-    assert result["target_shield"] == 10
-    print("  ✓ 庇护X=5: 消耗5，格挡10")
+    assert result["shelter_charges"] == 5 and result["duration"] == 5
+    print("  ✓ 庇护X=5: 消耗5，免疫非[目标]来源的下5次失去生命，持续5")
     
     # 测试再生
     result = DaoWenEngine.resolve("再生", 4, target=target)
@@ -497,19 +497,25 @@ def test_daowen_effects_wired():
     grant_extra_actions(player, 7)
     # 给玩家多个道纹用于测试
     from engine.models import DaoWen, DaoWenInstance
-    for n in ["弱化","全力","变形","抢劫"]:
+    for n in ["弱化","全力","变形","烁金"]:
         player.dao_wen[n] = DaoWenInstance(dao_wen=DaoWen(name=n,formula="",cost_type="消耗",cost_formula="X",effect_formula=""))
     m = Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100, attack_count=3, attack_power=10)
     m.shards = 20
     engine.state.enemies.append(m)
     player.current_mana = 99
 
-    # 弱化3 → 攻击力10-3=7
+    # 弱化3 → 攻击力＝当前法力-3（状态层修正，单行动契约下每次发动各占一个回合的出手）
+    engine.state.player.actions_used_this_round = 0
+    engine.state.duel_turn = "player_side"
     r = engine.execute_action("use_daowen", {"daowen_name":"弱化","x":3,"target":"靶怪"})
     assert r["success"], r
-    assert m.attack_power == 7, f"弱化后攻击力应7，实{m.attack_power}"
-    # 强化2（2026-09-17 用户令重做）→ 攻击力**锁定为其[法限]**，持续X。
+    assert m.get_status_value("弱化") == 3, f"弱化层数应3，实{m.get_status_value('弱化')}"
+    assert m.effective_attack_power() == max(0, m.current_mana - 3), \
+        f"弱化后攻击力应＝当前法力{m.current_mana}-3，实{m.effective_attack_power()}"
+    # 全力2 → 攻击力**锁定为其[法限]**，持续X。
     # 旧版「攻击力+X，持续∞」写遗留字段，属性统一后对不写穿的轮回者无效，已废止。
+    engine.state.player.actions_used_this_round = 0
+    engine.state.duel_turn = "player_side"
     r = engine.execute_action("use_daowen", {"daowen_name":"全力","x":2,"target":"靶怪"})
     assert r["success"], r
     assert m.effective_attack_power() == m.mana_limit, \
@@ -520,16 +526,20 @@ def test_daowen_effects_wired():
     m.current_mana = mana_before
     print(f"  ✓ 弱化/强化：靶怪攻击力 10→7→锁定法限{m.mana_limit}（花法力不掉）")
 
-    # R35 抢劫3：夺取目标现有20碎片。
+    # R35 烁金2：目标碎片减少20，施法者不获得。
     shards_before = engine.state.shards
-    engine.state.player.actions_used_this_round = 0   # 前序弱化/强化已用满2次出手
-    r = engine.execute_action("use_daowen", {"daowen_name":"抢劫","x":3,"target":"靶怪"})
-    assert r["success"], f"抢劫失败: {r}"
-    assert m.shards == 0, f"抢劫后靶怪现有20碎片应被夺尽，实{m.shards}"
-    assert engine.state.shards == shards_before + 20, f"玩家应+20碎片"
-    print(f"  ✓ 抢劫：靶怪碎片20→0，玩家+20碎片")
+    # 前序弱化/全力各占一个回合的出手：起新回合并把出手权归本侧
+    engine.state.player.actions_used_this_round = 0
+    engine.state.duel_turn = "player_side"
+    r = engine.execute_action("use_daowen", {"daowen_name":"烁金","x":2,"target":"靶怪"})
+    assert r["success"], f"烁金失败: {r}"
+    assert m.shards == 0, f"烁金X2应烧掉靶怪现有20碎片，实{m.shards}"
+    assert engine.state.shards == shards_before, "烁金销毁碎片，玩家不获得"
+    print(f"  ✓ 烁金：靶怪碎片20→0，玩家碎片不变")
 
     # 变形（自身攻击力/攻击次数互换）：玩家默认 0×0，互换后仍为 0×0，只验证逻辑跑通
+    engine.state.player.actions_used_this_round = 0
+    engine.state.duel_turn = "player_side"
     r = engine.execute_action("use_daowen", {"daowen_name":"变形","x":1})
     assert r["success"], r
     print("  ✓ 变形：攻击力/攻击次数互换执行成功")
@@ -567,17 +577,17 @@ def test_out_of_combat_actions():
     # 法术统一通过战斗中的自定义施法定义，立即写入 spells 并消耗一次主动出手。
     engine.state.phase = "in_combat"
     engine.state.combat_subphase = "player_actions"
-    grant_extra_actions(player, 7)  # 阶数＝重数后，2 阶法术要 2 次出手
+    grant_extra_actions(player, 7)  # 阶数＝重数后，2 阶法术要 2 次出手（基础 1 出手，先补足）
     used = player.actions_used_this_round
     r = engine.execute_action("define_spell", {"spell_name": "先发制人"})
     assert r["success"], f"定义法术失败: {r}"
     assert "先发制人" in [spell.name for spell in player.spells]
     assert player.armed_spells == []
-    assert player.actions_used_this_round == used + 2, "先发制人（受到伤害前＋杀伐）定义应消耗2次出手"
+    assert player.actions_used_this_round == used + 1, "定义法术固定消耗1次出手（阶级不预付出手）"
     r = engine.execute_action("undefine_spell", {"spell_name": "先发制人"})
     assert r["success"], f"移除法术失败: {r}"
     assert player.spells == []
-    assert player.actions_used_this_round == used + 2, "移除不应再扣出手"
+    assert player.actions_used_this_round == used + 1, "移除不应再扣出手"
     engine.state.phase = "pre_battle"
     print("  ✓ 法术定义/移除：持道纹即可定义，定义耗1次出手")
 
@@ -977,7 +987,11 @@ def test_evolution_yuanchu():
     r10 = resolve_monster_phase(combat2, {"自毁怪": "全力"})
     assert m_col.mutation_count == Entity.MUTATION_COLLAPSE_THRESHOLD + 2 * m_col.mana_limit
     assert m_col.is_alive and m_col.current_hp == 120
+    # 单行动契约：怪物一回合只有一次出手，本回合花在道纹上；再下一回合才轮到它普攻。
+    combat2.round_start()
+    r10b = resolve_monster_phase(combat2, {"自毁怪": None})
     assert st2.player.current_hp < 60, "怪物越过50层后仍应发动道纹并正常攻击"
+    assert not any(e.get("collapsed") or e.get("lost") for e in r10b)
     assert not any(e.get("collapsed") or e.get("lost") for e in r10)
     print(f"  ✓ 怪物异变{m_col.mutation_count}层仍存活，正常攻击，玩家HP={st2.player.current_hp}")
 

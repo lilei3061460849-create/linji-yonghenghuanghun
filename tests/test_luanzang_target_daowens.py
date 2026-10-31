@@ -72,7 +72,7 @@ def _monster_cast(e, monster, daowen_name, target_ref):
                          for _ in range(actor["base_hits_per_attack"])]}
                for _ in range(actor["base_attack_actions"])]
     return e.combat.resolve_monster_phase(
-        [{"actor_ref": actor["actor_ref"], "daowen": dao, "attack_actions": attacks}],
+        [{"actor_ref": actor["actor_ref"], "daowen": dao, "attack_actions": []}],
         prepared)
 
 
@@ -202,7 +202,7 @@ def test_monster_cast_without_target_is_rejected(tmp_path):
                for _ in range(actor["base_attack_actions"])]
     try:
         e.combat.resolve_monster_phase(
-            [{"actor_ref": actor["actor_ref"], "daowen": dao, "attack_actions": attacks}],
+            [{"actor_ref": actor["actor_ref"], "daowen": dao, "attack_actions": []}],
             prepared)
         raise AssertionError("怪物缺少目标提交应被拒绝")
     except ValueError as exc:

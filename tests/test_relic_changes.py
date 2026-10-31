@@ -73,7 +73,7 @@ def test_relic_wording_uses_requested_concise_descriptions():
     index = (ROOT / "物品索引.md").read_text(encoding="utf-8")
     api = (ROOT / "engine/api.py").read_text(encoding="utf-8")
     assert "[回增]，你获得等同于增加后当前回合数的法力。" in index
-    assert "任意角色每次失去生命时，使其衰老1。" in index
+    assert "任意角色每次失去生命时，使其支付血限1。" in index
     assert "本回合你每失去1点生命，造成的伤害+1。" in index
     assert "战斗被动" not in index
     # 缓厄沙漏的奇数延期按现行裁定向上取整，不再把必要结算术语当旧文案禁词。

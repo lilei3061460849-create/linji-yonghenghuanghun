@@ -111,6 +111,8 @@ def _submission_for(actor: dict, option: dict | None = None) -> dict:
         for h, ss in option.get("trigger_spell_options", {}).items()}
     dao["dodge_targets"] = pick_wave_dodge_targets(option)
     choice["daowen"] = dao
+    # 交替出手：一次提交＝一个行动，发动道纹时不得再捆绑攻击组。
+    choice["attack_actions"] = []
     return choice
 
 
@@ -145,6 +147,20 @@ def _legal_daowen(actor: dict) -> dict | None:
     if chosen["dodge_submission"] == "per_target":
         dao["dodge_targets"] = pick_wave_dodge_targets(chosen)
     return dao
+
+
+def _pass_player_priority(engine: GameEngine) -> None:
+    """交替出手：轮回者交出剩余优先权，让敌方/回终继续推进。"""
+    passed = engine.execute_action("skip", {})
+    assert passed["success"], passed
+
+
+def _resolve_one_monster_action(engine: GameEngine, option: dict | None = None) -> dict:
+    """让当前持有优先权的敌方结算一个行动（一步一个行动者）。"""
+    prepared, actor = _prepared_monster_option(engine)
+    return engine.execute_action("resolve_monster_phase", {
+        "token": prepared["result"]["token"],
+        "choices": [_submission_for(actor, option)]})
 
 
 def _snapshot(e: GameEngine) -> dict:
@@ -236,18 +252,24 @@ def test_wave_marks_exactly_x_targets(tmp_path):
            "dodge_targets": [
                {"target_ref": "player:0", "dodge": False, "blood_shadow": False},
                {"target_ref": "friend:0", "dodge": False, "blood_shadow": False}]}
-    other_actor = next(a for a in prepared["result"]["actors"] if a["actor_ref"] == "enemy:1")
+    # 交替出手：先结算波及使用者（一步一个行动者），再让另一只怪行动。
     ok = e.execute_action("resolve_monster_phase", {
         "token": prepared["result"]["token"],
-        "choices": [
-            {"actor_ref": "enemy:0", "daowen": dao, "attack_actions": _attack_block(actor)},
-            {"actor_ref": "enemy:1", "daowen": None, "attack_actions": _attack_block(other_actor)},
-        ]})
+        "choices": [{"actor_ref": "enemy:0", "daowen": dao, "attack_actions": []}]})
     assert ok["success"], ok
     assert e.state.player.has_status("波及")
     assert e.state.friends[0].has_status("波及")
     assert not e.state.friends[1].has_status("波及")
     assert not other.has_status("波及")
+
+    _pass_player_priority(e)  # 交替出手：轮回者先交回优先权
+    prepared2, other_actor = _prepared_monster_option(e, "enemy:1")
+    ok = e.execute_action("resolve_monster_phase", {
+        "token": prepared2["result"]["token"],
+        "choices": [{"actor_ref": "enemy:1", "daowen": None,
+                     "attack_actions": _attack_block(other_actor)}]})
+    assert ok["success"], ok
+    assert not other.has_status("波及"), "未被波及选中的怪不得因他人结算而被标记"
 
 
 def test_wave_over_submit_rejected_and_rolled_back(tmp_path):
@@ -263,7 +285,6 @@ def test_wave_over_submit_rejected_and_rolled_back(tmp_path):
     e.state.friends.append(_friend("友军B"))
     prepared, actor = _prepared_monster_option(e)
     option = next(o for o in actor["daowen_options"] if o["name"] == "波及")
-    other_actor = next(a for a in prepared["result"]["actors"] if a["actor_ref"] == "enemy:1")
     before = _snapshot(e)
 
     # 全量提交4个候选（>X=2）→ 必须拒绝
@@ -273,10 +294,7 @@ def test_wave_over_submit_rejected_and_rolled_back(tmp_path):
                              for t in option["dodge_target_options"]]}
     bad = e.execute_action("resolve_monster_phase", {
         "token": prepared["result"]["token"],
-        "choices": [
-            {"actor_ref": "enemy:0", "daowen": dao, "attack_actions": _attack_block(actor)},
-            {"actor_ref": "enemy:1", "daowen": None, "attack_actions": _attack_block(other_actor)},
-        ]})
+        "choices": [{"actor_ref": "enemy:0", "daowen": dao, "attack_actions": []}]})
     assert not bad["success"], bad
     assert "2个目标" in bad["error"], bad
     assert _snapshot(e) == before, "超提交被拒后必须零副作用"
@@ -293,8 +311,8 @@ def test_failed_resolve_stays_resubmittable_with_same_token(tmp_path):
     token = prepared["result"]["token"]
     before = _snapshot(e)
 
-    bad = _legal_daowen(actor)
-    bad_choice = {"actor_ref": actor["actor_ref"], "daowen": bad,
+    # 非法提交：少交命中（一次提交＝一个行动，这里只交攻击组）。
+    bad_choice = {"actor_ref": actor["actor_ref"], "daowen": None,
                   "attack_actions": _attack_block(actor)}
     bad_choice["attack_actions"][0]["hits"] = bad_choice["attack_actions"][0]["hits"][:-1]
     failed = e.execute_action("resolve_monster_phase",
@@ -314,10 +332,11 @@ def test_failed_resolve_stays_resubmittable_with_same_token(tmp_path):
 
     # 关键：同一token修正后重交成功，回合推进
     good = {"actor_ref": actor["actor_ref"], "daowen": _legal_daowen(actor),
-            "attack_actions": _attack_block(actor)}
+            "attack_actions": []}
     ok = e.execute_action("resolve_monster_phase",
                           {"token": token, "choices": [good]})
     assert ok["success"], ok
+    _pass_player_priority(e)  # 轮回者仍有剩余出手，先交回优先权再回终
     assert e.execute_action("round_end", {})["success"]
 
 
@@ -338,7 +357,7 @@ def test_stale_token_replay_returns_valid_token(tmp_path):
     ok = e.execute_action("resolve_monster_phase", {
         "token": stale["token"],
         "choices": [{"actor_ref": actor["actor_ref"], "daowen": _legal_daowen(actor),
-                     "attack_actions": _attack_block(actor)}]})
+                     "attack_actions": []}]})
     assert ok["success"], ok
 
 
@@ -354,6 +373,7 @@ def test_user_original_playthrough_no_longer_stucks(tmp_path):
     for _ in range(3):
         e.state.player.current_hp = e.state.player.blood_limit  # 夹具：避免死者之页中断干扰
         assert e.execute_action("round_start", {"relic_choices": {}})["success"]
+        _pass_player_priority(e)  # 交替出手：回始由轮回者先手，交出优先权后敌方才能准备
         prepared, actor = _prepared_monster_option(e)
         # solo 场上【波及】降 X 为 1 持续可选（2026-10-09：X 下限 repealed）——
         # 每回合都专门发动波及验证可解算（标记在玩家身上逐回合「种/摘」切换）。
@@ -463,6 +483,11 @@ def test_wave_single_mark_gets_full_value(tmp_path):
     assert ok["success"], ok
     assert marked.has_status("波及") and not unmarked.has_status("波及")
 
+    # 交替出手：轮回者一回合只有1次出手额度；本用例需要同一回合两发，
+    # 故按通用规则用【疯狂1】把额度提到2，并让怪物在两次施法之间正常行动一次。
+    from engine.models import StatusEffect
+    player.add_status(StatusEffect("疯狂", 1, 1, "test"))
+    _resolve_one_monster_action(e)
     hp_before = marked.current_hp
     ok = e.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 3,
                                          "target_ref": "enemy:0",
@@ -528,22 +553,17 @@ def test_monster_without_attack_targets_phase_still_settles(tmp_path):
     player.is_flying = True  # 怪物不飞行 → 选不中玩家 → 无合法攻击目标
 
     prep = e.execute_action("prepare_monster_phase", {})
+    # 怪物没有任何合法行动（无攻击目标、需目标道纹也无目标）时，prepare按【跳过】
+    # 结束敌方回合：不得列出「0次攻击」的空行动者让调用方提交必被拒的义务。
     assert prep["success"], prep
-    actor = next(a for a in prep["result"]["actors"] if a["actor_ref"] == "enemy:0")
-    assert actor["attack_target_options"] == [], actor["attack_target_options"]
-    assert actor["base_attack_actions"] == 0, actor["base_attack_actions"]
-    # 不变量：给出的每个需[目标]道纹都必须有合法目标（飞行solo时只剩自身，
-    # 自指向合法——与强化/自愈等自用道纹同一口径，只是无战术意义）
-    for o in actor["daowen_options"]:
-        if o["requires_target"]:
-            assert o["target_options"], f"{o['name']} 无合法目标却仍被给出: {o}"
-
-    choice = {"actor_ref": "enemy:0", "daowen": _legal_daowen(actor),
-              "attack_actions": []}
-    r = e.execute_action("resolve_monster_phase",
-                         {"token": prep["result"]["token"], "choices": [choice]})
-    assert r["success"], r
-    assert e.execute_action("round_end", {})["success"]
+    assert prep.get("skipped") is True, prep
+    assert prep["result"]["actors"] == [], prep["result"]
+    reasons = {entry["actor_ref"]: entry["reason"] for entry in prep["result"]["skipped"]}
+    assert reasons.get("enemy:0") == "没有可支付的道纹或合法攻击目标", reasons
+    # 跳过不卡死：轮回者交出优先权后轮次可以正常回终。
+    _pass_player_priority(e)
+    ended = e.execute_action("round_end", {})
+    assert ended["success"], ended
 
 
 # ============ pick_wave_dodge_targets：恰好X个、对侧优先 ============

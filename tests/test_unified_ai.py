@@ -58,20 +58,20 @@ def test_ai_player_is_the_combat_and_high_level_entrypoint(tmp_path):
     enemy.attack_count = 1
     enemy.attack_power = 12
 
-    # 2026-10-11：招架已改为 resolve_attack 逐击参数，declare_parry 不再是可选行动，
-    # 改用【蓄锐】作为脚本决策（本测试考察的是「交给 LLM 决策」而非具体行动）。
-    llm = _ScriptedLLM(AIDecision("rest", {}, "致命威胁，先蓄锐"))
+    # 2026-10-11：招架已改为 resolve_attack 逐击参数，declare_parry 不再是可选行动。
+    # 现行可选行动里「结束本回合」的规范名是 skip（rest 仅为旧调用别名，不再列出）。
+    llm = _ScriptedLLM(AIDecision("skip", {}, "致命威胁，先跳过"))
     ai = AIPlayer(engine, backend=llm)
     result = ai.play_turn("战斗中评估本轮威胁")
 
     assert len(llm.calls) == 1, "轮回者战斗行动必须交给 LLM 后端决策"
     _, available, _ = llm.calls[0]
     offered = {a.get("action_type") for a in available.get("actions", [])}
-    assert "rest" in offered and "cast" in offered
+    assert "skip" in offered and "cast" in offered
     assert "declare_parry" not in offered, "招架已不再是独立行动类型"
     assert result["result"]["success"], result
-    assert result["result"]["action"] == "贾凡蓄锐"
-    assert result["reasoning"] == "致命威胁，先蓄锐"
+    assert result["result"]["action"] == "贾凡跳过"
+    assert result["reasoning"] == "致命威胁，先跳过"
     assert len(ai.get_history()) == 1
 
 

@@ -26,11 +26,20 @@
 - 法器：必须有 `effects` 与 `uniqueness`；不受遗物的 X/触发限制。
 - 消耗品：`uses ≥ 1`；`effects` 必填；可有 `trigger` 变为被动型。
 
-明确不做（v1 边界，勿假装已支持）
+v2 新增（2026-10-30）
+--------------------
+- 随机目标 `random_enemy` / `random_ally`：走 `DiceEngine.auto_roll` 的正式随机源，
+  日志记录 seed、selected_index 与池大小，可复现；不再用临时 random。
+- 失忆代价：声明 `cost.type = "失忆"` 时必须显式提交 `forget_daowen`（要失去的道纹名），
+  校验持有后走 `Entity.forget_for_cost` 的真实失忆账本；缺失或非法一律拒绝且不改状态。
+- 存档持久化：`export_specs()` / `restore_specs()` 让声明随存档往返，跨会话不必重声明。
+
+明确不做（仍未裁定，勿假装已支持）
 --------------------------------
-- 随机目标（`random_enemy`）：需要与随机源对齐，留给后续版本；现在不支持。
-- `失忆`/`唯一` 代价：需要玩家/怪物选择失忆对象，v1 不支持。
-- 残韵转化、法术 DSL 内部步骤：自定义道纹按普通道纹结算，不参与闭环路径。
+- `唯一` 代价：本项目没有可支付的「唯一」资源账本（`spent_unique` 仅为旧档遗留字段），
+  需要用户裁定其含义后才实现。
+- 残韵闭环：自定义道纹不进入任何闭环，不能被残韵转化/被转化出来，也不参与【典当】发现；
+  闭环位置与残韵边由用户裁定，不能由声明自行指定。
 """
 from __future__ import annotations
 
@@ -52,9 +61,10 @@ CATEGORIES = ("道纹", "遗物", "法器", "消耗品")
 
 # 与《规则正文·代价》一致的可数值化代价；法力单独走法力通道。
 NUMERIC_COST_TYPES = ("生命", "血限", "枯竭", "法限", "速度", "速限", "异变")
-SUPPORTED_COST_TYPES = ("法力",) + NUMERIC_COST_TYPES + ("碎片", "假碎片", "冷却")
+SUPPORTED_COST_TYPES = ("法力",) + NUMERIC_COST_TYPES + ("碎片", "假碎片", "冷却", "失忆")
 
-TARGET_TOKENS = ("self", "target", "all_enemies", "all_allies")
+TARGET_TOKENS = ("self", "target", "all_enemies", "all_allies",
+                 "random_enemy", "random_ally")
 
 # 动词需要的键名（amount 之外的固定键）
 _VERB_REQUIRED_KEYS = {
@@ -227,21 +237,60 @@ def validate_spec(spec: dict) -> dict:
 
 def resolve_targets(token: str, *, combat, actor, target) -> list:
     """把声明里的目标词翻译成当前场上的实体列表。"""
+    return _resolve_targets_with_roll(token, combat=combat, actor=actor,
+                                      target=target)[0]
+
+
+def _resolve_targets_with_roll(token: str, *, combat, actor, target) -> tuple[list, dict | None]:
+    """同 `resolve_targets`；随机目标额外返回本次随机结算记录（seed/序号/池大小）。
+
+    随机选择复用机制层的标准选择器与 `DiceEngine` 随机流，不另开一套随机系统；
+    一次调用只投一次，调用方拿同一笔记录写战报，不重投。
+    """
+    from .mechanisms.targets import ALL_ALLIES, ALL_ENEMIES, roll_pick
+    from .mechanisms.triggers import TriggerContext
+
     if token == "self":
-        return [actor] if actor is not None else []
+        return ([actor] if actor is not None else []), None
     if token == "target":
-        return [target] if target is not None else []
+        return ([target] if target is not None else []), None
     state = getattr(combat, "state", None)
     if state is None:
-        return []
-    side = state.get_all_player_side() if _on_player_side(state, actor) else state.get_all_enemy_side()
+        return [], None
+    ctx = TriggerContext(combat=combat, state=state, target=actor, source=actor)
     if token == "all_allies":
-        return [entity for entity in side if getattr(entity, "is_alive", False)]
-    return [entity for entity in side if getattr(entity, "is_alive", False)
-            and entity is not actor]
+        return ALL_ALLIES(ctx), None
+    if token == "all_enemies":
+        return ALL_ENEMIES(ctx), None
+    if token == "random_enemy":
+        picked = roll_pick(ctx, ALL_ENEMIES(ctx), stream="custom_random_enemy",
+                           context="自定义资源随机敌人")
+        return ([picked["entity"]], _roll_record(picked, token)) if picked else ([], None)
+    if token == "random_ally":
+        candidates = ALL_ALLIES(ctx)
+        if not candidates:
+            return [], None
+        picked = roll_pick(ctx, candidates, stream="custom_random_ally",
+                           context="自定义资源随机友方")
+        return ([picked["entity"]], _roll_record(picked, token)) if picked else ([], None)
+    return ALL_ENEMIES(ctx), None
 
 
-def _on_player_side(state, actor) -> bool:
+def _roll_record(picked: dict, token: str) -> dict:
+    """把机制层的随机选择记录压成可写战报/存档的纯数据（不含实体对象）。"""
+    return {
+        "token": token,
+        "stream": picked.get("stream"),
+        "pool_size": picked.get("of"),
+        "names": list(picked.get("names") or []),
+        "roll": picked.get("roll"),
+        "selected_index": picked.get("selected_index"),
+        "selected_name": getattr(picked.get("entity"), "name", ""),
+        "seed": picked.get("seed"),
+    }
+
+
+
     if actor is None or not hasattr(state, "on_player_side"):
         return True
     return bool(state.on_player_side(actor))
@@ -286,14 +335,19 @@ def _verb_spec(effect: dict, *, target, actor, amount: int, source: str) -> dict
 
 def apply_effects(combat, effects: Iterable[dict], *, actor, target, x: int = 1,
                   source: str = "") -> list[dict]:
-    """按声明顺序执行效果；每一步都走 verbs 的统一入口。"""
+    """按声明顺序执行效果；每一步都走 verbs 的统一入口。
+
+    随机目标的一次随机结算记录（seed/序号/池大小）写进对应日志，可复现。
+    """
     logs: list[dict] = []
     for effect in effects:
         amount = evaluate(effect.get("amount", 0), x)
         token = effect.get("target", "target")
-        targets = resolve_targets(token, combat=combat, actor=actor, target=target)
+        targets, roll = _resolve_targets_with_roll(token, combat=combat, actor=actor,
+                                                   target=target)
         if not targets:
-            logs.append({"verb": effect["verb"], "target": token, "skipped": "没有合法目标"})
+            logs.append({"verb": effect["verb"], "target": token, "skipped": "没有合法目标",
+                         **({"random_roll": roll} if roll else {})})
             continue
         for entity in targets:
             spec = _verb_spec(effect, target=entity, actor=actor, amount=amount,
@@ -303,8 +357,11 @@ def apply_effects(combat, effects: Iterable[dict], *, actor, target, x: int = 1,
             result = apply_verb(combat, effect["verb"], spec,
                                 ctx={"timing": "custom_resource", "source": source,
                                      "actor": actor, "target": entity})
-            logs.append({"verb": effect["verb"], "target": getattr(entity, "name", ""),
-                         "amount": amount, "result": _compact(result)})
+            entry = {"verb": effect["verb"], "target": getattr(entity, "name", ""),
+                     "amount": amount, "result": _compact(result)}
+            if roll:
+                entry["random_roll"] = roll
+            logs.append(entry)
     return logs
 
 
@@ -467,20 +524,48 @@ def register(spec: dict) -> CustomResource:
 
 # ---- 代价支付（道纹） ----
 
-def pay_custom_cost(engine, actor, instance, calc: dict) -> Optional[str]:
+def amnesia_candidates(actor) -> list[str]:
+    """失忆代价的合法候选：角色当前持有的道纹名（不能失去未持有的东西）。"""
+    return sorted(getattr(actor, "dao_wen", {}) or {})
+
+
+def _pay_amnesia_cost(actor, amount: int, forget_daowen: Optional[str]) -> Optional[str]:
+    """失忆代价：按显式选择移除道纹，并登记到可逆/可追述的失忆账本。"""
+    if amount <= 0:
+        return "失忆代价的层数必须为正整数"
+    candidates = amnesia_candidates(actor)
+    if not candidates:
+        return f"失忆{amount}无法支付：{getattr(actor, 'name', '角色')}没有道纹"
+    if len(candidates) < amount:
+        return f"失忆{amount}无法支付：仅持有{len(candidates)}种道纹"
+    if forget_daowen is None:
+        return (f"失忆{amount}必须先显式选择要失去的道纹："
+                f"提交 forget_daowen，可选 {candidates}")
+    if not isinstance(forget_daowen, str) or forget_daowen not in candidates:
+        return (f"失忆目标「{forget_daowen}」不在当前持有道纹中：可选 {candidates}")
+    actor.forget_for_cost(forget_daowen)
+    return None
+
+
+def pay_custom_cost(engine, actor, instance, calc: dict,
+                    forget_daowen: Optional[str] = None) -> Optional[str]:
     """支付自定义道纹中「法力以外」的代价；返回错误文案（None=成功）。
 
     法力代价已在 `_action_use_daowen` 的既有 `pay_daowen_mana` 里支付，
     这里只处理其余通道，全部走既有统一入口。
+
+    失忆：必须由调用方显式提交要失去的道纹名 `forget_daowen`；缺失、未持有或
+    重复提交一律拒绝，且不修改任何状态（不走忘忧香/净化等旁路）。
     """
     amount = int(calc.get("custom_cost_amount", 0))
-    cost_type = calc.get("custom_cost_type", "法力")
+    cost_type = normalize_payment_type(calc.get("custom_cost_type", "法力"))
+    if cost_type == "失忆":
+        return _pay_amnesia_cost(actor, amount, forget_daowen)
     if amount <= 0 or cost_type == "法力":
         # 法力已由引擎既有的 pay_daowen_mana 扣过，这里不重复收取。
         return None
     combat = engine.combat
     state = engine.state
-    cost_type = normalize_payment_type(cost_type)
     if cost_type in RESOURCE_TYPES:
         try:
             combat.pay_resource(
@@ -541,6 +626,34 @@ def get_consumable(name: str) -> Optional[CustomResource]:
 
 
 # ---- 文件加载 ----
+
+def export_specs() -> list[dict]:
+    """导出当前注册的全部声明（深拷贝），供存档跨会话恢复。"""
+    return [copy.deepcopy(resource.spec) for resource in all_resources()]
+
+
+def restore_specs(specs: Iterable[dict] | None) -> dict:
+    """读档时恢复声明：已注册的跳过，新声明走同一套校验/注册流程。
+
+    单条声明失败不回滚整份存档，只在返回里登记错误，避免旧档里的一条坏声明
+    让整局无法读取。
+    """
+    restored, skipped, errors = [], [], []
+    for spec in specs or []:
+        name = spec.get("name") if isinstance(spec, dict) else None
+        if not isinstance(name, str) or not name:
+            errors.append({"spec": str(spec)[:80], "error": "声明缺少 name"})
+            continue
+        if name in _REGISTRY:
+            skipped.append(name)
+            continue
+        try:
+            register(spec)
+            restored.append(name)
+        except CustomResourceError as exc:
+            errors.append({"name": name, "error": str(exc)})
+    return {"restored": restored, "skipped": skipped, "errors": errors}
+
 
 def load_specs(path: str | Path) -> list[CustomResource]:
     """从 JSON（单个对象或数组）或目录（*.json，按文件名排序）加载声明。"""

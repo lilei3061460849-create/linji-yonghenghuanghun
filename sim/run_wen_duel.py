@@ -225,6 +225,9 @@ def run(seed: int, name: str, slots: str, out_path: str):
                 or getattr(e.state, "delayed_monster_reentries", [])):
             break
         ended = act("battle_end", {}, f"第{battle_no}场战终")
+        # 2026-10-31：战终不再自动开启死斗；本脚本显式走旧入口。
+        if e.state.current_battle == 7 and "final_crown" not in (ended.get("result") or {}):
+            ended.setdefault("result", {})["final_crown"] = e._trigger_final_crown() or {}
         crown = (ended.get("result") or {}).get("final_crown") or {}
         if crown.get("outcome") == "duel_start":
             duel_log = []

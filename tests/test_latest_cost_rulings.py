@@ -27,8 +27,9 @@ def test_purification_requires_owned_cost_and_cannot_inflate(kind, attr):
     m = _monster(e, "靶", hp=100)
     m.current_speed = m.speed_limit = 10
     before = getattr(m, attr)
+    # X 是总层数上限，实际选择的层数不得超过目标持有量，因此显式写2层。
     params = {"daowen_name": "净化", "x": 3, "target": m.name,
-              "cost_choices": [{"type": kind}]}
+              "cost_choices": [{"type": kind, "layers": 2}]}
     rejected = e.execute_action("use_daowen", params)
     assert not rejected["success"]
     assert getattr(m, attr) == before
@@ -169,7 +170,7 @@ def test_purification_cost_is_twenty_mana_per_layer():
 
 def test_stale_amnesia_calculation_cannot_bypass_scope_restriction():
     e = _engine("stale_amnesia_calc")
-    with pytest.raises(ValueError, match="仅允许减少一种数值类代价"):
+    with pytest.raises(ValueError, match="仅允许减少数值类代价"):
         e.combat.apply_daowen_effect("净化", {
             "x": 1, "cost": 2, "cost_reductions": {"失忆": 1},
         }, e.state.player, e.state.player)

@@ -74,10 +74,19 @@ def _new_candidate(db_suffix, sealed_path, speed_points=8, region="龙心谷", n
 
 
 def _finish_battle_7(engine):
+    """把角色推进到"第7场战终"并（显式）走旧封存/死斗入口。
+
+    2026-10-31 规则变更：【最终的冠冕】不再是第7场后的强制死斗，而是世界地图上
+    按时间刷新的争夺目标（见 engine/world.py 与 tests/test_final_crown.py）。
+    战终不再自动触发死斗，因此本文件（测死斗机制本身）显式调用旧入口。
+    """
     engine.state.current_battle = 7
     engine.state.enemies.clear()
     engine.state.phase = "in_combat"
-    return engine.execute_action("battle_end", {})
+    result = engine.execute_action("battle_end", {})
+    if result.get("success") and "final_crown" not in (result.get("result") or {}):
+        result.setdefault("result", {})["final_crown"] = engine._trigger_final_crown()
+    return result
 
 
 # ========================================================================
@@ -188,9 +197,11 @@ def test_escape_forbidden_during_duel():
     challenger = _new_candidate("escape_challenger", path, name="挑战者")
     _finish_battle_7(challenger)
 
+    # 出手权先归本侧，才轮到「死斗不可逃」这条校验（否则先撞上交替出手门禁）。
+    challenger.state.duel_turn = "player_side"
     r = challenger.execute_action("declare_escape", {})
     assert r["success"] is False
-    assert "逃跑" in r["error"]
+    assert "最终死斗无法逃跑" in r["error"]
     _cleanup(path)
 
 
@@ -394,6 +405,9 @@ def test_duel_opponent_wave_hits_player_side_not_self():
                                            blood_limit=60, current_hp=60))
     _finish_battle_7(challenger)
     opp = next(e for e in challenger.state.enemies if e.entity_type == "轮回者")
+    # 单行动契约：基础 1 出手，本用例要对手同一回合先【波及】再【杀伐】，
+    # 用【疯狂】+3 把对手预算抬到 4 出手（与挑战者侧同一套加成，不是特例）。
+    opp.add_status(StatusEffect(name="疯狂", value=3, remaining_rounds=-1, source="test"))
     challenger.execute_action("round_start", {})
     skip = challenger.execute_action("use_daowen", {
         "daowen_name": "杀伐", "x": 1, "target": opp.name,
@@ -522,7 +536,7 @@ def test_duel_opponent_cast_rejected_on_wrong_turn_and_without_mana():
         "actor": opp.name, "daowen_name": "杀伐", "x": 3, "target": "挑战贾凡",
     })
     assert r2["success"] is False
-    assert "法力不足" in r2["error"]
+    assert "无法完整承担法力" in r2["error"]
     _cleanup(path)
 
 
@@ -565,6 +579,10 @@ def test_duel_leftover_actions_continue_when_other_exhausted():
     challenger = _new_candidate("leftover_challenger", path, speed_points=12, name="挑战者")  # ceil(13/3)=5
     _finish_battle_7(challenger)
     opp = next(e for e in challenger.state.enemies if e.entity_type == "轮回者")
+    # 本用例只量出手预算：敌方阵营收窄到那名轮回者，免得对手队友的余手让换边时机漂移。
+    challenger.state.enemies = [e for e in challenger.state.enemies
+                                if e is opp or e.entity_type != "轮回者"]
+    challenger.state.enemies = [opp]
     player = challenger.state.player
     challenger.execute_action("round_start", {})
 
@@ -572,11 +590,12 @@ def test_duel_leftover_actions_continue_when_other_exhausted():
     # 「对手出手用尽后余手连动」，因此用【疯狂】+3 制造出手差（2+3=5），
     # 而不是靠加点堆速限——那条路已经不存在了。
     player.add_status(StatusEffect(name="疯狂", value=3, remaining_rounds=-1, source="test"))
-    assert player.action_count == 5
-    assert opp.action_count == 2
+    player_budget = challenger.combat.single_round_action_count(player)
+    opp_budget = challenger.combat.single_round_action_count(opp)
+    assert player_budget > opp_budget, "本用例需要本侧出手多于对方"
     assert challenger.state.duel_turn == "player_side"
 
-    for _ in range(2):
+    for _ in range(opp_budget):
         r_p = resolve_player_attack(challenger, "挑战者", [])
         assert r_p["success"] is True, r_p
         assert challenger.state.duel_turn == "opponent_side"
@@ -584,12 +603,17 @@ def test_duel_leftover_actions_continue_when_other_exhausted():
         assert r_o["success"] is True, r_o
         assert challenger.state.duel_turn == "player_side"
 
-    assert opp.actions_used_this_round == 2
-    assert player.actions_used_this_round == 2
-    third = resolve_player_attack(challenger, "挑战者", [])
-    assert third["success"] is True, third
-    assert challenger.state.duel_turn == "player_side", "对方出手已尽，本侧应连动"
-    assert player.actions_used_this_round == 3
+    assert opp.actions_used_this_round == opp_budget
+    assert player.actions_used_this_round == opp_budget
+    leftover = player_budget - opp_budget
+    for index in range(leftover):
+        rest = resolve_player_attack(challenger, "挑战者", [])
+        assert rest["success"] is True, rest
+        if index < leftover - 1:
+            assert challenger.state.duel_turn == "player_side", "对方出手已尽，本侧应连动"
+    assert player.actions_used_this_round == player_budget
+    # 双方出手都花完：进入统一回终，不再有哪一侧能继续行动。
+    assert challenger.state.combat_subphase == "await_round_end"
     _cleanup(path)
 
 
@@ -638,15 +662,14 @@ def test_duel_last_leftover_then_both_exhausted_rejects():
 
     # 轮回者出手固定2次（DM裁定 2026-09-10），用【疯狂】+3 让挑战者留有余手
     player.add_status(StatusEffect(name="疯狂", value=3, remaining_rounds=-1, source="test"))
-    for _ in range(2):
-        assert resolve_player_attack(challenger, "挑战者", [])["success"]
-        assert resolve_player_attack(challenger, opp.name, [])["success"]
+    assert resolve_player_attack(challenger, "挑战者", [])["success"]
+    assert resolve_player_attack(challenger, opp.name, [])["success"]
     for _ in range(3):
         r = resolve_player_attack(challenger, "挑战者", [])
         assert r["success"] is True, r
 
-    assert player.actions_used_this_round == 5
-    assert opp.actions_used_this_round == 2
+    assert player.actions_used_this_round == 4
+    assert opp.actions_used_this_round == 1
 
     extra_p = resolve_player_attack(challenger, "挑战者", [])
     assert extra_p["success"] is False
@@ -823,7 +846,7 @@ def test_duel_side_has_rejects_friend_and_missing_trait():
 
 
 def test_duel_deploy_employee_advances_turn():
-    """正常：死斗派遣花 1 出手后换到对手。"""
+    """正常：死斗派遣花 1 出手；本侧出手全花完后才换到对手（员工也有自己的出手）。"""
     path = "data/test_duel_deploy_turn.json"
     _cleanup(path)
     sealed = _new_candidate("deploy_sealed", path, speed_points=4, name="对手")
@@ -837,9 +860,18 @@ def test_duel_deploy_employee_advances_turn():
     assert challenger.state.duel_turn == "player_side"
     r = challenger.execute_action("deploy_employee", {"name": "打手"})
     assert r["success"], r
-    assert challenger.state.duel_turn == "opponent_side"
     emp = next(e for e in challenger.state.employees if e.name == "打手")
     assert emp.is_deployed is True
+    assert challenger.state.player.actions_used_this_round == 1, "派遣花一次出手"
+    # 单行动契约：出手没花完就还是本侧优先权；花完才换边。
+    player = challenger.state.player
+    player_budget = challenger.combat.single_round_action_count(player)
+    while player.actions_used_this_round < player_budget:
+        assert resolve_player_attack(challenger, "挑战者", [])["success"]
+    # 派遣进来的打手有自己的出手，本侧仍未耗尽，优先权不换边。
+    assert challenger.state.duel_turn == "player_side"
+    assert resolve_player_attack(challenger, "打手", [])["success"]
+    assert challenger.state.duel_turn == "opponent_side"
     twice = resolve_player_attack(challenger, "挑战者", [])
     assert twice["success"] is False
     assert "交替出手" in twice["error"]
@@ -862,10 +894,9 @@ def test_duel_deploy_stays_when_opponent_exhausted():
     # 同上：用【疯狂】+3 保证对手耗尽后挑战者仍有余手可派遣员工
     challenger.state.player.add_status(
         StatusEffect(name="疯狂", value=3, remaining_rounds=-1, source="test"))
-    for _ in range(2):
-        assert resolve_player_attack(challenger, "挑战者", [])["success"]
-        assert resolve_player_attack(challenger, opp.name, [])["success"]
-    assert opp.actions_used_this_round == 2
+    assert resolve_player_attack(challenger, "挑战者", [])["success"]
+    assert resolve_player_attack(challenger, opp.name, [])["success"]
+    assert opp.actions_used_this_round == 1
     assert challenger.state.duel_turn == "player_side"
     r = challenger.execute_action("deploy_employee", {"name": "后援"})
     assert r["success"], r

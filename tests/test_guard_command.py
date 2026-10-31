@@ -7,7 +7,7 @@ import os
 import sys
 import tempfile
 
-from tests.setup_support import finish_initial_daowen, grant_extra_actions
+from tests.setup_support import finish_initial_daowen, hand_priority_to_enemy, grant_extra_actions
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
@@ -246,7 +246,9 @@ def test_custom_spell_defined_in_battle_costs_tier_actions():
     assert r["success"], r.get("error")
     assert r["result"]["wired"] is True
     assert [s.name for s in p.spells] == ["以杀养伤"]
-    assert p.actions_used_this_round == used_before + 3, "3阶自创法术应消耗3次主动出手"
+    # 《规则正文·战斗行动》：定义法术占 1 次主动出手，定义本身固定支付 1 次出手、
+    # 不按阶级预付（效果步骤在真正施法时逐步支付）。旧「按阶数预付」口径已废止。
+    assert p.actions_used_this_round == used_before + 1, "定义法术应只消耗1次主动出手"
     assert not e._pending_interrupts, "新规则下自创不再卡DM裁定"
 
 
@@ -338,6 +340,7 @@ def test_alt_path_resolve_monster_turn_with_daowen_monster_no_nameerror():
 
     # 第 1 回合（白板：怪物只普攻不出道纹）
     assert e.execute_action("round_start", {"relic_choices": {}})["success"]
+    hand_priority_to_enemy(e)  # 交替出手：声明轮回者本回合已交出优先权
     mp1 = resolve_monster_turn(e, [])
     assert mp1.get("success"), f"第1回合怪物阶段失败: {mp1.get('error')}"
     assert e.execute_action("round_end", {})["success"]
@@ -351,6 +354,7 @@ def test_alt_path_resolve_monster_turn_with_daowen_monster_no_nameerror():
                for o in (a.get("daowen_options") or [])]
     assert options, "第2回合怪物必须暴露道纹选项（白板回合已过）"
 
+    hand_priority_to_enemy(e)
     mp2 = resolve_monster_turn(e, [])   # 修复前此处 NameError
     assert mp2.get("success"), f"第2回合怪物阶段失败: {mp2.get('error')}"
     assert not e.state.pending_monster_phase, "怪物阶段必须已结算完成"

@@ -5,7 +5,7 @@
 from __future__ import annotations
 from typing import Optional, Any
 from .models import Entity, StatusEffect, DaoWen, DaoWenInstance
-from .enums import CostType, normalize_payment_type
+from .enums import CostType, RESOURCE_TYPES, normalize_payment_type
 from .rule_engine import daowen_migration_status, get_daowen_rule
 from .gamedata import UNIMPLEMENTED_DAOWEN, RACE_EXCLUSIVE_DAOWEN, BLOODLINE_EXCLUSIVE_DAOWEN
 import math
@@ -21,7 +21,7 @@ RELICIZED_SLOT = "？？"
 PLACEHOLDER_SLOTS = frozenset({RESERVED_SLOT, RELICIZED_SLOT})
 RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变", "背负", "蒙蔽", "清算", "瓦解",
+    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变", "背负", "蒙蔽", "瓦解",
 )}
 # 迁入其它闭环的原位也要独立命名，避免不同闭环的待补节点在残韵查询中互相碰撞。
 RELOCATED_DAOWEN_SLOTS = {name: f"（待补）〔{name}〕" for name in ("增殖",)}
@@ -45,6 +45,25 @@ def normalize_daowen_name(name):
     return LEGACY_DAOWEN_ALIASES.get(name, name)
 
 
+# 【净化】可逆的数值类代价：只包含可以按层数回退的当前状态。
+# 失忆（已失去的道纹）、冷却、唯一、生命／流血、法力、碎片等属于已经发生的历史结果，
+# 不在净化范围内——它们没有可逆层数账本，也不允许凭空退回。
+PURIFIABLE_COST_KINDS = ("血限", "枯竭", "法限", "速度", "异变")
+
+
+def purifiable_cost_layers(entity: Entity, kind: str) -> int:
+    """目标当前持有、可被【净化】逆转的某种数值类代价层数。"""
+    if entity is None:
+        return 0
+    kind = normalize_payment_type(kind)
+    if kind == "异变":
+        return max(0, int(getattr(entity, "mutation_count", 0) or 0))
+    if kind == "枯竭":
+        return max(0, int(getattr(entity, "pending_exhaust_mana", 0) or 0))
+    ledger = getattr(entity, "reversible_cost_layers", None) or {}
+    return max(0, int(ledger.get(kind, 0) or 0))
+
+
 def display_resonance_node(name):
     """内部空位独立编号；玩家/索引统一显示为「？？」或「（待补）」。"""
     if isinstance(name, str) and name.startswith("？？〔"):
@@ -61,7 +80,8 @@ class DaoWenEngine:
     # 用于"雇佣"后"发现并选择一种转化道纹"等需要从此类别中随机抽取的场景
     # 2026-10-08 清理：原孤儿转化道纹已移除（曾挂在【狂暴】的反转分支下）。
     TRANSFORMED_DAOWEN = [
-        "弱化", "全速", "压迫",  # 愤怒已转消耗品怒火针，不得由转化授予入口复活。
+        # 与 gamedata.MONSTER_TRANSFORM_DAOWEN、全道纹索引「转化」行保持同一份名单。
+        "弱化", "强化", "全速", "压迫",  # 愤怒已转消耗品怒火针，不得由转化授予入口复活。
         # 2026-10-11 用户令（A14）：【无神】【借力】【衰败】整条删除，不补位。
     ]
 
@@ -216,26 +236,31 @@ class DaoWenEngine:
     # ---- 杀伐闭环后半（连击至封印）----
     
     @staticmethod
-    def calculate_gongzui(x: int, target1: Entity = None, target2: Entity = None) -> dict:
-        """共罪X：支付：法力X。两个[目标]与发动者共同组成共罪组，持续X。
+    def calculate_gongzui(x: int, targets: Optional[list] = None) -> dict:
+        """共罪X：支付：生命5X。选择X个非自身目标，与发动者共同组成共罪组，持续∞；发动者始终额外占一个支付名额。
 
-        发动者始终额外占一个支付名额；即使已被选为目标，也仍追加这一份。
-        组成员支付资源时，由全部存活支付名额平分，实际支付者同样承担自己的
-        份额；不分摊特殊机制代价。共罪不是局外道纹。
+        分摊口径、余数分配、特殊机制代价不分摊见《规则正文》通用条文，此处不复述。
         """
         if x < 1:
             raise ValueError("X必须为正整数")
-        if target1 is not None or target2 is not None:
-            if target1 is None or target2 is None or target1 is target2:
-                raise ValueError("共罪需要两个不同的目标")
-            if not target1.is_alive or not target2.is_alive:
-                raise ValueError("共罪的两个目标都必须存活")
-        name1 = target1.name if target1 is not None else "目标1"
-        name2 = target2.name if target2 is not None else "目标2"
+        picked = list(targets or [])
+        if picked:
+            if len(picked) != x:
+                raise ValueError("共罪需要恰好X个非自身目标")
+            if len({id(entity) for entity in picked}) != len(picked):
+                raise ValueError("共罪目标不得重复")
+            if any(not entity.is_alive for entity in picked):
+                raise ValueError("共罪的目标都必须存活")
+        names = "、".join(entity.name for entity in picked) or "目标"
         return {
-            "dao_wen": "共罪", "x": x, "target1": target1, "target2": target2,
-            "cost_type": CostType.MANA.value, "cost": x, "duration": x,
-            "summary": f"支付：法力{x}，{name1}、{name2}与发动者额外一份组成共罪支付名额，持续{x}",
+            "dao_wen": "共罪", "x": x, "targets": picked,
+            # 流血（生命）5X：统一代价总线按 cost_hp 结算（与透支/连击的流血通道同口径）。
+            "cost_type": CostType.BLEED.value, "cost": 5 * x, "cost_hp": 5 * x,
+            "duration": -1,
+            # 支付名额 = X 个非自身目标 + 发动者追加的一份；随 X 变化。
+            "share_slots": x + 1,
+            "summary": (f"支付：生命{5 * x}，{names}与发动者组成共罪支付名额，"
+                        f"平分资源支付，持续∞"),
         }
 
     @staticmethod
@@ -254,6 +279,27 @@ class DaoWenEngine:
             "blood_pact_multiplier": x, "duration": x,
             "summary": (f"支付：法力{x}，与{target_name}建立血契：你支付资源时，"
                         f"{target_name}额外支付{x}倍相同资源，持续{x}"),
+        }
+
+    # 怜悯可封锁的支付途径 = 道纹能用的一切支付途径（资源 + 特殊机制代价 + 攻击力）。
+    PAYABLE_TYPES = tuple(sorted(set(RESOURCE_TYPES) | {
+        CostType.EXHAUST.value, CostType.AMNESIA.value,
+        CostType.MUTATION.value, CostType.COOLDOWN.value, "攻击力"}))
+
+    @staticmethod
+    def calculate_lianmin(x: int, target: Entity = None, blocked_type: str = "法力") -> dict:
+        """怜悯X：支付：法力5X。使[目标]无法使用一种支付途径，持续X。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        kind = normalize_payment_type(blocked_type)
+        if kind not in DaoWenEngine.PAYABLE_TYPES:
+            raise ValueError(f"怜悯的支付途径非法：{blocked_type}；可选{'/'.join(DaoWenEngine.PAYABLE_TYPES)}")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "怜悯", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 5 * x,
+            "duration": x, "blocked_payment_type": kind,
+            "summary": f"支付：法力{5 * x}，使{target_name}无法使用{kind}支付，持续{x}",
         }
 
     @staticmethod
@@ -381,34 +427,54 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_jinghua(x: int, target: Entity = None, cost_choices: list[dict] | None = None) -> dict:
-        """净化X：支付：法力20X。选择目标拥有的一种数值类代价，使其层数-X。
+        """净化X：支付：法力20X。选择目标拥有的数值类代价及各层数，可混选，总层数不超过X。
 
         仅血限、枯竭、法限、速度、异变；失忆、冷却与已经失去的生命不在范围内。
+        可混选多种代价：每项显式给出 layers（单选项省略 layers 时默认吃满 X），
+        所有 layers 之和不得超过 X；代价恒按声明的 X 支付 20X，未用完的层数不返还。
         """
         target_name = target.name if target is not None else "未选定目标"
-        allowed = {"血限", "枯竭", "法限", "速度", "异变"}
-        if not isinstance(cost_choices, list) or len(cost_choices) != 1:
-            raise ValueError("净化必须显式选择目标拥有的一种数值类代价")
-        item = cost_choices[0]
-        if not isinstance(item, dict):
-            raise ValueError("净化选择必须是对象")
-        item = dict(item, type=normalize_payment_type(item.get("type", "")))
-        if item.get("type") not in allowed:
-            raise ValueError("净化仅支持数值类代价：血限/枯竭/法限/速度/异变，不支持失忆、冷却或已经失去的生命")
-        kind = item["type"]
-        if "layers" in item and (type(item["layers"]) is not int or item["layers"] != x):
-            raise ValueError("净化所选代价固定减少X层，不能拆分层数")
+        allowed = PURIFIABLE_COST_KINDS
+        if not isinstance(cost_choices, list) or not cost_choices:
+            raise ValueError("净化必须显式选择目标拥有的数值类代价")
+        normalized: list[dict] = []
+        for item in cost_choices:
+            if not isinstance(item, dict):
+                raise ValueError("净化选择必须是对象")
+            kind = normalize_payment_type(item.get("type", ""))
+            if kind not in allowed:
+                raise ValueError("净化仅支持数值类代价：血限/枯竭/法限/速度/异变，不支持失忆、冷却或已经失去的生命")
+            normalized.append({"type": kind, "layers": item.get("layers")})
+        kinds = [item["type"] for item in normalized]
+        if len(set(kinds)) != len(kinds):
+            raise ValueError("净化同一种代价只能选择一次；请合并为一项并给出总层数")
+        if any(item["layers"] is None for item in normalized) and len(normalized) > 1:
+            raise ValueError("净化选择多种代价时必须显式给出每种代价的层数")
+        chosen: dict[str, int] = {}
+        for item in normalized:
+            kind = item["type"]
+            layers = x if item["layers"] is None else item["layers"]
+            if type(layers) is not int or isinstance(layers, bool):
+                raise ValueError("净化层数必须是正整数")
+            if layers < 1:
+                raise ValueError("净化层数必须为正整数")
+            chosen[kind] = layers
+        total = sum(chosen.values())
+        if total > x:
+            raise ValueError(f"净化总层数{total}超过X={x}")
         if target is not None:
-            owned = (target.mutation_count if kind == "异变" else
-                     int(getattr(target, "pending_exhaust_mana", 0) or 0)
-                     if kind == "枯竭" else
-                     getattr(target, "reversible_cost_layers", {}).get(kind, 0))
-            if owned <= 0:
-                raise ValueError(f"目标未拥有可净化的【{kind}】层数")
+            for kind, layers in chosen.items():
+                owned = purifiable_cost_layers(target, kind)
+                if owned <= 0:
+                    raise ValueError(f"目标未拥有可净化的【{kind}】层数")
+                if layers > owned:
+                    raise ValueError(
+                        f"净化选择{kind}{layers}层超过目标实际持有的{owned}层")
+        detail = "、".join(f"{kind}-{n}" for kind, n in chosen.items())
         return {
             "dao_wen": "净化", "x": x, "cost_type": CostType.MANA.value, "cost": 20 * x,
-            "cost_reductions": {kind: x},
-            "summary": f"支付：法力{20*x}。使{target_name}的{kind}层数-{x}",
+            "cost_reductions": chosen, "purified_layers": total,
+            "summary": f"支付：法力{20*x}。使{target_name}的{detail}（合计{total}层，≤X={x}）",
         }
 
     @staticmethod
@@ -637,32 +703,53 @@ class DaoWenEngine:
             "summary": f"支付：{5*x}碎片，夺取{target_name}一件遗物，持续{x}回合"
         }
 
+    # 2026-10-31 用户令：【抢劫】【勒索】删除，补入主环四纹。
+    @staticmethod
+    def calculate_shuojin(x: int, target: Entity = None) -> dict:
+        """烁金X：支付：法力X。使[目标]碎片减少10X。"""
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "烁金", "x": x, "cost_type": CostType.MANA.value, "cost": x,
+            "shard_burn": 10 * x,
+            "summary": f"支付：{x}法力，使{target_name}碎片减少{10 * x}",
+        }
+
+    @staticmethod
+    def calculate_shemian(x: int, relic_names: Optional[list] = None) -> dict:
+        """赦免X：支付：碎片2X。选择X件遗物，将其状态变为启用。"""
+        picked = list(relic_names or [])
+        if picked and len(picked) != x:
+            raise ValueError("赦免需要恰好X件遗物")
+        return {
+            "dao_wen": "赦免", "x": x, "cost_type": "碎片", "cost_real_shards": 2 * x,
+            "relic_enable": x, "relic_names": picked,
+            "summary": f"支付：{2 * x}碎片，使{picked or 'X件遗物'}变为启用",
+        }
+
+    @staticmethod
+    def calculate_huilu(x: int, target: Entity = None,
+                        relic_names: Optional[list] = None) -> dict:
+        """贿赂X：支付：碎片10X。使[目标]X件已启用遗物变为未启用。"""
+        picked = list(relic_names or [])
+        if picked and len(picked) != x:
+            raise ValueError("贿赂需要恰好X件遗物")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "贿赂", "x": x, "cost_type": "碎片", "cost_real_shards": 10 * x,
+            "relic_disable": x, "relic_names": picked,
+            "summary": f"支付：{10 * x}碎片，使{target_name}{x}件已启用遗物变为未启用",
+        }
+
+    @staticmethod
+    def calculate_jiaoyi(x: int) -> dict:
+        """交易X：支付：碎片15X。发现X件遗物（仅本场战斗有效）。"""
+        return {
+            "dao_wen": "交易", "x": x, "cost_type": "碎片", "cost_real_shards": 15 * x,
+            "relic_discovery": x,
+            "summary": f"支付：{15 * x}碎片，发现{x}件遗物（仅本场战斗有效）",
+        }
+
     # 旧名 calculate_dikou 不再保留（避免注册时与"豪夺"双注册）。
-    
-    @staticmethod
-    def calculate_qiangjie(x: int, target: Entity = None) -> dict:
-        """抢劫X：支付：法力3X。夺取目标10X碎片；若无碎片则失去X点速度"""
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "抢劫", "x": x, "cost_type": CostType.MANA.value, "cost": 3 * x,
-            "shard_steal": 10 * x, "speed_penalty": x,
-            "summary": f"支付：{3 * x}法力，夺取{target_name} {10*x}碎片或{x}速度"
-        }
-
-    @staticmethod
-    def calculate_lesuo(x: int, target: Entity = None) -> dict:
-        """勒索X：支付：法力3X。目标失去10X碎片，不足部分记负债（真碎片扣负；2026-10-14 补点金反转分叉，还债新生产者）。
-
-        与【抢劫】同价同量（3X→10X），形状不同：抢劫是偷取（施法者获得，不足不记负债；
-        无碎片改失速），勒索是销毁+记负债（谁都不获得，不足部分真碎片扣负，可触发【还债】）。
-        单次结算，无持续（用户 2026-10-14 选单次，不 mirror 逼债的回始∞）。
-        """
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "勒索", "x": x, "cost_type": CostType.MANA.value, "cost": 3 * x,
-            "shard_debt": 10 * x,
-            "summary": f"支付：{3 * x}法力，{target_name}失去{10*x}碎片，不足记负债"
-        }
     
     @staticmethod
     def calculate_jiachao(x: int) -> dict:
@@ -939,6 +1026,7 @@ class DaoWenEngine:
             "束缚": cls.calculate_shufu,
             "透支": cls.calculate_touzhi,
             "封印": cls.calculate_fengyin,
+            "怜悯": cls.calculate_lianmin,
             # 怪物原始（2026-10-25 用户令：【疯狂】【减速】遗物化，退出道纹体系）
             "全力": cls.calculate_quanli,
             "强化": cls.calculate_qianghua,
@@ -965,9 +1053,11 @@ class DaoWenEngine:
             # 2026-10-13 用户令：【逼债】删除，【典当】顶替其闭环格（点金—转换—典当—反转—豪夺）。
             "典当": cls.calculate_diandang,
             "豪夺": cls.calculate_haoduo,
-            "抢劫": cls.calculate_qiangjie,
-            # 2026-10-14 用户令：补点金反转分叉，还债新生产者。
-            "勒索": cls.calculate_lesuo,
+            # 2026-10-31 用户令：【抢劫】【勒索】删除，主环改由烁金/假钞/交易/赦免/贿赂/豪夺/典当/点金构成。
+            "烁金": cls.calculate_shuojin,
+            "赦免": cls.calculate_shemian,
+            "贿赂": cls.calculate_huilu,
+            "交易": cls.calculate_jiaoyi,
             "假钞": cls.calculate_jiachao,
             # 龙心谷
             # ---- 沉沦海（二阶）----
@@ -1111,24 +1201,15 @@ class ResonanceEngine:
             ("超频", "反转", "萎缩"),
         ],
         "罪孽都市闭环": [
-            ("点金", "转换", "典当"),
-            ("典当", "反转", "豪夺"),
-            ("豪夺", "曲解", RELICIZED_DAOWEN_SLOTS["清算"]),
-            (RELICIZED_DAOWEN_SLOTS["清算"], "反转", "抢劫"),
-            ("抢劫", "转换", "假钞"),
-            # 2026-10-29：既有【勒索】补入假钞—点金之间的通用空位；点金反转分叉另表保留。
-            ("假钞", "曲解", "勒索"),
-            ("勒索", "曲解", "点金"),
-        ],
-        # ---- 副本专属分叉（非闭环：单边spur，不参与合拢断言）----
-        # 2026-10-14 用户令：补【点金】的【反转】→【勒索】。点金已有出边
-        # （转换→典当），此边是第二条出边——find_transformations 按（源，残韵类型）
-        # 查询天然支持（杀伐/全力先例），且点金+反转此前无路径、无歧义。
-        # 不进「罪孽都市闭环」表：该表的合拢断言要求入度=出度=1（test_region_loops_are_closed），
-        # spur 进去会破坏合拢；索引 loop_chain 也假设出度1（dict 会静默吞边）。
-        # 查询侧（get_available_resonance/find_transformations）遍历全表，分叉自动生效。
-        "罪孽都市分叉": [
-            ("点金", "反转", "勒索"),
+            # 2026-10-31 用户令：删【抢劫】【勒索】【清算】占位，主环重画为八节点八边。
+            ("点金", "反转", "烁金"),
+            ("烁金", "转换", "假钞"),
+            ("假钞", "曲解", "交易"),
+            ("交易", "转换", "赦免"),
+            ("赦免", "反转", "贿赂"),
+            ("贿赂", "曲解", "豪夺"),
+            ("豪夺", "转换", "典当"),
+            ("典当", "曲解", "点金"),
         ],
         "龙心谷闭环": [
             (RELICIZED_DAOWEN_SLOTS["加害"], "反转", RELICIZED_DAOWEN_SLOTS["龙鳞"]),

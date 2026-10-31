@@ -115,14 +115,18 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         calc = DaoWenEngine.resolve('共罪', 2)
         self.assertEqual(calc['dao_wen'], '共罪')
         self.assertNotIn('mark_targets', calc)
-        self.assertEqual(calc['cost_type'], '消耗')
-        self.assertEqual(calc['cost'], 2)
-        self.assertEqual(calc['duration'], 2)
+        # 2026-10-31 用户裁定：生命5X／X个非自身目标／持续∞。
+        self.assertEqual(calc['cost_type'], '生命')
+        self.assertEqual(calc['cost'], 10)
+        self.assertEqual(calc['cost_hp'], 10)
+        self.assertEqual(calc['duration'], -1)
         pact = DaoWenEngine.resolve('血契', 2)
         self.assertEqual(pact['blood_pact_multiplier'], 2)
         self.assertEqual(pact['cost'], 2)
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
-        self.assertIn('6.血契X：支付：法力X。你支付资源时，[目标]额外支付X倍同种名义资源，持续X；', dungeon)
+        self.assertIn('6.共罪X', dungeon)
+        self.assertIn('支付：生命5X', dungeon)
+        self.assertIn('7.血契X：支付：法力X。你支付资源时，[目标]额外支付X倍同种名义资源，持续X。', dungeon)
         self.assertNotIn('使[目标]替你支付代价', dungeon)
         self.assertIn('获得道纹[共罪]', dungeon)
         by_name = {r['name']: r for r in self.rows}
@@ -133,7 +137,8 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertNotIn('失血', {r['name'] for r in self.rows})
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
         self.assertNotRegex(dungeon, r'失血(?:X|\d)')
-        self.assertIn('血契X⇄（曲解）？？⇄（反转）饥饿X', dungeon)
+        # 2026-10-31：共罪回到永夜庭主环，血契改为环外（不占主环格）。
+        self.assertIn('共罪X⇄（曲解）？？⇄（反转）饥饿X', dungeon)
         self.assertIn('生命减少视为失血', dungeon)
         scraps = (ROOT / '废稿汇总.md').read_text(encoding='utf-8')
         self.assertIn('| A10 | 失血道纹、伤害来源自反噬', scraps)
@@ -280,12 +285,16 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
 
     def test_rule_boundary_and_examples_remain_explicit(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
-        for phrase in ('允许持续规则', '不允许内嵌触发', '按规则语义而非写法判定',
-                       '疑义处理', '坏死禁止回复', '勾魂禁止获得法力',
+        # 正文只留玩法边界与例子；判定指引（按语义判定、疑义处理）搬到《教案-涌现案例.md》附二。
+        for phrase in ('允许：持续规则', '不允许：内嵌触发', '坏死禁止回复', '勾魂禁止获得法力',
                        '共罪分担代价', '波及平分道纹效果',
                        '回终回复生命', '受击后获得法力', '状态结束时再生效'):
             self.assertIn(phrase, rules)
         self.assertNotIn('在事件发生时改写结算的效果，不符合道纹定义', rules)
+        self.assertNotIn('按规则语义而非写法判定', rules, '判定指引不该再写在正文里')
+        lesson = (ROOT / '教案-涌现案例.md').read_text(encoding='utf-8')
+        for phrase in ('按结算语义判定，不按写法判定', '判不清就标待定'):
+            self.assertIn(phrase, lesson)
         # 文本护栏只防止已裁定边界漂移，不是任意效果的自动语义判定器。
 
 

@@ -569,6 +569,9 @@ def play_first_tier(seed: int, region: str, sealed_path: str,
         if not ended.get("success"):
             return {"cleared": cleared, "won": False, "invalid": True,
                     "reason": f"battle_end: {ended.get('error')}"}
+        # 2026-10-31：战终不再自动开启死斗；本脚本显式走旧入口。
+        if e.state.current_battle == 7 and "final_crown" not in (ended.get("result") or {}):
+            ended.setdefault("result", {})["final_crown"] = e._trigger_final_crown() or {}
         crown = ended.get("result", {}).get("final_crown", {})
         outcome = crown.get("outcome")
         # 先看冠冕：无候选时【封存】会重置状态（player=None），必须在阵亡检查前判定
