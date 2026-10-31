@@ -1310,7 +1310,7 @@ class DaowenEffectMixin:
                 })
                 result["effects"].append({"type": "speed_halved", "target": wt.name,
                                           "speed": wt.current_speed})
-        if "speed_penalty" in calc and (name != "抢劫" or self._shards_of(target) <= 0):
+        if "speed_penalty" in calc:
             self._lose_current_speed(target, calc["speed_penalty"], ctx={
                 "timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
                 "source": name, "source_type": "daowen", "actor": caster, "target": target,
@@ -1340,33 +1340,33 @@ class DaowenEffectMixin:
             self._settle_diandang_discovery(caster, calc["discover_daowen"], result)
 
         # ---- 碎片系（罪孽）----
-        if "shard_steal" in calc and self._shards_of(target) > 0:
-            # 抢劫是“有碎片则夺取，若无碎片才失速”的二选一；不得把不足额偷取扩成负债。
-            gained = min(self._shards_of(target), calc["shard_steal"])
-            self._lose_shards_of(target, gained)
-            if caster is self.state.player:
-                self.state.shards += gained
-            else:
-                caster.shards += gained
-            result["effects"].append({"type": "shard_steal", "target": target.name, "gained": gained})
-        if "shard_debt" in calc:
-            # 2026-10-14【勒索】：与抢劫同价同量形状不同——碎片是销毁（谁都不获得），
-            # 不足部分记负债（真碎片扣负，可触发【还债】）。走 shards 动词统一口径
-            # （= 旧逼债块字面约定：够则扣，不够则假碎片优先+差额扣负）。
-            need = calc["shard_debt"]
-            paid = apply_verb(self, "shards", {
-                "target": target, "delta": -need,
-                "ctx": {"source": "勒索", "source_type": "daowen", "actor": caster,
-                        "target": target, "mechanic": "cost", "subtype": "lesuo",
-                        "amount": -need, "tags": {"daowen", "shards"}},
-            })
-            if paid["paid"]:
-                result["effects"].append({"type": "lesuo", "target": target.name,
-                                          "lost_shards": need})
-            else:
-                result["effects"].append({"type": "lesuo_debt", "target": target.name,
-                                          "obligation": need, "shards_now": paid["shards_now"],
-                                          "debt_now": paid["debt"]})
+        if "shard_burn" in calc:
+            # 【烁金】：目标碎片减少10X；不足时减到 0，不记负债（与已删的【勒索】不同）。
+            burned = min(max(0, self._shards_of(target)), int(calc["shard_burn"]))
+            if burned:
+                self._lose_shards_of(target, burned)
+            result["effects"].append({"type": "shard_burn", "target": target.name,
+                                      "lost": burned})
+        if "relic_enable" in calc:
+            names = [str(n) for n in (calc.get("relic_names") or []) if n]
+            pool = self.state.relics if caster is self.state.player else getattr(caster, "relics", [])
+            changed = []
+            for relic in pool:
+                if relic.name in names and not getattr(relic, "enabled", True):
+                    relic.enabled = True
+                    changed.append(relic.name)
+            result["effects"].append({"type": "relic_enable", "target": caster.name,
+                                      "enabled": changed})
+        if "relic_disable" in calc:
+            names = [str(n) for n in (calc.get("relic_names") or []) if n]
+            pool = self.state.relics if target is self.state.player else getattr(target, "relics", [])
+            changed = []
+            for relic in pool:
+                if relic.name in names and getattr(relic, "enabled", True):
+                    relic.enabled = False
+                    changed.append(relic.name)
+            result["effects"].append({"type": "relic_disable", "target": target.name,
+                                      "disabled": changed})
         if "shard_gain" in calc:  # 点金：支付失忆X后获得80X真碎片
             if caster is self.state.player:
                 self.state.shards += calc["shard_gain"]

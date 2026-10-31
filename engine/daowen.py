@@ -21,7 +21,7 @@ RELICIZED_SLOT = "？？"
 PLACEHOLDER_SLOTS = frozenset({RESERVED_SLOT, RELICIZED_SLOT})
 RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
     "逆鳞", "伤痕", "寄生", "加速", "急速", "洞察", "无力",
-    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变", "背负", "蒙蔽", "清算", "瓦解",
+    "冥气", "退化", "畸变", "缄默", "加害", "龙鳞", "固执", "贯穿", "裂变", "背负", "蒙蔽", "瓦解",
 )}
 # 迁入其它闭环的原位也要独立命名，避免不同闭环的待补节点在残韵查询中互相碰撞。
 RELOCATED_DAOWEN_SLOTS = {name: f"（待补）〔{name}〕" for name in ("增殖",)}
@@ -703,32 +703,53 @@ class DaoWenEngine:
             "summary": f"支付：{5*x}碎片，夺取{target_name}一件遗物，持续{x}回合"
         }
 
+    # 2026-10-31 用户令：【抢劫】【勒索】删除，补入主环四纹。
+    @staticmethod
+    def calculate_shuojin(x: int, target: Entity = None) -> dict:
+        """烁金X：支付：法力X。使[目标]碎片减少10X。"""
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "烁金", "x": x, "cost_type": CostType.MANA.value, "cost": x,
+            "shard_burn": 10 * x,
+            "summary": f"支付：{x}法力，使{target_name}碎片减少{10 * x}",
+        }
+
+    @staticmethod
+    def calculate_shemian(x: int, relic_names: Optional[list] = None) -> dict:
+        """赦免X：支付：碎片2X。选择X件遗物，将其状态变为启用。"""
+        picked = list(relic_names or [])
+        if picked and len(picked) != x:
+            raise ValueError("赦免需要恰好X件遗物")
+        return {
+            "dao_wen": "赦免", "x": x, "cost_type": "碎片", "cost_real_shards": 2 * x,
+            "relic_enable": x, "relic_names": picked,
+            "summary": f"支付：{2 * x}碎片，使{picked or 'X件遗物'}变为启用",
+        }
+
+    @staticmethod
+    def calculate_huilu(x: int, target: Entity = None,
+                        relic_names: Optional[list] = None) -> dict:
+        """贿赂X：支付：碎片10X。使[目标]X件已启用遗物变为未启用。"""
+        picked = list(relic_names or [])
+        if picked and len(picked) != x:
+            raise ValueError("贿赂需要恰好X件遗物")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "贿赂", "x": x, "cost_type": "碎片", "cost_real_shards": 10 * x,
+            "relic_disable": x, "relic_names": picked,
+            "summary": f"支付：{10 * x}碎片，使{target_name}{x}件已启用遗物变为未启用",
+        }
+
+    @staticmethod
+    def calculate_jiaoyi(x: int) -> dict:
+        """交易X：支付：碎片15X。发现X件遗物（仅本场战斗有效）。"""
+        return {
+            "dao_wen": "交易", "x": x, "cost_type": "碎片", "cost_real_shards": 15 * x,
+            "relic_discovery": x,
+            "summary": f"支付：{15 * x}碎片，发现{x}件遗物（仅本场战斗有效）",
+        }
+
     # 旧名 calculate_dikou 不再保留（避免注册时与"豪夺"双注册）。
-    
-    @staticmethod
-    def calculate_qiangjie(x: int, target: Entity = None) -> dict:
-        """抢劫X：支付：法力3X。夺取目标10X碎片；若无碎片则失去X点速度"""
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "抢劫", "x": x, "cost_type": CostType.MANA.value, "cost": 3 * x,
-            "shard_steal": 10 * x, "speed_penalty": x,
-            "summary": f"支付：{3 * x}法力，夺取{target_name} {10*x}碎片或{x}速度"
-        }
-
-    @staticmethod
-    def calculate_lesuo(x: int, target: Entity = None) -> dict:
-        """勒索X：支付：法力3X。目标失去10X碎片，不足部分记负债（真碎片扣负；2026-10-14 补点金反转分叉，还债新生产者）。
-
-        与【抢劫】同价同量（3X→10X），形状不同：抢劫是偷取（施法者获得，不足不记负债；
-        无碎片改失速），勒索是销毁+记负债（谁都不获得，不足部分真碎片扣负，可触发【还债】）。
-        单次结算，无持续（用户 2026-10-14 选单次，不 mirror 逼债的回始∞）。
-        """
-        target_name = target.name if target is not None else "未选定目标"
-        return {
-            "dao_wen": "勒索", "x": x, "cost_type": CostType.MANA.value, "cost": 3 * x,
-            "shard_debt": 10 * x,
-            "summary": f"支付：{3 * x}法力，{target_name}失去{10*x}碎片，不足记负债"
-        }
     
     @staticmethod
     def calculate_jiachao(x: int) -> dict:
@@ -1032,9 +1053,11 @@ class DaoWenEngine:
             # 2026-10-13 用户令：【逼债】删除，【典当】顶替其闭环格（点金—转换—典当—反转—豪夺）。
             "典当": cls.calculate_diandang,
             "豪夺": cls.calculate_haoduo,
-            "抢劫": cls.calculate_qiangjie,
-            # 2026-10-14 用户令：补点金反转分叉，还债新生产者。
-            "勒索": cls.calculate_lesuo,
+            # 2026-10-31 用户令：【抢劫】【勒索】删除，主环改由烁金/假钞/交易/赦免/贿赂/豪夺/典当/点金构成。
+            "烁金": cls.calculate_shuojin,
+            "赦免": cls.calculate_shemian,
+            "贿赂": cls.calculate_huilu,
+            "交易": cls.calculate_jiaoyi,
             "假钞": cls.calculate_jiachao,
             # 龙心谷
             # ---- 沉沦海（二阶）----
@@ -1178,24 +1201,15 @@ class ResonanceEngine:
             ("超频", "反转", "萎缩"),
         ],
         "罪孽都市闭环": [
-            ("点金", "转换", "典当"),
-            ("典当", "反转", "豪夺"),
-            ("豪夺", "曲解", RELICIZED_DAOWEN_SLOTS["清算"]),
-            (RELICIZED_DAOWEN_SLOTS["清算"], "反转", "抢劫"),
-            ("抢劫", "转换", "假钞"),
-            # 2026-10-29：既有【勒索】补入假钞—点金之间的通用空位；点金反转分叉另表保留。
-            ("假钞", "曲解", "勒索"),
-            ("勒索", "曲解", "点金"),
-        ],
-        # ---- 副本专属分叉（非闭环：单边spur，不参与合拢断言）----
-        # 2026-10-14 用户令：补【点金】的【反转】→【勒索】。点金已有出边
-        # （转换→典当），此边是第二条出边——find_transformations 按（源，残韵类型）
-        # 查询天然支持（杀伐/全力先例），且点金+反转此前无路径、无歧义。
-        # 不进「罪孽都市闭环」表：该表的合拢断言要求入度=出度=1（test_region_loops_are_closed），
-        # spur 进去会破坏合拢；索引 loop_chain 也假设出度1（dict 会静默吞边）。
-        # 查询侧（get_available_resonance/find_transformations）遍历全表，分叉自动生效。
-        "罪孽都市分叉": [
-            ("点金", "反转", "勒索"),
+            # 2026-10-31 用户令：删【抢劫】【勒索】【清算】占位，主环重画为八节点八边。
+            ("点金", "反转", "烁金"),
+            ("烁金", "转换", "假钞"),
+            ("假钞", "曲解", "交易"),
+            ("交易", "转换", "赦免"),
+            ("赦免", "反转", "贿赂"),
+            ("贿赂", "曲解", "豪夺"),
+            ("豪夺", "转换", "典当"),
+            ("典当", "曲解", "点金"),
         ],
         "龙心谷闭环": [
             (RELICIZED_DAOWEN_SLOTS["加害"], "反转", RELICIZED_DAOWEN_SLOTS["龙鳞"]),

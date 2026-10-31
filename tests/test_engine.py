@@ -497,7 +497,7 @@ def test_daowen_effects_wired():
     grant_extra_actions(player, 7)
     # 给玩家多个道纹用于测试
     from engine.models import DaoWen, DaoWenInstance
-    for n in ["弱化","全力","变形","抢劫"]:
+    for n in ["弱化","全力","变形","烁金"]:
         player.dao_wen[n] = DaoWenInstance(dao_wen=DaoWen(name=n,formula="",cost_type="消耗",cost_formula="X",effect_formula=""))
     m = Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100, attack_count=3, attack_power=10)
     m.shards = 20
@@ -526,16 +526,16 @@ def test_daowen_effects_wired():
     m.current_mana = mana_before
     print(f"  ✓ 弱化/强化：靶怪攻击力 10→7→锁定法限{m.mana_limit}（花法力不掉）")
 
-    # R35 抢劫3：夺取目标现有20碎片。
+    # R35 烁金2：目标碎片减少20，施法者不获得。
     shards_before = engine.state.shards
     # 前序弱化/全力各占一个回合的出手：起新回合并把出手权归本侧
     engine.state.player.actions_used_this_round = 0
     engine.state.duel_turn = "player_side"
-    r = engine.execute_action("use_daowen", {"daowen_name":"抢劫","x":3,"target":"靶怪"})
-    assert r["success"], f"抢劫失败: {r}"
-    assert m.shards == 0, f"抢劫后靶怪现有20碎片应被夺尽，实{m.shards}"
-    assert engine.state.shards == shards_before + 20, f"玩家应+20碎片"
-    print(f"  ✓ 抢劫：靶怪碎片20→0，玩家+20碎片")
+    r = engine.execute_action("use_daowen", {"daowen_name":"烁金","x":2,"target":"靶怪"})
+    assert r["success"], f"烁金失败: {r}"
+    assert m.shards == 0, f"烁金X2应烧掉靶怪现有20碎片，实{m.shards}"
+    assert engine.state.shards == shards_before, "烁金销毁碎片，玩家不获得"
+    print(f"  ✓ 烁金：靶怪碎片20→0，玩家碎片不变")
 
     # 变形（自身攻击力/攻击次数互换）：玩家默认 0×0，互换后仍为 0×0，只验证逻辑跑通
     engine.state.player.actions_used_this_round = 0

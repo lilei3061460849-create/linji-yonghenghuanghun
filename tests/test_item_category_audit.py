@@ -49,7 +49,8 @@ def _add_monster(engine, hp=100):
 
 COST_AMOUNT_KEYS = ("cost", "cost_shards", "cost_hp", "cost_blood_limit", "cost_speed",
                     "cost_mutation", "fake_cost", "real_cost", "forget_daowen",
-                    "cost_speed_limit", "cost_mana_limit")  # 2026-10-14：【透支·枯竭通道】
+                    "cost_speed_limit", "cost_mana_limit",
+                    "cost_real_shards")  # 2026-10-14：【透支·枯竭通道】；2026-10-31：碎片计价（赦免/贿赂/交易）
 
 
 def test_daowen_registry_every_daowen_has_positive_cost_channel():

@@ -23,7 +23,7 @@ from tests.monster_phase_support import resolve_monster_phase as advance_round1
 
 
 def _arena(seed: int = 1):
-    """罪孽都市（抢劫是罪孽专属）开战并推进到第 2 回合，怪物持有 抢劫。"""
+    """罪孽都市（烁金是罪孽专属）开战并推进到第 2 回合，怪物持有 烁金。"""
     import tempfile
     save_dir = tempfile.mkdtemp(prefix="txn")
     e = GameEngine(db_path=os.path.join(save_dir, "g.db"), rng_seed=seed,
@@ -48,10 +48,10 @@ def _arena(seed: int = 1):
     m.attack_count = 1
     m.shards = 100
     # 第 1 回合先让怪物空手（无道纹则 prepare 不列选项、daowen 提交 null），
-    # 免得首回合被迫发动道纹污染 activated 基线；抢劫在第 1 回合结束后再加。
+    # 免得首回合被迫发动道纹污染 activated 基线；烁金在第 1 回合结束后再加。
     m.dao_wen.clear()
     # 第 1 回合走完整两阶段 API：2026-09-15 删除白板后，首回合怪物也要交一个道纹，
-    # 这里选一个非【抢劫】的选项（保住抢劫 X=2，供第 2 回合断言吸金 10X=20）。
+    # 这里选一个非【烁金】的选项（保住烁金 X=2，供第 2 回合断言吸金 10X=20）。
     assert e.execute_action("round_start", {"relic_choices": {}})["success"]
     hand_priority_to_enemy(e)  # 交替出手：声明轮回者本回合已交出优先权
     prep1 = e.execute_action("prepare_monster_phase", {})
@@ -71,9 +71,9 @@ def _arena(seed: int = 1):
                             {"token": prep1["result"]["token"],
                              "choices": choices1})["success"]
     assert e.execute_action("round_end", {})["success"]
-    # 第 2 回合：怪物获得抢劫，可发动道纹
-    m.dao_wen["抢劫"] = DaoWenInstance(
-        DaoWen(name="抢劫", formula="", cost_type="", cost_formula="", effect_formula=""),
+    # 第 2 回合：怪物获得烁金，可发动道纹
+    m.dao_wen["烁金"] = DaoWenInstance(
+        DaoWen(name="烁金", formula="", cost_type="", cost_formula="", effect_formula=""),
         x_value=2)
     assert e.execute_action("round_start", {"relic_choices": {}})["success"]
     hand_priority_to_enemy(e)
@@ -131,7 +131,7 @@ def _legal_hits(engine, prep, actor):
 
 
 def test_illegal_hits_count_rolls_back_all_side_effects():
-    """非法 hits（数量不足）：道纹已执行（抢劫夺碎片）后动态校验失败 → 必须整体回滚。"""
+    """非法 hits（数量不足）：道纹已执行（烁金夺碎片）后动态校验失败 → 必须整体回滚。"""
     e, m, prep = _arena()
     actor = next(iter(_actors(prep)))
     before = _snapshot(e)
@@ -139,7 +139,7 @@ def test_illegal_hits_count_rolls_back_all_side_effects():
     # 合法道纹 + 攻击只提交 1 次命中（schema 要求 2 次以上）→ 执行阶段动态失败
     choice = {
         "actor_ref": actor,
-        "daowen": {"name": "抢劫", "dodge": False, "blood_shadow": False,
+        "daowen": {"name": "烁金", "dodge": False, "blood_shadow": False,
                    "trigger_spell_choices": {}, "target_ref": "player:0"},
         "attack_actions": [{"hits": [{"target_ref": "player:0", "dodge": False,
                                       "blood_shadow": False,
@@ -165,7 +165,7 @@ def test_illegal_attack_actions_count_no_side_effects():
     # 故意少提交一个 attack_action（合法数量 +1）
     choice = {
         "actor_ref": actor,
-        "daowen": {"name": "抢劫", "dodge": False, "blood_shadow": False,
+        "daowen": {"name": "烁金", "dodge": False, "blood_shadow": False,
                    "trigger_spell_choices": {}, "target_ref": "player:0"},
         "attack_actions": legal_hits + legal_hits[:1],
     }
@@ -190,7 +190,7 @@ def test_illegal_dodge_no_speed_rolls_back():
     legal_hits[0]["hits"][0]["dodge"] = True
     choice = {
         "actor_ref": actor,
-        "daowen": {"name": "抢劫", "dodge": False, "blood_shadow": False,
+        "daowen": {"name": "烁金", "dodge": False, "blood_shadow": False,
                    "trigger_spell_choices": {}, "target_ref": "player:0"},
         "attack_actions": legal_hits,
     }
@@ -205,13 +205,13 @@ def test_illegal_reused_daowen_this_round_no_side_effects():
     """非法/重复使用本回合道纹：round_used 已含该道纹仍提交 → 静态校验拦截，零副作用。"""
     e, m, prep = _arena()
     actor = next(iter(_actors(prep)))
-    # 模拟本回合已用过 抢劫（引擎记录 round_used）
-    e.combat._monster_round_used(m).add("抢劫")
+    # 模拟本回合已用过 烁金（引擎记录 round_used）
+    e.combat._monster_round_used(m).add("烁金")
     before = _snapshot(e)
 
     choice = {
         "actor_ref": actor,
-        "daowen": {"name": "抢劫", "dodge": False, "blood_shadow": False,
+        "daowen": {"name": "烁金", "dodge": False, "blood_shadow": False,
                    "trigger_spell_choices": {}, "target_ref": "player:0"},
         "attack_actions": _legal_hits(e, prep, actor),
     }
@@ -230,7 +230,7 @@ def test_api_level_failure_leaves_no_side_effects():
 
     choice = {
         "actor_ref": actor,
-        "daowen": {"name": "抢劫", "dodge": False, "blood_shadow": False,
+        "daowen": {"name": "烁金", "dodge": False, "blood_shadow": False,
                    "trigger_spell_choices": {}, "target_ref": "player:0"},
         "attack_actions": [{"hits": [{"target_ref": "player:0", "dodge": False,
                                       "blood_shadow": False,
@@ -261,16 +261,16 @@ def test_legal_submission_behavior_unchanged():
 
     dao_choice = {
         "actor_ref": actor,
-        "daowen": {"name": "抢劫", "dodge": False, "blood_shadow": False,
+        "daowen": {"name": "烁金", "dodge": False, "blood_shadow": False,
                    "trigger_spell_choices": {}, "target_ref": "player:0"},
         "attack_actions": [],
     }
     e.combat.resolve_monster_phase([dao_choice], prep["result"])
 
-    # 道纹已激活：round_used 含 抢劫，X 递增（+2×副本阶级）
-    assert "抢劫" in e.combat._monster_round_used(m)
-    # 抢劫X=2 → 夺 10X=20 碎片：玩家 100→80，怪物 100→120（caster 入账）
-    assert m.shards == 120, f"抢劫应入账 20: {m.shards}"
+    # 道纹已激活：round_used 含 烁金，X 递增（+2×副本阶级）
+    assert "烁金" in e.combat._monster_round_used(m)
+    # 烁金X=2 → 烧 10X=20 碎片：玩家 100→80，怪物碎片不变（销毁，不入账）
+    assert m.shards == 100, f"烁金只烧目标碎片，施法者不入账: {m.shards}"
     assert e.state.shards == 80
 
     # 第二手：重新 prepare 后只提交攻击组

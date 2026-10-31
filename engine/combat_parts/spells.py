@@ -672,7 +672,7 @@ class SpellReactionMixin:
     def pay_daowen_shard_cost(self, actor: Entity, name: str, calc: dict,
                               x: int) -> Optional[str]:
         """现役道纹的真／假碎片资源支付；两个池始终分开。"""
-        if name != "连击":
+        if not calc.get("cost_real_shards") and not calc.get("cost_fake_shards"):
             return None
         for resource, key in (("碎片", "cost_real_shards"), ("假碎片", "cost_fake_shards")):
             need = int(calc.get(key, 0) or 0)

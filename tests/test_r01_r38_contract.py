@@ -549,7 +549,7 @@ def test_r25_r31_illegal_sculpture_and_live_battle_end(tmp_path):
 
 # R32-R38：持续语义与死斗
 
-def test_r32_r38_normal_deform_robbery_and_transform_restore(tmp_path):
+def test_r32_r38_normal_deform_burn_and_transform_restore(tmp_path):
     """2026-10-11 用户令：【衰败】删除，原「衰败发动不立即掉血、回始扣10%」段落移除。"""
     engine = _engine(tmp_path)
     player, monster = _controlled_combat(engine)
@@ -560,16 +560,18 @@ def test_r32_r38_normal_deform_robbery_and_transform_restore(tmp_path):
     engine.combat.round_end()
     assert monster.blood_limit == before_limit - 6
 
+    # 【烁金】（2026-10-31 取代已删【抢劫】）：只烧目标碎片，施法者不入账，无失速分支。
     monster.shards = 3
     engine.state.shards = 0
-    robbery = DaoWenEngine.resolve("抢劫", 1, target=monster, caster=player)
+    burn = DaoWenEngine.resolve("烁金", 1, target=monster, caster=player)
     speed = monster.current_speed
-    engine.combat.apply_daowen_effect("抢劫", robbery, player, monster)
-    assert monster.shards == 0 and engine.state.shards == 3 and monster.current_speed == speed
+    engine.combat.apply_daowen_effect("烁金", burn, player, monster)
+    assert monster.shards == 0 and engine.state.shards == 0 and monster.current_speed == speed
     monster.current_speed = 4
-    engine.combat.apply_daowen_effect("抢劫", robbery, player, monster)
-    assert monster.current_speed == 3  # 无碎片时才失去X速度
-    assert engine.state.shards == 3
+    engine.combat.apply_daowen_effect("烁金", burn, player, monster)
+    assert monster.shards == 0, "碎片不足减到0，不记负债"
+    assert monster.current_speed == 4, "烁金不再附带失速"
+    assert engine.state.shards == 0
 
     # 【变形】2026-09-17 用户令重做：互换**当前速度 ↔ 当前法力**
     # （旧版写遗留字段 attack_power / attack_count，属性统一后对轮回者无效）

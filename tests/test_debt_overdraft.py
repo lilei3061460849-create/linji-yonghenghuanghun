@@ -43,7 +43,7 @@ def _activate_haoduo(combat, monster):
 def test_haoduo_is_refused_when_caster_cannot_pay_shards():
     """豪夺是「支付5X碎片去夺遗物」，不是抢碎片：自己付不起就是发不动。
 
-    负债只由目标侧的失去碎片产生（勒索/抢劫），施法者自己的碎片代价不能透支。
+    负债只由目标侧的失去碎片产生，施法者自己的碎片代价不能透支。
     """
     combat = _make_combat(_haoduo_monster(x=1, shards=0, fake=100))
     monster = combat.state.enemies[0]
@@ -52,15 +52,16 @@ def test_haoduo_is_refused_when_caster_cannot_pay_shards():
     assert monster.shards == 0 and monster.fake_shards == 100, "付不起时两个池子都不许动"
 
 
-def test_lingshou_debt_reaches_threshold_and_binds_at_settle():
-    """链路：勒索把一个 0 碎片的怪物打成负债→越过动态负债线→回终结算触发还债→转为员工参战。"""
+def test_debt_reaches_threshold_and_binds_at_settle():
+    """链路：怪物被打成负债→越过动态负债线→回终结算触发还债→转为员工参战。
+
+    2026-10-31：勒索删除（烁金只烧到0、不记负债），负债改由失去碎片原语直接制造，
+    被验证的是还债链路本身，与哪一种道纹产生负碎片无关。
+    """
     combat = _make_combat(_haoduo_monster(x=1, shards=0, fake=0))
     monster = combat.state.enemies[0]
-    player = combat.state.player
-    player.mana_limit = player.current_mana = 30
-    calc = DaoWenEngine.resolve("勒索", 1, target=monster, caster=player)
-    combat.apply_daowen_effect("勒索", calc, player, monster)
-    assert monster.shards == -10, f"勒索X1应让目标失去10碎片，实{monster.shards}"
+    monster.lose_shards(10)
+    assert monster.shards == -10, f"应让目标失去10碎片成负债，实{monster.shards}"
     assert monster.shards <= -(combat.DEBT_THRESHOLD + monster.shards_peak)
     results = combat.settle_victory_paths()
     assert any(r.get("type") == "debt_bind" for r in results), f"负债达到动态阈值应触发还债: {results}"

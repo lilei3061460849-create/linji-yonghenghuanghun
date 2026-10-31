@@ -1270,6 +1270,8 @@ class GameState:
     relic_pool_initialized: bool = False
     # 【发现】：随机列出3个未持有候选后，必须由角色显式选1件。
     pending_relic_choices: list[str] = field(default_factory=list)
+    # 【交易】剩余待发现的轮数（每完成一次3选1递减；0=没有排队）。
+    pending_relic_discovery_rounds: int = 0
     pending_relic_source: str = ""
     # 开局从杀伐闭环【发现】初始道纹。
     pending_initial_daowen_choices: list[str] = field(default_factory=list)
@@ -2006,6 +2008,8 @@ class GameState:
             "pending_learned_daowen": list(getattr(self, "pending_learned_daowen", [])),
             "pending_relic_choices": list(self.pending_relic_choices),
             "pending_relic_source": self.pending_relic_source,
+            "pending_relic_discovery_rounds": int(
+                getattr(self, "pending_relic_discovery_rounds", 0) or 0),
             "pending_initial_daowen_choices": list(self.pending_initial_daowen_choices),
             "pending_initial_daowen_source": self.pending_initial_daowen_source,
             "pending_diandang_discoveries": [list(g) for g in self.pending_diandang_discoveries],

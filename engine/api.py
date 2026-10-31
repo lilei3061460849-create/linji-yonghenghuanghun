@@ -4460,6 +4460,13 @@ class GameEngine:
         self.state.pending_relic_source = source
         return {"success": True, "choices": choices, "source": source}
 
+    def _clear_battle_only_relics(self) -> list[str]:
+        """【交易】发现的遗物只在本场战斗内有效：战终从持有中移除，不回到遗物池。"""
+        battle_only = [r for r in self.state.relics if "本场" in getattr(r, "tags", [])]
+        for relic in battle_only:
+            self.state.relics.remove(relic)
+        return [r.name for r in battle_only]
+
     def _action_discard_discovered_relic(self, params: dict) -> dict:
         """放弃本次遗物发现（2026-10-12 用户裁定③）。
 
@@ -4473,6 +4480,16 @@ class GameEngine:
         source = self.state.pending_relic_source
         self.state.pending_relic_choices = []
         self.state.pending_relic_source = ""
+        next_round: dict = {}
+        # 旧档没有该字段：一律按 0 读。
+        rounds_left = int(getattr(self.state, "pending_relic_discovery_rounds", 0) or 0)
+        if rounds_left > 0:
+            # 【交易】放弃本次候选也占一轮：剩余轮数照常推进。
+            self.state.pending_relic_discovery_rounds = rounds_left - 1
+            offer = self._offer_relic_discovery(source or "交易")
+            if offer.get("success"):
+                next_round = {"choices": offer["choices"],
+                              "remaining": self.state.pending_relic_discovery_rounds}
         return {"success": True, "action": "放弃发现遗物",
                 "result": {"discarded_choices": choices, "source": source,
                            "note": "本次发现不取任何遗物，待选列表已清空"}}
@@ -4539,12 +4556,27 @@ class GameEngine:
         source = self.state.pending_relic_source
         self.state.pending_relic_choices = []
         self.state.pending_relic_source = ""
+        next_round: dict = {}
+        if source == "交易":
+            # 【交易】发现的遗物只在本场战斗内有效：打标，战终统一移除。
+            if "本场" not in relic.tags:
+                relic.tags.append("本场")
+            rounds_left = int(getattr(self.state, "pending_relic_discovery_rounds", 0) or 0)
+            if rounds_left > 0:
+                self.state.pending_relic_discovery_rounds = rounds_left - 1
+                offer = self._offer_relic_discovery("交易")
+                if offer.get("success"):
+                    next_round = {"choices": offer["choices"],
+                                  "remaining": self.state.pending_relic_discovery_rounds}
         result: dict = {
             "success": True,
             "action": "选择发现遗物",
             "result": {"relic": choice, "source": source, "enabled": relic.enabled,
                        **({"replaced": replaced.name} if replaced is not None else {})},
         }
+        if next_round:
+            result["result"].update(next_round)
+            result["note"] = "交易仍在发现中：继续从当前候选里选择。"
         # 开局流程：先发现遗物，再发现初始道纹。
         if (source == "开局发现" and self.state.player is not None
                 and not self.state.player.dao_wen
@@ -5880,6 +5912,27 @@ class GameEngine:
                    or entry.get("dodge", False) and entry.get("blood_shadow", False)
                    for entry in pact_entries):
                 return {"success": False, "error": "共罪目标的dodge/blood_shadow必须为互斥布尔值"}
+        if name in ("赦免", "贿赂"):
+            picked = [str(n) for n in (params.get("relic_names") or []) if n]
+            if len(picked) != x or len(set(picked)) != x:
+                return {"success": False,
+                        "error": f"{name}X={x}必须显式指定{x}件互不重复的遗物"}
+            if name == "赦免":
+                pool = self.state.relics if actor is self.state.player else getattr(actor, "relics", [])
+                known = {r.name for r in pool}
+                missing = [n for n in picked if n not in known]
+                if missing:
+                    return {"success": False, "error": f"赦免只能启用自己持有的遗物：未持有{missing}"}
+            else:
+                tgt = refs.get(target_ref) if target_ref else None
+                if tgt is None:
+                    return {"success": False, "error": "贿赂需要显式指定target_ref"}
+                pool = self.state.relics if tgt is self.state.player else getattr(tgt, "relics", [])
+                enabled = {r.name for r in pool if getattr(r, "enabled", True)}
+                missing = [n for n in picked if n not in enabled]
+                if missing:
+                    return {"success": False, "error": f"贿赂只能作用于目标已启用的遗物：不符{missing}"}
+
         if target is not actor and not self.combat.is_targetable(actor, target):
             locked_by = self.combat.yapo_target_lock_holder(actor, target)
             if locked_by is not None:
@@ -5937,6 +5990,8 @@ class GameEngine:
             # 2026-10-31：【怜悯】封锁一种支付途径（缺省法力）。
             if name == "怜悯":
                 resolve_kw["blocked_type"] = params.get("lianmin_cost", "法力")
+            if name in ("赦免", "贿赂"):
+                resolve_kw["relic_names"] = list(params.get("relic_names") or [])
             if name == "再生":
                 resolve_kw["cost_channel"] = params.get("zaisheng_cost", "法力")
             calc = DaoWenEngine.resolve(name, x, **resolve_kw)
@@ -6067,6 +6122,17 @@ class GameEngine:
                 cost_share_target_ref=params.get("cost_share_target_ref", ""),
                 aoe_targets_override=aoe_targets_override,
             )
+        if name == "交易":
+            # 【交易】发现X件遗物：逐次 3 选 1，本场战斗内有效（战终清除）。
+            self.state.pending_relic_discovery_rounds = max(0, int(x) - 1)
+            offer = self._offer_relic_discovery("交易")
+            execution.setdefault("effects", []).append(
+                {"type": "relic_discovery", "rounds": int(x),
+                 "choices": offer.get("choices", []), "error": offer.get("error")})
+            execution["trade_discovery"] = (
+                {"choices": offer["choices"],
+                 "remaining": self.state.pending_relic_discovery_rounds}
+                if offer.get("success") else {"error": offer.get("error")})
         self.combat.consume_tamper(actor, tamper_rule)
         if dodge_log.get("dodged_names"):
             execution = dict(execution)
@@ -9615,6 +9681,8 @@ class GameEngine:
                               if not e.is_alive and not e.is_debt_bound]
 
         relic_end = self.combat.process_relics(TriggerTiming.BATTLE_END)
+        # 【交易】发现的遗物只在本场战斗内有效：战终结算完再移除。
+        self._clear_battle_only_relics()
         # 全局法术【战终】：必须在本函数下方"清除局内状态/法力相关计数"之前
         # 结算，否则法术依赖的道纹/法力/状态在校验时已经被清空，永远无法
         # 满足条件（与遗物战终结算 relic_end 同一时序原则：先结算再清理）。
