@@ -77,7 +77,8 @@ def test_boundary_monster_holder_helps_player_and_disabled_does_not():
     _hold(engine, monster)
     assert engine.combat.single_round_action_count(player) == base_player + 1, \
         "怪物持有的【疯狂】对玩家同样生效"
-    assert engine.combat.single_round_action_count(monster) == 3
+    # 该怪物 attack_count=1（出手＝攻击次数），＋【疯狂】1 次 = 2。
+    assert engine.combat.single_round_action_count(monster) == 2
 
     _hold(engine, player)  # 两人各持一件，仍然只 +1
     assert engine.combat.single_round_action_count(player) == base_player + 1

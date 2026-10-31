@@ -17,6 +17,7 @@ from ..enums import (ActionPhase, TriggerTiming, InterruptType, DamageType,
 from ..dm_rulings import Interrupt
 from ..combat_events import CombatEvent, CombatEventType, register_combat_event_observer
 from ..combat_hooks import CombatHookManager
+from ..resolution import note_delta
 from ..effect_context import EffectContext, make_context, normalize_context
 from ..mechanisms import MECHANISMS, Phase, TriggerBus, TriggerContext
 from ..personality import remove_personality
@@ -764,7 +765,10 @@ class DaowenEffectMixin:
             for life_target, amount in zip(life_targets, pieces):
                 if life_target is None or not life_target.is_alive:
                     continue
+                hp_before = life_target.current_hp
                 loss = self._raw_hp_loss(life_target, amount, ctx=daowen_ctx)
+                # trace 要能回答「它为什么没死」：失去生命同样必须记下 hp 变化。
+                note_delta(self, "hp", hp_before, life_target.current_hp)
                 result["effects"].append({"type": "target_life_loss", "target": life_target.name,
                                           "requested": amount, **loss})
         if "target_damage" in calc:

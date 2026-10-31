@@ -28,6 +28,20 @@ from .sandbox import (COMBAT_RUNTIME_ATTRS, copy_dice_for_snapshot,
 _GUARD_ON = guard_enabled()
 
 
+def _restore_runtime_value(target: Any, attr: str, saved: Any) -> None:
+    """容器类运行态必须**原地**恢复：身份被别处引用，换成新对象等于状态分叉。"""
+    current = getattr(target, attr, None)
+    if isinstance(current, dict) and isinstance(saved, dict):
+        current.clear()
+        for key, value in saved.items():
+            current[key] = set(value) if isinstance(value, set) else value
+    elif isinstance(current, set) and isinstance(saved, set):
+        current.clear()
+        current.update(saved)
+    else:
+        setattr(target, attr, saved)
+
+
 class ActionPreview:
     """行动后果预演器。preview() 返回动作的完整后果，不改变真实战斗状态。"""
     # 隔离项清单的唯一事实源在 engine/sandbox.py：预演与事务共用同一份读写实现，
@@ -105,11 +119,12 @@ class ActionPreview:
             if k not in _groups:
                 setattr(state, k, v)
         # 3) combat / engine 侧状态
-        combat._monster_activated = snap["activated"]
-        combat._monster_daowen_round_used = snap["round_used"]
-        combat._resonance_rewrites = snap["rewrites"]
-        combat._split_clones_spawned = snap["split_spawned"]
-        combat._monster_evolved = snap["evolved"]
+        for attr, saved in (("_monster_activated", snap["activated"]),
+                            ("_monster_daowen_round_used", snap["round_used"]),
+                            ("_resonance_rewrites", snap["rewrites"]),
+                            ("_split_clones_spawned", snap["split_spawned"]),
+                            ("_monster_evolved", snap["evolved"])):
+            _restore_runtime_value(combat, attr, saved)
         combat._effect_chain_depth = snap["effect_chain_depth"]
         eng.dice = snap["dice"]
         # combat 与 engine 共享同一 dice 引用：预演执行可能消耗了旧 dice 对象

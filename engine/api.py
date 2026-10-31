@@ -1371,15 +1371,34 @@ class GameEngine:
             "enemy": self.state.enemies,
         }
         refs = {(kind, i): entity for kind, entities in groups.items() for i, entity in enumerate(entities)}
-        self.combat._monster_activated = {
+        # 原地恢复：这两个 dict 的身份可能被沙盒/预演持有，换对象等于状态分叉。
+        activated = {
             id(refs[ref]): set(value) for ref, value in snapshot["activated"].items() if ref in refs
         }
-        self.combat._resonance_rewrites = {
+        current_activated = self.combat._monster_activated
+        if isinstance(current_activated, dict):
+            current_activated.clear()
+            current_activated.update(activated)
+        else:
+            self.combat._monster_activated = activated
+        rewrites = {
             id(refs[ref]): dict(value) for ref, value in snapshot["rewrites"].items() if ref in refs
         }
+        current_rewrites = self.combat._resonance_rewrites
+        if isinstance(current_rewrites, dict):
+            current_rewrites.clear()
+            current_rewrites.update(rewrites)
+        else:
+            self.combat._resonance_rewrites = rewrites
         self.combat._spell_window_serial = snapshot.get("spell_window_serial", 0)
         self.combat._priority_passes = snapshot.get("priority_passes", 0)
-        self.combat._ended_turn_sides = set(snapshot.get("ended_turn_sides", set()))
+        ended = set(snapshot.get("ended_turn_sides", set()))
+        current_ended = self.combat._ended_turn_sides
+        if isinstance(current_ended, set):
+            current_ended.clear()
+            current_ended.update(ended)
+        else:
+            self.combat._ended_turn_sides = ended
         self.combat._resuming_spell_stack = False
         self.combat._spell_stack = []
         current_refs = self.combat._combat_entity_refs()

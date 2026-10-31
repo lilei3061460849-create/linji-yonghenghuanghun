@@ -183,7 +183,9 @@ def test_budget_fuse_catches_breadth_explosion_at_depth_one():
 def test_action_rolls_back_and_reports_when_fuse_trips(tmp_path, monkeypatch):
     """API 边界：保险丝触发时行动返回失败、状态可继续使用、错误可读。"""
     engine = build_battle_engine(tmp_path, name="fuse_api")
-    monkeypatch.setattr(ResolutionContext, "MAX_DEPTH", 2)
+    # 杀伐现走「失去生命」单层结算（不再经伤害管线嵌套），阈值 2 已拦不住；
+    # 本用例只验证"保险丝触发→行动回滚"的边界，因此压到 0（首帧即越界）。
+    monkeypatch.setattr(ResolutionContext, "MAX_DEPTH", 0)
     enemy = next(e for e in engine.state.enemies if e.is_alive)
     hp_before = enemy.current_hp
     result = engine.execute_action("use_daowen",
@@ -287,6 +289,7 @@ def test_explain_answers_why_a_target_did_not_die(tmp_path):
     engine.execute_action("use_daowen",
                           {"daowen_name": "杀伐", "x": 1, "target": enemy.name})
     text = ctx.explain(enemy.name)
-    assert "damage" in text and enemy.name in text
+    # 杀伐走「失去生命」（不是【伤害】），trace 不写 damage 字样，但事实必须在。
+    assert enemy.name in text
     assert "hp " in text, "必须能看到血量变化，否则回答不了「为什么没死」"
     assert "没有涉及" in ctx.explain("不存在的实体")
