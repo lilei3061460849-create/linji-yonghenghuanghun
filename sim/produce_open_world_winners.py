@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generate auditable first-tier winners from full open-world runs.
 
-Unlike the legacy seven-battle TacticalAI loop, this driver runs the canonical map,
-real encounters, existing combat engine, and the last-two-survivors final duel.
-Only the actual player-side final-duel winner is written as a sample.
+Unlike the legacy seven-battle TacticalAI loop, this driver runs the canonical map
+and the existing combat engine. 2026-10-31: 收尾条件改为【最终的冠冕】——
+只有"自己抢到冠冕并活着带出副本"的玩家才写成样本。
 """
 from __future__ import annotations
 
@@ -52,12 +52,14 @@ def validate_open_world_winner_snapshot(snapshot: dict[str, Any]) -> None:
         raise ValueError("winner sample is missing seed/region provenance")
     if origin.get("generator") != "sim/produce_open_world_winners.py":
         raise ValueError("winner sample has no recognized open-world generator provenance")
-    if origin.get("final_duel_won") is not True:
-        raise ValueError("winner sample was not won by the player in the final duel")
-    if origin.get("stop_reason") != "final duel completed":
-        raise ValueError("winner sample did not reach a legal final-duel terminal")
-    if int(origin.get("battle_count", 0)) < 2 or int(origin.get("ordinary_battle_count", 0)) < 1:
-        raise ValueError("winner sample needs a real map battle plus the final duel")
+    if origin.get("generator_version") != 2:
+        raise ValueError("winner sample is not written by the crown-era generator")
+    if origin.get("crown_carried_out") is not True:
+        raise ValueError("winner sample was not carried out by the player with the final crown")
+    if origin.get("stop_reason") != "crown carried out":
+        raise ValueError("winner sample did not reach a legal final-crown terminal")
+    if int(origin.get("ordinary_battle_count", 0)) < 1:
+        raise ValueError("winner sample needs a real map battle")
     if int(origin.get("world_turn", 0)) < 1 or int(origin.get("combat_event_count", 0)) < 1:
         raise ValueError("winner sample has no auditable world/combat progression")
     attributes = origin.get("initial_attributes")
@@ -156,7 +158,7 @@ def main() -> None:
                 "exported_battle_replays": len(failed_battles),
                 "ordinary_battle_starts": sum(
                     1 for entry in failed_timeline
-                    if entry.get("type") == "battle_start" and not entry.get("final_duel", False)
+                    if entry.get("type") == "battle_start"
                 ),
                 "living_reincarnator_count": len(final.get("living_reincarnators_at_end") or []),
                 "living_reincarnators": [
@@ -172,7 +174,7 @@ def main() -> None:
         final = payload["final_state"]
         ordinary_battle_count = sum(
             1 for entry in payload.get("driver_timeline", [])
-            if entry.get("type") == "battle_start" and not entry.get("final_duel", False)
+            if entry.get("type") == "battle_start"
         )
         player_won = (
             final.get("winner_id") == (final.get("player") or {}).get("runtime_id")
@@ -198,7 +200,7 @@ def main() -> None:
                 "region": region,
                 "rank": next_index,
                 "generator": "sim/produce_open_world_winners.py",
-                "generator_version": 1,
+                "generator_version": 2,
                 "initial_attributes": {
                     "blood_points": attributes.get("blood_points"),
                     "speed_points": attributes.get("speed_points"),
@@ -210,7 +212,7 @@ def main() -> None:
                 "ordinary_battle_count": ordinary_battle_count,
                 "combat_event_count": final.get("combat_event_count"),
                 "stop_reason": final.get("stop_reason"),
-                "final_duel_won": True,
+                "crown_carried_out": True,
                 "winner_name": final.get("winner_name"),
                 "winner_runtime_id": final.get("winner_id"),
                 "growth_actions": (payload.get("driver_timeline") or [{}])[0].get("setup", {}).get("growth_actions", []),

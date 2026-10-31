@@ -1635,18 +1635,7 @@ class GameEngine:
         # 豁免：自创法术 dm_approved 重提是"结算中断"的动作，不该被自己挡住
         # 注：旧 is_custom_approve 旁路口（局外自创法术的 dm_approved 重提）
         # 已于 2026-09-16 随局外自创入口一并删除，不再需要豁免待裁定门禁。
-        # 世界最终死斗中的轮回者可能已命零并触发【死者之页】；先允许战终把胜负
-        # 和存活者写回世界，再让调用方处理遗言。普通 pending interrupt 仍封锁行动。
-        pending_world_duel_death = (
-            action_type == "battle_end"
-            and bool(self.state.event_modifiers.get("world_final_duel"))
-            and self.state.phase == GamePhase.IN_COMBAT.value
-            and all(getattr(interrupt.interrupt_type, "value", interrupt.interrupt_type)
-                    == InterruptType.DEATH_INHERITANCE.value
-                    for interrupt in self._pending_interrupts)
-        )
-        if (self._pending_interrupts and action_type != "restart_battle"
-                and not pending_world_duel_death):
+        if self._pending_interrupts and action_type != "restart_battle":
             player_dead = (self.state.player is None) or (not self.state.player.is_alive)
             return {
                 "success": False,
@@ -2183,11 +2172,10 @@ class GameEngine:
         world.record("crown_dropped", previous or None, position=[int(position[0]), int(position[1])])
 
     def _exit_dungeon_with_crown(self, world: WorldState, holder) -> dict:
-        """持有【最终的冠冕】并活过计时 → 自动脱离副本。
+        """持有【最终的冠冕】并活过计时 → 带冠冕脱离副本 = 完整通关（封存）。
 
-        退出只做"离开副本"这一件事：副本战斗清空、阶段回到局外、地图单位离场，
-        角色本身（面板/道纹/遗物）原样保留。是否因此进入下一阶、如何发奖，
-        规则未写，故不在此臆造。
+        用户裁定（2026-10-31）：拿到冠冕离场就是通关，接上原来"死斗胜利"之后那条
+        既有封存链路（领终音法器 → 分层封存槽 → 下一阶级），不再需要死斗。
         """
         from .world import CROWN_HOLD_WORLD_TURNS, CROWN_NAME
 
@@ -2202,10 +2190,14 @@ class GameEngine:
         }
         world.crown_exited = True
         holder.alive = False   # 已离开副本，不再是地图上的活动单位
+        # 直接摘掉地图单位：_sync_world_* 会依 entity.is_alive 把单位复活，
+        # 而这里离场的是"通关封存"的活人，不能靠 alive 标记表达。
+        world.actors.pop(holder.actor_id, None)
         # 冠冕随人离开：地图上不再有可争夺的冠冕。
         world.crown_holder_id = ""
         world.crown_location_id = ""
-        self._depart_crown_carrier(holder)
+        # 注意：这里**不能**走 Entity.depart_battle——离场者不是战死，而是通关封存；
+        # 标成死亡会触发【死者之页】并把「通关」记成「阵亡」。只让地图单位下线。
         # payload 里已有 actor_id，record 的第二个位置参数也是 actor_id，重复会 TypeError。
         world.record("dungeon_exited", holder.actor_id,
                      **{k: v for k, v in payload.items() if k != "actor_id"})
@@ -2217,7 +2209,25 @@ class GameEngine:
         self.state.combat_subphase = ""
         self.state.current_battle = 0
         self.state.phase = "pre_battle"
+        # 人已经带着冠冕离场：地图上未结算的遭遇/事件随之作废，不能拦住封存流程。
+        self.event_pool.current = None
+        self._seal_crown_carrying_runner(payload)
         return payload
+
+    def _seal_crown_carrying_runner(self, payload: dict) -> None:
+        """把带冠冕通关者按既有封存链路处置（终音法器优先，无则直接封存）。"""
+        region = self.state.current_region
+        if self.TERMINAL_ARTIFACTS.get(region):
+            # 与死斗胜利一致：先领终音法器，领取动作里才真正落封存槽。
+            self.state.pending_terminal_region = region
+            payload["pending_terminal_choice"] = region
+            payload["instruction"] = (f"{payload['actor_name']}带着【最终的冠冕】离开副本："
+                                      "请调用 choose_terminal_artifact(choice=序号) 领取终音法器后封存")
+            self.state.dungeon_exit = dict(payload)
+            return
+        seal = self._finalize_victory_seal()
+        payload["seal"] = seal
+        self.state.dungeon_exit = dict(payload)
 
     def _depart_crown_carrier(self, holder) -> None:
         """让携带冠冕的单位真正离场。
@@ -2236,13 +2246,13 @@ class GameEngine:
             entity.depart_battle(CROWN_NAME)
 
     def _leave_world_with_crown(self, world: WorldState, holder) -> dict:
-        """非玩家持有者带冠冕离场。
+        """非玩家持有者带冠冕离场：冠冕被夺走，副本随之关闭。
 
-        别人抱走冠冕不等于玩家通关：这里只结算地图事实（冠冕离开、持有者离场），
-        不动 state.phase/enemies，也不写 state.dungeon_exit；随后按刷新周期
-        重新排一颗冠冕，避免地图事件被一次偶然的拾取永久消耗掉。
+        用户裁定（2026-10-31）："谁抢到谁带走，剩下人都死里边"——
+        冠冕离场后不再重刷，留在副本里的轮回者出不来（记死因 `crown_lost`，
+        不是被谁击杀，故不走击杀/碎片结算）。
         """
-        from .world import CROWN_NAME, CROWN_SPAWN_WORLD_TURNS
+        from .world import CROWN_NAME
 
         location_id = world.crown_location_id
         if location_id and location_id in world.map.locations:
@@ -2250,14 +2260,36 @@ class GameEngine:
             world.map.locations[location_id]["removed_with_crown"] = True
         holder.alive = False
         self._depart_crown_carrier(holder)
+        world.crown_exited = True
         world.crown_holder_id = ""
         world.crown_taken_turn = 0
         world.crown_location_id = ""
         world.crown_spawned = False
-        world.crown_spawn_turn = world.clock.turn + CROWN_SPAWN_WORLD_TURNS
+        world.crown_spawn_turn = 0
         world.record("crown_left_world", holder.actor_id, name=holder.name,
                      reason=CROWN_NAME)
-        return {"holder_id": holder.actor_id, "left_world": True}
+        payload = {"holder_id": holder.actor_id, "holder_name": holder.name,
+                   "left_world": True, "world_turn": world.clock.turn}
+        player = self.state.player
+        if player is not None and player.is_alive and not player.is_departed:
+            player.current_hp = 0
+            player.is_alive = False
+            self.state.last_death_cause = "crown_lost"
+            world.record("player_trapped_in_dungeon", player.runtime_id,
+                         name=player.name, reason=CROWN_NAME)
+            payload["player_trapped"] = True
+            self.state.enemies.clear()
+            self.state.delayed_monster_reentries = []
+            self.state.pending_monster_phase = {}
+            self.state.combat_subphase = ""
+            self.state.current_battle = 0
+            self.state.phase = "pre_battle"
+        self.state.dungeon_exit = {**payload, "reason": CROWN_NAME,
+                                   "actor_id": holder.actor_id,
+                                   "actor_name": holder.name,
+                                   "held_world_turns": 0,
+                                   "required_world_turns": 0}
+        return payload
 
     def _resolve_world_crown(self, world: WorldState) -> dict | None:
         """【最终的冠冕】世界事件主循环：排期 → 刷新 → 拾取 → 存活计时 → 脱离副本。
@@ -2291,109 +2323,8 @@ class GameEngine:
             if holder.kind == "player":
                 return self._exit_dungeon_with_crown(world, holder)
             self._leave_world_with_crown(world, holder)
+            return None
         return None
-
-    def _refresh_world_final_duel(self, world: WorldState) -> dict:
-        """在地图存活状态变化后，启动或结算最后两名轮回者的自然会合阶段。"""
-        player = self.state.player
-        # 轮回者即使通过交涉成为朋友或临时盟友，也仍然是存活的轮回者；
-        # 最终死斗人数不能只统计 enemies，否则结盟会让死斗永远无法触发。
-        all_entities = []
-        for group_name in ("enemies", "friends", "temp_friends", "employees"):
-            all_entities.extend(getattr(self.state, group_name, []) or [])
-        living_rivals_by_id = {
-            entity.runtime_id: entity for entity in all_entities
-            if entity is not None and entity is not player
-            and entity.entity_type == "轮回者"
-            and entity.is_alive and not entity.is_departed
-        }
-        living_rivals = list(living_rivals_by_id.values())
-        if world.final_duel_complete:
-            return {"active": False, "complete": True, "winner": world.final_duel_winner}
-        # 若地图威胁在最终会合启动前清空了其他轮回者，唯一存活者直接获胜；
-        # 不得因“必须恰好两人”而把世界卡在没有可达目标的状态。
-        known_rival_ids = {
-            entity.runtime_id for entity in all_entities
-            if entity is not None and entity is not player
-            and entity.entity_type == "轮回者"
-        }
-        has_seen_rival_actor = any(actor_id in known_rival_ids for actor_id in world.actors)
-        if (not world.final_duel_search and not world.final_duel_started
-                and world.map.width * world.map.height >= 150
-                and world.clock.turn > 0 and has_seen_rival_actor
-                and player is not None and player.is_alive and not living_rivals):
-            world.final_duel_complete = True
-            world.final_duel_winner = player.runtime_id
-            winner_actor = world.actors.get(player.runtime_id)
-            if winner_actor is not None:
-                winner_actor.alive = False
-            world.record("sole_survivor_victory", player.runtime_id,
-                         winner=player.runtime_id, winner_name=player.name,
-                         note="只剩一名存活轮回者，无需进行最终死斗")
-            world.record("final_duel_winner_departed", player.runtime_id,
-                         winner_name=player.name, reason="sole_survivor")
-            return {"active": False, "complete": True, "winner": player.runtime_id,
-                    "sole_survivor": True}
-        # 最终死斗以剩余轮回者人数判定，不要求玩家先抛弃朋友/员工/妖怪；
-        # 怪物仍然存在时，也会在两名轮回者自然会合期间继续构成威胁。
-        eligible = (player is not None and player.is_alive
-                    and len(living_rivals) == 1)
-        if not world.final_duel_search and eligible:
-            rival = living_rivals[0]
-            # 最终死斗优先于先前结成的盟约。把最后一名轮回者移回敌方阵营，
-            # 让地图遭遇检测和既有战斗引擎都能按真正的死斗处理。
-            for group_name in ("friends", "temp_friends", "employees"):
-                group = getattr(self.state, group_name, []) or []
-                if rival in group:
-                    group.remove(rival)
-            enemies = getattr(self.state, "enemies", [])
-            if rival not in enemies:
-                enemies.append(rival)
-            rival_actor = world.actors.get(rival.runtime_id)
-            if rival_actor is not None:
-                rival_actor.kind = "enemy"
-                rival_actor.faction = "enemy"
-                rival_actor.owner_actor_id = ""
-                rival_actor.behavior = "explore"
-                rival_actor.mode = "autonomous"
-            world.final_duel_search = True
-            world.final_duel_finalists = [player.runtime_id, rival.runtime_id]
-            for encounter in world.encounters.values():
-                if encounter.active and set(world.final_duel_finalists).issubset(set(encounter.participants)):
-                    encounter.final_duel = True
-                    world.final_duel_started = True
-            world.record("final_duel_search_started", player.runtime_id,
-                         finalists=list(world.final_duel_finalists),
-                         note="最后两名轮回者开始自行寻找彼此；世界威胁在会合前继续结算")
-            return {"active": True, "finalists": list(world.final_duel_finalists)}
-        if world.final_duel_search and not world.final_duel_started:
-            entities = ([player] if player is not None else [])
-            for group_name in ("enemies", "friends", "temp_friends", "employees"):
-                entities.extend(getattr(self.state, group_name, []) or [])
-            live_ids = {entity.runtime_id for entity in entities
-                        if entity is not None and entity.is_alive and not entity.is_departed}
-            living_finalists = [actor_id for actor_id in world.final_duel_finalists
-                                if actor_id in live_ids]
-            if len(living_finalists) == 1:
-                world.final_duel_search = False
-                world.final_duel_complete = True
-                world.final_duel_winner = living_finalists[0]
-                winner_actor = world.actors.get(world.final_duel_winner)
-                if winner_actor is not None:
-                    winner_actor.alive = False
-                    world.record("final_duel_winner_departed", world.final_duel_winner,
-                                 winner_name=winner_actor.name,
-                                 reason="opponent_eliminated_before_meeting")
-                world.record("final_duel_search_ended", living_finalists[0],
-                             winner=world.final_duel_winner,
-                             note="另一名最终候选在会合前已被世界威胁淘汰")
-                return {"active": False, "complete": True,
-                        "winner": world.final_duel_winner}
-            if len(living_finalists) < 2:
-                world.final_duel_search = False
-                world.final_duel_finalists = []
-        return {"active": world.final_duel_search,
-                "finalists": list(world.final_duel_finalists)}
 
     def _resolve_world_npc_encounters(self, world: WorldState) -> list[dict]:
         """NPC之间的遭遇由现有攻击结算器逐个世界回合自动推进；玩家遭遇仍交给玩家操作。"""
@@ -3127,7 +3058,6 @@ class GameEngine:
             from .world_consumables import scatter_consumables
             scattered_count = scatter_consumables(world, self.dice, self._world_consumable_specs(), available)
             self._sync_world_entity_positions(world)
-            final_phase = self._refresh_world_final_duel(world)
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_initialize",
                     "result": {"width": width, "height": height,
@@ -3135,16 +3065,15 @@ class GameEngine:
                                "consumable_locations": scattered_count,
                                "spawned_monsters": len(spawned_monsters),
                                "spawned_reincarnators": len(spawned_reincarnators),
-                               "event_locations": len(world.map.locations),
-                               "final_duel_search": final_phase if final_phase.get("active") else None}}
+                               "event_locations": len(world.map.locations)}}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}
 
     def _action_world_move(self, params: dict) -> dict:
         try:
             world = self._world_from_state()
-            if world.final_duel_complete:
-                return {"success": False, "error": "最终生存阶段已经结算，地图行动已结束"}
+            if world.crown_exited:
+                return {"success": False, "error": "【最终的冠冕】已被带出副本，地图行动已结束"}
             actor_id = params.get("actor_id")
             player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
             actor_id = params.get("actor_id") or player_id
@@ -3260,9 +3189,6 @@ class GameEngine:
                 ]
                 if visible_trades:
                     result["npc_merchant_trades"] = visible_trades
-            final_phase = self._refresh_world_final_duel(world)
-            if final_phase.get("active") or final_phase.get("complete"):
-                result["final_duel"] = final_phase
             # 商人自己走近玩家也会建立接触；只在实际相邻时打开交易会话。
             self._open_adjacent_merchant_session(world)
             self.state.world_state = world.to_dict()
@@ -3273,8 +3199,8 @@ class GameEngine:
     def _action_world_wait(self, params: dict) -> dict:
         try:
             world = self._world_from_state()
-            if world.final_duel_complete:
-                return {"success": False, "error": "最终生存阶段已经结算，不能继续等待世界回合"}
+            if world.crown_exited:
+                return {"success": False, "error": "【最终的冠冕】已被带出副本，不能继续等待世界回合"}
             actor_id = params.get("actor_id")
             player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
             actor_id = params.get("actor_id") or player_id
@@ -3290,7 +3216,6 @@ class GameEngine:
             self._resolve_world_hiring_signals(world)
             self._resolve_world_temporary_alliances(world)
             self._share_created_being_vision(world)
-            self._refresh_world_final_duel(world)
             elapsed = world.clock.turn - start_turn
             active_encounter = next((encounter for encounter in world.encounters.values()
                                      if encounter.active and actor_id in encounter.participants), None)
@@ -3332,15 +3257,12 @@ class GameEngine:
         """只返回玩家已知信息，不把全地图、隐藏单位或完整事实账本交给AI。"""
         try:
             world = self._world_from_state()
-            if world.final_duel_complete:
-                winner_actor = world.actors.get(world.final_duel_winner)
+            if world.crown_exited:
                 return {"success": True, "action": "world_status",
                         "result": {"world_turn": world.clock.turn,
-                                   "final_duel": {"complete": True,
-                                                  "winner": world.final_duel_winner,
-                                                  "winner_name": (winner_actor.name
-                                                                  if winner_actor else "")},
-                                   "instruction": "最终生存阶段已结束；胜者已离开副本"}}
+                                   "final_crown": self._world_crown_status(world),
+                                   "exit": dict(self.state.dungeon_exit or {}),
+                                   "instruction": "【最终的冠冕】已被带出副本，地图阶段已结束"}}
             actor_id = params.get("actor_id")
             player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
             actor_id = params.get("actor_id") or player_id
@@ -3391,23 +3313,7 @@ class GameEngine:
                     "shrunk_rings": world.shrink_count,
                     "next_shrink_turn": next_shrink_turn,
                 },
-                "final_duel": {
-                    "search_active": world.final_duel_search,
-                    "battle_started": world.final_duel_started,
-                    "complete": world.final_duel_complete,
-                    "winner": world.final_duel_winner if world.final_duel_complete else None,
-                    # NPC决赛者以地图中心为会合点；把目标公开给玩家，避免远距离死斗
-                    # 只在后台寻路、却不给玩家可执行的方向信息。
-                    "rally_point": ([world.map.width // 2, world.map.height // 2]
-                                    if world.final_duel_search and not world.final_duel_started
-                                    else None),
-                    "instruction": (
-                        "最后两名轮回者正向地图中心会合；前往rally_point寻找最终对手。移动和世界威胁仍继续结算"
-                        if world.final_duel_search and not world.final_duel_started
-                        else "最终遭遇已开始" if world.final_duel_started and not world.final_duel_complete
-                        else "最终生存阶段已结束" if world.final_duel_complete else None
-                    ),
-                },
+                "final_crown": self._world_crown_status(world),
                 "self": {"actor_id": actor.actor_id, "name": actor.name,
                          "position": [actor.x, actor.y], "alive": actor.alive},
                 "known_terrain": known_terrain,
@@ -3670,8 +3576,8 @@ class GameEngine:
         """
         try:
             world = self._world_from_state()
-            if world.final_duel_complete:
-                return {"success": False, "error": "最终生存阶段已经结算，地图行动已结束"}
+            if world.crown_exited:
+                return {"success": False, "error": "【最终的冠冕】已被带出副本，地图行动已结束"}
             player_id = next((key for key, actor in world.actors.items()
                               if actor.kind == "player" and actor.alive), None)
             if player_id is None:
@@ -3964,8 +3870,8 @@ class GameEngine:
             world = self._world_from_state()
         except ValueError as exc:
             return {"success": False, "error": str(exc)}
-        if world.final_duel_complete:
-            return {"success": False, "error": "最终生存阶段已经结算，不能继续耗时行动"}
+        if world.crown_exited:
+            return {"success": False, "error": "【最终的冠冕】已被带出副本，不能继续耗时行动"}
         player_id = next((key for key, actor in world.actors.items() if actor.kind == "player"), None)
         if player_id is None:
             return {"success": False, "error": "地图上找不到轮回者单位"}
@@ -4009,7 +3915,6 @@ class GameEngine:
             self._resolve_world_hiring_signals(world)
             self._resolve_world_temporary_alliances(world)
             self._share_created_being_vision(world)
-            self._refresh_world_final_duel(world)
             elapsed = world.clock.turn - start_turn
             active_encounter = next((encounter for encounter in world.encounters.values()
                                      if encounter.active and player_id in encounter.participants), None)
@@ -4023,15 +3928,15 @@ class GameEngine:
                                    "required_turns": 1, "encounter_id": active_encounter.encounter_id,
                                    "reward_applied": False},
                         "instruction": "共鸣被遭遇打断，未投放遗物；请先处理地图遭遇"}
-            if world.final_duel_complete:
+            if world.crown_exited:
                 world.record("world_action_interrupted", player_id, action=action,
-                             elapsed_turns=elapsed, reason="final_duel_completed")
+                             elapsed_turns=elapsed, reason="crown_exited")
                 self.state.world_state = world.to_dict()
                 return {"success": True, "action": "world_action_interrupted",
                         "result": {"sub_action": action, "elapsed_turns": elapsed,
                                    "required_turns": 1, "reward_applied": False,
-                                   "reason": "final_duel_completed"},
-                        "instruction": "最终死斗已结算，耗时行动未获得奖励"}
+                                   "reason": "crown_exited"},
+                        "instruction": "【最终的冠冕】已被带出副本，耗时行动未获得奖励"}
             # 等待期间边界可能收缩；投放范围必须按结算后的真实地图重新计算。
             player_actor = world.actors[player_id]
             distances = {player_actor.position: 0}
@@ -4119,7 +4024,6 @@ class GameEngine:
         self._resolve_world_hiring_signals(world)
         self._resolve_world_temporary_alliances(world)
         self._share_created_being_vision(world)
-        self._refresh_world_final_duel(world)
         elapsed = world.clock.turn - start_turn
         active_encounter = next((encounter for encounter in world.encounters.values()
                                  if encounter.active and player_id in encounter.participants), None)
@@ -4135,15 +4039,15 @@ class GameEngine:
                                "reward_applied": False},
                     "instruction": "行动被遭遇打断，未结算本次收益；请先处理地图遭遇"}
 
-        if world.final_duel_complete:
+        if world.crown_exited:
             world.record("world_action_interrupted", player_id, action=action,
-                         elapsed_turns=elapsed, reason="final_duel_completed")
+                         elapsed_turns=elapsed, reason="crown_exited")
             self.state.world_state = world.to_dict()
             return {"success": True, "action": "world_action_interrupted",
                     "result": {"sub_action": action, "elapsed_turns": elapsed,
                                "required_turns": duration, "reward_applied": False,
-                               "reason": "final_duel_completed"},
-                    "instruction": "最终死斗已结算，耗时行动未获得奖励"}
+                               "reason": "crown_exited"},
+                    "instruction": "【最终的冠冕】已被带出副本，耗时行动未获得奖励"}
 
         if action == "雇佣":
             player_actor = world.actors[player_id]
@@ -8222,7 +8126,6 @@ class GameEngine:
         self.combat.validate_battle_start_relic_choices(relic_choices)
         world_encounter_id = params.get("world_encounter_id")
         world_battle = bool(world_encounter_id)
-        world_final_duel = False
         world_participant_enemies = []
         if world_battle:
             try:
@@ -8230,7 +8133,6 @@ class GameEngine:
             except ValueError as exc:
                 return {"success": False, "error": str(exc)}
             encounter = world.encounters.get(world_encounter_id)
-            world_final_duel = bool(encounter and encounter.final_duel)
             player_id = getattr(self.state.player, "runtime_id", "") if self.state.player else ""
             if encounter is None or not encounter.active or player_id not in encounter.participants:
                 return {"success": False, "error": "world_encounter_id必须指向包含当前轮回者的有效地图遭遇"}
@@ -8409,30 +8311,6 @@ class GameEngine:
             self.combat.init_monster_shards(m)
             self.state.enemies.append(m)
             drawn_names.append(fm["name"] + "(额外出现)")
-        if world_final_duel:
-            opponent = next((entity for entity in self.state.enemies
-                             if entity.entity_type == "轮回者" and entity.is_alive), None)
-            if opponent is None or self.state.player is None or not self.state.player.is_alive:
-                return {"success": False, "error": "最终会合遭遇缺少存活的轮回者双方"}
-            player_key = self._duel_priority_key(self.state.player)
-            opponent_key = self._duel_priority_key(opponent)
-            tied = player_key == opponent_key
-            if tied:
-                first_mover = self.dice.auto_roll(
-                    "world_final_duel_first_mover", ["player_side", "opponent_side"],
-                    context="开放世界最终死斗：先手完全平局").get("selected", "player_side")
-            else:
-                first_mover = "player_side" if player_key > opponent_key else "opponent_side"
-            self.state.in_final_duel = True
-            self.state.event_modifiers["world_final_duel"] = True
-            self.state.duel_tier = self._current_tier()
-            self.state.duel_defending_snapshot = {}
-            self.state.opponent_relics = []
-            self.state.opponent_artifacts_owned = []
-            self.state.duel_turn = first_mover
-            self.state.duel_round_first = first_mover
-            self.state.duel_tie_alternating = tied
-            self.state.duel_rounds_started = 0
         arena_percent = modifiers.pop("arena_health_percent", 0)
         if arena_percent:
             for monster in self.state.enemies:
@@ -8477,10 +8355,7 @@ class GameEngine:
             "spell_logs": spell_logs,
             "artifact_logs": artifact_logs,
             "exhaust_logs": exhaust_logs,
-            "instruction": (("最终死斗会合已开始：双方按最终死斗回合顺序交替行动，无法逃跑；"
-                             "击败对手后调用 battle_end 结算最后生存者。")
-                            if world_final_duel else
-                            (f"首发{len(drawn_names)}只怪物已进场"
+            "instruction": ((f"首发{len(drawn_names)}只怪物已进场"
                              + (f"；另有{len(queued_names)}只增援待命（"
                                 + "、".join(f"R{w['arrive_round']}进{w['count']}只" for w in waves)
                                 + "）" if queued_names else "（无增援）")
@@ -9653,82 +9528,6 @@ class GameEngine:
 
     def _action_battle_end(self, params: dict) -> dict:
         """战终；仍有未移出的存活敌人时不得跳过战斗直接结算（统一判定见 GameState.battle_won）。"""
-        if self.state.event_modifiers.get("world_final_duel"):
-            try:
-                world = self._world_from_state()
-            except ValueError as exc:
-                return {"success": False, "error": str(exc)}
-            finalists = list(world.final_duel_finalists)
-            entities = ([self.state.player] if self.state.player else [])
-            for group_name in ("friends", "employees", "temp_friends", "enemies"):
-                entities.extend(getattr(self.state, group_name, []) or [])
-            entity_by_id = {entity.runtime_id: entity for entity in entities}
-            alive_finalists = [
-                actor_id for actor_id in finalists
-                if actor_id in entity_by_id and entity_by_id[actor_id].is_alive
-                and not entity_by_id[actor_id].is_departed
-            ]
-            if len(alive_finalists) != 1:
-                return {"success": False,
-                        "error": "最终死斗必须且只能有一名最终候选存活后才能结算战终"}
-            winner_id = alive_finalists[0]
-            winner_entity = entity_by_id[winner_id]
-            player_id = self.state.player.runtime_id if self.state.player else ""
-            outcome = "player_won" if winner_id == player_id else "opponent_won"
-            for actor_id in finalists:
-                actor = world.actors.get(actor_id)
-                entity = entity_by_id.get(actor_id)
-                if actor is None:
-                    continue
-                if entity is not None:
-                    actor.name = entity.name
-                if entity is None or not entity.is_alive or entity.is_departed:
-                    actor.alive = False
-                else:
-                    if entity.world_x is not None and entity.world_y is not None:
-                        actor.x, actor.y = int(entity.world_x), int(entity.world_y)
-                    actor.alive = True
-            # 胜者仍保留真实角色状态供结算/封存使用，但已离开副本，不再是地图上的活动单位。
-            winner_actor = world.actors.get(winner_id)
-            if winner_actor is not None:
-                winner_actor.alive = False
-                world.record("final_duel_winner_departed", winner_id,
-                             winner_name=winner_entity.name, outcome=outcome,
-                             position=list(winner_actor.position))
-            for companion in self.state.friends + self.state.employees + self.state.temp_friends:
-                companion_actor = world.actors.get(companion.runtime_id)
-                if companion_actor is not None:
-                    companion_actor.alive = bool(companion.is_alive and not companion.is_departed)
-                    if companion.world_x is not None and companion.world_y is not None:
-                        companion_actor.x, companion_actor.y = int(companion.world_x), int(companion.world_y)
-                if getattr(companion, "is_created_being", False):
-                    companion.is_summoned = False
-            encounter_id = self.state.world_encounter_id
-            encounter = world.encounters.get(encounter_id) if encounter_id else None
-            if encounter is not None and encounter.active:
-                world.finish_encounter(encounter_id, "final_duel_" + outcome)
-            world.final_duel_search = False
-            world.final_duel_started = True
-            world.final_duel_complete = True
-            world.final_duel_winner = winner_id
-            world.record("final_duel_completed", winner_id, winner=winner_id,
-                         winner_name=winner_entity.name, outcome=outcome,
-                         finalists=finalists)
-            self._record_world_entity_outcomes(world)
-            self.state.world_state = world.to_dict()
-            self.state.world_enemy_reserve = []
-            self.state.world_encounter_entities = []
-            self.state.world_encounter_id = ""
-            self.state.enemies = [] if winner_id == player_id else [winner_entity]
-            self.state.in_final_duel = False
-            self.state.event_modifiers.pop("world_final_duel", None)
-            self.state.phase = "pre_battle"
-            return {"success": True, "action": "最终生存结算",
-                    "result": {"winner": winner_entity.name, "winner_id": winner_id,
-                               "outcome": outcome, "finalists": finalists,
-                               "world_turn": world.clock.turn},
-                    "instruction": f"最终死斗结束，最后存活者为{winner_entity.name}；开放世界最终生存阶段已结算"}
-
         world_battle = bool(getattr(self.state, "world_encounter_id", ""))
         living = [e.name for e in self.state.active_enemies()]
         escaping = self.state.event_modifiers.pop("escape_at_battle_end", False)
@@ -10019,7 +9818,6 @@ class GameEngine:
             world.detect_adjacent_encounters()
             # NPC战斗可能刚好淘汰了倒数第二名轮回者；此时进入自然会合阶段，
             # 但仍保留地图上的怪物，让它们在会合期间继续构成威胁。
-            self._refresh_world_final_duel(world)
             # 死亡参与者已从state.enemies移除，但仍必须写入世界事实账本。
             self._record_world_entity_outcomes(world, extra_entities=participants + reserve)
             self.state.world_state = world.to_dict()

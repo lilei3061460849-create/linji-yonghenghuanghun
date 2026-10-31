@@ -67,6 +67,15 @@ def _save_battle_replay(engine: GameEngine, encounter_id: str, outcome: str) -> 
     return replay
 
 
+def _crown_stop_reason(engine: GameEngine) -> str:
+    """冠冕离场后的终止原因：玩家自己带走 = 通关；被别人抢走 = 困死副本。"""
+    exit_record = dict(engine.state.dungeon_exit or {})
+    player_id = getattr(engine.state.player, "runtime_id", "")
+    if exit_record.get("actor_id") == player_id and not exit_record.get("player_trapped"):
+        return "crown carried out"
+    return "crown lost"
+
+
 def fight(engine: GameEngine, encounter_id: str, timeline: list[dict[str, Any]],
           replays: list[dict[str, Any]]) -> str:
     """Resolve one active map encounter, using the existing engines for both battle types."""
@@ -75,35 +84,9 @@ def fight(engine: GameEngine, encounter_id: str, timeline: list[dict[str, Any]],
     start = call(engine, "battle_start", {"world_encounter_id": encounter_id})
     timeline.append({"type": "battle_start", "world_turn": world.clock.turn,
                      "battle": engine.state.current_battle,
-                     "encounter_id": encounter_id, "final_duel": encounter.final_duel,
+                     "encounter_id": encounter_id,
                      "result": start})
 
-    if encounter.final_duel:
-        # A final duel uses the existing alternating PvP driver. Calling the normal
-        # player-only loop here violates duel_turn and would create a false failure.
-        duel_log: list[str] = []
-        from engine.ai_tactics import TacticalAI
-        duel = run_duel_pvp(engine, max_rounds=60, max_steps=400, log=duel_log,
-                            max_wall_seconds=30, ai_cls=TacticalAI)
-        winner = duel.get("winner")
-        outcome = ("player_won" if winner == "challenger" else
-                   "opponent_won" if winner == "defender" else "duel_incomplete")
-        replays.append(_save_battle_replay(engine, encounter_id, outcome))
-        timeline.append({"type": "final_duel", "world_turn": world.clock.turn,
-                         "battle": engine.state.current_battle,
-                         "result": duel, "driver_log": duel_log})
-        if winner not in {"challenger", "defender"}:
-            return "duel_incomplete"
-        ended = call(engine, "battle_end")
-        timeline.append({"type": "battle_end", "world_turn": world.clock.turn,
-                         "result": ended})
-        # Death-legacy review is post-game DM content, not a combat action. Preserve
-        # the actual world winner and record the pending proposal without inventing
-        # or auto-approving a legacy in this deterministic gameplay run.
-        for interrupt in engine._pending_interrupts:
-            timeline.append({"type": "pending_postgame_interrupt",
-                             "interrupt": interrupt.to_dict()})
-        return outcome
 
     call(engine, "round_start")
     if engine.state.pending_redemption:
@@ -113,7 +96,12 @@ def fight(engine: GameEngine, encounter_id: str, timeline: list[dict[str, Any]],
     while engine.state.player.is_alive and _has_remaining_enemies(engine):
         guard += 1
         if guard > 400:
-            raise RuntimeError("combat exceeded 400 actions or queued reinforcements did not settle")
+            # 打不动/打不完的局面不能把整局回放炸掉：如实记一次上限中止，
+            # 由调用方按"这场遭遇没打出合法结果"处理。
+            timeline.append({"type": "battle_action_cap", "battle": engine.state.current_battle,
+                             "round": engine.state.current_round,
+                             "actions": guard - 1})
+            return "stopped"
         if engine.state.pending_redemption:
             redemption = call(engine, "resolve_redemption", {"option": "终结"})
             timeline.append({"type": "redemption", "result": redemption})
@@ -178,11 +166,6 @@ def fight(engine: GameEngine, encounter_id: str, timeline: list[dict[str, Any]],
         ended = call(engine, "battle_end")
         timeline.append({"type": "battle_end", "world_turn": world.clock.turn,
                          "result": ended})
-        # 2026-10-31 规则变更：第7场战终不再自动开启死斗（改为【最终的冠冕】世界事件）。
-        # 本 replay 目前仍演绎"旧终局"，故在此显式走旧入口；终局改为冠冕后整段删除。
-        if (engine.state.current_battle == 7 and not engine.state.in_final_duel
-                and "final_crown" not in (ended.get("result") or {})):
-            engine._trigger_final_crown()
     return outcome
 
 
@@ -242,19 +225,15 @@ def _next_player_step(engine: GameEngine, world: WorldState) -> tuple[int, int] 
     entity_by_id = {entity.runtime_id: entity for entity in engine.state.enemies
                     if entity.is_alive and not entity.is_departed}
 
-    if world.final_duel_search:
-        rival_id = next((actor_id for actor_id in world.final_duel_finalists
-                         if actor_id != player_id and actor_id in world.actors
-                         and world.actors[actor_id].alive), None)
-        destination = world.actors[rival_id].position if rival_id else (
-            world.map.width // 2, world.map.height // 2)
-        path = world.map.find_path(player_actor.position, destination)
+    # 冠冕是唯一的收尾条件：地图上出现冠冕就去抢；自己抱着冠冕就原地等时钟走完。
+    crown_location = world.map.locations.get(world.crown_location_id) or {}
+    if world.crown_spawned and crown_location.get("active", True):
+        crown_cell = (int(crown_location.get("x", -1)), int(crown_location.get("y", -1)))
+        path = world.map.find_path(player_actor.position, crown_cell)
         if path and len(path) > 1:
             return path[1]
-        # Both finalists independently converge on the center, as the world rule specifies.
-        destination = (world.map.width // 2, world.map.height // 2)
-        path = world.map.find_path(player_actor.position, destination)
-        return path[1] if path and len(path) > 1 else None
+    if world.crown_holder_id == player_id:
+        return None          # 已持有：等待世界回合计时
 
     rival_candidates = []
     for actor_id, entity in entity_by_id.items():
@@ -330,8 +309,8 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
                 redemption = call(engine, "resolve_redemption", {"option": "终结"})
                 timeline.append({"type": "redemption", "result": redemption})
             world = WorldState.from_dict(engine.state.world_state)
-            if world.final_duel_complete:
-                stop_reason = "final duel completed"
+            if engine.state.dungeon_exit:
+                stop_reason = _crown_stop_reason(engine)
                 break
             if engine.event_pool.current is not None:
                 event_name = engine.event_pool.current
@@ -373,7 +352,8 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
                     stop_reason = f"world wait failed: {wait_result.get('error', 'unknown error')}"
                     break
                 world = WorldState.from_dict(engine.state.world_state)
-                if world.final_duel_complete:
+                if engine.state.dungeon_exit:
+                    stop_reason = _crown_stop_reason(engine)
                     break
                 continue
             moved = call(engine, "world_move", {
@@ -385,12 +365,13 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
                              "destination": list(destination), "result": moved})
 
         world = WorldState.from_dict(engine.state.world_state)
-        if world.final_duel_complete:
-            stop_reason = ("sole survivor victory"
-                           if any(event.get("type") in {"sole_survivor_victory", "final_duel_search_ended"}
-                                  for event in world.event_log)
-                           else "final duel completed")
-        elif not engine.state.player.is_alive:
+        exit_record = dict(engine.state.dungeon_exit or {})
+        player = engine.state.player
+        player_carried_crown = (bool(exit_record)
+                                and exit_record.get("actor_id") == player.runtime_id)
+        if exit_record:
+            stop_reason = _crown_stop_reason(engine)
+        elif not player.is_alive:
             stop_reason = stop_reason or "player died"
         final = {
             "player": {"name": engine.state.player.name,
@@ -398,19 +379,19 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
                        "alive": engine.state.player.is_alive,
                        "hp": engine.state.player.current_hp,
                        "blood_limit": engine.state.player.blood_limit},
-            "winner_id": world.final_duel_winner if world.final_duel_complete else None,
-            "winner_name": (world.actors[world.final_duel_winner].name
-                            if world.final_duel_complete and world.final_duel_winner in world.actors
-                            else None),
-            "game_complete": world.final_duel_complete,
+            "winner_id": (exit_record.get("actor_id") if player_carried_crown else None),
+            "winner_name": (exit_record.get("actor_name") if player_carried_crown else None),
+            "game_complete": player_carried_crown,
+            "crown_exit": exit_record or None,
+            "crown_taken_by": (exit_record.get("actor_name") if exit_record else None),
             "world_turn": world.clock.turn,
             "stop_reason": stop_reason or "run incomplete",
             "living_reincarnators_at_end": [
                 {"name": actor.name, "actor_id": actor.actor_id,
                  "entity_alive": True, "map_present": actor.alive,
                  "position": list(actor.position),
-                 "winner_departed": (world.final_duel_complete
-                                     and actor.actor_id == world.final_duel_winner)}
+                 "winner_departed": bool(exit_record)
+                 and actor.actor_id == exit_record.get("actor_id")}
                 for actor in world.actors.values()
                 if actor.kind in {"player", "enemy", "friend", "employee", "temp_friend"}
                 and any(entity.runtime_id == actor.actor_id and entity.entity_type == "轮回者"
@@ -443,7 +424,7 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
             "world_event_log": world.event_log,
             "battles": replays,
         }
-        if (include_winner_snapshot and world.final_duel_complete
+        if (include_winner_snapshot and player_carried_crown
                 and final.get("winner_id") == engine.state.player.runtime_id
                 and engine.state.player.is_alive):
             payload["winner_snapshot"] = engine._serialize_full_character()
@@ -495,7 +476,7 @@ def _chronological_timeline(world_log: list[dict[str, Any]],
             continue
         turn = int(action.get("world_turn", 0))
         phase = 1
-        if action_type in {"battle_snapshot", "battle_end", "final_duel",
+        if action_type in {"battle_snapshot", "battle_end",
                            "pending_postgame_interrupt"}:
             phase = 3
         elif action_type == "battle_start":
@@ -573,7 +554,7 @@ def validate_complete_playthrough(payload: dict[str, Any]) -> None:
     if final.get("game_complete") is not True:
         raise RuntimeError(f"open-world run is incomplete: {final.get('stop_reason', 'unknown stop')}")
     terminal_reason = final.get("stop_reason")
-    if terminal_reason not in {"final duel completed", "sole survivor victory"}:
+    if terminal_reason not in {"crown carried out", "crown lost"}:
         raise RuntimeError(f"unexpected terminal reason: {terminal_reason}")
     if int(population.get("monsters", 0)) < 1:
         raise RuntimeError("open-world run spawned no monsters")
@@ -587,7 +568,7 @@ def validate_complete_playthrough(payload: dict[str, Any]) -> None:
         raise RuntimeError("battle count does not match the exported battle replays")
     ordinary_encounters = [
         item for item in payload.get("driver_timeline", [])
-        if item.get("type") == "battle_start" and not item.get("final_duel", False)
+        if item.get("type") == "battle_start"
     ]
     if not ordinary_encounters:
         raise RuntimeError("open-world run reached no ordinary map encounter using the combat engine")
@@ -596,17 +577,20 @@ def validate_complete_playthrough(payload: dict[str, Any]) -> None:
         raise RuntimeError("combat event count does not match the exported battle replays")
     if int(battles[-1].get("round_count", 0)) < 1 or int(battles[-1].get("event_count", 0)) < 1:
         raise RuntimeError("last exported battle has no actual combat rounds/events")
-    duel_entries = [entry for entry in payload.get("driver_timeline", [])
-                    if entry.get("type") == "final_duel"]
-    if terminal_reason == "final duel completed":
-        if len(duel_entries) != 1 or duel_entries[0].get("result", {}).get("winner") not in {
-                "challenger", "defender"}:
-            raise RuntimeError("final duel did not produce exactly one recorded winner")
-    elif not any(event.get("type") in {"sole_survivor_victory", "final_duel_search_ended"}
-                 for event in payload.get("world_event_log", [])):
-        raise RuntimeError("sole-survivor terminal has no recorded victory event")
-    if len(final.get("living_reincarnators_at_end", [])) != 1:
-        raise RuntimeError("terminal world state does not contain exactly one living reincarnator")
+    crown_exit = final.get("crown_exit") or {}
+    if not crown_exit:
+        raise RuntimeError("terminal world state has no recorded crown exit")
+    exit_events = [event for event in payload.get("world_event_log", [])
+                   if event.get("type") in {"dungeon_exited", "crown_left_world"}]
+    if not exit_events:
+        raise RuntimeError("crown exit was not recorded in the world event log")
+    if terminal_reason == "crown carried out":
+        if final.get("game_complete") is not True:
+            raise RuntimeError("carrying the crown out must complete the run")
+        if crown_exit.get("reason") != "最终的冠冕":
+            raise RuntimeError("crown exit reason is not the final crown")
+    if len(final.get("living_reincarnators_at_end", [])) > 1:
+        raise RuntimeError("terminal world state still contains multiple living reincarnators")
 
 
 def main() -> None:

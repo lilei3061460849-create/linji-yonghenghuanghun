@@ -48,6 +48,8 @@ def _world_engine(tmp_path, suffix: str = "crown_world", keep_npc: bool = False)
     player_id = next(aid for aid, actor in world["actors"].items()
                      if actor["kind"] == "player")
     kept = ""
+    # 保留下来的 NPC 会与玩家形成遭遇（等待会被拒），本文件只关心冠冕计时。
+    world["encounters"] = {}
     for actor_id, actor in list(world["actors"].items()):
         if actor_id == player_id:
             continue
@@ -68,6 +70,31 @@ def _world_engine(tmp_path, suffix: str = "crown_world", keep_npc: bool = False)
 def _player_actor(e: GameEngine) -> dict:
     return next(actor for actor in e.state.world_state["actors"].values()
                 if actor["kind"] == "player")
+
+
+def _place_crown_away_from_player(e: GameEngine) -> tuple[int, int]:
+    """夹具：把冠冕摆在离玩家最远（且可通行）的格子上。"""
+    player = _player_actor(e)
+    world = e.state.world_state
+    world["crown_spawn_turn"] = world["clock"]["turn"]
+    world["crown_spawned"] = True
+    best = None
+    for y in range(world["map"]["height"]):
+        for x in range(world["map"]["width"]):
+            terrain = world["map"]["terrain"].get(f"{x},{y}")
+            if terrain is None or terrain in {"wall", "building", "void", "water_current"}:
+                continue
+            distance = abs(int(player["x"]) - x) + abs(int(player["y"]) - y)
+            if best is None or distance > best[0]:
+                best = (distance, x, y)
+    assert best is not None, "地图上没有空地"
+    _, x, y = best
+    location_id = "crown-fixture-far"
+    world["map"]["locations"][location_id] = {
+        "kind": "crown", "name": "最终的冠冕", "x": x, "y": y, "active": True,
+    }
+    world["crown_location_id"] = location_id
+    return x, y
 
 
 def _place_crown_next_to_player(e: GameEngine) -> tuple[int, int]:
@@ -168,7 +195,8 @@ def test_holding_five_world_turns_exits_the_dungeon(tmp_path):
     assert e.state.dungeon_exit == payload
     assert e.state.phase == "pre_battle", "脱离副本后回到局外阶段"
     assert not [m for m in e.state.enemies if m.is_alive]
-    assert _player_actor(e)["alive"] is False, "离场者不再是地图上的活动单位"
+    assert not any(actor["kind"] == "player" for actor in world["actors"].values()), \
+        "离场者不再是地图上的活动单位"
     # 记录写进世界事实账本
     assert any(entry["type"] == "dungeon_exited" for entry in world["event_log"])
 
@@ -214,3 +242,66 @@ def test_battle_end_on_battle_seven_no_longer_starts_a_duel(tmp_path):
         "战终不得再自动开启第8场死斗"
     assert e.state.in_final_duel is False
     assert e.state.player is not None, "角色不再被自动封存/替换"
+
+
+# ---------------------------------------------------------------------------
+# 6. 带冠冕脱离 = 完整通关（封存），不再需要死斗
+# ---------------------------------------------------------------------------
+
+def test_crown_exit_seals_the_runner_as_a_completed_run(tmp_path):
+    from engine.gamedata import REGION_TIERS
+
+    e = _world_engine(tmp_path, "seal")
+    region = e.state.current_region
+    sealed_name = e.state.player.name
+    x, y = _place_crown_next_to_player(e)
+    assert e.execute_action("world_move", {"x": x, "y": y})["success"]
+    for _ in range(CROWN_HOLD_WORLD_TURNS):
+        waited = e.execute_action("world_wait", {"turns": 1})
+        assert waited["success"], waited
+
+    payload = waited["result"]["dungeon_exit"]
+    assert payload["pending_terminal_choice"] == region, \
+        "脱冠通关应走既有封存链路：先领终音法器"
+    assert e.state.pending_terminal_region == region
+
+    chosen = e.execute_action("choose_terminal_artifact", {"choice": 1})
+    assert chosen["success"], chosen
+    seal = chosen["result"]["seal"]
+    assert seal["sealed_name"] == sealed_name
+    assert seal["tier"] == REGION_TIERS[region], "未死斗 → 按当前副本阶级封存"
+    slots = e._load_seal_slots()
+    assert any(entry.get("player", {}).get("name") == sealed_name
+               for entry in slots[seal["tier"]]), slots
+
+
+# ---------------------------------------------------------------------------
+# 7. 别人抢到冠冕带走：冠冕不重刷，留在副本里的人出不来
+# ---------------------------------------------------------------------------
+
+def test_npc_carrying_the_crown_out_traps_the_runner(tmp_path):
+    e = _world_engine(tmp_path, "npc_wins", keep_npc=True)
+    world = e.state.world_state
+    x, y = _place_crown_away_from_player(e)   # 远离玩家：不要变成遭遇战
+    npc_id = next(aid for aid, actor in world["actors"].items()
+                  if actor["kind"] != "player")
+    live = e._world_from_state()
+    live.actors[npc_id].x, live.actors[npc_id].y = x, y
+    e._resolve_world_crown(live)                 # 该回合：NPC 踩中 → 持有
+    e.state.world_state = live.to_dict()
+    assert e.state.world_state["crown_holder_id"] == npc_id
+
+    for _ in range(CROWN_HOLD_WORLD_TURNS):
+        waited = e.execute_action("world_wait", {"turns": 1})
+        assert waited["success"], waited
+
+    world = e.state.world_state
+    assert world["crown_exited"] is True
+    assert world["crown_holder_id"] == "" and world["crown_location_id"] == ""
+    assert world["crown_spawned"] is False and world["crown_spawn_turn"] == 0, \
+        "冠冕被带走后不再重刷"
+    assert e.state.player.is_alive is False, "没抢到冠冕的轮回者留在副本里出不来"
+    assert e.state.last_death_cause == "crown_lost"
+    assert not [enemy for enemy in e.state.enemies if enemy.is_alive]
+    assert any(entry["type"] == "crown_left_world" for entry in world["event_log"])
+    assert any(entry["type"] == "player_trapped_in_dungeon" for entry in world["event_log"])

@@ -335,7 +335,6 @@ class EncounterState:
     started_turn: int
     active: bool = True
     outcome: str = ""
-    final_duel: bool = False
 
 
 @dataclass
@@ -350,11 +349,6 @@ class WorldState:
     # 每10个世界回合移除方形地图最外一圈；计数随存档保存。
     shrink_interval: int = 10
     shrink_count: int = 0
-    final_duel_search: bool = False
-    final_duel_finalists: list[str] = field(default_factory=list)
-    final_duel_started: bool = False
-    final_duel_complete: bool = False
-    final_duel_winner: str = ""
     # 【最终的冠冕】世界事件状态（替代已删除的第8场强制死斗）。
     crown_spawn_turn: int = 0        # 预定刷新回合；0＝尚未排定
     crown_spawned: bool = False
@@ -774,7 +768,6 @@ class WorldState:
             # 目标来源只取本单位记忆；未知地点不会因为地图数据存在而被NPC直接利用。
             if (destination is None
                     and actor.faction in {"enemy", "friend", "employee", "temp_friend"}
-                    and not (self.final_duel_search and actor_id in self.final_duel_finalists)
                     # 明确指挥妖怪跟随/守卫时，服从命令优先于自主搜刮资源。
                     and not (actor.kind in ALLY_KINDS and actor.owner_actor_id
                              and actor.behavior in {"follow", "guard"})):
@@ -881,49 +874,7 @@ class WorldState:
                 if (actor.behavior in {"follow", "guard"}
                         and target_position == actor.position):
                     continue
-            # 最终会合者先向地图中心收敛；到达中心附近后，继续按自己的迷雾记忆
-            # 搜索已知的未探索格，避免因中心格被占或中心已到达而在周围反复打转。
-            # 若曾目击另一名决斗者，优先沿已知地形前往其最后目击位置，不读取其当前隐藏坐标。
-            if destination is None and self.final_duel_search and actor_id in self.final_duel_finalists:
-                rival_ids = [item for item in self.final_duel_finalists if item != actor_id]
-                rival_id = rival_ids[0] if rival_ids else None
-                sightings = [entry for entry in actor.memory
-                             if entry.get("actor_id") == rival_id
-                             and isinstance(entry.get("position"), (list, tuple))
-                             and len(entry["position"]) == 2]
-                if sightings:
-                    last_seen = max(sightings, key=lambda entry: int(entry.get("turn", 0)))
-                    goal = (int(last_seen["position"][0]), int(last_seen["position"][1]))
-                    path = self._find_known_path(actor_id, actor.position, goal)
-                    if path is not None and len(path) > 1:
-                        destination = path[1]
-
-                center = (self.map.width // 2, self.map.height // 2)
-                center_distance = abs(actor.x - center[0]) + abs(actor.y - center[1])
-                if destination is None and center_distance > 1:
-                    closer = [pos for pos in candidates
-                              if abs(pos[0] - center[0]) + abs(pos[1] - center[1]) < center_distance]
-                    if closer:
-                        destination = min(
-                            closer,
-                            key=lambda pos: (
-                                abs(pos[0] - center[0]) + abs(pos[1] - center[1]),
-                                self.map.key(pos) in actor.visited_cells,
-                                pos[1], pos[0]))
-                if destination is None:
-                    known_unvisited = sorted(
-                        (self.map.parse(key) for key in actor.known_cells
-                         if key not in actor.visited_cells and self.map.is_passable(self.map.parse(key), actor)),
-                        key=lambda pos: (abs(pos[0] - actor.x) + abs(pos[1] - actor.y), pos[1], pos[0]))
-                    for goal in known_unvisited:
-                        path = self._find_known_path(actor_id, actor.position, goal)
-                        if path is not None and len(path) > 1:
-                            destination = path[1]
-                            break
-                    if destination is None:
-                        destination = min(candidates, key=lambda pos: (
-                            self.map.key(pos) in actor.visited_cells, pos[1], pos[0]))
-            elif destination is None:
+            if destination is None:
                 unvisited = [pos for pos in candidates
                              if self.map.key(pos) not in actor.visited_cells]
                 choices = unvisited or candidates
@@ -1122,19 +1073,14 @@ class WorldState:
                 raise ValueError("地图幻象不能成为战斗参与者")
         if not self.map.in_bounds(location):
             raise ValueError("遭遇地点超出地图")
-        is_final_duel = (self.final_duel_search
-                         and set(self.final_duel_finalists).issubset(set(unique)))
         encounter = EncounterState(
             encounter_id=f"encounter-{self.next_encounter_id}",
             location=location, participants=unique, started_turn=self.clock.turn,
-            final_duel=is_final_duel,
         )
-        if is_final_duel:
-            self.final_duel_started = True
         self.next_encounter_id += 1
         self.encounters[encounter.encounter_id] = encounter
         self.record("encounter_started", unique[0], encounter_id=encounter.encounter_id,
-                    participants=unique, location=list(location), final_duel=is_final_duel)
+                    participants=unique, location=list(location))
         return encounter
 
     def finish_encounter(self, encounter_id: str, outcome: str) -> None:
@@ -1162,11 +1108,6 @@ class WorldState:
             "next_encounter_id": self.next_encounter_id,
             "shrink_interval": self.shrink_interval,
             "shrink_count": self.shrink_count,
-            "final_duel_search": self.final_duel_search,
-            "final_duel_finalists": list(self.final_duel_finalists),
-            "final_duel_started": self.final_duel_started,
-            "final_duel_complete": self.final_duel_complete,
-            "final_duel_winner": self.final_duel_winner,
             "crown_spawn_turn": self.crown_spawn_turn,
             "crown_spawned": self.crown_spawned,
             "crown_location_id": self.crown_location_id,
@@ -1191,18 +1132,12 @@ class WorldState:
                 started_turn=int(v["started_turn"]),
                 active=bool(v.get("active", True)),
                 outcome=str(v.get("outcome", "")),
-                final_duel=bool(v.get("final_duel", False)),
             ) for k, v in data.get("encounters", {}).items()},
             event_log=list(data.get("event_log", [])),
             next_event_id=int(data.get("next_event_id", 1)),
             next_encounter_id=int(data.get("next_encounter_id", 1)),
             shrink_interval=max(1, int(data.get("shrink_interval", 10))),
             shrink_count=max(0, int(data.get("shrink_count", 0))),
-            final_duel_search=bool(data.get("final_duel_search", False)),
-            final_duel_finalists=list(data.get("final_duel_finalists") or []),
-            final_duel_started=bool(data.get("final_duel_started", False)),
-            final_duel_complete=bool(data.get("final_duel_complete", False)),
-            final_duel_winner=str(data.get("final_duel_winner", "") or ""),
             crown_spawn_turn=int(data.get("crown_spawn_turn", 0) or 0),
             crown_spawned=bool(data.get("crown_spawned", False)),
             crown_location_id=str(data.get("crown_location_id", "") or ""),

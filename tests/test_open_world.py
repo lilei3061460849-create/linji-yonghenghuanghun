@@ -1192,94 +1192,6 @@ def test_replay_driver_explores_unvisited_frontier_when_no_hostile_is_reachable(
     assert world.map.is_passable(destination)
 
 
-def test_final_duel_search_starts_when_only_two_reincarnators_remain_even_if_monsters_survive(tmp_path):
-    from engine.api import GameEngine
-    from engine.models import Entity
-
-    engine = GameEngine(db_path=str(tmp_path / "final-duel-search.db"),
-                        save_dir=str(tmp_path), rng_seed=103, autosave=False)
-    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
-    rival = Entity("R", "轮回者", blood_limit=30, current_hp=30)
-    monster = Entity("M", "怪物", blood_limit=10, current_hp=10)
-    engine.state.enemies = [rival, monster]
-    world = WorldState(clock=WorldClock(), map=_open_map())
-    world.add_actor(WorldActorState(engine.state.player.runtime_id, "P", "player", 1, 1,
-                                    faction="player", mode="manual"))
-    world.add_actor(WorldActorState(rival.runtime_id, "R", "enemy", 5, 5,
-                                    faction="enemy", mode="autonomous"))
-    world.add_actor(WorldActorState(monster.runtime_id, "M", "enemy", 4, 5,
-                                    faction="monster", mode="autonomous"))
-
-    result = engine._refresh_world_final_duel(world)
-    assert result["active"] is True
-    assert set(result["finalists"]) == {engine.state.player.runtime_id, rival.runtime_id}
-    assert world.final_duel_search is True
-    assert world.final_duel_started is False
-
-
-def test_only_surviving_reincarnator_wins_without_a_fake_final_duel(tmp_path):
-    from engine.api import GameEngine
-    from engine.models import Entity
-
-    engine = GameEngine(db_path=str(tmp_path / "solo-survivor.db"),
-                        save_dir=str(tmp_path), rng_seed=104, autosave=False)
-    player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
-    dead_rival = Entity("R", "轮回者", blood_limit=30, current_hp=0, is_alive=False)
-    engine.state.player = player
-    engine.state.enemies = [dead_rival]
-    world = WorldState(clock=WorldClock(), map=_open_map(width=21, height=21))
-    world.clock.turn = 1
-    world.add_actor(WorldActorState(player.runtime_id, "P", "player", 1, 1,
-                                    faction="player", mode="manual"))
-    world.add_actor(WorldActorState(dead_rival.runtime_id, "R", "enemy", 5, 5,
-                                    faction="enemy", mode="autonomous", alive=False))
-
-    result = engine._refresh_world_final_duel(world)
-
-    assert result["complete"] is True
-    assert result["sole_survivor"] is True
-    assert world.final_duel_started is False
-    assert world.final_duel_winner == player.runtime_id
-    assert any(event["type"] == "sole_survivor_victory" for event in world.event_log)
-
-
-def test_replay_validator_accepts_a_recorded_solo_survivor_terminal():
-    from sim.run_open_world_replay import validate_complete_playthrough
-
-    payload = {
-        "initial_population": {"monsters": 2, "other_reincarnators": 2, "special_locations": 1},
-        "final_state": {
-            "game_complete": True, "stop_reason": "sole survivor victory",
-            "winner_id": "player", "battle_count": 1, "combat_event_count": 2,
-            "living_reincarnators_at_end": [{"name": "玩家", "actor_id": "player"}],
-        },
-        "battles": [{"round_count": 1, "event_count": 2}],
-        "driver_timeline": [{"type": "battle_start", "final_duel": False}],
-        "world_event_log": [{"type": "sole_survivor_victory", "actor_id": "player"}],
-    }
-
-    validate_complete_playthrough(payload)
-
-
-def test_final_survivors_converge_to_a_marked_final_encounter():
-    world = WorldState(clock=WorldClock(), map=_open_map(),
-                       final_duel_search=True,
-                       final_duel_finalists=["p", "e"])
-    world.add_actor(WorldActorState("p", "玩家", "player", 2, 2,
-                                    faction="player", mode="manual"))
-    world.add_actor(WorldActorState("e", "最后的轮回者", "reincarnator", 3, 2,
-                                    faction="enemy", mode="manual"))
-    encounter_ids = world.detect_adjacent_encounters()
-    assert len(encounter_ids) == 1
-    encounter = world.encounters[encounter_ids[0]]
-    assert encounter.final_duel is True
-    assert world.final_duel_started is True
-    restored = WorldState.from_dict(world.to_dict())
-    assert restored.final_duel_search is True
-    assert restored.final_duel_finalists == ["p", "e"]
-    assert restored.encounters[encounter.encounter_id].final_duel is True
-
-
 def test_multiple_hostiles_sharing_a_cell_join_one_encounter():
     world = WorldState(clock=WorldClock(), map=_open_map())
     world.add_actor(WorldActorState("p", "玩家", "轮回者", 2, 2,
@@ -1321,11 +1233,17 @@ def test_adjacent_hostile_waits_until_current_encounter_finishes():
     assert set(world.encounters[second[0]].participants) == {"p", "m2"}
 
 
-def test_world_status_exposes_boundary_and_final_search_without_revealing_hidden_positions(tmp_path):
+def test_world_status_exposes_boundary_and_crown_status_without_revealing_hidden_positions(tmp_path):
+    """世界情报要给出边界收缩与【最终的冠冕】状态，但绝不泄露隐藏单位坐标。
+
+    2026-10-31：世界层"最终会合死斗"已删除，原 final_duel 状态块换成了冠冕状态块；
+    本用例守的仍是「公开可行动信息 / 不公开隐藏位置」这条边界。
+    """
     from engine.api import GameEngine
     from engine.models import Entity
+    from engine.world import CROWN_HOLD_WORLD_TURNS
 
-    engine = GameEngine(db_path=str(tmp_path / "world-status-final.db"),
+    engine = GameEngine(db_path=str(tmp_path / "world-status-crown.db"),
                         save_dir=str(tmp_path), rng_seed=149, autosave=False)
     engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
     engine.state.phase = "pre_battle"
@@ -1333,22 +1251,25 @@ def test_world_status_exposes_boundary_and_final_search_without_revealing_hidden
     engine.state.enemies = [rival]
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
 
-    world = WorldState.from_dict(engine.state.world_state)
-    world.final_duel_search = True
-    world.final_duel_finalists = [engine.state.player.runtime_id, rival.runtime_id]
-    world.actors[rival.runtime_id].x, world.actors[rival.runtime_id].y = 5, 5
-    engine.state.world_state = world.to_dict()
-
     status = engine.execute_action("world_status", {})
     assert status["success"], status
     result = status["result"]
     assert result["boundary"]["shape"] == "square"
     assert result["boundary"]["next_shrink_turn"] == 10
-    assert result["final_duel"]["search_active"] is True
-    assert result["final_duel"]["rally_point"] == [3, 3]
-    assert "地图中心" in result["final_duel"]["instruction"]
-    assert "final_duel_finalists" not in result
-    assert [5, 5] not in [actor["position"] for actor in result["visible_actors"]]
+    crown = result["final_crown"]
+    assert crown["spawned"] is False
+    assert crown["required_world_turns"] == CROWN_HOLD_WORLD_TURNS
+    assert "position" not in crown, "冠冕还没刷新，不得给出坐标"
+    assert "final_duel" not in result, "强制会合死斗已删除，不再回报该状态"
+
+    # 把对手挪到远处隐藏格：状态回报里不得出现它的坐标。
+    world = WorldState.from_dict(engine.state.world_state)
+    world.actors[rival.runtime_id].x, world.actors[rival.runtime_id].y = 5, 5
+    engine.state.world_state = world.to_dict()
+    status = engine.execute_action("world_status", {})
+    assert status["success"], status
+    assert [5, 5] not in [actor["position"] for actor in status["result"]["visible_actors"]]
+
 
 
 def test_world_encounter_handoff_accepts_companions_without_forcing_created_beings_into_combat(tmp_path):
@@ -1753,68 +1674,6 @@ def test_trade_does_not_count_temporary_transfer_balance_as_shard_peak(tmp_path)
     assert rival.shards_peak == 10
 
 
-def test_final_duelist_explores_known_frontiers_after_reaching_center():
-    world = WorldState(clock=WorldClock(), map=_open_map(9, 9))
-    world.add_actor(WorldActorState(
-        "player", "玩家", "轮回者", 1, 1, faction="player", mode="manual"))
-    world.add_actor(WorldActorState(
-        "rival", "最后的对手", "轮回者", 4, 4, faction="enemy", mode="autonomous"))
-    world.final_duel_search = True
-    world.final_duel_finalists = ["player", "rival"]
-
-    for _ in range(12):
-        world.clock.advance(1)
-        world._run_autonomous_units()
-
-    rival = world.actors["rival"]
-    # 搜索不应在中心周围循环；它应持续扩展自己的已知地图并走访更多格子。
-    assert len(rival.visited_cells) > 8
-    assert max(max(abs(WorldMap.parse(cell)[0] - 4), abs(WorldMap.parse(cell)[1] - 4))
-               for cell in rival.visited_cells) > 1
-
-
-
-def test_distant_final_duelist_reaches_rally_area_and_starts_final_encounter():
-    world = WorldState(clock=WorldClock(), map=_open_map(9, 9))
-    world.add_actor(WorldActorState(
-        "player", "玩家", "player", 4, 4, faction="player", mode="manual"))
-    world.add_actor(WorldActorState(
-        "rival", "最后的对手", "轮回者", 8, 8, faction="enemy", mode="autonomous"))
-    world.final_duel_search = True
-    world.final_duel_finalists = ["player", "rival"]
-
-    for _ in range(12):
-        if any(encounter.active and encounter.final_duel
-               for encounter in world.encounters.values()):
-            break
-        world.wait("player", 1)
-
-    final_encounters = [encounter for encounter in world.encounters.values()
-                        if encounter.active and encounter.final_duel]
-    assert len(final_encounters) == 1
-    assert set(final_encounters[0].participants) == {"player", "rival"}
-    assert world.final_duel_started is True
-
-def test_final_duelist_tracks_only_last_known_opponent_position():
-    world = WorldState(clock=WorldClock(), map=_open_map(9, 9))
-    world.add_actor(WorldActorState(
-        "player", "玩家", "轮回者", 1, 1, faction="player", mode="manual"))
-    rival = WorldActorState(
-        "rival", "最后的对手", "轮回者", 4, 4, faction="enemy", mode="autonomous")
-    rival.known_cells.update({"4,4", "3,4", "2,4"})
-    rival.memory.append({
-        "turn": 2, "actor_id": "player", "name": "玩家",
-        "kind": "player", "position": [2, 4],
-    })
-    world.add_actor(rival)
-    world.final_duel_search = True
-    world.final_duel_finalists = ["player", "rival"]
-
-    world.clock.advance(1)
-    world._run_autonomous_units()
-
-    assert world.actors["rival"].position == (3, 4)
-
 def test_traveling_merchant_is_neutral_immediately_when_created(tmp_path):
     from engine.api import GameEngine
 
@@ -1963,76 +1822,16 @@ def test_world_learning_action_advances_three_turns_before_granting_daowen(tmp_p
     assert engine.state.energy == energy_before
 
 
-def test_final_duel_counts_a_reincarnator_who_became_a_friend(tmp_path):
+def test_timed_action_does_not_award_reward_after_the_crown_is_carried_out(tmp_path, monkeypatch):
+    """冠冕被带出副本后，耗时行动必须被判"未结算"，不得悄悄发奖。
+
+    2026-10-31：原用例把世界层最终死斗当作收尾；死斗已删除，收尾条件改为
+    `world.crown_exited`，断言口径不变（打断 + 不发奖 + 账本有记录）。
+    """
     from engine.api import GameEngine
     from engine.models import Entity
 
-    engine = GameEngine(db_path=str(tmp_path / "allied-finalist.db"),
-                        save_dir=str(tmp_path), rng_seed=137, autosave=False)
-    player = Entity("玩家", "轮回者", blood_limit=30, current_hp=30)
-    rival = Entity("旧盟友", "轮回者", blood_limit=30, current_hp=30)
-    engine.state.player = player
-    engine.state.friends = [rival]
-    world = WorldState(clock=WorldClock(), map=_open_map())
-    world.add_actor(WorldActorState(
-        player.runtime_id, player.name, "player", 1, 1,
-        faction="player", mode="manual"))
-    world.add_actor(WorldActorState(
-        rival.runtime_id, rival.name, "friend", 5, 5,
-        faction="friend", mode="manual", owner_actor_id=player.runtime_id))
-
-    result = engine._refresh_world_final_duel(world)
-
-    assert result["active"] is True
-    assert world.final_duel_finalists == [player.runtime_id, rival.runtime_id]
-    assert rival not in engine.state.friends
-    assert rival in engine.state.enemies
-    assert world.actors[rival.runtime_id].kind == "enemy"
-    assert world.actors[rival.runtime_id].faction == "enemy"
-    assert world.actors[rival.runtime_id].mode == "autonomous"
-
-
-def test_final_duel_search_marks_survivor_as_departed_from_world_map(tmp_path):
-    from engine.api import GameEngine
-    from engine.models import Entity
-
-    engine = GameEngine(db_path=str(tmp_path / "final-duel-exit.db"),
-                        save_dir=str(tmp_path), rng_seed=139, autosave=False)
-    player = Entity("玩家", "轮回者", blood_limit=30, current_hp=30)
-    rival = Entity("败者", "轮回者", blood_limit=30, current_hp=0)
-    rival.is_alive = False
-    engine.state.player = player
-    engine.state.enemies = [rival]
-    engine.state.phase = "pre_battle"
-    world = WorldState(clock=WorldClock(), map=_open_map())
-    world.add_actor(WorldActorState(
-        player.runtime_id, player.name, "player", 1, 1,
-        faction="player", mode="manual", alive=True))
-    world.add_actor(WorldActorState(
-        rival.runtime_id, rival.name, "enemy", 5, 5,
-        faction="enemy", mode="autonomous", alive=False))
-    world.final_duel_search = True
-    world.final_duel_finalists = [player.runtime_id, rival.runtime_id]
-
-    result = engine._refresh_world_final_duel(world)
-
-    assert result["complete"] is True
-    assert result["winner"] == player.runtime_id
-    assert player.is_alive
-    assert world.actors[player.runtime_id].alive is False
-    assert any(event["type"] == "final_duel_winner_departed"
-               for event in world.event_log)
-    engine.state.world_state = world.to_dict()
-    status = engine.execute_action("world_status", {})
-    assert status["success"], status
-    assert status["result"]["final_duel"]["winner_name"] == player.name
-
-
-def test_timed_action_does_not_award_reward_after_final_duel_completes(tmp_path, monkeypatch):
-    from engine.api import GameEngine
-    from engine.models import Entity
-
-    engine = GameEngine(db_path=str(tmp_path / "final-duel-interrupt.db"),
+    engine = GameEngine(db_path=str(tmp_path / "crown-interrupt.db"),
                         save_dir=str(tmp_path), rng_seed=157)
     engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=20)
     engine.state.phase = "pre_battle"
@@ -2040,13 +1839,14 @@ def test_timed_action_does_not_award_reward_after_final_duel_completes(tmp_path,
     player_id = engine.state.player.runtime_id
     points_before = engine.state.attribute_points
 
-    def finish_final_duel(world):
-        world.final_duel_complete = True
-        world.final_duel_winner = player_id
+    def crown_leaves(world):
+        world.crown_exited = True
+        world.crown_holder_id = ""
+        world.crown_spawned = False
         world.actors[player_id].alive = False
-        return {"active": False, "complete": True, "winner": player_id}
+        return None
 
-    monkeypatch.setattr(engine, "_refresh_world_final_duel", finish_final_duel)
+    monkeypatch.setattr(engine, "_resolve_world_crown", crown_leaves)
     result = engine.execute_action("pre_battle_action", {
         "sub_action": "修行", "tier": 1,
         "allocations": {"blood_points": 1, "speed_points": 0, "mana_points": 0},
@@ -2054,13 +1854,13 @@ def test_timed_action_does_not_award_reward_after_final_duel_completes(tmp_path,
 
     assert result["success"], result
     assert result["action"] == "world_action_interrupted"
-    assert result["result"]["reason"] == "final_duel_completed"
+    assert result["result"]["reason"] == "crown_exited"
     assert result["result"]["reward_applied"] is False
     assert engine.state.attribute_points == points_before
     settled = WorldState.from_dict(engine.state.world_state)
-    assert settled.final_duel_complete is True
+    assert settled.crown_exited is True
     assert any(event["type"] == "world_action_interrupted"
-               and event["details"].get("reason") == "final_duel_completed"
+               and event["details"].get("reason") == "crown_exited"
                for event in settled.event_log)
 
 
@@ -2156,128 +1956,6 @@ def test_world_vision_range_expands_with_manhattan_distance_and_respects_walls()
 """Deterministic end-to-end proof for the canonical open-world loop."""
 
 from sim.run_open_world_replay import run_playthrough
-
-
-def test_seeded_open_world_run_reaches_final_duel_and_exports_engine_events():
-    # 怪物道纹口径与出怪配方调整后，SEED 那局会在会合前先被世界威胁淘汰掉另一名候选
-    # （终局走 sole survivor 分支）；本用例固定验证「真打满一场终局决斗」的路径。
-    # 贯穿退出发现池、地图新增消耗品后重新固定仍覆盖完整终局的种子。
-    # 2026-10-31：冠冕世界事件加入地图后，旧种子 3 已改走 sole survivor 分支；
-    # 重新钉一个仍能打满整场终局的种子（seed 1：玩家方胜）。
-    duel_seed = 1
-    replay = run_playthrough(duel_seed, include_winner_snapshot=True,
-                             blood_points=11, speed_points=6, mana_points=8)
-    final = replay["final_state"]
-
-    assert final["game_complete"] is True
-    assert final["stop_reason"] == "final duel completed"
-    assert final["winner_id"]
-    assert final["winner_name"]
-    player_won = final["winner_id"] == final["player"]["runtime_id"]
-    assert final["player"]["alive"] is player_won
-    assert final["world_turn"] > 0
-    if player_won:
-        winner_snapshot = replay["winner_snapshot"]
-        assert winner_snapshot["player"]["name"] == final["winner_name"]
-        assert winner_snapshot["player"]["entity_type"] == "轮回者"
-        assert winner_snapshot["player"]["is_alive"] is True
-        assert len(winner_snapshot["player"].get("dao_wen") or {}) >= 2
-        assert "candidates" not in winner_snapshot
-    else:
-        assert "winner_snapshot" not in replay
-
-    # The run must use the ordinary tier-1 population and a rules-valid setup,
-    # not a handful of hand-placed enemies or an over-budget test character.
-    assert replay["run_config"]["region"] == "罪孽都市"
-    assert replay["initial_population"]["monsters"] >= 1
-    assert replay["initial_population"]["other_reincarnators"] >= 2
-    assert replay["initial_population"]["special_locations"] >= 1
-    setup = replay["driver_timeline"][0]["setup"]
-    assert setup["attributes"]["total"] == 25
-    assert any(item["kind"] == "daowen" and item["success"]
-               for item in setup["growth_actions"])
-    assert setup["spell_capabilities"]
-
-    assert final["battle_count"] == len(replay["battles"]) >= 1
-    assert any(entry.get("type") == "battle_start" and not entry.get("final_duel", False)
-               for entry in replay["driver_timeline"]), "the map run must include a normal encounter"
-    assert final["combat_event_count"] == sum(
-        battle["event_count"] for battle in replay["battles"])
-    final_battle = replay["battles"][-1]
-    assert final_battle["outcome"] == ("player_won" if player_won else "opponent_won")
-    final_duel_entries = [entry for entry in replay["driver_timeline"]
-                          if entry["type"] == "final_duel"]
-    assert len(final_duel_entries) == 1
-    assert final_duel_entries[0]["result"]["winner"] == ("challenger" if player_won else "defender")
-    assert final_battle["round_count"] >= 1
-    assert final_battle["event_count"] >= 1
-    assert all(event["battle_no"] == final_battle["battle_no"]
-               for event in final_battle["events"])
-    assert max(event["round_no"] for event in final_battle["events"]) == final_battle["round_count"]
-
-    completions = [event for event in replay["world_event_log"]
-                   if event["type"] == "final_duel_completed"]
-    assert len(completions) == 1
-    assert completions[0]["details"]["winner"] == final["winner_id"]
-    merged = replay["timeline"]
-    assert [event["sequence"] for event in merged] == list(range(len(merged)))
-    assert [event["world_turn"] for event in merged] == sorted(
-        event["world_turn"] for event in merged)
-    assert sum(event["source"] == "world_fact" for event in merged) == len(
-        replay["world_event_log"])
-    assert sum(event["source"] == "combat_event" for event in merged) == final["combat_event_count"]
-    assert any(event["source"] == "combat_event" and event["battle_no"] == final_battle["battle_no"]
-               for event in merged)
-    assert final["living_reincarnators_at_end"] == [{
-        "name": final["winner_name"], "actor_id": final["winner_id"],
-        "entity_alive": True, "map_present": False,
-        "position": final["living_reincarnators_at_end"][0]["position"],
-        "winner_departed": True,
-    }]
-
-    repeated = run_playthrough(duel_seed, blood_points=11, speed_points=6, mana_points=8)
-    assert repeated["final_state"]["world_turn"] == final["world_turn"]
-    assert repeated["final_state"]["player"]["hp"] == final["player"]["hp"]
-    assert repeated["final_state"]["winner_name"] == final["winner_name"]
-    assert [(battle["round_count"], battle["event_count"], battle["outcome"])
-            for battle in repeated["battles"]] == [
-        (battle["round_count"], battle["event_count"], battle["outcome"])
-        for battle in replay["battles"]]
-
-
-def test_replay_waits_for_rivals_when_no_hostile_is_reachable():
-    from sim.run_open_world_replay import run_playthrough, validate_complete_playthrough
-
-    # 2026-10-31：冠冕世界事件改变地图事实后，seed 12 该局提前阵亡；
-    # 改用仍能演完「无可达敌手 → 等待对手会合」的种子。
-    replay = run_playthrough(
-        seed=5, region="龙心谷", player_name="测试轮回者",
-        blood_points=11, speed_points=6, mana_points=8,
-    )
-
-    assert replay["final_state"]["stop_reason"] in {
-        "final duel completed", "sole survivor victory",
-    }
-    validate_complete_playthrough(replay)
-
-
-def test_final_duel_loss_still_settles_world_before_death_legacy_interrupt():
-    # 同上：固定一个「终局决斗打输」的种子，不再假定 SEED 那局一定进终局。
-    replay = run_playthrough(15, blood_points=13, speed_points=6, mana_points=6)
-    final = replay["final_state"]
-
-    assert final["game_complete"] is True
-    assert final["stop_reason"] == "final duel completed"
-    assert final["player"]["alive"] is False
-    assert final["winner_id"] != final["player"]["runtime_id"]
-    assert replay["battles"][-1]["outcome"] == "opponent_won"
-    assert replay["battles"][-1]["round_count"] >= 1
-    assert any(entry["type"] == "pending_postgame_interrupt"
-               and entry["interrupt"]["interrupt_type"] == "死者之页"
-               for entry in replay["driver_timeline"])
-    assert any(event["type"] == "final_duel_completed"
-               and event["details"]["winner"] == final["winner_id"]
-               for event in replay["world_event_log"])
 
 
 def _engine_with_map_friend(tmp_path, *, name="map-ally", friend_at=(3, 1), seed=7):
@@ -2445,3 +2123,110 @@ def test_world_trails_and_last_position_survive_serialization():
     restored = WorldState.from_dict(world.to_dict())
     assert restored.trails["p"] == [(2, 1), (2, 2)]
     assert restored.actors["p"].last_position == (2, 1)  # 上一格，不是当前格
+
+
+"""Deterministic end-to-end proof for the canonical open-world loop."""
+
+from sim.run_open_world_replay import run_playthrough, validate_complete_playthrough
+
+
+def test_seeded_open_world_run_reaches_crown_ending_and_exports_engine_events():
+    """整局跑完并导出事件账本：收尾条件现在是【最终的冠冕】。
+
+    2026-10-31 用户裁定：删除"最后两名幸存者强制会合死斗"，收尾改为
+    「谁抢到冠冕谁带走」。本用例钉一个玩家真把冠冕带出副本的种子，
+    验证终局事实、账本与战斗实录三者口径一致（并演示同 seed 可复现）。
+    """
+    from engine.world import CROWN_HOLD_WORLD_TURNS
+
+    crown_seed = 2
+    replay = run_playthrough(crown_seed, include_winner_snapshot=True,
+                             blood_points=11, speed_points=6, mana_points=8)
+    final = replay["final_state"]
+
+    assert final["game_complete"] is True
+    assert final["stop_reason"] == "crown carried out"
+    assert final["winner_id"] == final["player"]["runtime_id"]
+    assert final["winner_name"] == final["player"]["name"]
+    assert final["crown_exit"]["reason"] == "最终的冠冕"
+    assert final["crown_exit"]["held_world_turns"] == CROWN_HOLD_WORLD_TURNS
+    assert final["crown_exit"]["required_world_turns"] == CROWN_HOLD_WORLD_TURNS
+    assert final["world_turn"] > 0
+
+    winner_snapshot = replay["winner_snapshot"]
+    assert winner_snapshot["player"]["name"] == final["winner_name"]
+    assert winner_snapshot["player"]["entity_type"] == "轮回者"
+    assert winner_snapshot["player"]["is_alive"] is True
+    assert len(winner_snapshot["player"].get("dao_wen") or {}) >= 2
+    assert "candidates" not in winner_snapshot
+
+    # The run must use the ordinary tier-1 population and a rules-valid setup,
+    # not a handful of hand-placed enemies or an over-budget test character.
+    assert replay["run_config"]["region"] == "罪孽都市"
+    assert replay["initial_population"]["monsters"] >= 1
+    assert replay["initial_population"]["other_reincarnators"] >= 2
+    assert replay["initial_population"]["special_locations"] >= 1
+    setup = replay["driver_timeline"][0]["setup"]
+    assert setup["attributes"]["total"] == 25
+    assert any(item["kind"] == "daowen" and item["success"]
+               for item in setup["growth_actions"])
+    assert setup["spell_capabilities"]
+
+    assert final["battle_count"] == len(replay["battles"]) >= 1
+    assert any(entry.get("type") == "battle_start"
+               for entry in replay["driver_timeline"]), "the map run must include a normal encounter"
+    assert final["combat_event_count"] == sum(
+        battle["event_count"] for battle in replay["battles"])
+    final_battle = replay["battles"][-1]
+    assert final_battle["round_count"] >= 1
+    assert final_battle["event_count"] >= 1
+    assert all(event["battle_no"] == final_battle["battle_no"]
+               for event in final_battle["events"])
+    assert max(event["round_no"] for event in final_battle["events"]) == final_battle["round_count"]
+
+    exits = [event for event in replay["world_event_log"]
+             if event["type"] == "dungeon_exited"]
+    assert len(exits) == 1
+    assert exits[0]["details"]["reason"] == "最终的冠冕"
+    assert exits[0]["world_turn"] == final["world_turn"]
+    assert any(event["type"] == "crown_taken" for event in replay["world_event_log"])
+    merged = replay["timeline"]
+    assert [event["sequence"] for event in merged] == list(range(len(merged)))
+    assert [event["world_turn"] for event in merged] == sorted(
+        event["world_turn"] for event in merged)
+    assert sum(event["source"] == "world_fact" for event in merged) == len(
+        replay["world_event_log"])
+    assert sum(event["source"] == "combat_event" for event in merged) == final["combat_event_count"]
+    assert any(event["source"] == "combat_event" and event["battle_no"] == final_battle["battle_no"]
+               for event in merged)
+    assert any(event["source"] == "world_fact" and event["event_type"] == "dungeon_exited"
+               for event in merged)
+
+    repeated = run_playthrough(crown_seed, blood_points=11, speed_points=6, mana_points=8)
+    assert repeated["final_state"]["world_turn"] == final["world_turn"]
+    assert repeated["final_state"]["player"]["hp"] == final["player"]["hp"]
+    assert repeated["final_state"]["winner_name"] == final["winner_name"]
+    assert repeated["final_state"]["stop_reason"] == final["stop_reason"]
+    assert [(battle["round_count"], battle["event_count"], battle["outcome"])
+            for battle in repeated["battles"]] == [
+        (battle["round_count"], battle["event_count"], battle["outcome"])
+        for battle in replay["battles"]]
+
+
+def test_replay_terminates_on_a_crown_ending_instead_of_hanging():
+    """没有可达敌人时回放会"等待"而不是提前收工；终局必须落在冠冕离场上。
+
+    2026-10-31：世界层强制会合死斗已删除，这里退化为"跑完整局、终局合法、
+    导出可校验"——不再要求世界自己把两名幸存者拽到地图中心。
+    """
+    replay = run_playthrough(
+        seed=8, region="龙心谷", player_name="测试轮回者",
+        blood_points=11, speed_points=6, mana_points=8,
+    )
+
+    assert replay["final_state"]["stop_reason"] in {"crown carried out", "crown lost"}
+    assert replay["final_state"]["crown_exit"]["reason"] == "最终的冠冕"
+    assert any(entry["type"] == "world_wait" for entry in replay["driver_timeline"]), \
+        "无可达敌手时应靠等待推进世界，而不是立刻判负"
+    validate_complete_playthrough(replay)
+
