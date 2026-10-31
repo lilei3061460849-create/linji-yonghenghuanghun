@@ -1684,12 +1684,18 @@ class DaowenEffectMixin:
                 result["effects"].extend(advanced)
 
         if name == "共罪":
-            # 两个目标之外，发动者始终追加一个支付名额；同一实体可以占两份。
+            # 2026-10-31 用户裁定：X 个非自身目标之外，发动者始终追加一个支付名额；
+            # 同一实体可以因追加而占两份。
             import json
-            targets = [calc.get("target1"), calc.get("target2")]
-            if (any(entity is None for entity in targets) or targets[0] is targets[1]
-                    or any(not entity.is_alive for entity in targets)):
-                raise ValueError("共罪需要两个不同的存活目标")
+            targets = list(calc.get("targets") or [])
+            expected = int(calc.get("x", 0) or 0)
+            if (not targets
+                    or (expected and len(targets) != expected)
+                    or any(entity is None for entity in targets)
+                    or len({id(entity) for entity in targets}) != len(targets)
+                    or any(not entity.is_alive for entity in targets)
+                    or any(entity is caster for entity in targets)):
+                raise ValueError("共罪需要X个互不相同的存活非自身目标")
             group_slots = targets + [caster]
             group_ids = [str(entity.runtime_id) for entity in group_slots]
             encoded = json.dumps(group_ids, ensure_ascii=False)

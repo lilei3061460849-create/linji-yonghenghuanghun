@@ -236,26 +236,35 @@ class DaoWenEngine:
     # ---- 杀伐闭环后半（连击至封印）----
     
     @staticmethod
-    def calculate_gongzui(x: int, target1: Entity = None, target2: Entity = None) -> dict:
-        """共罪X：支付：法力X。两个[目标]与发动者共同组成共罪组，持续X。
+    def calculate_gongzui(x: int, targets: Optional[list] = None) -> dict:
+        """共罪X：支付：生命5X。选择X个非自身目标，与发动者平分资源支付，持续∞。
 
+        2026-10-31 用户裁定：共罪回到永夜庭主环；费用由法力改为流血（生命）5X，
+        目标数随 X（X 个非自身目标），期限改为持续∞。
         发动者始终额外占一个支付名额；即使已被选为目标，也仍追加这一份。
         组成员支付资源时，由全部存活支付名额平分，实际支付者同样承担自己的
         份额；不分摊特殊机制代价。共罪不是局外道纹。
         """
         if x < 1:
             raise ValueError("X必须为正整数")
-        if target1 is not None or target2 is not None:
-            if target1 is None or target2 is None or target1 is target2:
-                raise ValueError("共罪需要两个不同的目标")
-            if not target1.is_alive or not target2.is_alive:
-                raise ValueError("共罪的两个目标都必须存活")
-        name1 = target1.name if target1 is not None else "目标1"
-        name2 = target2.name if target2 is not None else "目标2"
+        picked = list(targets or [])
+        if picked:
+            if len(picked) != x:
+                raise ValueError("共罪需要恰好X个非自身目标")
+            if len({id(entity) for entity in picked}) != len(picked):
+                raise ValueError("共罪目标不得重复")
+            if any(not entity.is_alive for entity in picked):
+                raise ValueError("共罪的目标都必须存活")
+        names = "、".join(entity.name for entity in picked) or "目标"
         return {
-            "dao_wen": "共罪", "x": x, "target1": target1, "target2": target2,
-            "cost_type": CostType.MANA.value, "cost": x, "duration": x,
-            "summary": f"支付：法力{x}，{name1}、{name2}与发动者额外一份组成共罪支付名额，持续{x}",
+            "dao_wen": "共罪", "x": x, "targets": picked,
+            # 流血（生命）5X：统一代价总线按 cost_hp 结算（与透支/连击的流血通道同口径）。
+            "cost_type": CostType.BLEED.value, "cost": 5 * x, "cost_hp": 5 * x,
+            "duration": -1,
+            # 支付名额 = X 个非自身目标 + 发动者追加的一份；随 X 变化。
+            "share_slots": x + 1,
+            "summary": (f"支付：生命{5 * x}，{names}与发动者组成共罪支付名额，"
+                        f"平分资源支付，持续∞"),
         }
 
     @staticmethod

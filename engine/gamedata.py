@@ -65,8 +65,11 @@ UNIMPLEMENTED_DAOWEN = {
     "锻造": "龙心谷",
 }
 
-# 血契已有战斗结算，但永夜庭尚未作为可学习区域开放。
+# 血契、共罪已有战斗结算，但永夜庭尚未作为可学习区域开放。
+# 2026-10-31 用户裁定：共罪回到永夜庭主环（生命5X、X个非自身目标、持续∞），
+# 因此和血契一样按永夜庭专属门禁拒绝局外学习；血契改为环外道纹。
 UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN["血契"] = "永夜庭"
+UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN["共罪"] = "永夜庭"
 
 # 初拥之夜选项5授予的血族专属道纹；不进入局外学习或残韵获取池。
 FIRST_EMBRACE_DAOWEN = frozenset({"真理"})

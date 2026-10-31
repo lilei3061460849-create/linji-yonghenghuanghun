@@ -856,7 +856,8 @@ class GameEngine:
                                   for ref, entity in refs.items()
                                   if entity.is_alive and entity is not player]
                     params_schema["dodge_targets"] = {
-                        "exact_count": ("X" if name == "波及" else 2), "targets": selectable,
+                        # 2026-10-31：共罪目标数随 X（X 个非自身目标），与波及同口径。
+                        "exact_count": "X", "targets": selectable,
                         "entry": {"target_ref": "存活非自身目标引用",
                                   "dodge": "敌对目标可选布尔值",
                                   "blood_shadow": "可选布尔值"},
@@ -883,7 +884,7 @@ class GameEngine:
                 if name in ("波及", "共罪"):
                     wave_candidates = [e for e in refs.values()
                                        if e.is_alive and e is not actor]
-                    required_targets = fixed_x if name == "波及" else 2
+                    required_targets = fixed_x
                     if len(wave_candidates) < required_targets:
                         actions.append({"action_type": "use_daowen", "available": False,
                                         "params_schema": {"actor_ref": actor_ref,
@@ -5509,7 +5510,8 @@ class GameEngine:
                 else:
                     accepted.append(ent)
             log["blood_pact_targets"] = [entity.name for entity in accepted]
-            log["fully_dodged"] = len(accepted) != 2
+            # 2026-10-31：目标数随 X，不再写死 2——全体被闪避/血影挡下才算全免。
+            log["fully_dodged"] = len(accepted) != wave_count
             return log, accepted
 
         if name == "波及":
@@ -5857,13 +5859,16 @@ class GameEngine:
         if is_command and target is actor:
             return {"success": False, "error": "听从指令发动道纹必须指定一个非自身目标"}
         if name == "共罪":
+            # 2026-10-31 用户裁定：共罪选 X 个非自身目标（不再固定 2 个）。
             pact_entries = list(params.get("dodge_targets") or [])
-            if len(pact_entries) != 2:
-                return {"success": False, "error": "共罪必须显式选择恰好2个目标"}
+            if len(pact_entries) != x:
+                return {"success": False, "error": f"共罪X={x}必须显式选择恰好{x}个目标"}
             pact_refs = [entry.get("target_ref") for entry in pact_entries
                          if isinstance(entry, dict)]
-            if len(pact_refs) != 2 or len(set(pact_refs)) != 2:
-                return {"success": False, "error": "共罪目标必须是2个互不重复的target_ref"}
+            if len(pact_refs) != x or len(set(pact_refs)) != x:
+                return {"success": False, "error": f"共罪目标必须是{x}个互不重复的target_ref"}
+            if any(ref == str(actor.runtime_id) for ref in pact_refs):
+                return {"success": False, "error": "共罪目标必须是非自身目标"}
             if any(ref not in refs or not refs[ref].is_alive
                    or not self.combat.is_targetable(actor, refs[ref])
                    for ref in pact_refs):
@@ -6015,14 +6020,14 @@ class GameEngine:
             blood_shadow_cost_share_target_ref=params.get(
                 "blood_shadow_cost_share_target_ref", ""),
             dodge_relic_target_ref=params.get("dodge_relic_target_ref", ""),
-            wave_count=int(calc.get("mark_targets", 2 if name == "共罪" else 0)),
+            # 2026-10-31：共罪的目标数=X（不借用波及的 mark_targets 字段）。
+            wave_count=(x if name == "共罪" else int(calc.get("mark_targets", 0))),
             activation_x=x,
         )
         self.combat.pay_daowen_cooldown(name,calc,actor)
         if name == "共罪":
-            pact_targets = list(aoe_targets_override or [])
-            calc["target1"] = pact_targets[0] if len(pact_targets) == 2 else None
-            calc["target2"] = pact_targets[1] if len(pact_targets) == 2 else None
+            # 共罪：把本次实际提交并接受的目标整组交给效果层，不再写死两个字段。
+            calc["targets"] = list(aoe_targets_override or [])
         if dodge_log.get("fully_dodged"):
             missed_numeric_cost=self.combat.pay_daowen_numeric_cost(name,calc,actor,
                 dragon_heart_use=params.get("dragon_heart_use",0),
