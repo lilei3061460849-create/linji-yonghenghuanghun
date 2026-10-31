@@ -843,6 +843,8 @@ class GameEngine:
                     **({"zaisheng_cost": ["法力", "攻击力"]} if name == "再生" else {}),
                     **({"lianji_cost": ["生命", "法力", "血限", "枯竭", "碎片", "假碎片"]}
                        if name == "连击" else {}),
+                    **({"lianmin_cost": list(DaoWenEngine.PAYABLE_TYPES)}
+                       if name == "怜悯" else {}),
                     **({"cost_choices": "净化：支付法力20X；显式选择目标拥有的数值类代价及层数，格式为[{type: 血限/枯竭/法限/速度/异变, layers: 正整数}]；可混选多种，所有layers之和不得超过X；单选项省略layers时默认吃满X；不能选择失忆或冷却"} if name == "净化" else {}),
                     "cost_share_target_ref": (
                         [{"ref": ref, "name": entity.name}
@@ -5932,6 +5934,9 @@ class GameEngine:
             # 2026-10-22：【连击】多支付通道（缺省生命；与透支同一接线口径）。
             if name == "连击":
                 resolve_kw["cost_channel"] = params.get("lianji_cost", "生命")
+            # 2026-10-31：【怜悯】封锁一种支付途径（缺省法力）。
+            if name == "怜悯":
+                resolve_kw["blocked_type"] = params.get("lianmin_cost", "法力")
             if name == "再生":
                 resolve_kw["cost_channel"] = params.get("zaisheng_cost", "法力")
             calc = DaoWenEngine.resolve(name, x, **resolve_kw)
@@ -7174,7 +7179,7 @@ class GameEngine:
 
         # 自由结晶（2026-10-05 用户令重做，旧口径「对同一怪物喂满3次触发救赎」废止）：
         # 对[目标]使用→其随机付出一种代价，共计10；若目标是生命≤20%血限的怪物，
-        # 代价结算后仍存活的，强制触发救赎。消耗品不占主动出手。
+        # 代价结算后仍存活的，强制触发救赎。
         if item.name == "自由结晶":
             target_ref = params.get("target_ref", "")
             target = self.combat._combat_entity_refs().get(target_ref)

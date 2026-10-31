@@ -942,6 +942,7 @@ class DaowenEffectMixin:
 
         # ---- 再生的攻击力代价：发动者失去攻击力，随后按正常目标结算回复 ----
         if calc.get("cost_type") == "攻击力" and calc.get("cost_attack", 0) > 0:
+            self._refuse_blocked_payment(caster, "攻击力")
             amount = int(calc["cost_attack"])
             available = max(0, int(caster.effective_attack_power()))
             if amount > available:
@@ -1324,6 +1325,7 @@ class DaowenEffectMixin:
         # 当前统一执行接口没有额外的选纹决策槽，按持有顺序优先失去发动道纹以外的道纹；
         # 数量不足时发动失败应由上层预检，本处只结算已确认的代价。
         if "forget_daowen" in calc:
+            self._refuse_blocked_payment(caster, "失忆")
             count = int(calc["forget_daowen"])
             owned = list(caster.dao_wen)
             chosen = [n for n in owned if n != name][:count]
@@ -1615,7 +1617,8 @@ class DaowenEffectMixin:
               and not (name == "变形" and bianxing_blocked)
               # 波及标记由 use_daowen/怪物结算逐目标处理，不走通用状态块
               # 乱葬岗道纹已在上方乱葬岗段自行 add_status，跳过通用状态处理避免重复叠加
-              and name not in ("勾魂", "冥气", "缄默", "波及", "共罪", "血契", "庇护", "强化", "弱化", "冰冻")):
+              and name not in ("勾魂", "冥气", "缄默", "波及", "共罪", "血契", "庇护", "强化", "弱化", "冰冻",
+                               "怜悯")):
             duration = calc["duration"]  # 0不生效；只有显式-1表示持续∞。
             effect_target = target if target else caster
             # 自身作用型道纹（变形/超频等）作用于施法者
@@ -1682,6 +1685,20 @@ class DaowenEffectMixin:
                     continue
                 advanced = self.advance_target_rounds(st_target, int(calc["extra_target_rounds"]), source="大梦")
                 result["effects"].extend(advanced)
+
+        if name == "怜悯":
+            kind = calc.get("blocked_payment_type")
+            if not kind:
+                raise ValueError("怜悯缺少封锁的支付途径")
+            if target is None:
+                raise ValueError("怜悯需要显式目标")
+            target.add_status(self._daowen_status(
+                daowen_order=daowen_order, name="怜悯", value=1,
+                remaining_rounds=calc.get("duration", x), source=caster.name,
+                effect_data={"blocked_type": kind}))
+            result["effects"].append({"type": "payment_block", "target": target.name,
+                                      "blocked_type": kind,
+                                      "duration": calc.get("duration", x)})
 
         if name == "共罪":
             # 2026-10-31 用户裁定：X 个非自身目标之外，发动者始终追加一个支付名额；

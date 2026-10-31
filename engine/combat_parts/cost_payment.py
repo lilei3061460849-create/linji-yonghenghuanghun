@@ -69,6 +69,7 @@ class CostPaymentMixin:
         """冷却是发动代价，目标闪避也已支付；重复记账幂等，不清空原冷却。"""
         if calc.get("cost_type") != "冷却":
             return {}
+        self._refuse_blocked_payment(caster, "冷却")
         inst=caster.dao_wen.get(name)
         if inst is None:
             return {}
@@ -129,6 +130,23 @@ class CostPaymentMixin:
                  "amount": 10, "tags": {"relic", "must_hit"},
                  "parent_event_id": cost_ctx.event_id if cost_ctx else None})
         return {"target": target.name, **detail}
+
+    def blocked_payment_types(self, entity: Entity) -> set[str]:
+        """【怜悯】封锁的支付途径（一种；随状态到期清除）。"""
+        if entity is None:
+            return set()
+        return {normalize_payment_type(status.effect_data.get("blocked_type", ""))
+                for status in getattr(entity, "status_effects", ())
+                if status.name == "怜悯" and not status.is_expired
+                and status.effect_data.get("blocked_type")}
+
+    def payment_blocked(self, entity: Entity, cost_type: str) -> bool:
+        """该实体当前是否被禁止用这种途径支付。"""
+        return normalize_payment_type(cost_type) in self.blocked_payment_types(entity)
+
+    def _refuse_blocked_payment(self, entity: Entity, cost_type: str) -> None:
+        if self.payment_blocked(entity, cost_type):
+            raise ValueError(f"{entity.name}无法使用{normalize_payment_type(cost_type)}支付（【怜悯】生效中）")
 
     SHAREABLE_RESOURCE_TYPES = frozenset(RESOURCE_TYPES)
     # 兼容旧代码引用；现在只有资源支付可由共罪平分，特殊机制代价不在其中。
@@ -220,6 +238,7 @@ class CostPaymentMixin:
         cost_type = normalize_payment_type(cost_type)
         if cost_type not in set(RESOURCE_TYPES) | {"枯竭", "异变"}:
             raise ValueError(f"{cost_type}不是可支付的数值资源或特殊机制代价")
+        self._refuse_blocked_payment(payer, cost_type)
         if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
             raise ValueError("数值代价必须是非负整数")
         ally = None
@@ -600,6 +619,7 @@ class CostPaymentMixin:
         """
 
         cost_type = normalize_payment_type(cost_type)
+        self._refuse_blocked_payment(payer, cost_type)
         nominal = amount if nominal_amount is None else nominal_amount
         if (not isinstance(nominal, int) or isinstance(nominal, bool) or nominal < 0
                 or not isinstance(amount, int) or isinstance(amount, bool) or amount < 0):

@@ -173,6 +173,7 @@ CATEGORY = {}
 for n in SHAFA_LOOP_DAOWEN:
     CATEGORY[n] = "shaifa"
 CATEGORY["共罪"] = "unimpl"
+CATEGORY["怜悯"] = "other"
 for n in ORIGINAL_MONSTER_DAOWEN:
     CATEGORY[n] = "original"
 for n in MONSTER_TRANSFORM_DAOWEN:
@@ -230,7 +231,7 @@ A("")
 draft_summary = (f"（含{len(DRAFT_DAOWEN)}种尚未接入运行时的草案节点）" if DRAFT_DAOWEN else "")
 A(f"本文件是**当前索引收录道纹（{len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)}种）的完整索引**{draft_summary}。道纹条目按归属分类：")
 category_summary = (
-    f"杀伐闭环（通用核心）{len(SHAFA_LOOP_DAOWEN)} ｜ 原始怪物道纹 {len(ORIGINAL_MONSTER_DAOWEN)} ｜ "
+    f"杀伐闭环（通用核心）{len(SHAFA_LOOP_DAOWEN)} ｜ 其他通用道纹 1 ｜ 原始怪物道纹 {len(ORIGINAL_MONSTER_DAOWEN)} ｜ "
     f"怪物转化道纹 {len(MONSTER_TRANSFORM_DAOWEN)} ｜ 副本专属 "
     f"{'/'.join(str(len(region_daowen_order(r))) for r in REGION_EXCLUSIVE_DAOWEN)} ｜ "
     f"鲛族专属 {sum(len(pool) for pool in RACE_EXCLUSIVE_DAOWEN.values())}"
@@ -263,6 +264,7 @@ A("## 目录")
 A("")
 A("- [总览表](#总览表)")
 A(f"- [杀伐闭环（通用核心·{len(SHAFA_LOOP_DAOWEN)}）](#杀伐闭环通用核心{len(SHAFA_LOOP_DAOWEN)})")
+A("- [其他通用道纹（1）](#其他通用道纹1)")
 A(f"- [原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）](#原始怪物道纹{len(ORIGINAL_MONSTER_DAOWEN)})")
 A(f"- [怪物转化道纹（{len(MONSTER_TRANSFORM_DAOWEN)}）](#怪物转化道纹{len(MONSTER_TRANSFORM_DAOWEN)})")
 for _r in REGION_EXCLUSIVE_DAOWEN:
@@ -290,7 +292,7 @@ CAT_LABEL = {
 }
 for name in sorted(DaoWenEngine._registry, key=lambda n: (list(CATEGORY).index(n), n)):
     pass
-order = (list(SHAFA_LOOP_DAOWEN) + ["共罪"] + sorted(ORIGINAL_MONSTER_DAOWEN)
+order = (list(SHAFA_LOOP_DAOWEN) + ["共罪", "怜悯"] + sorted(ORIGINAL_MONSTER_DAOWEN)
          + sorted(MONSTER_TRANSFORM_DAOWEN)
          + [n for r in REGION_EXCLUSIVE_DAOWEN for n in region_daowen_order(r)]
          + [n for pool in RACE_EXCLUSIVE_DAOWEN.values() for n in sorted(pool)]
@@ -340,6 +342,9 @@ section(f"杀伐闭环（通用核心·{len(SHAFA_LOOP_DAOWEN)}）", list(SHAFA_
         note_lines=["开局【发现】初始道纹只从本闭环抽（随机列出3种未持有候选，显式选1；杀伐不是默认起手）。",
                     "通用核心道纹为人类侧基础概念，局外可经学习/残韵获得。"],
         loop="杀伐闭环")
+
+section("其他通用道纹（1）", ["怜悯"],
+        note_lines=["不属于杀伐闭环，也不属于任何副本闭环。"])
 
 section(f"原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）", sorted(ORIGINAL_MONSTER_DAOWEN),
         note_lines=[

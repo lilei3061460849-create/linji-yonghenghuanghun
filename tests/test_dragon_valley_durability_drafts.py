@@ -17,7 +17,7 @@ def test_three_user_drafts_are_in_dragon_valley_text_and_index():
     assert "3.锻造X：支付待定。发现一个消耗品，给予其X耐久，持续∞。" in dungeon
 
     index = (ROOT / "全道纹索引.md").read_text(encoding="utf-8")
-    assert "当前索引收录道纹（51种）" in index
+    assert "当前索引收录道纹（52种）" in index
     assert "（含3种尚未接入运行时的草案节点）" in index
     for name in NAMES:
         assert f"### {name}\n" in index
@@ -25,7 +25,7 @@ def test_three_user_drafts_are_in_dragon_valley_text_and_index():
 
 def test_drafts_have_no_runtime_registration_or_resonance_edges():
     DaoWenEngine.register_all()
-    assert len(DaoWenEngine._registry) == 48
+    assert len(DaoWenEngine._registry) == 49
     assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == set()
     for name in NAMES:
         assert name not in DaoWenEngine._registry

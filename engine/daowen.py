@@ -5,7 +5,7 @@
 from __future__ import annotations
 from typing import Optional, Any
 from .models import Entity, StatusEffect, DaoWen, DaoWenInstance
-from .enums import CostType, normalize_payment_type
+from .enums import CostType, RESOURCE_TYPES, normalize_payment_type
 from .rule_engine import daowen_migration_status, get_daowen_rule
 from .gamedata import UNIMPLEMENTED_DAOWEN, RACE_EXCLUSIVE_DAOWEN, BLOODLINE_EXCLUSIVE_DAOWEN
 import math
@@ -279,6 +279,27 @@ class DaoWenEngine:
             "blood_pact_multiplier": x, "duration": x,
             "summary": (f"支付：法力{x}，与{target_name}建立血契：你支付资源时，"
                         f"{target_name}额外支付{x}倍相同资源，持续{x}"),
+        }
+
+    # 怜悯可封锁的支付途径 = 道纹能用的一切支付途径（资源 + 特殊机制代价 + 攻击力）。
+    PAYABLE_TYPES = tuple(sorted(set(RESOURCE_TYPES) | {
+        CostType.EXHAUST.value, CostType.AMNESIA.value,
+        CostType.MUTATION.value, CostType.COOLDOWN.value, "攻击力"}))
+
+    @staticmethod
+    def calculate_lianmin(x: int, target: Entity = None, blocked_type: str = "法力") -> dict:
+        """怜悯X：支付：法力5X。使[目标]无法使用一种支付途径，持续X。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        kind = normalize_payment_type(blocked_type)
+        if kind not in DaoWenEngine.PAYABLE_TYPES:
+            raise ValueError(f"怜悯的支付途径非法：{blocked_type}；可选{'/'.join(DaoWenEngine.PAYABLE_TYPES)}")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "怜悯", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 5 * x,
+            "duration": x, "blocked_payment_type": kind,
+            "summary": f"支付：法力{5 * x}，使{target_name}无法使用{kind}支付，持续{x}",
         }
 
     @staticmethod
@@ -984,6 +1005,7 @@ class DaoWenEngine:
             "束缚": cls.calculate_shufu,
             "透支": cls.calculate_touzhi,
             "封印": cls.calculate_fengyin,
+            "怜悯": cls.calculate_lianmin,
             # 怪物原始（2026-10-25 用户令：【疯狂】【减速】遗物化，退出道纹体系）
             "全力": cls.calculate_quanli,
             "强化": cls.calculate_qianghua,
