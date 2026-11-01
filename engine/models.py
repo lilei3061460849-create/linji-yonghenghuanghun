@@ -177,6 +177,36 @@ class Consumable:
     def is_depleted(self) -> bool:
         return self.current_uses <= 0
 
+    # 被动型效果来源：它们在持有期间自动生效，不能手动「使用」。
+    PASSIVE_SOURCE_KINDS = ("dragon_heart",)
+    PASSIVE_SOURCE_NAMES = ("万钧印",)
+
+    def effect_sources(self) -> list:
+        """本条目的全部效果来源（自身 ＋ 改造并入的来源）。
+
+        未参与过改造时只有自身一项；被动型来源（龙心／万钧印）也在这里，
+        所以持有判定（如万钧印改道、龙心抵扣代价）在改造后同样能看见它们。
+        """
+        if self.merged_sources:
+            return [dict(source) for source in self.merged_sources]
+        return [{"name": self.name, "effect": self.effect, "kind": self.kind,
+                 "dragon_heart_type": self.dragon_heart_type}]
+
+    def source_named(self, name: str) -> Optional[dict]:
+        """按名称取一个已被并入（或自身）的效果来源。"""
+        return next((source for source in self.effect_sources()
+                     if source.get("name") == name), None)
+
+    def is_passive_source(self) -> bool:
+        """整条只承载被动效果（自身与全部来源都不需要手动使用）。"""
+        sources = self.effect_sources()
+        return all(self.source_is_passive(source) for source in sources)
+
+    @classmethod
+    def source_is_passive(cls, source: dict) -> bool:
+        return (source.get("kind") in cls.PASSIVE_SOURCE_KINDS
+                or source.get("name") in cls.PASSIVE_SOURCE_NAMES)
+
     def use(self) -> int:
         if self.is_depleted:
             return 0

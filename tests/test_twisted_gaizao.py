@@ -2,9 +2,9 @@
 
 规则：选择2/3/4件不同名消耗品，使其全部效果叠加到其中一个消耗品中。
 - 档位＝参与件数（2件 0碎片／3件 5碎片／4件 12碎片），另耗 1 点精力；
-- 只叠效果、不叠耐久：目标条目耐久与上限不变，被并入的条目从持有中移除；
-- 使用合成条目时逐条结算全部来源效果，最后只扣它自己的 1 点耐久；
-- 战斗中的被动／需额外模式的条目（万钧印、翼类、雕塑、龙心、被动触发型自定义）不参与。
+- 效果与耐久一起叠加：被并入条目的当前耐久与上限进目标条目，被并入的条目从持有中移除；
+- 使用合成条目时逐条结算全部来源效果，最后只扣它自己的 1 点耐久（耐久池共用）；
+- 被动效果（龙心、万钧印）随条目携带、不参与手动结算，但持有判定仍然看得到。
 """
 import dataclasses
 import os
@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
-from engine.models import Consumable
+from engine.models import Consumable, Entity
 from tests.setup_support import finish_initial_daowen
 
 
@@ -68,7 +68,7 @@ def test_gaizao_stacks_all_effects_onto_one_item(tmp_path):
     assert result["success"], result.get("error")
     assert result["result"]["absorbed"] == ["储能电池"]
     assert result["result"]["shard_cost"] == 0        # 2件档免费
-    assert (pump.current_uses, pump.max_uses) == (3, 3), "只叠效果，不叠耐久"
+    assert (pump.current_uses, pump.max_uses) == (6, 6), "耐久与上限一起叠加"
     assert "获得20点" in pump.effect and "12点法力" in pump.effect
     assert [item.name for item in engine.state.consumables] == ["备用血泵"]
     assert [source["name"] for source in pump.merged_sources] == ["备用血泵", "储能电池"]
@@ -94,7 +94,7 @@ def test_merged_item_executes_every_source_effect(tmp_path):
     assert [entry["name"] for entry in used["result"]["sources"]] == ["备用血泵", "储能电池"]
     assert all(entry["success"] for entry in used["result"]["sources"])
     item = engine.state.consumables[0]
-    assert item.current_uses == 2, "一次使用只扣合成条目自身的1点耐久"
+    assert item.current_uses == 5, "耐久已合并（3+3），一次使用只扣共用池的1点"
 
 
 def test_second_gaizao_absorbs_existing_merged_effects(tmp_path):
@@ -109,18 +109,64 @@ def test_second_gaizao_absorbs_existing_merged_effects(tmp_path):
     assert "获得20点" in target.effect and "12点法力" in target.effect
 
 
-def test_gaizao_rejects_passive_and_mode_dependent_items(tmp_path):
-    """万钧印（被动触发）与翼类（每次选模式）不能参与改造。"""
+def test_wanjunyin_still_triggers_after_being_merged(tmp_path):
+    """被动效果不因改造失效：万钧印并进另一件后，被攻击仍能改道攻击者自己。
+
+    万钧印本身不能手动使用，但它作为来源随条目携带；触发时扣的是合成后的共用耐久池。
+    """
     engine = _engine(tmp_path)
     engine.state.consumables = [_tool("万钧印"), _tool("储能电池")]
-    blocked = _gaizao(engine, 2, ["万钧印", "储能电池"], "储能电池")
-    assert not blocked["success"] and "万钧印" in blocked["error"]
-    assert engine.state.energy == 3
+    assert _gaizao(engine, 2, ["万钧印", "储能电池"], "储能电池")["success"]
+    host = engine.state.consumables[0]
+    assert host.name == "储能电池"
+    assert host.current_uses == 3 + 3, "耐久池合并"
+    assert engine.combat._wanjunyin_holder(engine.state.player)
 
+    engine.state.phase = "in_combat"
+    engine.state.combat_subphase = "player_actions"
+    player = engine.state.player
+    enemy = Entity("靶怪", "怪物", blood_limit=100, current_hp=100,
+                   attack_count=1, attack_power=10)
+    engine.state.enemies = [enemy]
+    before = enemy.current_hp
+
+    engine.combat.resolve_attack(enemy, player, hit_index=0, is_must_hit=True,
+                                 dodge=False, allocated_damage=10)
+    assert enemy.current_hp == before - 10, "改道：这一击打回攻击者自己"
+    assert host.current_uses == 5, "触发消耗的是合成条目的共用耐久池"
+
+
+def test_wing_and_sculpture_sources_use_per_source_params(tmp_path):
+    """需要选择的效果照常可用：用 source_params 按来源名分别提交模式。"""
+    engine = _engine(tmp_path)
     wing = Consumable(name="血翼", effect="", current_uses=1, max_uses=1, kind="wing")
     engine.state.consumables = [wing, _tool("储能电池")]
-    blocked_wing = _gaizao(engine, 2, ["血翼", "储能电池"], "储能电池")
-    assert not blocked_wing["success"]
+    assert _gaizao(engine, 2, ["血翼", "储能电池"], "血翼")["success"]
+
+    engine.state.phase = "in_combat"
+    host = engine.state.consumables[0]
+    host.current_uses = 3
+    result = engine.execute_action("consume_item", {
+        "name": "血翼",
+        "source_params": {"血翼": {"mode": "fly"}},
+    })
+    assert result["success"], result.get("error")
+    by_name = {entry["name"]: entry for entry in result["result"]["sources"]}
+    assert by_name["血翼"]["success"], by_name["血翼"]
+    assert by_name["储能电池"]["success"], "未单独提交的普通来源照常结算"
+
+
+def test_carried_dragon_heart_offsets_cost(tmp_path):
+    """龙心被并进别的条目后仍按耐久抵扣对应类型的代价。"""
+    engine = _engine(tmp_path)
+    heart = Consumable(name="生命龙心", effect="消耗Y点耐久可抵消Y点生命代价",
+                       current_uses=5, max_uses=5, kind="dragon_heart",
+                       dragon_heart_type="生命")
+    engine.state.consumables = [heart, _tool("储能电池")]
+    assert _gaizao(engine, 2, ["生命龙心", "储能电池"], "储能电池")["success"]
+    host = engine.state.consumables[0]
+    assert host.source_named("生命龙心") is not None
+    assert engine.combat._dragon_heart_matches(host, "生命")
 
 
 def test_gaizao_result_survives_serialization(tmp_path):

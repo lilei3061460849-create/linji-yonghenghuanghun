@@ -754,12 +754,24 @@ class CostPaymentMixin:
 
     @staticmethod
     def _dragon_heart_matches(item: Consumable, cost_type: str) -> bool:
-        if item.kind != "dragon_heart" or item.is_depleted:
-            return False
-        if normalize_payment_type(item.dragon_heart_type) != cost_type:
+        """该条目是否携带匹配类型的【××龙心】（含【改造】并入的情形）。
+
+        龙心是被动效果：持有期间按耐久抵扣对应代价。改造把它并进别的条目后，
+        名字不再等于「××龙心」，所以按 effect_sources() 逐个来源判定；
+        抵扣消耗的是合成后共用的耐久池（item.current_uses）。
+        """
+        if item.is_depleted:
             return False
         legacy = next((old for old, new in LEGACY_COST_ALIASES.items() if new == cost_type), None)
-        return item.name in {f"{cost_type}龙心", f"{legacy}龙心" if legacy else ""}
+        expected = {f"{cost_type}龙心", f"{legacy}龙心" if legacy else ""}
+        for source in item.effect_sources():
+            if source.get("kind") != "dragon_heart":
+                continue
+            if normalize_payment_type(source.get("dragon_heart_type") or "") != cost_type:
+                continue
+            if source.get("name") in expected:
+                return True
+        return False
 
     def _pay_numeric_cost_inner(
         self,

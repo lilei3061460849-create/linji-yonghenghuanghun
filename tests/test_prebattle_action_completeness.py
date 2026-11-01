@@ -94,7 +94,7 @@ def test_resonance_choose_requires_second_energy_and_applies_cost(tmp_path):
 
 
 def test_gaizao_merges_effects_into_target_and_charges_shards(tmp_path):
-    """改造：把多件不同名消耗品的全部效果叠到其中一件，被并入的条目移除。"""
+    """改造：把多件不同名消耗品的全部效果与耐久叠到其中一件，被并入的条目移除。"""
     engine = _engine(tmp_path)
     first = Consumable("甲", "回复5生命", current_uses=1, max_uses=3)
     second = Consumable("乙", "获得3格挡", current_uses=2, max_uses=3)
@@ -106,8 +106,8 @@ def test_gaizao_merges_effects_into_target_and_charges_shards(tmp_path):
         "sub_action": "改造", "tier": 3, "names": ["甲", "乙", "丙"], "target": "乙",
     })
     assert merged["success"], merged.get("error")
-    # 只叠效果、不叠耐久：目标条目耐久与上限不变
-    assert (second.current_uses, second.max_uses) == (2, 3)
+    # 效果与耐久一起叠加：目标条目成为唯一的耐久池（2+1+1 当前 / 3+3+1 上限）
+    assert (second.current_uses, second.max_uses) == (4, 7)
     # 顺序＝目标自身效果在前，其余按 names 顺序并入
     assert second.effect == "获得3格挡；回复5生命；造成4伤害"
     assert [source["name"] for source in second.merged_sources] == ["乙", "甲", "丙"]

@@ -714,12 +714,13 @@ class GameEngine:
         if self.state.current_region == "扭曲都市":
             mergeable = []
             for index, item in enumerate(self.state.consumables):
-                allowed, reason = self._gaizao_eligible(item)
                 mergeable.append({
                     "item_ref": f"consumable:{index}", "name": item.name,
                     "effect": item.effect, "current_uses": item.current_uses,
                     "max_uses": item.max_uses,
-                    "eligible": allowed, "reason": reason or None})
+                    "passive_sources": [source["name"] for source in item.effect_sources()
+                                        if Consumable.source_is_passive(source)],
+                    "sources": [source["name"] for source in item.effect_sources()]})
             return [{"id": "改造", "params_schema": {
                 "tier": {2: "合并2件不同名消耗品（0碎片）",
                          3: "合并3件不同名消耗品（5碎片）",
@@ -727,8 +728,10 @@ class GameEngine:
                 "names": mergeable,
                 "target": "接收全部效果的消耗品名，必须是names之一",
                 "constraint": ("names数量必须等于tier且互不同名；"
-                               "被并入的条目从持有中移除，目标条目耐久不变，"
-                               "效果叠加为目标条目的效果文本；使用目标条目时逐条结算全部来源效果"),
+                               "被并入的条目从持有中移除，其当前耐久与耐久上限一并叠加到目标条目；"
+                               "效果叠加为目标条目的效果文本；使用目标条目时逐条结算全部来源效果。"
+                               "被动型效果（龙心、万钧印）随条目携带、不参与手动结算；"
+                               "翼类／雕塑等需要选择的效果用source_params按来源名分别提交"),
             }}]
         if self.state.current_region == "罪孽都市":
             return [{"id": "雇佣", "params_schema": {"name": "string", "blood_alloc": "integer",
@@ -4988,29 +4991,19 @@ class GameEngine:
 
     # 【改造】档位：合并的消耗品件数 → 碎片价目（沿用原【维修】1/2/3档的 0/5/12 阶梯）。
     GAIZAO_TIERS = {2: 0, 3: 5, 4: 12}
-    # 不能参与改造的消耗品类别：雕塑绑定特定怪物、龙心是炼心产物、翼类每次使用需选模式。
-    GAIZAO_EXCLUDED_KINDS = {"sculpture", "dragon_heart", "wing"}
-
-    def _gaizao_eligible(self, item: Consumable) -> tuple[bool, str]:
-        """该消耗品能否被【改造】并入/接收。返回 (可否, 不可的原因)。"""
-        if item.name == "万钧印":
-            return False, "万钧印是被动触发，不能当作可使用条目"
-        if item.kind in self.GAIZAO_EXCLUDED_KINDS:
-            return False, f"{item.kind}类条目每次使用需要额外选择，效果不能简单叠加"
-        custom_item = custom_resources.get_consumable(item.name)
-        if custom_item is not None and custom_item.spec.get("trigger") is not None:
-            return False, "被动触发型消耗品不能手动使用，效果不能叠加"
-        return True, ""
 
     def _pre_battle_gaizao(self, params: dict) -> dict:
         """改造（扭曲都市专属）：选择2/3/4件不同名消耗品，把全部效果叠加到其中一件。
 
-        口径（2026-11-01 用户令，原【维修】撤销）：
+        口径（2026-11-01 用户令，原【维修】撤销；同日补正：耐久同样叠加、被动效果照常携带）：
         - 档位＝参与件数：2件（0碎片）／3件（5碎片）／4件（12碎片），另耗1点精力；
         - names 必须互不同名且都在持有中，target 必须是 names 之一；
-        - 目标条目的耐久与上限不变（只叠效果，不叠耐久）；
-        - 被并入的条目从持有中移除；目标条目的效果文本变为各条目效果之和，
-          使用它时按原顺序逐条结算全部来源效果，最后只扣它自己的1点耐久。
+        - 被并入条目的**当前耐久与耐久上限一并叠加**到目标条目，目标条目成为唯一的耐久池；
+        - 效果文本变为各条目效果之和；使用它时按原顺序逐条结算全部来源效果，
+          最后只扣它自己的1点耐久；
+        - 被动型效果（【龙心】的代价抵扣、【万钧印】的改道）随条目携带，靠
+          `effect_sources()` 对持有判定可见，不参与手动结算；翼类/雕塑等需要选择的效果
+          用 `source_params` 按来源名分别提交参数。
         """
         tier = params.get("tier", 2)
         if (not isinstance(tier, int) or isinstance(tier, bool)
@@ -5039,10 +5032,6 @@ class GameEngine:
             if item is None:
                 self.state.energy += 1
                 return {"success": False, "error": f"未持有消耗品【{name}】"}
-            allowed, reason = self._gaizao_eligible(item)
-            if not allowed:
-                self.state.energy += 1
-                return {"success": False, "error": f"【{name}】{reason}"}
             resolved[name] = item
         if cost > 0 and self.state.shards < cost:  # 负债口径：0费档不属于支出
             self.state.energy += 1
@@ -5060,6 +5049,11 @@ class GameEngine:
         target.merged_sources = sources
         target.effect = "；".join(dict.fromkeys(
             source["effect"] for source in sources if source.get("effect")))
+        # 耐久同样叠加：被并入条目的当前耐久与上限都进目标条目，合成后只有一个耐久池。
+        absorbed_uses = sum(item.current_uses for item in merged[1:])
+        absorbed_max = sum(item.max_uses for item in merged[1:])
+        target.current_uses += absorbed_uses
+        target.max_uses += absorbed_max
         removed = [item.name for item in merged[1:]]
         self.state.consumables = [c for c in self.state.consumables if c not in merged[1:]]
         self.state.shards -= cost
@@ -5069,6 +5063,7 @@ class GameEngine:
                 "tier": tier, "merged_count": len(merged), "shard_cost": cost,
                 "target": target.name, "target_effect": target.effect,
                 "target_uses": target.current_uses, "target_max_uses": target.max_uses,
+                "absorbed_uses": absorbed_uses, "absorbed_max_uses": absorbed_max,
                 "absorbed": removed,
                 "sources": [source["name"] for source in sources],
             },
@@ -7281,29 +7276,46 @@ class GameEngine:
         """使用【改造】合成条目：按原顺序逐条结算全部来源效果。
 
         每个来源都用一份临时 Consumable 走同一条使用管线，因此耐久扣除只发生在
-        临时条目上；本条目最后只扣自己1点耐久，不会因并入几件就多扣几次。
+        临时条目上；本条目最后只扣自己1点耐久（耐久池已由改造合并）。
         某个来源因缺少自身必需参数而失败时，其余来源照常结算，失败原因逐条回传。
+        被动型来源（龙心／万钧印）随条目携带、不参与手动结算，记为 passive。
+        需要选择的效果（翼类模式、雕塑模式）可用 params["source_params"][来源名] 分别提交。
         """
+        base_params = {key: value for key, value in params.items() if key != "source_params"}
+        per_source = params.get("source_params")
+        if not isinstance(per_source, dict):
+            per_source = {}
         outcomes = []
-        for source in item.merged_sources:
+        executed = 0
+        for source in item.effect_sources():
+            name = str(source.get("name") or item.name)
+            if Consumable.source_is_passive(source):
+                outcomes.append({"name": name, "success": True, "passive": True,
+                                 "detail": "被动效果随条目携带，不参与手动结算"})
+                continue
             payload = {key: source.get(key) for key in
                        ("name", "effect", "kind", "dragon_heart_type")}
-            temp = Consumable(name=str(payload.get("name") or item.name),
+            temp = Consumable(name=name,
                               effect=str(payload.get("effect") or ""),
                               current_uses=1, max_uses=1,
                               kind=str(payload.get("kind") or "normal"),
                               dragon_heart_type=str(payload.get("dragon_heart_type") or ""))
+            own = per_source.get(name)
+            source_params = dict(base_params)
+            if isinstance(own, dict):
+                source_params.update(own)
             try:
-                outcome = self._consume_item_effect(temp, params)
+                outcome = self._consume_item_effect(temp, source_params)
             except Exception as exc:  # 单条效果异常不拖垮其余来源
                 outcome = {"success": False, "error": f"效果结算异常：{exc}"}
-            entry = {"name": temp.name, "success": bool(outcome.get("success"))}
+            executed += 1
+            entry = {"name": name, "success": bool(outcome.get("success"))}
             if outcome.get("error"):
                 entry["error"] = outcome["error"]
             if outcome.get("result") is not None:
                 entry["result"] = outcome["result"]
             outcomes.append(entry)
-        if not any(entry["success"] for entry in outcomes):
+        if executed and not any(entry["success"] for entry in outcomes if not entry.get("passive")):
             return {"success": False,
                     "error": "改造条目的全部来源效果都未能结算",
                     "sources": outcomes}

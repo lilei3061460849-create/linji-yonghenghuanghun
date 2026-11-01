@@ -279,12 +279,24 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         return bool(getattr(entity, "is_flying", False)
                     or entity.has_status("飞行"))
 
-    def _wanjunyin_holder(self, target: Entity) -> bool:
-        """被攻击角色实际持有的【万钧印】；敌我同规则。"""
+    def _wanjunyin_item(self, target: Entity):
+        """被攻击角色实际持有【万钧印】效果的那一条消耗品；敌我同规则。
+
+        【改造】会把万钧印并进另一件消耗品（万钧印本身从持有中消失），所以这里
+        按 effect_sources() 判定——被动效果随条目携带，耐久由合成后的耐久池扣。
+        """
         if target is None:
-            return False
-        return any(item.name == "万钧印" and not item.is_depleted
-                   for item in self._held_consumables(target))
+            return None
+        for item in self._held_consumables(target):
+            if item.is_depleted:
+                continue
+            if item.name == "万钧印" or item.source_named("万钧印") is not None:
+                return item
+        return None
+
+    def _wanjunyin_holder(self, target: Entity) -> bool:
+        """被攻击角色是否实际持有【万钧印】效果（含已改造并入的情形）。"""
+        return self._wanjunyin_item(target) is not None
 
     def _held_consumables(self, entity):
         return self.state.consumables if entity is self.state.player else entity.consumables
@@ -779,9 +791,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         if (not _wanjunyin_converted and wanjunyin is not False
                 and attacker is not target and attacker.is_alive
                 and self._wanjunyin_holder(target)):
-            item = next(item for item in self._held_consumables(target)
-                        if item.name == "万钧印" and not item.is_depleted)
-            item.use()
+            item = self._wanjunyin_item(target)
+            item.use()   # 改造合成条目：扣的是合成后共用的耐久池
             # 原受击者的反应提交随改道失效；自攻目标按自身可用反应法术生成
             # 显式「不发动」提交，避免把原目标的法术选择错配给攻击者。
             redirected_choices = {
