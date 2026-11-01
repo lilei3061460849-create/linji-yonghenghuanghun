@@ -414,9 +414,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         抽成方法是为了让代价路径（`cost_payment.py` 的【枯竭】）读同一条判定，
         避免两处各写一份而漂移。
         """
-        if entity is not self.state.player:
-            return False
-        return self._relic_active(entity, "苍白之花")
+        # 2026-11-01 重构2：唯一实现搬到 GameState（局外也要能判），此处转调。
+        return self.state.mana_overflow_exempt(entity)
 
     def clamp_immortal_body(self, entity: Entity) -> None:
         """任何属性都不得超过其上限（用户裁定 2026-09-13，全局化）。

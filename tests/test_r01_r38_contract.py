@@ -569,6 +569,7 @@ def test_r32_r38_normal_deform_burn_and_transform_restore(tmp_path):
     speed = monster.current_speed
     engine.combat.apply_daowen_effect("烁金", burn, player, monster)
     assert monster.shards == 0 and engine.state.shards == 0 and monster.current_speed == speed
+    monster.speed_limit = 4    # 2026-11-01 重构2：当前速度不得超速限
     monster.current_speed = 4
     engine.combat.apply_daowen_effect("烁金", burn, player, monster)
     assert monster.shards == 0, "碎片不足减到0，不记负债"

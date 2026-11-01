@@ -28,9 +28,8 @@ from .world import (ALLY_KINDS, ALLY_SUGGESTION_RANGE, ALLY_SUGGESTIONS,
 from .enums import (GamePhase, CombatSubphase, ActionPhase, TriggerTiming,
                     InterruptType, EntityType, EffectScope, EffectPolarity)
 from .dice import DiceEngine
-from .death_pages import can_accept as can_accept_page_resource
 from .yaoguai import (
-    BANNER_NAME, BANNER_CAPACITY, UNHOUSED_PAGE_COST,
+    BANNER_NAME, BANNER_CAPACITY,
     find_owned_yaoguai, has_banner as has_yaoguai_banner, owned_yaoguai,
 )
 from .daowen import (DaoWenEngine, ResonanceEngine, PURIFIABLE_COST_KINDS,
@@ -2582,9 +2581,8 @@ class GameEngine:
                 inventory = self.state.relics if is_player else entity.relics
                 owned_names = {relic.name for relic in inventory}
                 relic_name = location.get("relic_name", location.get("name", ""))
-                capacity = getattr(entity, "relic_capacity", 10**9)
-                # 2026-10-27：各方均按剩余死者之页拾取，满页留在原地。
-                if relic_name not in owned_names and can_accept_page_resource(entity, "遗物", relic_name):
+                # 2026-11-01 重构1：遗物已脱离死者之页，拾取不再受页数拦截。
+                if relic_name not in owned_names:
                     relic = Relic(name=relic_name, effect=location.get("relic_effect", ""),
                                   tags=list(location.get("relic_tags") or []))
                     inventory.append(relic)
@@ -2654,8 +2652,8 @@ class GameEngine:
                 continue
             owned = {relic.name for relic in entity.relics}
             stock = next((relic for relic in merchant.relics if relic.name not in owned), None)
-            can_buy = (stock is not None
-                       and len(owned) < int(getattr(entity, "relic_capacity", 10**9)))
+            # 2026-11-01 重构1：遗物不再占死者之页，NPC 买入不再受"承载件数"拦截。
+            can_buy = stock is not None
             if can_buy and entity.shards >= price:
                 # 固定参考价避免NPC凭空议价；库存与货币由真实实体状态原子转移。
                 merchant.relics.remove(stock)
@@ -3175,10 +3173,9 @@ class GameEngine:
                         if actor_entity is not None:
                             is_player = actor_entity is self.state.player
                             owned_relics = self.state.relics if is_player else actor_entity.relics
-                            capacity = (actor_entity.relic_capacity if is_player
-                                        else getattr(actor_entity, "relic_capacity", 10**9))
                             owned_names = {relic.name for relic in owned_relics}
-                            if location.get("relic_name") not in owned_names and can_accept_page_resource(actor_entity, "遗物", location.get("relic_name")):
+                            # 2026-11-01 重构1：遗物不占页，拾取不再有页数门禁。
+                            if location.get("relic_name") not in owned_names:
                                 relic = Relic(name=location["relic_name"],
                                               effect=location.get("relic_effect", ""),
                                               tags=list(location.get("relic_tags") or []))
@@ -3455,9 +3452,8 @@ class GameEngine:
                     return {"success": False, "error": f"你没有遗物【{give_relic}】"}
                 if request_relic and target_relic is None:
                     return {"success": False, "error": f"对方没有遗物【{request_relic}】"}
-                target_relic_count = len({r.name for r in target_entity.relics})
-                if give_relic and not request_relic and target_relic_count >= target_entity.relic_capacity:
-                    return {"success": False, "error": "对方遗物承载已满，无法接收你的遗物"}
+                # 2026-11-01 重构1：遗物不占页、持有不限量，交易不再因"承载满"拒绝；
+                # 对方的启用槽位若已满，新到手的遗物按停用入库即可。
                 # 默认议价基准：一件遗物按10碎片估值。目标只接受自己收到的价值不低于付出的报价。
                 value_received = offer_shards + (10 if give_relic else 0)
                 value_given = request_shards + (10 if request_relic else 0)
@@ -5190,12 +5186,13 @@ class GameEngine:
             return {"success": False,
                     "error": f"煌妖幡最多收纳{BANNER_CAPACITY}只妖怪，无法继续创造"}
         if not banner:
-            from .death_pages import bind_resources
-            bind_resources(self.state)
-            if player.pages_used + UNHOUSED_PAGE_COST > player.load_capacity:
-                return {"success": False,
-                        "error": f"未入幡妖怪每只占{UNHOUSED_PAGE_COST}张死者之页；"
-                                 f"当前已用{player.pages_used}/{player.load_capacity}页，无法创造新妖怪"}
+            # 2026-11-01 重构3.2：预检走 death_pages.yaoguai_creation_error，
+            # 与事务层 growth_error 用同一套投影键（妖怪本体5页；签名道纹记在
+            # 妖怪自身页上；偏爱遗物在重构1后已不占页），不再各写一份近似算式。
+            from .death_pages import yaoguai_creation_error
+            page_error = yaoguai_creation_error(self.state)
+            if page_error:
+                return {"success": False, "error": page_error}
 
         cost = 10
         if self.state.shards < cost:
@@ -5230,6 +5227,11 @@ class GameEngine:
         signature_name = str(self.dice.auto_roll(
             "created_being_signature_daowen", sorted(signature_values),
             context=f"{name}造生：抽取一次性专属道纹")["selected"])
+        if not banner:
+            from .death_pages import yaoguai_creation_error
+            page_error = yaoguai_creation_error(self.state, signature_name)
+            if page_error:
+                return {"success": False, "error": page_error}
         signature_x = signature_values[signature_name]
         preference = str(self.dice.auto_roll(
             "created_being_initial_preference", list(MONSTER_PREFERENCE_POOL),
@@ -6089,9 +6091,10 @@ class GameEngine:
                 return {"success": False, "error": str(exc)}
 
         if name == "招魂":
-            # 2026-11-01 用户令：场上没有可唤回的怪物尸体时，必须在**扣法力前**拒绝，
-            # 不能先付3X法力再记一句"没有可唤回的怪物尸体"。多具尸体时由调用方
-            # 显式指定（revive_monster）；只有唯一一具才允许省略。
+            # 2026-11-01 用户令（修复6）：场上没有可唤回的怪物尸体时，必须在
+            # **扣法力前**拒绝，不能先付3X法力再记一句"没有可唤回的怪物尸体"。
+            # 2026-11-01 重构3.1：多具尸体时**允许**调用方用 revive_monster 指定
+            # 唤回哪一具；未指定（或只有一具）时默认取最近一具（dead_monsters[-1]）。
             corpses = [e for e in self.state.dead_monsters
                        if getattr(e, "entity_type", "") == "怪物"]
             if not corpses:
@@ -6102,13 +6105,7 @@ class GameEngine:
             if wanted and wanted not in corpse_names:
                 return {"success": False,
                         "error": f"【招魂】没有名为「{wanted}」的怪物尸体，可选 {corpse_names}"}
-            if not wanted:
-                if len(corpse_names) > 1:
-                    return {"success": False,
-                            "error": f"【招魂】有{len(corpse_names)}具可唤回尸体{corpse_names}，"
-                                     f"必须用revive_monster显式指定唤回哪一具"}
-                wanted = corpse_names[0]
-            calc["revive_monster_name"] = wanted
+            calc["revive_monster_name"] = wanted or corpse_names[-1]
 
         if name == "豪夺":
             # 2026-11-01 用户令：无可夺遗物必须在**扣费前**中止，禁止吞掉5X碎片空放；
@@ -7170,6 +7167,10 @@ class GameEngine:
         """
         self.state.enemies.clear()
         self.state.temp_friends.clear()
+        # 2026-11-01 重构1：逃跑/血翼脱战同样要收口战斗期的遗物临时突破
+        # （清掉【交易】的"本场"遗物，再把已启用件数压回 ceil(血限/30)）。
+        self._clear_battle_only_relics()
+        self.state.enforce_enabled_relic_limit()
         # 2026-10-14：逃跑不走战终结算，【增殖】战终待决随脱战作废（不得带入下场）。
         for emp in self.state.employees:
             if emp.is_alive and not emp.is_debt_bound:
@@ -9900,7 +9901,11 @@ class GameEngine:
 
         relic_end = self.combat.process_relics(TriggerTiming.BATTLE_END)
         # 【交易】发现的遗物只在本场战斗内有效：战终结算完再移除。
-        self._clear_battle_only_relics()
+        cleared_battle_relics = self._clear_battle_only_relics()
+        # 2026-11-01 重构1（方案A 收口）：战斗中的临时突破（【赦免】强制启用、
+        # 【交易】发现、【豪夺】夺取）在战终、临时遗物清除与到期归还之后压回
+        # ceil(血限/30)：按持有顺序保留前 N 件为启用，其余转 enabled=False。
+        disabled_relics = self.state.enforce_enabled_relic_limit()
         # 全局法术【战终】：必须在本函数下方"清除局内状态/法力相关计数"之前
         # 结算，否则法术依赖的道纹/法力/状态在校验时已经被清空，永远无法
         # 满足条件（与遗物战终结算 relic_end 同一时序原则：先结算再清理）。
@@ -10174,6 +10179,8 @@ class GameEngine:
             "removed_via_alt_path": removed,
             "death_shard_rewards": death_rewards,
             "relic_end_logs": relic_end,
+            "battle_only_relics_cleared": cleared_battle_relics,
+            "relics_disabled_over_limit": disabled_relics,
             "zengzhi_settled": zengzhi_settled,
             "zi_yu_logs": zi_yu_logs,
             "spell_logs": spell_logs,

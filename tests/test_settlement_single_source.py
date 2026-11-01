@@ -315,6 +315,7 @@ def test_full_dodge_cancels_an_attack(tmp_path):
     foe = e.state.enemies[0]
     foe.blood_limit = 500
     foe.current_hp = 500
+    foe.speed_limit = 9        # 2026-11-01 重构2：当前速度写入处封顶在[速限]
     foe.current_speed = 9
 
     from tests.attack_support import resolve_attack

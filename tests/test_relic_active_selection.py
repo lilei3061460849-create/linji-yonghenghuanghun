@@ -1,4 +1,9 @@
-"""遗物启用状态保留；十张页限制持有种类，不另设血限生效额度。"""
+"""遗物启用状态与启用槽位（2026-11-01 重构1）。
+
+- 遗物**不再占死者之页**，持有件数不受十页限制；
+- 常规可同时启用的件数＝`ceil(血限/30)`（1~30→1 件，31~60→2 件…）；
+- 战斗中的临时突破（【赦免】/【交易】/【豪夺】）不受该上限约束，战终压回。
+"""
 from __future__ import annotations
 
 import os
@@ -53,11 +58,24 @@ def test_set_active_relics_picks_any_two_of_five():
     assert e.state.enabled_relic_names() == {"避风铃", "不离"}
 
 
-def test_set_active_relics_no_longer_has_a_blood_quota():
-    """血限60也允许启用3件合法持有的遗物。"""
+def test_set_active_relics_rejects_more_than_blood_quota():
+    """血限60 → ceil(60/30)=2 个启用槽；提交3件必须拒绝，且不改动现状。"""
     e = _engine()
     _give_five(e)
     e.execute_action("set_active_relics", {"relic_names": ["避风铃", "不离"]})
+
+    r = e.execute_action("set_active_relics",
+                         {"relic_names": ["避风铃", "不离", "守夜灯"]})
+
+    assert r["success"] is False, r
+    assert "不得超过2件" in r["error"], r["error"]
+    assert e.state.enabled_relic_names() == {"避风铃", "不离"}, "被拒时不得改动启用集合"
+
+
+def test_set_active_relics_allows_exactly_the_quota():
+    e = _engine()
+    _give_five(e)
+    e.state.player.blood_limit = 90          # ceil(90/30)=3
 
     r = e.execute_action("set_active_relics",
                          {"relic_names": ["避风铃", "不离", "守夜灯"]})
@@ -106,19 +124,24 @@ def test_battle_start_active_relics_selects_for_this_battle():
     assert e.state._relic_active(player, "避风铃") is False, "未选中的遗物本场不得生效"
 
 
-def test_battle_start_can_enable_three_relics_at_low_blood():
-    """战始可启用3件，取消血限/30生效上限。"""
+def test_battle_start_rejects_three_relics_at_blood_60():
+    """战始配装同样受 ceil(血限/30) 约束：血限60只允许2件。"""
     e = _engine()
     _give_five(e)
     e.state.energy = 0
-    phase_before = e.state.phase
 
     r = e.execute_action("battle_start",
                          {"active_relics": ["守夜灯", "避风铃", "不离"]})
 
-    assert r["success"] is True, r
+    assert r["success"] is False, r
+    assert "不得超过2件" in r["error"], r["error"]
+    assert e.state.phase != "in_combat"
+
+    r2 = e.execute_action("battle_start",
+                          {"active_relics": ["守夜灯", "避风铃"]})
+    assert r2["success"] is True, r2
     assert e.state.phase == "in_combat"
-    assert e.state.enabled_relic_names() == {"守夜灯", "避风铃", "不离"}
+    assert e.state.enabled_relic_names() == {"守夜灯", "避风铃"}
 
 
 # ==================== 3. 停用即不生效 ====================
@@ -155,9 +178,9 @@ def test_disabled_stacks_with_sealed_not_replacing_it():
 
 # ==================== 4. 获得时的默认归类 ====================
 
-def test_legal_relics_default_enabled_without_separate_quota():
-    """正常路径：获得入口的归口 note_relic_gained——承载 2 时连拿 3 件，
-    前 2 件默认启用，第 3 件持有但停用；玩家可再自行改选换进来。"""
+def test_legal_relics_beyond_quota_are_stored_disabled():
+    """获得归口 note_relic_gained：启用槽 2 个时连拿 3 件，
+    前 2 件启用，第 3 件**持有但停用**（不报错、不丢奖励）；玩家可再自行换进来。"""
     e = _engine()
     p = e.state.player
     p.blood_limit = 60                       # 承载 2
@@ -170,8 +193,8 @@ def test_legal_relics_default_enabled_without_separate_quota():
         e.state.note_relic_gained(relic)     # 发现/自选/交易/拾取等入口共用此归口
         gained.append(relic)
 
-    assert gained[0].enabled and gained[1].enabled, "生效数未满时默认启用"
-    assert gained[2].enabled is True, "已合法持有的遗物不再另限生效数"
+    assert gained[0].enabled and gained[1].enabled, "启用槽未满时默认启用"
+    assert gained[2].enabled is False, "启用槽已满 → 以停用状态入库"
     assert len(e.state.relics) == 3, "持有不限：第 3 件不得被拒"
     # 玩家随后可自行改选：把第 3 件换进来
     ok, err = e.state.set_active_relics(["守夜灯", "不离"])
@@ -227,16 +250,20 @@ def test_toggle_relic_flips_one_relic_off_and_on():
     assert e.state.enabled_relic_names() == {"避风铃", "不离"}
 
 
-def test_toggle_relic_on_does_not_have_separate_quota():
-    """启用第3件不需要先停用另一件。"""
+def test_toggle_relic_on_is_refused_when_quota_full():
+    """启用槽已满时，单独 toggle 第3件被拒；先停用一件再启用即可。"""
     e = _engine()
     _give_five(e)
     e.execute_action("set_active_relics", {"relic_names": ["避风铃", "不离"]})
 
     r = e.execute_action("toggle_relic", {"relic_name": "守夜灯"})
+    assert r["success"] is False, r
+    assert "达到上限2件" in r["error"], r["error"]
 
-    assert r["success"] is True, r
-    assert e.state.enabled_relic_names() == {"避风铃", "不离", "守夜灯"}
+    assert e.execute_action("toggle_relic", {"relic_name": "不离"})["success"] is True
+    r2 = e.execute_action("toggle_relic", {"relic_name": "守夜灯"})
+    assert r2["success"] is True, r2
+    assert e.state.enabled_relic_names() == {"避风铃", "守夜灯"}
 
 
 def test_toggle_relic_unowned_is_rejected():

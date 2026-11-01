@@ -354,6 +354,8 @@ def test_option8_blood_feast_kills_chizu_and_heals_equal_amount():
     _start_battle_with_enemy(engine, hp=5)
     engine.execute_action("enslave_as_chizu", {"target_ref": "enemy:0"})
     chizu = next(f for f in engine.state.friends if f.name == "怪物甲")
+    # 2026-11-01 重构2：current_hp 写入处封顶在[血限]，夹具须同时抬高血限。
+    chizu.blood_limit = 30
     chizu.current_hp = 18
     player.current_hp = 10
     r = engine.execute_action("blood_feast", {"target_ref": "friend:0"})
@@ -379,6 +381,7 @@ def test_chizu_curse_bleeds_20_each_round_end():
     _start_battle_with_enemy(engine, hp=5)
     engine.execute_action("enslave_as_chizu", {"target_ref": "enemy:0"})
     chizu = next(f for f in engine.state.friends if f.name == "怪物甲")
+    chizu.blood_limit = 30
     chizu.current_hp = 30
     finish_round(engine)
     assert chizu.current_hp == 10

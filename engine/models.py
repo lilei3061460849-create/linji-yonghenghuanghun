@@ -597,8 +597,98 @@ class Entity:
     # 期间本钩子被抑制，避免双发；未被接管、或未来全新效果的直接
     # current_hp-= 写法则由本钩子兜底自动触发，无需再手工接线。
     # _hp_engine_ref 为可选弱引用（非字段，不参与序列化/深拷贝判定）。
+    def _current_ceiling(self, attr: str):
+        """attr（current_hp/current_mana/current_speed）当前允许的最大值。
+
+        唯一的"上限＋豁免"定义点：`__setattr__` 的封顶、`heal` 的封顶
+        都读它，杜绝两处各写一份。
+        """
+        if attr == "current_hp":
+            if self._has_status_raw("无限血限") or self._overflow_exempt("current_hp"):
+                return math.inf
+            return self.blood_limit
+        if attr == "current_mana":
+            if self._overflow_exempt("current_mana"):
+                return math.inf
+            return self.mana_limit
+        return self.speed_limit
+
+    def _cap_active(self) -> bool:
+        """当前是否处于"上限生效"的战斗上下文。
+
+        2026-11-01 重构2：封顶在实体**绑定战斗引擎之后**无条件生效（战斗内
+        所有对 current_hp/current_mana/current_speed 的写入都不得超上限）。
+        模型层/局外构造期（尚未绑定）不施加，避免与"先填当前值、后填上限"的
+        初始化顺序打架（这种顺序在存档反序列化与夹具里普遍存在）。
+        """
+        return self.__dict__.get("_hp_engine_ref") is not None
+
+    def _has_status_raw(self, name: str) -> bool:
+        """构造期安全的 has_status：status_effects 可能尚未写入 __dict__。"""
+        return any(status.name == name and not getattr(status, "is_expired", False)
+                   for status in self.__dict__.get("status_effects", ()) or ())
+
+    def _overflow_exempt(self, attr: str) -> bool:
+        """该实体的当前 hp/mana 是否处于"允许超出上限"的豁免态。
+
+        ★ 2026-11-01 重构2：这是**唯一**的豁免判定入口，`__setattr__` 的封顶
+        与 `CombatEngine.clamp_immortal_body` 都读它，避免两处各写一份而漂移。
+        - 当前生命：遗物【猩红果实】（`GameState.hp_overflow_exempt`）或【增殖】
+          的无限血限（`effective_blood_limit` 已是 inf，另在下面兜底）。
+        - 当前法力：遗物【苍白之花】（`CombatEngine.mana_overflow_exempt`）。
+        未绑定战斗引擎（模型层/局外/深拷贝）时一律不豁免。
+        """
+        state = self.__dict__.get("_hp_state_ref")
+        eng = self.__dict__.get("_hp_engine_ref")
+        owner = eng() if eng is not None else None
+        # 战斗引擎优先（它持有 state 与战斗期上下文），否则退到局外绑定的 state。
+        if owner is not None:
+            try:
+                if attr == "current_hp":
+                    return bool(owner.state.hp_overflow_exempt(self))
+                if attr == "current_mana":
+                    return bool(owner.mana_overflow_exempt(self))
+            except Exception:      # 引擎尚未装配完成（初始化期）→ 按不豁免处理
+                return False
+            return False
+        holder = state() if state is not None else None
+        if holder is None:
+            return False
+        try:
+            if attr == "current_hp":
+                return bool(holder.hp_overflow_exempt(self))
+            if attr == "current_mana":
+                return bool(holder.mana_overflow_exempt(self))
+        except Exception:
+            return False
+        return False
+
+    def _clamp_current(self, attr: str, limit_name: str) -> None:
+        """把 attr 拉回 limit_name 以内（写入上限下降时用）。"""
+        limit = self.__dict__.get(limit_name)
+        if not isinstance(limit, int):
+            return
+        current = self.__dict__.get(attr)
+        if not isinstance(current, int) or current <= limit:
+            return
+        object.__setattr__(self, attr, limit)
+
     def __setattr__(self, name, value):
         old = self.__dict__.get(name, None)
+        # ★ 2026-11-01 重构2：属性模型的下限/上限不变量焊死在写入处，不再依赖
+        # 每个调用方自觉调用 clamp_immortal_body。三条不变量：
+        #   当前生命 ≤ 血限（豁免：猩红果实 / 无限血限）
+        #   当前法力 ≤ 法限（豁免：苍白之花）
+        #   当前速度 ≤ 速限（无豁免；【萎缩】另有"不许涨"的更强约束在下面）
+        # 同时，上限本身被调低时（弱化/血限削减/变形…）当前值随之下压，
+        # 保证"任何时刻读到的当前值都落在 0~上限 闭区间"。
+        if name in ("blood_limit", "mana_limit", "speed_limit"):
+            pass      # 上限本身的写入不加钳制；写入后由下面的 _clamp_current 下压当前值。
+        elif (name in ("current_hp", "current_mana", "current_speed")
+              and isinstance(value, int) and self._cap_active()):
+            ceiling = self._current_ceiling(name)
+            if value > ceiling:
+                value = ceiling
         # 不死只限制存活角色的当前生命下降，不回复、不复活，不豁免独立离场事件。
         if (name == "current_hp" and old is not None and old >= 1 and value < 1
                 and self.__dict__.get("is_alive", False)
@@ -625,6 +715,11 @@ class Entity:
         if name == "shards_peak" and old is not None:
             value = max(int(value), int(old))
         object.__setattr__(self, name, value)
+        # 上限本身被调低（弱化/血限削减/变形互换…）时，**下压当前值仍由既有
+        # 管线负责**（`CombatEngine._apply_blood_limit_change` 的 clamp_hp、
+        # `clamp_immortal_body`、弱化的 rollback_scoped_sources 等）——那些地方
+        # 需要按顺序登记"失去生命前/后"上下文，若在这里抢先下压会吞掉
+        # 失去生命的触发窗口（`test_after_life_lost_fires_on_blood_limit_pressure`）。
         if name == "shards" and "shards_peak" in self.__dict__:
             if int(value) > int(self.__dict__.get("shards_peak", 0)):
                 object.__setattr__(self, "shards_peak", int(value))
@@ -666,6 +761,7 @@ class Entity:
         """存档/快照序列化时剔除战斗期引擎弱引用（不可 pickle）。"""
         state = self.__dict__.copy()
         state.pop("_hp_engine_ref", None)
+        state.pop("_hp_state_ref", None)
         return state
 
     def __setstate__(self, state):
@@ -674,6 +770,8 @@ class Entity:
         self.__dict__["entity_type"] = normalize_entity_type(
             self.__dict__.get("entity_type", ""))
         self.__dict__["_hp_engine_ref"] = None
+        # `_hp_state_ref` 不回填：反序列化后若写入 None 会被沙盒污染检查
+        # 判成新状态（见 engine/pollution_guard.py）；读取端一律用 __dict__.get。
         self.__dict__.setdefault("daowen_use_history", set())
         self.__dict__.setdefault("heavy_shackles_action_penalty", 0)
         self.__dict__.setdefault("hostile_targeters_this_battle", set())
@@ -753,8 +851,28 @@ class Entity:
         return self._kind_capacity("道纹")
 
     @property
+    def enabled_relic_limit(self) -> int:
+        """常规可同时启用的遗物件数＝ceil(血限 / 30)（向上取整）。
+
+        2026-11-01 用户令（重构1）：遗物不再占死者之页，改为**启用槽位**限制。
+        1~30 血限 → 1 件；31~60 → 2 件；61~90 → 3 件，以此类推。
+        战斗中的临时突破（【赦免】强制启用、【交易】发现、【豪夺】夺取来的
+        已启用遗物）不走本上限；战终再由
+        `GameState.enforce_enabled_relic_limit` 压回。
+        """
+        blood = int(getattr(self, "blood_limit", 0) or 0)
+        return max(0, (max(0, blood) + 29) // 30)
+
+    @property
+    def enabled_relics(self) -> list:
+        """当前处于启用状态的遗物（按持有顺序）。"""
+        return [r for r in getattr(self, "relics", []) or []
+                if getattr(r, "enabled", True)]
+
+    @property
     def relic_capacity(self) -> int:
-        return self._kind_capacity("遗物")
+        """"遗物承载"现在的含义＝可同时启用的件数（旧"占页数"口径已废弃）。"""
+        return self.enabled_relic_limit
 
     @property
     def action_cost_penalty(self) -> int:
@@ -978,14 +1096,19 @@ class Entity:
         """当前生效血限：增殖是真正无穷约束，blood_limit保留既有基础账本。"""
         return math.inf if self.has_status("无限血限") else self.blood_limit
 
-    def heal(self, amount: int, allow_overflow: bool = False) -> dict:
-        """回复生命。allow_overflow=True 时当前生命可超出[血限]（遗物【猩红果实】）。"""
+    def heal(self, amount: int) -> dict:
+        """回复生命。
+
+        2026-11-01 重构2：删掉 `allow_overflow` 死参数——"能否超过[血限]"
+        已经由 `__setattr__` 统一判定（猩红果实 / 【增殖】的无限血限），
+        本方法只负责写值，不再自带一份上限判断。
+        """
         before = self.current_hp
-        # 【增殖】：临时无限血限期间，当前生命可以随回复超过基础血限。
-        if allow_overflow or self.has_status("无限血限"):
-            self.current_hp = self.current_hp + amount
-        else:
-            self.current_hp = min(self.blood_limit, self.current_hp + amount)
+        # 未绑定战斗引擎时 `__setattr__` 不封顶（局外不是战斗声明期），
+        # 回复必须自己按同一条 ceiling 封顶，否则会凭空造出"局外过疗"。
+        ceiling = self._current_ceiling("current_hp")
+        gained = self.current_hp + amount
+        self.current_hp = gained if ceiling == math.inf else min(ceiling, gained)
         actual = self.current_hp - before
         overheal = amount - actual
         # 癌变追踪：DM裁定删除过量回复双倍计入机制，
@@ -1589,6 +1712,7 @@ class GameState:
                     tags=heal_ctx.tags, event_id=heal_ctx.event_id,
                     parent_event_id=heal_ctx.parent_event_id,
                 )
+        self.link_entity(entity)
         # 坏死封锁所有来源的回复，包括消耗品；不累计治疗、不产生溢出收益。
         if entity.has_status("坏死"):
             return {"heal_amount": amount, "actual_heal": 0,
@@ -1596,10 +1720,9 @@ class GameState:
                     "overheal": 0, "blocked_by": "坏死", "heal_ctx": heal_ctx.to_dict()}
         # 2026-10-14：【猩红果实】持有者当前生命可超出[血限]，回复不再封顶
         # （溢出量归零，【忘忧香】/【龙血瓶】无溢出可吃——没有溢出，只有实打实的血）。
-        detail = entity.heal(
-            amount,
-            allow_overflow=(self.hp_overflow_exempt(entity) or entity.has_status("无限血限")),
-        )
+        # 2026-11-01 重构2：上限判定由 Entity.__setattr__ 统一完成（猩红果实/
+        # 无限血限），此处不再传参——`heal` 的 allow_overflow 已删除。
+        detail = entity.heal(amount)
         detail["heal_ctx"] = heal_ctx.to_dict()
         heal_events = getattr(entity, "_heal_events", None)
         if heal_events is None:
@@ -1788,13 +1911,51 @@ class GameState:
         return {r.name for r in self.relics if getattr(r, "enabled", True)}
 
     def note_relic_gained(self, relic: Relic) -> None:
-        """页数限制持有；合法获得的遗物默认启用，不再另限生效数。"""
-        relic.enabled = True
+        """合法获得遗物的统一归口：默认启用，启用槽位满则**停用入库**。
+
+        2026-11-01 用户令（重构1）：
+        - 持有不再受十页限制（遗物已脱离死者之页），所以这里永不报错/回滚；
+        - 常规获得（世界事件、地图拾取、商店、开局发现…）按
+          `ceil(血限/30)` 的启用槽位归位：满了就 `enabled=False` 入库，
+          玩家可事后用 `set_active_relics` / `toggle_relic` 换进来；
+        - **战斗中**获得的遗物（【交易】发现、【豪夺】夺取…）直接启用，
+          允许临时突破上限，战终统一压回，见 `enforce_enabled_relic_limit`。
+        """
+        if self.phase == "in_combat":
+            relic.enabled = True
+            return
+        limit = self.player.enabled_relic_limit if self.player is not None else 0
+        already = len([r for r in self.relics
+                       if getattr(r, "enabled", True) and r is not relic])
+        relic.enabled = already < limit
+
+    def enforce_enabled_relic_limit(self) -> list:
+        """把已启用遗物压回 `ceil(血限/30)`，按持有顺序保留前 N 件。
+
+        战终（含【交易】临时遗物清除、到期归还之后）调用一次；返回被停用
+        的遗物名，便于写进战终结算日志。返回空表示没有超限。
+        """
+        player = self.player
+        if player is None:
+            return []
+        limit = player.enabled_relic_limit
+        kept = 0
+        disabled = []
+        for relic in self.relics:
+            if not getattr(relic, "enabled", True):
+                continue
+            kept += 1
+            if kept > limit:
+                relic.enabled = False
+                disabled.append(relic.name)
+        return disabled
 
     def set_active_relics(self, names) -> tuple:
         """把本局遗物的启用集合设为 names（战始/局外自定义启用）。
 
-        返回 (True, None) 或 (False, 错误文案)。启用数量不另限；未列名的已持有遗物一律置为停用（仍持有，不丢弃）。
+        返回 (True, None) 或 (False, 错误文案)。启用件数不得超过
+        `ceil(血限/30)`（2026-11-01 用户令，重构1）；未列名的已持有遗物
+        一律置为停用（仍持有，不丢弃）。
         """
         player = self.player
         if player is None:
@@ -1808,6 +1969,11 @@ class GameState:
         unknown = [n for n in names if n not in owned]
         if unknown:
             return False, f"未持有遗物：{'、'.join(unknown)}"
+        limit = player.enabled_relic_limit
+        if len(names) > limit:
+            return False, (f"同时启用的遗物不得超过{limit}件"
+                           f"（ceil(血限{player.blood_limit}/30)={limit}），"
+                           f"当前提交{len(names)}件")
         wanted = set(names)
         for relic in self.relics:
             relic.enabled = relic.name in wanted
@@ -1817,7 +1983,8 @@ class GameState:
         """切换单件遗物的启用/停用（2026-10-22 用户令）。
 
         返回 (True, 现在是否启用) 或 (False, 错误文案)。停用永远允许；
-        启用不再受血限或独立生效额度限制。
+        **启用**受 `ceil(血限/30)` 的启用槽位限制（2026-11-01 用户令，重构1）：
+        槽位已满时须先停用另一件，或改用 `set_active_relics` 一次性改选。
         """
         player = self.player
         if player is None:
@@ -1830,6 +1997,13 @@ class GameState:
         if getattr(relic, "enabled", True):
             relic.enabled = False
             return True, False
+        limit = player.enabled_relic_limit
+        # 玩家侧遗物挂在 GameState.relics（不是 player.relics），统一经本方法读。
+        enabled_now = len(self.enabled_relic_names())
+        if enabled_now >= limit:
+            return False, (f"已启用遗物{enabled_now}件，达到上限{limit}件"
+                           f"（ceil(血限{player.blood_limit}/30)）；"
+                           f"请先停用一件，或用set_active_relics一次性改选")
         relic.enabled = True
         return True, True
 
@@ -1846,6 +2020,30 @@ class GameState:
             grants = set()
             self._huangfu_grants = grants
         return grants
+
+    def mana_overflow_exempt(self, entity: Entity) -> bool:
+        """当前法力是否允许超出[法限]（唯一豁免：遗物【苍白之花】）。
+
+        2026-11-01 重构2：这里成为唯一实现，`CombatEngine.mana_overflow_exempt`
+        只是转调；`Entity.__setattr__` 的封顶也读同一条判定。
+        """
+        if entity is None or entity is not self.player:
+            return False
+        return self._relic_active(entity, "苍白之花")
+
+    def link_entity(self, entity: Entity) -> None:
+        """给实体挂上 state 弱引用，使局外（未绑定战斗引擎）也能读到豁免规则。
+
+        `Entity.__setattr__` 的封顶与 `heal` 的封顶都要问"猩红果实/苍白之花"，
+        这两者的持有信息都在 GameState 上，所以局外也必须能回到 state。
+        """
+        import weakref
+        if entity is None:
+            return
+        try:
+            entity._hp_state_ref = weakref.ref(self)
+        except TypeError:
+            pass
 
     def hp_overflow_exempt(self, entity: Entity) -> bool:
         """当前生命是否允许超出[血限]（唯一豁免：遗物【猩红果实】）。

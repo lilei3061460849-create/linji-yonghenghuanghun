@@ -1,4 +1,8 @@
-"""死者之页承载：替代已撤销的血限/30机制，保留真实学习/发现/残韵路由守护。"""
+"""死者之页承载：道纹／法器／消耗品共十页；遗物自 2026-11-01 起脱离页数体系。
+
+保留真实学习/发现/残韵路由守护。遗物现在的承载口径是"已启用件数
+≤ ceil(血限/30)"，专测见 tests/test_relic_enabled_limit.py。
+"""
 from __future__ import annotations
 
 import os
@@ -8,7 +12,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
-from engine.models import Entity, Relic
+from engine.models import Consumable, Entity, Relic
 from tests.setup_support import finish_initial_daowen
 
 
@@ -46,18 +50,23 @@ def _engine():
 
 
 
-def test_low_blood_does_not_limit_capacity():
+def test_low_blood_does_not_limit_pages_but_does_limit_enabled_relics():
     p = Entity("T", "轮回者", blood_limit=1)
     p.dao_wen.clear()  # 2026-11-01：出生自带的【透支】另占一页，本用例测空页口径。
-    assert p.load_capacity == p.daowen_capacity == p.relic_capacity == 10
+    assert p.load_capacity == p.daowen_capacity == 10
+    # 重构1：遗物承载改指"可同时启用的件数"＝ceil(血限/30)
+    assert p.relic_capacity == p.enabled_relic_limit == 1
     p.blood_limit = 900
-    assert p.load_capacity == 10
+    assert p.load_capacity == 10 and p.enabled_relic_limit == 30
+    p.blood_limit = 31
+    assert p.enabled_relic_limit == 2, "31~60 血限可启用 2 件"
 
 
 def test_learn_daowen_over_capacity_is_rejected_without_spending():
     e = _engine(); p = e.state.player
     _fill_to(p, 1)
-    e.state.relics = [Relic(f"占页{i}", "") for i in range(9)]
+    # 页数由 法器 占满（遗物自 2026-11-01 起不再占页）
+    e.state.artifacts_owned = [f"占页法器{i}" for i in range(9)]
     e.state.shards = 100
     before = (e.state.shards, e.state.energy, list(p.dao_wen))
     r = e.execute_action("pre_battle_action", {"sub_action": "学习", "sub": "daowen", "name": "弱化"})
@@ -65,32 +74,40 @@ def test_learn_daowen_over_capacity_is_rejected_without_spending():
     assert (e.state.shards, e.state.energy, list(p.dao_wen)) == before
 
 
-def full_relic_engine():
+def full_page_engine():
+    """页数占满（10页：1道纹 + 9法器），但一件遗物都没有。"""
     e = _engine()
     _fill_to(e.state.player, 1)
-    e.state.relics = [Relic(f"占页{i}", "") for i in range(9)]
+    e.state.artifacts_owned = [f"占页法器{i}" for i in range(9)]
+    e.state.relics = []
+    from engine.death_pages import bind_resources
+    bind_resources(e.state)     # artifacts 的页账是快照，改完要重新绑定
+    assert e.state.player.pages_used == e.state.player.load_capacity == 10
     e._init_relic_pool()
     return e
 
 
-def test_discovered_relic_full_pages_preserves_reward():
-    e = full_relic_engine()
+def test_discovered_relic_is_not_blocked_by_full_pages():
+    """重构1：遗物不占页 → 满页也照常获得，奖励不再被吞。"""
+    e = full_page_engine()
     name = e.state.relics_pool[0].name
     e.state.pending_relic_choices = [name]
     e.state.pending_relic_source = "测试"
     r = e.execute_action("choose_discovered_relic", {"relic_name": name})
-    assert not r["success"] and "死者之页" in r["error"]
-    assert e.state.pending_relic_choices == [name] and len(e.state.relics) == 9
-    assert any(item.name == name for item in e.state.relics_pool)
+    assert r["success"], r
+    assert any(item.name == name for item in e.state.relics)
+    assert not any(item.name == name for item in e.state.relics_pool)
+    assert e.state.player.pages_used == 10, "遗物入库不涨页"
 
 
-def test_paid_relic_acquisition_full_pages_rolls_back_cost():
-    e = full_relic_engine()
+def test_paid_relic_acquisition_with_full_pages_only_pays_once():
+    e = full_page_engine()
     e.state.shards = 100
-    before = (e.state.shards, e.state.energy)
-    r = e.execute_action("pre_battle_action", {"sub_action": "共鸣", "tier": 2, "name": e.state.relics_pool[0].name})
-    assert not r["success"] and "死者之页" in r["error"]
-    assert (e.state.shards, e.state.energy) == before and len(e.state.relics) == 9
+    e.state.energy = 2
+    r = e.execute_action("pre_battle_action", {"sub_action": "共鸣", "tier": 2,
+                                              "name": e.state.relics_pool[0].name})
+    assert r["success"], r
+    assert len(e.state.relics) == 1 and e.state.player.pages_used == 10
 
 
 def test_resonance_transform_keeps_holder_count_and_stays_within_capacity():
@@ -134,7 +151,7 @@ def test_resonance_grant_beyond_capacity_is_refused():
     p = e.state.player
     p.blood_limit = 30                      # 额度 1 种
     _fill_to(p, 1)
-    e.state.relics = [Relic(f"占页{i}", "") for i in range(9)]
+    e.state.artifacts_owned = [f"占页法器{i}" for i in range(9)]
     held = list(p.dao_wen)[0]
     monster = Entity("M", "怪物", blood_limit=50, current_hp=50)
     _grant(monster, "全力")
