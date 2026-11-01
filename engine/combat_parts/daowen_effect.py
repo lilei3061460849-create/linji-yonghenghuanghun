@@ -27,6 +27,41 @@ from ..mechanisms.verbs import apply_verb
 
 
 class DaowenEffectMixin:
+    def resolve_forget_daowen(self, caster: Entity, name: str, count: int,
+                              requested) -> list[str]:
+        """校验并返回失忆代价要永久销毁的道纹名（严禁代选）。
+
+        规则（2026-11-01 用户令）：
+        - 必须显式给出 count 个**互不重复**且施法者当前持有的道纹名；
+        - 未给出/数量不符/名字不存在/重复 → 直接报错，不扣任何代价；
+        - 选中本次正在发动的道纹是合法的（代价先于结算，标记"已发动"只记名字）。
+        """
+        if count <= 0:
+            raise ValueError("失忆代价的层数必须为正整数")
+        owned = list(caster.dao_wen)
+        if requested is None:
+            raise ValueError(
+                f"【{name}】的失忆{count}代价必须先显式选择要永久失去的{count}种道纹："
+                f"提交 forget_daowen（道纹名数组），可选 {owned}")
+        if isinstance(requested, str):
+            requested = [requested]
+        if not isinstance(requested, (list, tuple)):
+            raise ValueError("forget_daowen必须是道纹名数组")
+        names = [str(entry) for entry in requested]
+        if len(names) != count:
+            raise ValueError(
+                f"【{name}】的失忆{count}代价必须恰好指定{count}种道纹"
+                f"（收到{len(names)}种：{names}）")
+        if len(set(names)) != count:
+            raise ValueError(f"forget_daowen不能重复：{names}")
+        missing = [entry for entry in names if entry not in caster.dao_wen]
+        if missing:
+            raise ValueError(f"失忆只能销毁自己持有的道纹：未持有{missing}")
+        if len(owned) < count:
+            raise ValueError(
+                f"失忆{count}无法支付：{caster.name}仅持有{len(owned)}种道纹")
+        return names
+
     def _settle_diandang_discovery(self, caster, kinds: int, result: dict) -> None:
         """【典当X】发现获得X种道纹（2026-10-13）。
 
@@ -51,9 +86,10 @@ class DaowenEffectMixin:
                 known=DaoWenEngine.list_all())
             if not pool:
                 break
-            if len(caster.dao_wen) >= caster.daowen_capacity:
-                result["effects"].append({"type": "diandang_capped", "caster": caster.name})
-                break
+            # 2026-11-01 修复：不再在发现阶段按承载上限静默截断。
+            # 典当是"先失忆2X、再获得X"，净占页 −X：失忆前付得起，失忆后必然腾得出
+            # X 页，所以这里截断只会把已经付过代价的发现凭空吞掉。真正占页的判定
+            # 留在领取端（choose_diandang_daowen 的承载检查：保留本组、腾额后可重试）。
             remaining = list(pool)
             group: list[str] = []
             for slot in range(min(3, len(remaining))):
@@ -313,6 +349,20 @@ class DaowenEffectMixin:
             if rule.value == 0:
                 actor.status_effects.remove(rule)
 
+    @staticmethod
+    def _huixiang_extendable(status) -> bool:
+        """【回响】的候选判据：只有真正有正数持续回合的状态可被延长。
+
+        反面清单（一律不可选）：
+        - ∞/标记型：`remaining_rounds == -1`（强化/弱化/冰冻/波及/共罪，
+          以及已改为纯次数型的庇护、次数型篡改/出土/沉溺/操作/必中）；
+        - 已到期：`remaining_rounds <= 0`。
+        它们即使被"延长"也改变不了任何结算值，却被照常收取 5X 法力。
+        """
+        if status is None or status.is_expired or status.is_permanent:
+            return False
+        return int(status.remaining_rounds) > 0
+
     def prepare_huixiang(self, calc: dict, caster: Entity, target: Entity,
                          choices: Optional[dict] = None, refs: Optional[dict] = None) -> None:
         """在支付前锁定每个受影响者的一种持续状态；歧义不得偷偷选择第一项。
@@ -342,14 +392,19 @@ class DaowenEffectMixin:
                                  primary_index if recipient is target else None)
             if index is None:
                 candidates = [i for i, status in enumerate(recipient.status_effects)
-                              if not status.is_expired]
-                if len(candidates) != 1:
-                    raise ValueError(f"{recipient.name}有{len(candidates)}种有效持续状态，请明确status_index")
+                              if self._huixiang_extendable(status)]
+                if len(candidates) > 1:
+                    raise ValueError(f"{recipient.name}有{len(candidates)}种可延长状态，请明确status_index")
+                if not candidates:
+                    raise ValueError(
+                        f"{recipient.name}没有可被【回响】延长的状态"
+                        f"（只有正数持续回合的状态可延长；庇护/篡改/出土/沉溺/操作/必中/"
+                        f"冰冻/波及/共罪/强化/弱化等按次数或∞结算的不在内）")
                 index = candidates[0]
             if (isinstance(index, bool) or not isinstance(index, int)
                     or not 0 <= index < len(recipient.status_effects)
-                    or recipient.status_effects[index].is_expired):
-                raise ValueError(f"{recipient.name}的回响status_index不是有效持续状态")
+                    or not self._huixiang_extendable(recipient.status_effects[index])):
+                raise ValueError(f"{recipient.name}的回响status_index不是可延长的持续状态")
             status = recipient.status_effects[index]
             token = getattr(status, "_huixiang_token", None)
             if token is None:
@@ -628,6 +683,24 @@ class DaowenEffectMixin:
         aoe_targets_override: Optional[list[Entity]] = None,
     ) -> dict:
         """应用道纹效果；aoe_targets_override用于绑定两阶段决策的目标快照。"""
+        if name == "豪夺":
+            # 2026-11-01 用户令：夺取对象必须确定，且**在任何代价支付之前**判定。
+            # 无可夺遗物 → 报错中止（不扣碎片、不消耗出手）；目标有多件可夺遗物
+            # 时玩家侧必须显式指定 relic_name，只有唯一候选才允许省略。
+            pool = self._relic_steal_candidates(target)
+            if not pool:
+                raise ValueError(
+                    f"【豪夺】{getattr(target, 'name', '目标')}没有可夺取的遗物"
+                    f"（已封印/已被夺走的不算），本次发动不成立，不支付代价")
+            wanted = str(calc.get("haoduo_relic_name") or "").strip()
+            if wanted and wanted not in pool:
+                raise ValueError(f"【豪夺】目标没有可夺取的遗物「{wanted}」，可选 {pool}")
+            if not wanted:
+                if len(pool) > 1 and caster is self.state.player:
+                    raise ValueError(
+                        f"【豪夺】{target.name}有多件可夺遗物{pool}，必须显式指定relic_name")
+                wanted = pool[0]      # 唯一候选：无需选择；非玩家由引擎代选
+            calc["haoduo_relic_name"] = wanted
         if name == "净化":
             reductions = calc.get("cost_reductions", {})
             kinds = set(reductions)
@@ -1101,12 +1174,13 @@ class DaowenEffectMixin:
             for shelter_target, charges in zip(shelter_targets, pieces):
                 if shelter_target is None:
                     continue
+                # 纯次数型：remaining_rounds=-1 只表示"不按回合递减"，
+                # 真实剩余次数在 value；用完即由 _shelter_hp_loss 移除。
                 shelter_target.add_status(self._daowen_status(
                     daowen_order=daowen_order, name="庇护", value=charges,
-                    remaining_rounds=calc.get("duration", x), source=caster.name))
+                    remaining_rounds=-1, source=caster.name))
                 result["effects"].append({"type": "shelter", "target": shelter_target.name,
-                                          "charges": charges,
-                                          "duration": calc.get("duration", x)})
+                                          "charges": charges})
         if "shield_drain" in calc:  # 通用格挡扣减
             lost = min(target.shield, calc["shield_drain"]); target.shield -= lost
             result["effects"].append({"type": "shield_drain", "target": target.name, "lost": lost})
@@ -1320,20 +1394,27 @@ class DaowenEffectMixin:
             result["effects"].append({"type": "speed_penalty", "target": target.name,
                                       "lost": calc["speed_penalty"], "speed": target.current_speed})
 
-        # 点金的【失忆X】代价：永久失去自身X种道纹，再获得碎片。
-        # 当前统一执行接口没有额外的选纹决策槽，按持有顺序优先失去点金以外的道纹；
-        # 当前统一执行接口没有额外的选纹决策槽，按持有顺序优先失去发动道纹以外的道纹；
-        # 数量不足时发动失败应由上层预检，本处只结算已确认的代价。
-        if "forget_daowen" in calc:
+        # 【点金】/【典当】的失忆代价：永久失去施法者自选的X（典当为2X）种道纹。
+        # 2026-11-01 用户令：**严禁按持有顺序替玩家挑**。要销毁哪几种必须由调用方
+        # 经 forget_daowen 显式给出；缺失/数量不符/重复/未持有/选中本次道纹一律报错，
+        # 且本函数在代价结算最前段，报错时一处代价都还没付。
+        if "forget_daowen" in calc and int(calc.get("forget_daowen") or 0) > 0:
             self._refuse_blocked_payment(caster, "失忆")
             count = int(calc["forget_daowen"])
-            owned = list(caster.dao_wen)
-            chosen = [n for n in owned if n != name][:count]
-            if len(chosen) < count and name in caster.dao_wen:
-                chosen.append(name)
-            for forgotten in chosen[:count]:
+            requested = calc.get("forget_daowen_names",
+                                 calc.get("forget_daowen_selection"))
+            if requested is None and caster is not self.state.player:
+                # 怪物/NPC 没有选纹界面：由引擎按持有顺序确定性代选，并把选择写回
+                # calc，使结算日志与玩家侧走同一条显式通道（玩家侧绝不代选）。
+                requested = list(caster.dao_wen)[:count]
+                calc["forget_daowen_names"] = requested
+            chosen = self.resolve_forget_daowen(caster, name, count, requested)
+            for forgotten in chosen:
+                # forget_for_cost 只记账（amnesia_refundable 用于战报展示）；
+                # 引擎没有任何把失忆道纹还回去的入口，故为永久销毁。
                 caster.forget_for_cost(forgotten)
-            result["effects"].append({"type": "amnesia", "lost_daowen": chosen[:count]})
+            calc["forget_daowen_names"] = list(chosen)
+            result["effects"].append({"type": "amnesia", "lost_daowen": chosen})
 
         # 【典当】：失忆结算之后，发现获得X种道纹（学习口径池+承载上限）。
         if "discover_daowen" in calc:
@@ -1481,8 +1562,20 @@ class DaowenEffectMixin:
         if name == "招魂" and calc.get("revive_temp_friend"):
             # 唤回1具已击灭的怪物尸体作造物（生命20X）
             dead = [e for e in self.state.dead_monsters if e.entity_type == "怪物"]
-            if dead:
-                corpse = dead[-1]
+            # 2026-11-01 用户令：无尸体必须报错且不吞代价；有尸体时按调用方
+            # 显式指定的那一具（revive_monster_name），不再默认取最后一具。
+            if not dead:
+                raise ValueError(
+                    "【招魂】场上没有可唤回的怪物尸体，本次发动不成立，不支付法力")
+            corpse_name = str(calc.get("revive_monster_name") or "")
+            corpse = None
+            if corpse_name:
+                corpse = next((e for e in reversed(dead) if e.name == corpse_name), None)
+                if corpse is None:
+                    raise ValueError(f"【招魂】没有名为「{corpse_name}」的怪物尸体")
+            else:
+                corpse = dead[-1]      # 非玩家调用方（怪物/旧接口）沿用兼容口径
+            if corpse is not None:
                 from ..models import Entity
                 revived = Entity(name=f"{corpse.name}（魂）", entity_type="造物",
                                  blood_limit=calc["temp_hp"], current_hp=calc["temp_hp"],
@@ -1492,8 +1585,6 @@ class DaowenEffectMixin:
                 self.state.temp_friends.append(revived)
                 result["effects"].append({"type": "zhaohun", "name": revived.name,
                                           "hp": calc["temp_hp"], "corpse": corpse.name})
-            else:
-                result["effects"].append({"type": "zhaohun", "note": "没有可唤回的怪物尸体"})
 
         # ---- 特殊 ----
         # 当前没有任何已注册道纹产出 self_attack_count，本分支暂时无人触发。
@@ -1597,8 +1688,12 @@ class DaowenEffectMixin:
               and not (name == "变形" and bianxing_blocked)
               # 波及标记由 use_daowen/怪物结算逐目标处理，不走通用状态块
               # 乱葬岗道纹已在上方乱葬岗段自行 add_status，跳过通用状态处理避免重复叠加
+              # 【豪夺】同样跳过：它的"持续X回合"由 _steal_one_relic 挂一份带
+              # relic_name 的镜像状态并与 stolen_relics 账本同步（回响延长时同时
+              # 改账本）。若再走通用状态块就会挂出第二份无 relic_name 的【豪夺】，
+              # 两份各自递减、回响也只认其中一份，实为双计。
               and name not in ("勾魂", "冥气", "缄默", "波及", "共罪", "血契", "庇护", "强化", "弱化", "冰冻",
-                               "怜悯", "迟滞", "操作")):
+                               "怜悯", "迟滞", "操作", "豪夺")):
             duration = calc["duration"]  # 0不生效；只有显式-1表示持续∞。
             effect_target = target if target else caster
             # 自身作用型道纹（变形/超频等）作用于施法者
@@ -1654,6 +1749,14 @@ class DaowenEffectMixin:
                 before = status.remaining_rounds
                 if not status.is_permanent:
                     status.remaining_rounds += amount
+                # 【豪夺】的"持续X回合"真正记在 stolen_relics[name]["remaining"]，
+                # 状态只是镜像：延长必须同时改账本，否则镜子变长、遗物照样到期。
+                if status.name == "豪夺" and before > 0:
+                    ledger = (self.state.stolen_relics if recipient is self.state.player
+                              else getattr(recipient, "stolen_relics", {}) or {})
+                    info = ledger.get(status.effect_data.get("relic_name"))
+                    if isinstance(info, dict):
+                        info["remaining"] = int(info.get("remaining", 0)) + amount
                 result["effects"].append({"type": "duration_extended", "target": recipient.name,
                                           "status": status.name, "before": before,
                                           "after": status.remaining_rounds, "amount": amount})
@@ -1768,8 +1871,17 @@ class DaowenEffectMixin:
                                           "sealed": sealed or None, "rounds": x})
         # 豪夺X（2026-09-28）：消耗5X碎片，夺取[目标]1件遗物持续X回合（夺取者持有并享受被动）
         elif name == "豪夺":
+            # 显式选定的那一件只对**真正持有它的**目标生效；波及波及其他目标时
+            # 不会改投别的遗物、也不会重复夺同一件。
+            wanted = str(calc.get("haoduo_relic_name") or "")
             for st_target in wave_status_targets:
-                stolen = self._steal_one_relic(caster, st_target, x)
+                candidates = self._relic_steal_candidates(st_target)
+                if not candidates or st_target is not target:
+                    stolen = ""
+                else:
+                    stolen = self._steal_one_relic(
+                        caster, st_target, x,
+                        wanted if wanted in candidates else "")
                 result["effects"].append({"type": "haoduo", "target": st_target.name,
                                           "stolen": stolen or None, "rounds": x})
 

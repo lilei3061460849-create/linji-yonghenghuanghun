@@ -53,6 +53,12 @@ def _add_monster(engine, name="靶怪", hp=100, atk=5, shards=0, **kw):
     return m
 
 
+def _forget_names(engine, count, keep="典当"):
+    """测试侧的显式失忆选择：由调用方给出要永久销毁的道纹名（引擎不再代选）。"""
+    player = engine.state.player
+    return [n for n in player.dao_wen if n != keep][:count]
+
+
 def _apply_monster_daowen(engine, caster, name, x, target=None):
     target = target or caster
     calc = DaoWenEngine.resolve(name, x, target=target, caster=caster)
@@ -134,9 +140,11 @@ def test_normal_diandang_forgets_2x_and_pends_discovery():
     engine = _setup(); _grant(engine, ["典当", "杀伐", "庇护"])
     player = engine.state.player
     m = _add_monster(engine, shards=10)
-    r = engine.execute_action("use_daowen", {"daowen_name": "典当", "x": 1, "target": m.name})
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "典当", "x": 1, "target": m.name,
+        "forget_daowen": _forget_names(engine, 2)})
     assert r["success"], r
-    # 代价失忆2：按持有顺序优先忘记典当以外的道纹（杀伐、庇护），典当自身保留
+    # 代价失忆2：只销毁调用方显式点名的两种（这里是杀伐、庇护），典当自身保留
     assert "杀伐" not in player.dao_wen and "庇护" not in player.dao_wen
     assert "典当" in player.dao_wen
     # 发现获得1种：pending 一组3选1（学习口径：已持有/异副本专属不出池）
@@ -204,8 +212,9 @@ def test_normal_haoduo_steals_relic_for_x_rounds():
     m.relics = [Relic(name="防弹插板", effect="伤害减半"), Relic(name="其他", effect="x")]
     engine.state.shards = 100
     shards_before = engine.state.shards
-    r = engine.execute_action("use_daowen", {"daowen_name": "豪夺", "x": 2, "target": m.name})
-    assert r["success"], r
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "豪夺", "x": 2, "target": m.name,
+        "relic_name": "防弹插板"})   # 多件可夺遗物 → 必须显式指定
     assert engine.state.shards == shards_before - 10, "消耗5X=10碎片"
     # 敌人失去防弹插板
     assert not any(r.name == "防弹插板" for r in m.relics)
@@ -215,15 +224,17 @@ def test_normal_haoduo_steals_relic_for_x_rounds():
     assert engine.state.stolen_relics["防弹插板"]["remaining"] == 2
 
 
-def test_haoduo_no_relic_no_effect():
+def test_haoduo_without_stealable_relic_is_refused_before_payment():
+    """2026-11-01 用户令：没有可夺遗物必须在扣费前中止，不许吞掉 5X 碎片空放。"""
     engine = _setup(); _grant(engine, ["豪夺"])
     m = _add_monster(engine, shards=0)
     m.relics = []
     engine.state.shards = 100
     r = engine.execute_action("use_daowen", {"daowen_name": "豪夺", "x": 1, "target": m.name})
-    # 无遗物时仍会成功（没东西可夺），但不扣遗物
-    assert r["success"]
+    assert r["success"] is False and "没有可夺取的遗物" in r["error"], r
+    assert engine.state.shards == 100, "发不动时不得扣碎片"
     assert engine.state.stolen_relics == {}
+    assert engine.state.player.actions_used_this_round == 0
 
 
 def test_legacy_dikou_name_rejected():

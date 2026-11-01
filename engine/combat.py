@@ -1430,6 +1430,12 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
                 effects.extend(self._dispatch_phase(Phase.ROUND_END_POST_MEDIOCRITY, target=target))
                 effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=target))
+                # 【豪夺】的"持续X回合"跟随目标经历的回合递减：大梦额外回合里
+                # 目标（或夺了他遗物的一方）同样到期归还，不再只认世界回终。
+                stolen_returned = self._tick_stolen_relics(target)
+                if stolen_returned:
+                    effects.append({"type": "haoduo_returned", "entity": target.name,
+                                    "returned": stolen_returned, "source": source})
                 effects.append({"type": "extra_target_round", "source": source, "target": target.name,
                                 "round": self.state.current_round, "index": index + 1, "total": rounds})
         finally:

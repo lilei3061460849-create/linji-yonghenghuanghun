@@ -671,11 +671,31 @@ class SpellReactionMixin:
 
     def pay_daowen_shard_cost(self, actor: Entity, name: str, calc: dict,
                               x: int) -> Optional[str]:
-        """现役道纹的真／假碎片资源支付；两个池始终分开。"""
-        if not calc.get("cost_real_shards") and not calc.get("cost_fake_shards"):
+        """现役道纹的碎片支付（2026-11-01 用户令的口径）。
+
+        - 支付[碎片]的额度 = 真碎片 + 假碎片；实际扣除**先假后真**，
+          与"失去碎片"的优先序一致。假碎片因此不再是"支付通道里不存在的钱"。
+        - [假碎片]代价仍然只能由假碎片池承担（那是它自己的资源类型）。
+        - 两种代价同时存在时先付[假碎片]，再付[碎片]（碎片池会吃掉剩余假碎片），
+          并在任何扣款之前做完合计校验，避免"付了一半再报错"。
+        """
+        real_need = int(calc.get("cost_real_shards", 0) or 0)
+        fake_need = int(calc.get("cost_fake_shards", 0) or 0)
+        if real_need <= 0 and fake_need <= 0:
             return None
-        for resource, key in (("碎片", "cost_real_shards"), ("假碎片", "cost_fake_shards")):
-            need = int(calc.get(key, 0) or 0)
+        fake_avail = max(0, int(getattr(self.state if actor is self.state.player else actor,
+                                        "fake_shards", 0) or 0))
+        real_avail = max(0, int(getattr(self.state if actor is self.state.player else actor,
+                                        "shards", 0) or 0))
+        if fake_need > fake_avail:
+            return (f"{actor.name}无法完整承担假碎片{fake_need}"
+                    f"（可支付{fake_avail}）")
+        shard_capacity = max(0, fake_avail - fake_need) + real_avail
+        if real_need > shard_capacity:
+            return (f"{actor.name}无法完整承担碎片{real_need}"
+                    f"（可支付{shard_capacity}：真碎片{real_avail}＋假碎片"
+                    f"{max(0, fake_avail - fake_need)}）")
+        for resource, need in (("假碎片", fake_need), ("碎片", real_need)):
             if need <= 0:
                 continue
             try:

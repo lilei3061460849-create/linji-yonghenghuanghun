@@ -267,7 +267,15 @@ class CostPaymentMixin:
             "法限": entity.mana_limit,
             "速度": entity.current_speed,
             "速限": entity.speed_limit,
-            "碎片": (self.state.shards if entity is self.state.player else entity.shards),
+            # 2026-11-01 用户令：支付[碎片]的可用额度＝真碎片＋假碎片。
+            # 实际扣除仍先假后真（与"失去碎片"同一优先序），但"能不能付得起"
+            # 必须按两池合计判定，否则假碎片在支付通道里等于不存在。
+            "碎片": (
+                max(0, int(getattr(self.state if entity is self.state.player else entity,
+                                   "shards", 0) or 0))
+                + max(0, int(getattr(self.state if entity is self.state.player else entity,
+                                     "fake_shards", 0) or 0))
+            ),
             "假碎片": (self.state.fake_shards if entity is self.state.player
                        else getattr(entity, "fake_shards", 0)),
             "枯竭": max(0, entity.mana_limit
@@ -408,10 +416,26 @@ class CostPaymentMixin:
             detail = {"mana_before": before, "mana_after": payer.current_mana}
         elif cost_type in {"碎片", "假碎片"}:
             pool = self.state if payer is self.state.player else payer
-            field = "shards" if cost_type == "碎片" else "fake_shards"
-            before = max(0, int(getattr(pool, field, 0) or 0))
-            setattr(pool, field, max(0, before - amount))
-            detail = {"resource_before": before, "resource_after": getattr(pool, field)}
+            if cost_type == "碎片":
+                # 2026-11-01 用户令：支付[碎片]时先扣[假碎片]，不足部分再扣真[碎片]。
+                fake_before = max(0, int(getattr(pool, "fake_shards", 0) or 0))
+                real_before = max(0, int(getattr(pool, "shards", 0) or 0))
+                use_fake = min(fake_before, amount)
+                use_real = min(real_before, amount - use_fake)
+                pool.fake_shards = fake_before - use_fake
+                pool.shards = real_before - use_real
+                detail = {
+                    "resource_before": fake_before + real_before,
+                    "resource_after": pool.fake_shards + max(0, int(pool.shards)),
+                    "fake_shards_before": fake_before, "fake_shards_after": pool.fake_shards,
+                    "real_shards_before": real_before, "real_shards_after": pool.shards,
+                    "fake_shards_used": use_fake, "real_shards_used": use_real,
+                }
+            else:
+                field = "fake_shards"
+                before = max(0, int(getattr(pool, field, 0) or 0))
+                setattr(pool, field, max(0, before - amount))
+                detail = {"resource_before": before, "resource_after": getattr(pool, field)}
         elif cost_type == "枯竭":
             payer.pending_exhaust_mana = (
                 int(getattr(payer, "pending_exhaust_mana", 0) or 0) + amount)

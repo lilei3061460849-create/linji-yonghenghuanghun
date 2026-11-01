@@ -135,17 +135,32 @@ def test_battle_mana_channel_laser(tmp_path):
     assert m.current_hp == 80 - 5            # 效果恒同：5击×1点
 
 
-def test_battle_real_shard_channel_only_touches_real(tmp_path):
+def test_battle_shard_channel_spends_fake_shards_first(tmp_path):
+    """2026-11-01 用户令：支付[碎片]的额度＝真+假，实际扣除先假后真。
+
+    代价10（5/击×2）→ 假碎片40先扣掉10，真碎片20分文不动。
+    """
     e, p, m = _setup_battle(tmp_path)
     e.state.shards, e.state.fake_shards = 20, 40
     r = _cast(e, m, 2, "碎片")
     assert r["success"], r
-    assert e.state.shards == 10              # 5/击
-    assert e.state.fake_shards == 40         # 独立通道：不走假碎片优先
+    assert e.state.fake_shards == 30         # 先扣假碎片
+    assert e.state.shards == 20              # 假碎片够用时真碎片不动
     assert m.current_hp == 80 - 10           # X=2 → 10击
 
 
+def test_battle_shard_channel_falls_back_to_real_shards(tmp_path):
+    """假碎片不足时，不足部分由真碎片补足（合计额度）。"""
+    e, p, m = _setup_battle(tmp_path)
+    e.state.shards, e.state.fake_shards = 20, 4
+    r = _cast(e, m, 2, "碎片")
+    assert r["success"], r
+    assert e.state.fake_shards == 0 and e.state.shards == 14   # 10 = 假4 + 真6
+    assert m.current_hp == 80 - 10
+
+
 def test_battle_fake_shard_channel_only_touches_fake(tmp_path):
+    """【假碎片】作为独立资源类型，仍然只能由假碎片池承担（真碎片补不进来）。"""
     e, p, m = _setup_battle(tmp_path)
     e.state.shards, e.state.fake_shards = 10, 200
     r = _cast(e, m, 2, "假碎片")
@@ -156,6 +171,7 @@ def test_battle_fake_shard_channel_only_touches_fake(tmp_path):
 
 
 def test_battle_shard_channel_insufficient_rejected_cleanly(tmp_path):
+    """两池合计仍不足（真9＋假0 < 10）→ 拒绝，且一分不扣、一点不伤。"""
     e, p, m = _setup_battle(tmp_path)
     e.state.shards, e.state.fake_shards = 9, 0
     r = _cast(e, m, 2, "碎片")

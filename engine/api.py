@@ -854,6 +854,8 @@ class GameEngine:
                        if name == "连击" else {}),
                     **({"lianmin_cost": list(DaoWenEngine.PAYABLE_TYPES)}
                        if name == "怜悯" else {}),
+                    **({"relic_name": "目标可夺取的遗物名；目标有多件时必须显式指定，无可夺遗物则本次发动被拒绝且不支付代价"}
+                       if name == "豪夺" else {}),
                     **({"cost_choices": "净化：支付法力20X；显式选择目标拥有的数值类代价及层数，格式为[{type: 血限/枯竭/法限/速度/异变, layers: 正整数}]；可混选多种，所有layers之和不得超过X；单选项省略layers时默认吃满X；不能选择失忆或冷却"} if name == "净化" else {}),
                     "cost_share_target_ref": (
                         [{"ref": ref, "name": entity.name}
@@ -873,6 +875,15 @@ class GameEngine:
                                   "dodge": "敌对目标可选布尔值",
                                   "blood_shadow": "可选布尔值"},
                     }
+            if name in ("点金", "典当"):
+                # 失忆代价必须显式选纹（2026-11-01 用户令）：把候选直接公布，
+                # 缺失/数量不符会被 use_daowen 在扣费前拒绝。
+                params_schema["forget_daowen"] = {
+                    "count": f"{'X' if name == '点金' else '2X'}（随发动X）",
+                    "per_x": 1 if name == "点金" else 2,
+                    "choices": custom_resources.amnesia_candidates(player),
+                    "note": "道纹名数组；未提交或数量不符将被拒绝且不扣任何代价",
+                }
             _custom = custom_resources.get(name)
             if (_custom is not None and _custom.category == "道纹"
                     and _custom.spec.get("cost", {}).get("type") == "失忆"):
@@ -6068,6 +6079,59 @@ class GameEngine:
         if calc.get("cost_type") == "失忆" and calc.get("cost", 0) > len(actor.dao_wen):
             return {"success": False,
                     "error": f"失忆{calc.get('cost', 0)}无法支付：{actor.name}仅持有{len(actor.dao_wen)}种道纹"}
+        if int(calc.get("forget_daowen") or 0) > 0:
+            # 2026-11-01 用户令：失忆必须显式选纹，严禁按持有顺序替玩家代选。
+            # 校验放在任何支付之前——不合法的选择不扣法力、不扣碎片、不消耗出手。
+            try:
+                calc["forget_daowen_names"] = self.combat.resolve_forget_daowen(
+                    actor, name, int(calc["forget_daowen"]), params.get("forget_daowen"))
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
+
+        if name == "招魂":
+            # 2026-11-01 用户令：场上没有可唤回的怪物尸体时，必须在**扣法力前**拒绝，
+            # 不能先付3X法力再记一句"没有可唤回的怪物尸体"。多具尸体时由调用方
+            # 显式指定（revive_monster）；只有唯一一具才允许省略。
+            corpses = [e for e in self.state.dead_monsters
+                       if getattr(e, "entity_type", "") == "怪物"]
+            if not corpses:
+                return {"success": False,
+                        "error": "【招魂】场上没有可唤回的怪物尸体，本次发动不成立，不支付法力"}
+            corpse_names = [e.name for e in corpses]
+            wanted = str(params.get("revive_monster") or "").strip()
+            if wanted and wanted not in corpse_names:
+                return {"success": False,
+                        "error": f"【招魂】没有名为「{wanted}」的怪物尸体，可选 {corpse_names}"}
+            if not wanted:
+                if len(corpse_names) > 1:
+                    return {"success": False,
+                            "error": f"【招魂】有{len(corpse_names)}具可唤回尸体{corpse_names}，"
+                                     f"必须用revive_monster显式指定唤回哪一具"}
+                wanted = corpse_names[0]
+            calc["revive_monster_name"] = wanted
+
+        if name == "豪夺":
+            # 2026-11-01 用户令：无可夺遗物必须在**扣费前**中止，禁止吞掉5X碎片空放；
+            # 多件可夺时玩家必须显式提交 relic_name（唯一候选才允许省略）。
+            if target is actor:
+                return {"success": False,
+                        "error": "【豪夺】必须以他人为[目标]：夺取自身的遗物不产生任何转移"}
+            pool = self.combat._relic_steal_candidates(target)
+            if not pool:
+                return {"success": False,
+                        "error": f"【豪夺】{target.name}没有可夺取的遗物"
+                                 f"（已封印/已被夺走的不算），本次发动不成立，不支付任何代价"}
+            wanted = str(params.get("relic_name") or params.get("haoduo_relic") or "").strip()
+            if wanted and wanted not in pool:
+                return {"success": False,
+                        "error": f"【豪夺】目标没有可夺取的遗物「{wanted}」，可选 {pool}"}
+            if not wanted:
+                if len(pool) > 1:
+                    return {"success": False,
+                            "error": f"【豪夺】{target.name}有多件可夺遗物{pool}，"
+                                     f"必须用relic_name显式指定要夺哪一件"}
+                wanted = pool[0]
+            calc["haoduo_relic_name"] = wanted
 
         # 「发动道纹」的共用前置环节（与法术每一步同一实现，见
         # CombatEngine._daowen_step_preflight）：缄默面具 → 目标发动道纹前反应 →

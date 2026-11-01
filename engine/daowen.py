@@ -202,7 +202,14 @@ class DaoWenEngine:
     
     @staticmethod
     def calculate_bihu(x: int, target: Entity = None) -> dict:
-        """庇护X：支付：法力X。使[目标]免疫非[目标]导致的下X次失去生命，持续X。"""
+        """庇护X：支付：法力X。使[目标]免疫非[目标]导致的下X次失去生命。
+
+        2026-11-01 用户令：庇护是**纯次数型**——只有"下X次"次数，没有回合倒计时。
+        旧版同时挂 duration=X（状态既按次数消耗又按回合递减），等于同一个 X
+        被消费两遍：回合先到就白扔剩余次数，次数先用完则"持续X"毫无意义。
+        现状只保留 shelter_charges，状态本身 remaining_rounds=-1（不按回合递减），
+        也不可被【回响】选中（回响只收正数持续回合的状态）。
+        """
         target_name = target.name if target is not None else "未选定目标"
         return {
             "dao_wen": "庇护",
@@ -210,8 +217,7 @@ class DaoWenEngine:
             "cost_type": CostType.MANA.value,
             "cost": x,
             "shelter_charges": x,
-            "duration": x,
-            "summary": f"支付：法力{x}，使{target_name}免疫非{target_name}导致的下{x}次失去生命，持续{x}"
+            "summary": f"支付：法力{x}，使{target_name}免疫非{target_name}导致的下{x}次失去生命"
         }
     
     # 连击六通道价格（2026-10-22 用户令：与【透支】同类多代价道纹，价格与效果全表同乘五）：

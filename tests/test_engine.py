@@ -119,8 +119,9 @@ def test_daowen_calculations():
     # 测试庇护
     result = DaoWenEngine.resolve("庇护", 5, target=target)
     assert result["cost"] == 5
-    assert result["shelter_charges"] == 5 and result["duration"] == 5
-    print("  ✓ 庇护X=5: 消耗5，免疫非[目标]来源的下5次失去生命，持续5")
+    # 2026-11-01 用户令：庇护是纯次数型——只有"下X次"，没有回合倒计时。
+    assert result["shelter_charges"] == 5 and "duration" not in result
+    print("  ✓ 庇护X=5: 消耗5，免疫非[目标]来源的下5次失去生命（无回合倒计时）")
     
     # 测试再生
     result = DaoWenEngine.resolve("再生", 4, target=target)
