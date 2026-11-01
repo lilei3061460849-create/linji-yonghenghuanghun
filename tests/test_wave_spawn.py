@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 
 from engine.api import GameEngine
-from tests.setup_support import finish_initial_daowen
+from tests.setup_support import finish_initial_daowen, hand_priority_to_enemy
 
 
 def _new_engine(db_suffix: str) -> GameEngine:
@@ -85,12 +85,27 @@ def _pass_round(engine: GameEngine, kill_first: bool = True):
     assert r["success"] is True
     if kill_first:
         _kill_all_spawned(engine)
+    hand_priority_to_enemy(engine)   # 交替出手：声明轮回者本回合已交出优先权
     prep = engine.execute_action("prepare_monster_phase", {})
     assert prep["success"] is True
-    # 怪阶段空交即可：本文件验的是"进场节奏"，出手细节由 tests/test_monster_phase_* 覆盖。
-    rr = engine.execute_action("resolve_monster_phase",
-                               {"token": prep["result"]["token"], "choices": []})
-    assert rr["success"] is True, rr
+    # 已清场时引擎按【跳过】结束敌方回合（无行动者可提交），无需再 resolve。
+    # 本文件验的是"进场节奏"，出手细节由 tests/test_monster_phase_* 覆盖。
+    if not prep.get("skipped"):
+        actor = prep["result"]["actors"][0]
+        target_ref = actor["attack_target_options"][0]["ref"]
+        target_option = next(t for t in actor["attack_target_options"]
+                             if t["ref"] == target_ref)
+        hits = [{"target_ref": target_ref, "dodge": False, "blood_shadow": False,
+                 "spell_choices": {timing: {sp["spell_name"]: {"use": False}
+                                            for sp in target_option.get("spell_options", {}).get(timing, [])}
+                                   for timing in ("before", "after")}}
+                for _ in range(actor["base_hits_per_attack"])]
+        rr = engine.execute_action("resolve_monster_phase", {
+            "token": prep["result"]["token"],
+            "choices": [{"actor_ref": actor["actor_ref"], "daowen": None,
+                         "attack_actions": [{"hits": hits}
+                                            for _ in range(actor["base_attack_actions"])]}]})
+        assert rr["success"] is True, rr
     # 测试替身击杀：免凡庸（进场节奏与凡庸正交）
     p.damage_dealt_this_round = 1
     p.actions_used_this_round = 1
@@ -130,10 +145,11 @@ def test_reinforcements_arrive_exactly_on_planned_rounds():
         if arrived:
             spawned_by_round[rs["result"]["round"]] = arrived
         _kill_all_spawned(engine)
+        hand_priority_to_enemy(engine)
         prep = engine.execute_action("prepare_monster_phase", {})
-        rr = engine.execute_action("resolve_monster_phase",
-                                   {"token": prep["result"]["token"], "choices": []})
-        assert rr["success"] is True
+        # 清场后引擎按【跳过】结束敌方回合，没有行动者需要提交
+        assert prep["success"] is True
+        assert prep.get("skipped") is True, prep
         engine.state.player.damage_dealt_this_round = 1
         engine.state.player.actions_used_this_round = 1
         engine.execute_action("round_end", {})
@@ -163,6 +179,7 @@ def test_reinforcement_can_use_daowen_on_arrival_round():
     arrived_names = {m.name for m in engine.state.enemies
                      if m.spawned_round == arrival}
     assert arrived_names, "进场怪应带上本回合的 spawned_round"
+    hand_priority_to_enemy(engine)
     prep = engine.execute_action("prepare_monster_phase", {})
     assert prep["success"] is True
     actors = [a for a in prep["result"]["actors"]]

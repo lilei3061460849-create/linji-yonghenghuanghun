@@ -20,9 +20,8 @@ def duel_with_monster(tmp_path, seed=30601):
                   mana_limit=5, current_mana=5, speed_limit=2, current_speed=2)
     monster = Entity("多攻次怪", "怪物", blood_limit=100, current_hp=100,
                      attack_count=2, attack_power=7, mana_limit=10, current_mana=10)
-    monster.dao_wen["变形"] = DaoWenInstance(DaoWen(
-        name="变形", formula="", cost_type="异变", cost_formula="5X", effect_formula=""),
-        x_value=1)
+    # 单行动契约：一手只能是道纹或一次攻击。这里要验「命中提交随实时 attack_count
+    # 漂移」，因此这只怪这一手走攻击，不再额外挂【变形】道纹。
     e.state.enemies = [lord, monster]
     e.state.in_final_duel = True
     e.state.phase = "in_combat"
@@ -39,7 +38,7 @@ def test_duel_monster_submits_all_hits_after_shape_change(tmp_path, seed):
     assert result.get("success"), result
     assert acted_ref == "enemy:1"
     assert e.state.enemies[1].attack_count == 2
-    assert e.state.player.current_hp == 300 - 2 * 2
+    assert e.state.player.current_hp == 300 - 2 * e.state.enemies[1].effective_attack_power()
     assert sum("hit_index" in item for item in result["result"]["details"]) == 2
 
 
@@ -53,10 +52,14 @@ def test_real_slow_duel_reports_resource_timeout_without_a_verdict(tmp_path):
 
     def slow_action():
         calls.append(1)
-        time.sleep(0.03)
+        time.sleep(0.25)
         return True
 
-    result = run_duel_pvp(e, slow_action, use_tactical=False, max_wall_seconds=0.015,
+    # 预算必须大于「进入内层循环之前的那段准备」（回始 start_round 等），
+    # 否则机器一忙，墙钟会抢在第一次出手之前就到点，calls 空、断言假失败
+    # （2026-10-31 全量并行时实测复现）。0.2s 对准备阶段足够宽，慢行动
+    # 0.25s 仍必然越界——断言口径不变：真的执行了慢行动，且只报超时不判胜负。
+    result = run_duel_pvp(e, slow_action, use_tactical=False, max_wall_seconds=0.2,
                           max_rounds=2, max_steps=5)
     assert calls, "必须真的执行慢行动，不只是把墙钟改成零"
     assert result.get("timeout") and result.get("timeout_kind") == "wall_clock", result
@@ -97,8 +100,9 @@ def test_duel_recovers_real_hit_schema_drift_without_double_execution(tmp_path, 
     assert ref == "enemy:1"
     details = result["result"]["details"]
     assert sum("hit_index" in item for item in details) == 3
-    assert sum("daowen_activated" in item for item in details) == 1
-    assert e.state.player.current_hp == 300 - 3 * 3
+    # 攻击提交里不应出现道纹结算（防止重复执行同一出手）。
+    assert sum("daowen_activated" in item for item in details) == 0
+    assert e.state.player.current_hp == 300 - 3 * e.state.enemies[1].effective_attack_power()
 
 
 def test_play_does_not_reclassify_a_timeout_as_invalid_or_log_a_loss(monkeypatch):

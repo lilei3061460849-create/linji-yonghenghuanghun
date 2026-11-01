@@ -63,10 +63,10 @@ def test_initial_daowen_discovery_normal():
     choices = picked_relic["result"]["daowen_choices"]
     assert len(choices) == 3 and len(set(choices)) == 3
     assert set(choices) <= set(SHAFA_LOOP_DAOWEN)
-    assert engine.state.player.dao_wen == {}
+    assert list(engine.state.player.dao_wen) == ["透支"]  # 出生自带
     picked = engine.execute_action("setup_choose_initial_daowen", {"daowen_name": choices[1]})
     assert picked["success"]
-    assert list(engine.state.player.dao_wen) == [choices[1]]
+    assert set(engine.state.player.dao_wen) == {choices[1], "透支"}  # 出生自带
     assert engine.state.pending_initial_daowen_choices == []
 
 
@@ -97,7 +97,7 @@ def test_initial_daowen_discovery_rejects_illegal():
     choices = list(engine.state.pending_initial_daowen_choices)
     bad = engine.execute_action("setup_choose_initial_daowen", {"daowen_name": "净化"})
     assert not bad["success"]
-    assert engine.state.player.dao_wen == {}
+    assert list(engine.state.player.dao_wen) == ["透支"]  # 出生自带
     assert engine.state.pending_initial_daowen_choices == choices
     resonance = engine.execute_action("setup_choose_resonance", {"resonance_type": "转换"})
     assert not resonance["success"]
@@ -281,7 +281,7 @@ def test_redemption_fires_at_low_hp_even_with_transform_left():
     assert accept["success"]
     emp = next(e for e in engine.state.employees if e.name == "微光蛛")
     assert emp.entity_type == "员工" and emp.is_deployed is False
-    assert emp.dao_wen == {}
+    assert list(emp.dao_wen) == ["透支"]  # 出生自带
     assert emp.blood_limit == math.ceil(204 / 2)
 
 
@@ -317,7 +317,7 @@ def test_redemption_accept_creates_halved_employee_on_standby():
     assert emp.blood_limit == math.ceil(81 / 2)
     assert emp.attack_count == math.ceil(3 / 2)
     assert emp.attack_power == math.ceil(5 / 2)
-    assert emp.dao_wen == {}
+    assert list(emp.dao_wen) == ["透支"]  # 出生自带
     assert not engine.state.pending_redemption
     assert engine.state.friends == []
 
@@ -382,7 +382,8 @@ def test_redemption_finish_pays_exactly_the_kill_reward():
 
     end = engine.execute_action("battle_end", {})
     assert end["success"]
-    reward = math.ceil(126 * 0.02) + 3 * 5     # 3 + 15 = 18
+    # 2026-11-01：【透支】出生自带，计入道纹数，故 3 → 4 种。
+    reward = math.ceil(126 * 0.02) + 4 * 5     # 3 + 20 = 23
     assert end["result"]["shard_reward"] == reward
     assert [d["name"] for d in end["result"]["death_shard_rewards"]] == ["油囊"]
     assert end["result"]["removed_via_alt_path"] == []

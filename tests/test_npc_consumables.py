@@ -142,10 +142,12 @@ def monster_submission():
     npc.blood_limit = 100
     npc.consumables = [item("备用血泵")]
     ref = next(iter(_actors(prep)))
+    # 交替出手：一次提交＝一个行动（发放道纹时不再捆绑攻击组）；
+    # 消耗品在怪物真正出手时自动结算，与提交的是攻击还是道纹无关。
     choice = {"actor_ref": ref,
-              "daowen": {"name": "抢劫", "dodge": False, "blood_shadow": False,
+              "daowen": {"name": "烁金", "dodge": False, "blood_shadow": False,
                          "trigger_spell_choices": {}, "target_ref": "player:0"},
-              "attack_actions": _legal_hits(e, prep, ref)}
+              "attack_actions": []}
     return e, prep, choice
 
 

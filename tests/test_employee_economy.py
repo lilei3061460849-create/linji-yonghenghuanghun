@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 
 from engine.api import GameEngine
-from engine.models import Entity, GameState
+from engine.models import Entity, GameState, StatusEffect
 from engine.combat import CombatEngine
 from engine.dice import DiceEngine
 
@@ -270,9 +270,9 @@ def test_hire_allows_zero_attack_count_boundary():
     assert r["success"] is True
     assert len(engine.state.employees) == before_count + 1
     emp = next(e for e in engine.state.employees if e.name == "纯坦克")
-    # 2026-09-16：出手次数全体固定 2，不再由攻击次数推导。0 攻次员工仍有 2 次出手，
-    # 只是[攻次]=[当前速度]=0 → 普攻 0 击；它可以拿这 2 次出手去发动道纹。
-    assert emp.attack_count == 0 and emp.action_count == 2
+    # 出手预算与攻击次数解耦：基础 1 次，不由攻击次数推导。0 攻次员工仍有 1 次出手，
+    # 只是[攻次]=[当前速度]=0 → 普攻 0 击；这 1 次出手可以拿去发动道纹。
+    assert emp.attack_count == 0 and emp.action_count == 1
 
     r2 = _hire(engine, {
         "sub_action": "雇佣", "name": "合法员工", "blood_alloc": 17, "atk_bundles": 1,
@@ -325,8 +325,11 @@ def test_battle_end_blocked_until_all_pending_wages_resolved():
         })
     _start_battle(engine)
     engine.execute_action("round_start", {})
-    engine.execute_action("deploy_employee", {"name": "甲"})
-    engine.execute_action("deploy_employee", {"name": "乙"})
+    # 单行动契约：全员基础 1 次出手，同回合派两人要先补一次出手（通用修正，不是特例）。
+    engine.state.player.add_status(
+        StatusEffect(name="疯狂", value=1, remaining_rounds=-1, source="test"))
+    assert engine.execute_action("deploy_employee", {"name": "甲"})["success"]
+    assert engine.execute_action("deploy_employee", {"name": "乙"})["success"]
     _finish_round_without_monster_actions(engine)
 
     r1 = engine.execute_action("battle_end", {})

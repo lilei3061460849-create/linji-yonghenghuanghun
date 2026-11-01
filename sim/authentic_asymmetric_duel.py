@@ -420,6 +420,11 @@ def run_asymmetric_duel_playthrough(seed=42):
         be = e.execute_action("battle_end", {})
         b_lines.extend(BR.format_battle_end(be.get("result") or be))
         battle_blocks.append("\n".join(b_lines))
+        # 2026-10-31：第7场战终不再自动开启死斗（改由【最终的冠冕】世界事件承载）；
+        # 本脚本是死斗脚手架，显式走旧入口。
+        if not e.state.in_final_duel:
+            e._trigger_final_crown()
+
 
     # =========================================================================
     # 步骤 3：第 8 场 · 真正的跨副本不对称巅峰王座死斗（林渊 VS 苏星河）

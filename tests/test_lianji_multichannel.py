@@ -74,7 +74,7 @@ def test_monster_panel_old_name_normalized():
         "name": "旧面板怪", "blood_limit": 30, "attack_count": 1, "attack_power": 1,
         "dao_wen": {"血债": 2},
     })
-    assert list(m.dao_wen) == ["连击"]
+    assert list(m.dao_wen) == ["透支", "连击"]
     assert m.dao_wen["连击"].dao_wen.name == "连击"
 
 
@@ -88,7 +88,7 @@ def test_load_migration_renames_entity_daowen(tmp_path):
     # DaoWen.__post_init__ 已把实例名归一；此处模拟 pickle 旧档的键与实例名双旧
     p.dao_wen["血债"].dao_wen.name = "血债"
     assert e._migrate_legacy_xuezhai_names() is True
-    assert list(p.dao_wen) == ["连击"]
+    assert list(p.dao_wen) == ["透支", "连击"]
     assert p.dao_wen["连击"].dao_wen.name == "连击"
     assert p.dao_wen["连击"].x_value == 3
     assert e._migrate_legacy_xuezhai_names() is False  # 幂等

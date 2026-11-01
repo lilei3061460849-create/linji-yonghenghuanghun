@@ -15,6 +15,7 @@ def test_everyone_defaults_to_ten_independent_of_blood(blood):
     p = Entity("P", "怪物", blood_limit=blood)
     assert p.load_capacity == 10
     p.relics.clear()  # 怪物默认自带痛苦的偏爱，清除后再测试空页。
+    p.dao_wen.clear()  # 2026-11-01：出生自带的【透支】另占一页，本用例测空页口径。
     assert p.daowen_capacity == 10 and p.relic_capacity == 10
     grant_dw(p, "杀伐")
     p.relics.append(Relic("叠鳞甲", ""))
@@ -28,7 +29,8 @@ def test_everyone_defaults_to_ten_independent_of_blood(blood):
 
 def test_four_categories_share_pages_and_duplicates_do_not_charge_twice(tmp_path):
     e = engine(tmp_path); p = e.state.player
-    for i in range(7): grant_dw(p, f"纹{i}")
+    # 2026-11-01：【透支】出生自带占1页，故只再发6种道纹凑满10页。
+    for i in range(6): grant_dw(p, f"纹{i}")
     e.state.relics = [Relic("甲", "", enabled=False)]
     e.state.consumables = [Consumable("乙", "", 2, 2), Consumable("乙", "", 0, 2)]
     e.state.artifacts_owned = ["丙"]
@@ -44,7 +46,7 @@ def test_four_categories_share_pages_and_duplicates_do_not_charge_twice(tmp_path
 @pytest.mark.parametrize("kind", ["道纹", "遗物", "法器", "消耗品"])
 def test_transaction_rejects_eleventh_kind_without_charging_or_advancing_rng(tmp_path, monkeypatch, kind):
     e = engine(tmp_path); p = e.state.player
-    for i in range(10): grant_dw(p, str(i))
+    for i in range(9): grant_dw(p, str(i))  # 另1页是出生自带的【透支】
     e.state.shards = 20
     rng = e.dice._rng.getstate()
     def fake_action(action, params):
@@ -76,7 +78,7 @@ def test_full_pages_leave_map_item_and_allow_same_type_pickup(tmp_path):
     from engine.world_consumables import collect_consumables
     e = engine(tmp_path)
     world, npc = pickup_world(e)
-    for i in range(10): grant_dw(npc, str(i))
+    for i in range(9): grant_dw(npc, str(i))  # 另1页是出生自带的【透支】
     world.actors[npc.runtime_id].x = 3
     assert collect_consumables(world, e.state) == []
     assert world.map.locations["consumable_1"]["active"]
@@ -88,9 +90,9 @@ def test_full_pages_leave_map_item_and_allow_same_type_pickup(tmp_path):
 def test_relics_do_not_have_separate_enabled_quota(tmp_path):
     e = engine(tmp_path); p = e.state.player
     p.blood_limit = 1
-    e.state.relics = [Relic(str(i), "") for i in range(10)]
+    e.state.relics = [Relic(str(i), "") for i in range(9)]  # 另1页是出生自带的【透支】
     bind_resources(e.state)
-    assert e.state.set_active_relics([str(i) for i in range(10)])[0]
+    assert e.state.set_active_relics([str(i) for i in range(9)])[0]
     assert all(r.enabled for r in e.state.relics)
     assert e.state.toggle_relic("0") == (True, False)
     assert p.pages_used == 10  # 停用不释放页。
@@ -110,7 +112,7 @@ def test_player_map_full_pages_does_not_roll_back_movement(tmp_path):
     e = engine(tmp_path)
     world, npc = pickup_world(e)
     p = e.state.player
-    for i in range(10): grant_dw(p, str(i))
+    for i in range(9): grant_dw(p, str(i))  # 另1页是出生自带的【透支】
     world.actors[npc.runtime_id].x, world.actors[npc.runtime_id].y = 6, 6
     world.actors[p.runtime_id].x = 2
     e.state.world_state = world.to_dict()
@@ -126,4 +128,4 @@ def test_full_player_consumables_are_not_lost_in_character_snapshot(tmp_path):
     e.state.consumables = [Consumable("破障晶", "", 1, 2)]
     p = e._deserialize_entity_full(e._serialize_entity_full(e.state.player))
     assert p.consumables[0].name == "破障晶" and p.consumables[0].current_uses == 1
-    assert p.pages_used == 1
+    assert p.pages_used == 2  # 出生自带的【透支】占1页，消耗品占1页

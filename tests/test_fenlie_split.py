@@ -73,7 +73,7 @@ def _assert_minimal_creation(creation, creator):
 def test_cost_is_3x_and_x_is_the_number_of_minimal_creations():
     for x in (1, 2, 3, 5):
         calc = DaoWenEngine.resolve("分裂", x)
-        assert calc["cost_type"] == "流血"
+        assert calc["cost_type"] == "生命"
         assert calc["cost_hp"] == 3 * x
         assert calc["split_creations"] == x
         assert calc["creation_blood_limit"] == 1
@@ -117,7 +117,10 @@ def test_cast_pays_bleed_and_creates_exactly_x_minimal_creations():
 
 
 def test_creation_can_attack_once_but_cannot_act_twice_in_one_round():
-    engine, _, monster, _ = _engine()
+    engine, player, monster, _ = _engine()
+    # 单行动契约：造物只有 1 次出手。给施法者补一次出手，让本侧不至于因造物打完就整轮结束，
+    # 这样第二次尝试撞到的是「出手已用完」，而不是回终门禁。
+    player.add_status(StatusEffect(name="疯狂", value=1, remaining_rounds=-1, source="test"))
     assert _cast(engine, x=1)["success"] is True
     creation = engine.state.temp_friends[0]
     hp_before = monster.current_hp
@@ -183,7 +186,7 @@ def test_bleed_is_refused_atomically_when_current_hp_cannot_pay_3x():
     player.current_hp = 8  # X=3需支付9
     result = _cast(engine, x=3)
     assert result["success"] is False
-    assert "流血" in result.get("error", "")
+    assert "生命" in result.get("error", "")
     assert player.current_hp == 8
     assert engine.state.temp_friends == []
 

@@ -57,7 +57,7 @@ def test_escape_pays_five_atomically_and_forces_departure():
     player = engine.state.player
     _start_with_enemy(engine, Entity(name="拦路怪", entity_type="怪物",
                                      blood_limit=100, current_hp=100))
-    player.add_status(StatusEffect(name="疯狂", value=3, remaining_rounds=-1, source="test"))
+    player.add_status(StatusEffect(name="疯狂", value=4, remaining_rounds=-1, source="test"))
     assert player.action_count == 5
 
     r = engine.execute_action("declare_escape", {})
@@ -76,7 +76,7 @@ def test_escape_rejected_by_buli_and_final_duel():
     player = engine.state.player
     _start_with_enemy(engine, Entity(name="拦路怪", entity_type="怪物",
                                      blood_limit=100, current_hp=100))
-    player.add_status(StatusEffect(name="疯狂", value=3, remaining_rounds=-1, source="test"))
+    player.add_status(StatusEffect(name="疯狂", value=4, remaining_rounds=-1, source="test"))
     engine.state.relics.append(Relic(name="不离", effect=""))
     r = engine.execute_action("declare_escape", {})
     assert r["success"] is False
@@ -102,7 +102,7 @@ def test_escape_undeploys_employees_and_resets_retreat_marks():
     emp.deployed_at_round = 2
     emp.has_retreated = True
     engine.state.employees.append(emp)
-    player.add_status(StatusEffect(name="疯狂", value=3, remaining_rounds=-1, source="test"))
+    player.add_status(StatusEffect(name="疯狂", value=4, remaining_rounds=-1, source="test"))
 
     r = engine.execute_action("declare_escape", {})
     assert r["success"], r

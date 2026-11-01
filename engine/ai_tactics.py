@@ -406,6 +406,10 @@ class TacticalAI:
         enemy_gone = any(e.get("dead") for e in enemies
                          if e.get("alive_before", (e.get("hp_before") or 0) > 0))
         shield = max(0, p.get("shield_after", 0) - p.get("shield_before", 0))
+        # 【庇护】给的是「免疫失去生命的次数」，不是[格挡]：对 AI 而言同样是
+        # 保命资源，按盾口径计入（否则它会被当成空效果，甚至朝敌人发动）。
+        if "庇护" in (set(p.get("status_after", [])) - set(p.get("status_before", []))):
+            shield = max(shield, 1)
         heal = max(0, p.get("hp_after", 0) - p.get("hp_before", 0))
         cost = max(0, p.get("mana_before", 0) - p.get("mana_after", 0))
         mana_gain = max(0, p.get("mana_after", 0) - p.get("mana_before", 0))

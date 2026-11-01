@@ -47,7 +47,7 @@ def test_undefine_removes_definition_without_action_cost(tmp_path):
     assert e.execute_action("define_spell", {"spell_name": "先发制人"})["success"]
     assert e.execute_action("undefine_spell", {"spell_name": "先发制人"})["success"]
     assert p.spells == []
-    assert p.actions_used_this_round == used + 2, "先发制人（受到伤害前＋杀伐）是 2 阶"
+    assert p.actions_used_this_round == used + 1, "定义法术固定 1 次出手（阶数不预付出手）"
     assert not e.execute_action("undefine_spell", {"spell_name": "先发制人"})["success"]
 
 

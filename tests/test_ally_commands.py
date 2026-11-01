@@ -107,25 +107,25 @@ def test_player_self_cast_unaffected_backward_compatible():
     r = engine.execute_action("use_daowen", {"daowen_name": "庇护", "x": 3, "target": player.name})
     assert r["success"] is True
     assert player.current_mana == mana_before - 3, "玩家自身发动仍应正常扣除法力"
-    assert player.shield == 6, "庇护3=消耗3法力获得2*3=6点格挡"
+    assert player.get_status_value("庇护") == 3, "庇护3=消耗3法力，免疫非[目标]来源的下3次失去生命"
 
 
 # ========================================================================
 # 边界条件
 # ========================================================================
 
-def test_zero_attack_count_ally_still_has_two_actions_but_zero_hits():
-    """边界：2026-09-16 起出手次数全体固定 2，不再由攻击次数推导。
+def test_zero_attack_count_ally_still_has_one_action_but_zero_hits():
+    """边界：出手预算与攻击次数解耦，基础 1 次，不再由攻击次数推导。
 
-    旧口径下 0 攻击次数的盟友出手预算=0、压根动不了；新口径下它仍有 2 次出手，
-    只是[攻次]=[当前速度]=0 → 普攻 0 击（可以拿这 2 次出手去发动道纹，纯辅助定位成立）。
+    0 攻击次数的盟友出手预算不再是 0，它仍有 1 次出手，
+    只是[攻次]=[当前速度]=0 → 普攻 0 击（这 1 次出手可以拿去发动道纹，纯辅助定位成立）。
     本测试锁定：此类角色行动**不崩溃、不报"出手已用完"**，且确实打不出命中。
     """
     engine = _new_engine_with_enemy("zero_atk")
     friend = Entity(name="纯辅助", entity_type="朋友", blood_limit=30, current_hp=30,
                      attack_count=0, attack_power=0)
     engine.state.friends.append(friend)
-    assert friend.action_count == 2
+    assert friend.action_count == 1
     assert friend.effective_attack_count() == 0, "攻次=当前速度=0"
     r = resolve_player_attack(engine, "纯辅助", [])
     assert r["success"] is True, "有出手可用，不应被拒"

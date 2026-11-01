@@ -284,7 +284,9 @@ def test_combat_side_mutable_state_is_classified(engine):
 
 def test_sandbox_spec_stays_small_and_explicit():
     """隔离清单是白名单式审计点：条目突然变多通常意味着有人在扩大沙盒面。"""
-    assert len(sandbox.COMBAT_RUNTIME_ATTRS) <= 16
+    # 2026-10-31 复核：单行动契约/优先权闸门新增 _ended_turn_sides、_priority_passes 两项运行态，
+    # 上限随审计结果从 16 调到 18；再增加请先按白名单式审计确认语义。
+    assert len(sandbox.COMBAT_RUNTIME_ATTRS) <= 18
     assert set(sandbox.SWAPPED_ROOTS) == {"state", "dice"}
 
 

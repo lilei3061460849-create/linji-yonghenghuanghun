@@ -45,9 +45,13 @@ def test_tier2_spawn_and_real_multi_round_submission_contract(tmp_path, seed):
     for _ in range(2):
         assert e.execute_action("round_start", {
             "relic_choices": round_start_relic_choices(e)})["success"]
-        e.state.player.actions_used_this_round = e.state.player.action_count
-        result = _resolve_monster_turn(e)
-        assert result["success"], result
+        # 交替出手：驱动每步只结算一个怪物 actor，并把玩家侧优先权交出去；
+        # 反复推进到双方都无出手权（await_round_end）才允许回终。
+        for _ in range(12):
+            if e.state.combat_subphase == "await_round_end":
+                break
+            result = _resolve_monster_turn(e)
+            assert result["success"], result
         assert all(m.mutation_count >= 0 for m in e.state.enemies)
         end = e.execute_action("round_end", {})
         assert end["success"], end

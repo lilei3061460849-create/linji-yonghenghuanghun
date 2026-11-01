@@ -92,7 +92,12 @@ def chronicle(challenger_path: str, defender_path: str, seed: int,
         guard += 1
         if guard > 5:
             break
-    if (be.get("result") or {}).get("final_crown", {}).get("outcome") != "duel_start":
+    # 2026-10-31 规则变更：第7场战终不再自动开启死斗（改为【最终的冠冕】世界事件）。
+    # 本 harness 是"死斗/对局压力测试"脚手架，故显式走旧入口进入死斗。
+    if "final_crown" not in (be.get("result") or {}):
+        e._trigger_final_crown()
+    if (be.get("result") or {}).get("final_crown", {}).get("outcome") != "duel_start" \
+            and not e.state.in_final_duel:
         return {"error": "未进入死斗"}
 
     # ---- 逐手捕获（真实世界判定 = state 身份）----

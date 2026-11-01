@@ -9,7 +9,8 @@
 import os
 import sys
 
-from tests.setup_support import begin_battle, begin_round, finish_initial_daowen
+from tests.setup_support import (begin_battle, begin_round, finish_initial_daowen,
+                                 opponent_passes)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
@@ -143,8 +144,16 @@ def test_boundary_command_respects_action_budget():
     # 单轮行动窗口按战斗层预算校验，不拿角色总预算代替窗口预算。
     budget = e.combat.single_round_action_count(ally)
     for i in range(budget):
+        # 交替出手：两次主动行动之间必须经过敌方一次行动/跳过，否则第二次命令会
+        # 先被优先权闸门拦下，测不到朋友自己的出手预算。这里让敌方按规则【休整】。
+        if i:
+            back = opponent_passes(e)
+            assert back.get("success"), back
         r = e.execute_action("command_ally", {"ally_ref": "friend:0", "instruction": "攻击 靶怪"})
         assert r["success"], f"第{i+1}次指令应成功（窗口预算{budget}次）"
+
+    back = opponent_passes(e)
+    assert back.get("success"), back
     r2 = e.execute_action("command_ally", {"ally_ref": "friend:0", "instruction": "攻击 靶怪"})
     assert not r2["success"]
     assert "出手已用完" in r2["error"]

@@ -280,14 +280,15 @@ def test_battle_end_keeps_cost_status():
     from engine.models import StatusEffect
     e = _engine()
     p = e.state.player
-    p.status_effects.append(StatusEffect(name="流血", remaining_rounds=-1, value=3))
-    p.status_effects.append(StatusEffect(name="衰老", remaining_rounds=-1, value=2))
+    # 代价的现行名：生命／血限（旧名「流血」「衰老」已不参与结算）。
+    p.status_effects.append(StatusEffect(name="生命", remaining_rounds=-1, value=3))
+    p.status_effects.append(StatusEffect(name="血限", remaining_rounds=-1, value=2))
     p.status_effects.append(StatusEffect(name="庇护", remaining_rounds=2, value=1))
 
     e._action_battle_end({})
 
     names = [s.name for s in p.status_effects]
-    assert "流血" in names and "衰老" in names, "[代价]类不应被[战终]清除"
+    assert "生命" in names and "血限" in names, "[代价]类不应被[战终]清除"
     assert "庇护" not in names, "非代价的局内增益应被清除"
 
 

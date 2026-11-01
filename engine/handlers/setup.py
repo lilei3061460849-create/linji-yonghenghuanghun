@@ -143,7 +143,8 @@ def handle_setup_choose_initial_daowen(engine: Any, params: Dict[str, Any]) -> D
     choices = list(engine.state.pending_initial_daowen_choices)
     if not choices:
         return {"success": False, "error": "当前没有待选择的初始道纹发现"}
-    if engine.state.player.dao_wen:
+    # 2026-11-01：【透支】是出生自带，不算「已选过初始道纹」。
+    if any(name != "透支" for name in engine.state.player.dao_wen):
         return {"success": False, "error": "初始道纹已经选择，不能重复选择"}
     name = params.get("daowen_name", "")
     if name not in choices:
@@ -165,7 +166,8 @@ def handle_setup_choose_resonance(engine: Any, params: Dict[str, Any]) -> Dict[s
     """选择初始残韵"""
     if engine.state.player is None:
         return {"success": False, "error": "请先分配初始属性"}
-    if not engine.state.player.dao_wen:
+    # 出生自带的【透支】不满足前置；必须先完成初始道纹发现。
+    if not any(name != "透支" for name in engine.state.player.dao_wen):
         return {"success": False, "error": "选择残韵前必须先发现初始道纹"}
     if sum(engine.state.resonance.values()) > 0:
         return {"success": False, "error": "初始残韵已经选择，不能重复选择"}

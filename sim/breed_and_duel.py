@@ -283,6 +283,10 @@ def _run_breeder_duel_inner(e, challenger_path, defender_path, seed, cn, dn, db)
         guard += 1
         if guard > 5:
             break
+    # 2026-10-31：第7场战终不再自动开启死斗（改由【最终的冠冕】世界事件承载）；
+    # 本脚本是死斗脚手架，显式走旧入口。
+    if e.state.current_battle == 7 and "final_crown" not in (be.get("result") or {}):
+        be.setdefault("result", {})["final_crown"] = e._trigger_final_crown() or {}
     crown = (be.get("result") or {}).get("final_crown", {})
     if crown.get("outcome") != "duel_start":
         return None, 0, [f"未进入死斗: {crown.get('outcome')} {str(be.get('error',''))[:80]}"]

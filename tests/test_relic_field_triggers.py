@@ -89,7 +89,8 @@ def test_lamp_zero_from_atrophy_overflow(tmp_path):
     p.speed_limit = 6
     p.current_speed = 3
     p.shield = 0
-    e.combat.pay_numeric_cost(p, "萎缩", 6)
+    # 代价名现行写法：「速限」（旧名「萎缩」现指法限-X，不再压速限）。
+    e.combat.pay_numeric_cost(p, "速限", 6)
     assert p.speed_limit == 0
     assert p.current_speed == 0
     assert p.shield == 15

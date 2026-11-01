@@ -427,6 +427,25 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         if not self.state.hp_overflow_exempt(entity):
             entity.current_hp = min(entity.current_hp, entity.effective_blood_limit())
 
+    def charge_reaction_penalty(self, entity: Entity, label: str):
+        """【迟滞】等「行动所需出手+1」修正对回合外防御行动的扣账。
+
+        闪避、招架原本零出手；有该修正时按修正值真实记出手，剩余不足则本次防御
+        不能进行。返回 None＝可继续；返回 dict＝不能进行及原因。
+        怪物在非死斗战斗中不出手记账，与主动行动同一口径。
+        """
+        penalty = int(getattr(entity, "action_cost_penalty", 0) or 0)
+        if penalty <= 0:
+            return None
+        if entity.entity_type == "怪物" and not self.state.in_final_duel:
+            return None
+        budget = self.single_round_action_count(entity)
+        if entity.actions_used_this_round + penalty > budget:
+            return {"reason": f"【迟滞】{label}需{penalty}次出手",
+                    "budget": budget, "used": entity.actions_used_this_round}
+        entity.actions_used_this_round += penalty
+        return None
+
     def _note_dodge(self, entity: Entity, relic_target_ref: Optional[str] = None) -> dict:
         """闪避专属句：正文写「每次闪避后」的效果。失速/归零不在这里。"""
         extra = {}
@@ -606,14 +625,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         return None
 
     def _hostile_targeting(self, actor: Entity, target: Entity) -> bool:
-        """目标记录所用的阵营关系；养蛊场内不同怪物也彼此为敌。"""
-        if actor is None or target is None or actor is target:
-            return False
-        if getattr(self.state, "arena_ffa", False) \
-                and self.state.on_enemy_side(actor) and self.state.on_enemy_side(target):
-            return True
-        return ((self.state.on_player_side(actor) and self.state.on_enemy_side(target))
-                or (self.state.on_enemy_side(actor) and self.state.on_player_side(target)))
+        """目标记录所用的敌对关系：统一按阵营判定（阵营不同即敌对）。"""
+        return self.state.are_hostile(actor, target)
 
     def note_target_lock(self, actor: Entity, target: Entity) -> None:
         """记录本场真实的敌对目标选择；仅枚举候选目标不调用此入口。"""
@@ -810,8 +823,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             return bool(s and s.remaining_rounds > 0)  # -1 是次数型标记，不算真buff
         caster_has_bizhong_buff = _has_real_bizhong_buff(attacker)
         # 2026-10-12 用户令：必中X 改挂**目标**，故目标身上的【必中】debuff 同样封死闪避。
-        target_bizhonged = self.out_of_turn_blocked(target)
-        must_hit = (is_must_hit or caster_has_bizhong_buff or target_bizhonged
+        # 2026-11-01：必中＝发动者侧的「下X次选中」次数，选中即耗1次，该次目标不能
+        # 闪避/招架。目标身上的【必中】debuff 口径已废弃（不再夺走目标的行动）。
+        must_hit = (is_must_hit or caster_has_bizhong_buff
                     or self.consume_bizhong(attacker))
 
         # 血影（初拥之夜遗物，仅玩家自身持有）：非必中判定下，可支付生命10取消本次判定，是常规闪避外的另一选项
@@ -824,13 +838,26 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             result["note"] = "血影：支付生命10，本次判定被取消"
             return result
 
+        # 【束缚】限定只能施法（2026-11-01 用户令）：闪避、招架也是行动，同样不可选。
+        # 这不是新的旁路：束缚的旧闸门只管主动行动，零出手的响应行动原样沿用它。
+        if target.has_status("束缚"):
+            if dodge:
+                result["dodge_success"] = False
+                result["dodge_fail_reason"] = "受【束缚】影响，只能施法，无法闪避"
+            if parry:
+                result["parry_success"] = False
+                result["parry_fail_reason"] = "受【束缚】影响，只能施法，无法招架"
+            # 不能在这里返回：防御被封的本次攻击必须照常进入伤害结算。
+            dodge = parry = False
+
         # 闪避判定
         if dodge:
             if must_hit:
                 result["dodge_success"] = False
-                result["dodge_fail_reason"] = (
-                    "目标被【必中】封锁回合外行动，无法闪避" if target_bizhonged
-                    else "必中攻击无法闪避")
+                result["dodge_fail_reason"] = "必中攻击无法闪避"
+            elif (penalty := self.charge_reaction_penalty(target, "闪避")) is not None:
+                result["dodge_success"] = False
+                result["dodge_fail_reason"] = penalty["reason"]
             elif target.current_speed >= 1:
                 extra = self._spend_dodge_speed(target, dodge_relic_target_ref)
                 result["dodge_success"] = True
@@ -854,13 +881,15 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         # 逐击招架：与闪避一样先支付1速度，但只免疫攻击伤害，不取消判定。
         # 真刀（分配伤害>0）成功后返还1速度；空刀不返还，因此可骗取速度。
         if parry:
-            if target_bizhonged:
-                # 2026-10-12 用户令：招架是回合外行动，【必中】下不得进行。
-                # 注意与闪避不同——招架失败不退速度（它本来就没支付）。
+            if must_hit:
+                # 必中次数已消耗：本次选中不允许被动行动。招架失败不退速度。
                 result["parry_success"] = False
-                result["parry_fail_reason"] = "目标被【必中】封锁回合外行动，无法招架"
+                result["parry_fail_reason"] = "必中攻击无法招架"
             elif target.current_speed < 1:
                 result["parry_fail_reason"] = "速度不足"
+            elif (penalty := self.charge_reaction_penalty(target, "招架")) is not None:
+                result["parry_success"] = False
+                result["parry_fail_reason"] = penalty["reason"]
             else:
                 self.pay_resource(
                     target, "速度", 1,
@@ -1070,6 +1099,48 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                             "entity": entity.name, "detail": detail})
         return effects
 
+    def entity_has_spell_action_option(self, entity: Entity) -> bool:
+        """该角色是否还有可用于瞬发/自定义施法（含黄符授予）的道纹或法术。"""
+        if any(instance.can_use() for instance in entity.dao_wen.values()):
+            return True
+        grants = self.state.huangfu_grants()
+        return any((entity.runtime_id, spell.name) in grants for spell in entity.spells)
+
+    def entity_can_take_active_action(self, entity: Entity) -> bool:
+        """该角色本次是否还能主动行动；【束缚】者仅放行法术行动。"""
+        if self.can_act(entity):
+            return True
+        return (entity.has_status("束缚")
+                and self.can_act(entity, action_type="cast")
+                and self.entity_has_spell_action_option(entity))
+
+    def side_can_act(self, side: str) -> bool:
+        """该侧是否还有未用完的出手预算（存活且未撤退；get_all_* 已排除死者/撤退者）。
+
+        交替出手与回始初始优先权共用本判定，避免两套口径互相矛盾。
+        怪物同样按 `single_round_action_count` 计入预算（与出手门禁同一口径）。
+        """
+        if side in self._ended_turn_sides:
+            return False
+        entities = (self.state.get_all_player_side() if side == "player_side"
+                    else self.state.get_all_enemy_side())
+        # 通用规则：旁观者（`in_combat=False`）不在场上，不产生出手权。
+        # 养蛊场的观众就是这样一个实体，因此不需要任何模式开关。
+        return any(
+            e.is_alive and not getattr(e, "has_retreated", False)
+            and getattr(e, "in_combat", True)
+            and e.actions_used_this_round < self.single_round_action_count(e)
+            and self.entity_can_take_active_action(e)
+            for e in entities)
+
+    def _initial_priority_side(self) -> str:
+        """回始时该由哪一方先出手：优先轮回者侧，其次敌方，双方皆无余手则轮回者侧。"""
+        if self.side_can_act("player_side"):
+            return "player_side"
+        if self.side_can_act("opponent_side"):
+            return "opponent_side"
+        return "player_side"
+
     def round_start(self, relic_choices: Optional[dict] = None) -> dict:
         """
         回始结算
@@ -1243,7 +1314,11 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         self._priority_passes = 0
         self._ended_turn_sides.clear()
         if not self.state.in_final_duel:
-            self.state.duel_turn = "player_side"
+            # 回始的初始出手权交给实际还能行动的一方：轮回者侧可能因【沉溺】、
+            # 【封印】或出手预算为0而完全无法行动，此时把出手权留在无行动能力
+            # 的一侧会让怪物阶段永远无法开始。双方都不能行动时保持轮回者侧，
+            # 由统一子阶段门禁直接进入回终。
+            self.state.duel_turn = self._initial_priority_side()
         return {
             "round": self.state.current_round,
             "phase": "回始",
@@ -1790,11 +1865,13 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         普通行动判断，仍返回不可行动。被【封印】暂离者不在场上，任何行动都不可用。
         反应选择与自动触发不通过此主动行动门禁。
         """
+        # 2026-11-01：【必中】改口径为「目标无法行动」，任何行动都不可用。
+        # 【束缚】放行施法；法术由道纹构成，直接发动单个道纹同属施法（基础定义·施法）。
         return (entity.is_alive
                 and not self.state.is_sealed_away(entity)
                 and not self.chenni_round_blocked(entity)
                 and (not entity.has_status("束缚")
-                     or action_type in {"cast", "define_spell"}))
+                     or action_type in {"cast", "define_spell", "use_daowen"}))
 
     def yapo_target_lock_holder(self, attacker: Entity, target: Entity) -> Optional[Entity]:
         """返回限制这次选目标的【压迫】持有者；没有压迫限制则返回None。
@@ -1814,6 +1891,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
     def is_targetable(self, attacker: Entity, target: Entity) -> bool:
         """目标是否可被选中：统一结算飞行与压迫的目标限制。"""
+        if attacker is None or target is None:
+            return False
+        if not getattr(attacker, "in_combat", True) or not getattr(target, "in_combat", True):
+            return False  # 旁观者不在场上：既不选人，也不被选
         if self.state.is_sealed_away(attacker) or self.state.is_sealed_away(target):
             return False
         if self.yapo_target_lock_holder(attacker, target) is not None:

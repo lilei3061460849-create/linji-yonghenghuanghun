@@ -87,7 +87,8 @@ def test_gouhun_blocks_only_mana_not_mutation():
 
 def test_grant_reads_current_mana_limit_not_the_original_panel():
     _, combat, _, monster = _arena()
-    combat.pay_numeric_cost(monster, "枯竭", 6)
+    # 「枯竭」是下一次[战始]当前法力-X（延迟扣款），压法限要用「法限」。
+    combat.pay_numeric_cost(monster, "法限", 6)
     assert monster.mana_limit == 4
     combat.round_start()
     assert monster.current_mana == 4 and monster.mutation_count == 4

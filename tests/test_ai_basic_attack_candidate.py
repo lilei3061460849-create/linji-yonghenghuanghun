@@ -110,7 +110,7 @@ def test_empty_pool_means_zero_damage_output(engine, monkeypatch):
 
 
 def test_full_pool_shaifa_outscores_basic_attack(engine, monkeypatch):
-    """③修复（2026-09-10 法力按攻力折价）后的真实取舍——结论再次反转。
+    """③修复（2026-09-10 法力按攻力折价）后的真实取舍。
 
     上一轮（杀伐5X）结论「满池必选杀伐(40伤)>普攻(32伤)」已作废：那次打分
     没算「法力=攻力」的机会成本。③修复后花 8 法力 = 烧掉本场剩余全部攻力
@@ -119,21 +119,24 @@ def test_full_pool_shaifa_outscores_basic_attack(engine, monkeypatch):
         杀伐X=8   31.12 （40 伤 − 法力折价）
     满池**第一手**首选普攻（零耗 32 伤，保住后续攻力）。
 
-    2026-09-13 杀伐改 X² 后的续集：第一手仍是普攻，但第二手不再是空过——
-    杀伐X=8 从 31.12 涨到 65.68（8 法力换 64 伤），压过法力折价后依然划算。
-    先零耗打一发、再把剩下的池子一次性兑成平方伤害，正是 X² 想要的节奏。
+    2026-09-13 杀伐改 X² 后的续集：第一手仍是普攻，而杀伐X=8 的评分从 31.12
+    涨到 65.68（8 法力换 64 伤），因此它必须仍在候选里——只是单行动契约下
+    这一回合只有 1 次出手，打完就用完了。
     """
     monkeypatch.setenv(FLAG, "1")
     ai = TacticalAI(engine, verbose=True)
+    # 候选要看出手前那一手（单行动契约下打完就用完了，之后列表为空）。
+    kill_probe = ai._probe("杀伐")
+    kill_candidates = [c["label"] for c in ai._daowen_candidates()
+                       if c["label"].startswith("杀伐")]
     ai.take_action()
     decisions = [line for line in ai.log if "实时决策" in line]
     assert decisions, decisions
     assert "普攻" in decisions[0], decisions
-    kill_probe = ai._probe("杀伐")
-    kill_candidates = [c["label"] for c in ai._daowen_candidates()
-                       if c["label"].startswith("杀伐")]
     assert kill_probe and kill_probe.get("kind") == "damage", kill_probe
-    assert ai.remaining_actions() == 1
+    assert ai.remaining_actions() == 0, "单行动契约：这一手打完，本回合出手已用完"
+    # 满池第一手仍是普攻，但杀伐X=8（8 法力换 64 伤）必须仍是候选：
+    # 单行动契约只是让这一回合只有一次出手，不是把这张牌从候选里删掉。
     assert "杀伐X=8" in kill_candidates, {
         "kill_candidates": kill_candidates,
         "mana": ai.mana(),
@@ -141,17 +144,6 @@ def test_full_pool_shaifa_outscores_basic_attack(engine, monkeypatch):
         "cost_per_x": kill_probe.get("cost_per_x"),
         "x_value": ai.player.dao_wen["杀伐"].x_value,
         "can_use": ai.player.dao_wen["杀伐"].can_use(),
-    }
-    ai.take_action()
-    decisions = [line for line in ai.log if "实时决策" in line]
-    assert any("杀伐" in line for line in decisions[1:]), {
-        "decisions": decisions,
-        "mana": ai.mana(),
-        "remaining_actions": ai.remaining_actions(),
-        "dao_wen": list(ai.player.dao_wen),
-        "kill_probe": kill_probe,
-        "kill_candidates": kill_candidates,
-        "preview_rejected": ai.preview_rejected,
     }
 
 

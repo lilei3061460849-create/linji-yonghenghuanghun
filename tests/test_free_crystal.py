@@ -6,7 +6,7 @@
   萎缩/速度/失忆/异变/冷却八种数值代价；唯一不入池）；
 - 若目标是生命≤20%[血限]的怪物，代价结算后仍存活的，强制触发救赎事件
   （无视「没有原始怪物道纹」条件）；
-- 消耗品不占主动出手，1/1 用完即耗尽。
+- 1/1 用完即耗尽。
 """
 from __future__ import annotations
 
@@ -201,7 +201,8 @@ def test_settle_free_crystal_cost_covers_all_eight_types(tmp_path):
         amnesiac.dao_wen[name] = DaoWenInstance(
             DaoWen(name, "", "消耗", "X", f"{name}X"), x_value=1)
     detail = engine._settle_free_crystal_cost(amnesiac, "失忆", 10)
-    assert detail["paid"] == 3 and amnesiac.dao_wen == {}
+    # 2026-11-01：【透支】出生自带，同样算一张可被失忆指定的道纹（3＋1＝4）。
+    assert detail["paid"] == 4 and amnesiac.dao_wen == {}
 
     # 冷却：目标持有的全部道纹进入冷却10场
     cooled = Entity("冷却靶", "怪物", blood_limit=100, current_hp=100)
@@ -209,7 +210,8 @@ def test_settle_free_crystal_cost_covers_all_eight_types(tmp_path):
         cooled.dao_wen[name] = DaoWenInstance(
             DaoWen(name, "", "冷却", "X", f"{name}X"), x_value=1)
     detail = engine._settle_free_crystal_cost(cooled, "冷却", 10)
-    assert detail["cooled_daowen"] == ["固执", "束缚"]
+    # 2026-11-01：【透支】出生自带，也一起进冷却。
+    assert detail["cooled_daowen"] == ["透支", "固执", "束缚"]
     assert all(inst.cooldown_remaining == 10 for inst in cooled.dao_wen.values())
     assert all(not inst.can_use() for inst in cooled.dao_wen.values())
 

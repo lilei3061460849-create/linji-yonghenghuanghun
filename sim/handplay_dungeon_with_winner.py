@@ -190,6 +190,14 @@ def _wave_first(choices):
     choices.sort(key=lambda choice: 0 if "dodge_targets" in (choice.get("daowen") or {}) else 1)
     return choices
 
+
+def _wave_actors_first(e, actors):
+    """交替出手下逐个提交，因此排序必须作用于行动者本身（波及先于击杀者）。"""
+    def rank(actor):
+        option = _pick_monster_daowen(e, actor) if actor.get("daowen_options") else None
+        return 0 if option is not None and option.get("dodge_submission") == "per_target" else 1
+    return sorted(actors, key=rank)
+
 def manual_player_turn(e, log):
     """满法输出+理智闪避+庇护保命（玩家回合）。返回出手列表。"""
     p = e.state.player
@@ -246,96 +254,117 @@ def manual_player_turn(e, log):
     return out
 
 
-def _resolve_monster_turn_hand(e, log):
-    """怪物阶段：理智闪避 + 反应法术触发（先发制人/后发制人/生生不息）。"""
-    prepared = e.execute_action("prepare_monster_phase", {})
-    if not prepared.get("success"):
-        return prepared
-    choices = []
-    dodge_budget = 0
+def _build_actor_choice(e, prepared, actor, log, dodge_budget, *, decline_spells=False):
+    """构建单个行动者的完整提交（道纹契约 + 逐击闪避/反应法术）。"""
     refs = e.combat._combat_entity_refs()
     player_ref = "player:0"
-    for actor in prepared["result"]["actors"]:
-        dao = None
-        action_count = actor["base_attack_actions"]
-        hit_count = actor["base_hits_per_attack"]
-        if actor["daowen_options"]:
-            option = _pick_monster_daowen(e, actor)
-            if option is not None:
-                dao = _monster_daowen_submission(e, actor, option)
-                if option["resolves_as"] == "变形":
-                    enemy_index = int(actor["actor_ref"].split(":", 1)[1])
-                    hit_count = e.state.enemies[enemy_index].attack_power
-        monster = refs.get(actor["actor_ref"])
-        per_hit = monster.attack_power if monster is not None else 0
-        target_ref = choose_attack_target(actor["attack_target_options"], refs)
-        target_option = next((o for o in actor["attack_target_options"] if o["ref"] == target_ref), None)   # 无合法攻击目标时为None（引擎prepare已置base_attack_actions=0）
-        spell_mana_left = e.state.player.current_mana if e.state.player else 0
-        attacks = []
-        for _ in range(action_count):
-            hits = []
-            for _ in range(hit_count):
-                want_dodge = choose_dodge(e, per_hit, budget_used=dodge_budget)
-                if want_dodge:
-                    dodge_budget += 1
-                    log.append(f"    闪避{per_hit}伤命中（速度-1）")
-                hit = {"target_ref": target_ref, "dodge": want_dodge,
-                       "blood_shadow": False,
-                       "spell_choices": build_spell_choices(target_option, player_ref,
-                                                            mana_budget=spell_mana_left)}
-                if target_ref == player_ref:
-                    eligible = target_option.get("spell_options", {}) or {}
-                    for timing in ("before", "after"):
-                        for sp in eligible.get(timing, []) or []:
-                            if hit["spell_choices"].get(timing, {}).get(sp["spell_name"], {}).get("use"):
-                                spell_mana_left = max(0, spell_mana_left - 2)
-                if want_dodge and target_option.get("dodge_relic_target_options"):
-                    hit["dodge_relic_target_ref"] = target_option["dodge_relic_target_options"][0]["ref"]
-                hits.append(hit)
-            attacks.append({"hits": hits})
-        choices.append({"actor_ref": actor["actor_ref"], "daowen": dao,
-                        "attack_actions": attacks})
-    result = e.execute_action("resolve_monster_phase", {
-        "token": prepared["result"]["token"], "choices": _wave_first(choices)})
-    if not result.get("success"):
-        primary_error = result.get("error", "未知怪物阶段错误")
-        log.append(f"  怪物阶段首提被拒（状态已回滚）：{primary_error}")
-        # 兜底：拒绝全部法术，但仍完整提交道纹契约（含波及的dodge_targets）。
-        fallback = []
-        for actor in prepared["result"]["actors"]:
-            dao = None
-            hit_count_fb = actor["base_hits_per_attack"]
-            if actor["daowen_options"]:
-                option = _pick_monster_daowen(e, actor)
-                if option is not None:
-                    dao = _monster_daowen_submission(e, actor, option)
-                    if option["resolves_as"] == "变形":
-                        enemy_index = int(actor["actor_ref"].split(":", 1)[1])
-                        hit_count_fb = e.state.enemies[enemy_index].attack_power
-            target_ref = choose_attack_target(actor["attack_target_options"], refs)
-            target_option = next((o for o in actor["attack_target_options"] if o["ref"] == target_ref), None)   # 无合法攻击目标时为None（引擎prepare已置base_attack_actions=0）
-            attacks = [{"hits": [{
-                "target_ref": target_ref, "dodge": False, "blood_shadow": False,
-                "spell_choices": _decline_spells(target_option),
-            } for _ in range(hit_count_fb)]}
-                for _ in range(actor["base_attack_actions"])]
-            fallback.append({"actor_ref": actor["actor_ref"], "daowen": dao,
-                             "attack_actions": attacks})
+    dao = None
+    action_count = actor["base_attack_actions"]
+    hit_count = actor["base_hits_per_attack"]
+    if actor["daowen_options"]:
+        option = _pick_monster_daowen(e, actor)
+        if option is not None:
+            dao = _monster_daowen_submission(e, actor, option)
+            if option["resolves_as"] == "变形":
+                enemy_index = int(actor["actor_ref"].split(":", 1)[1])
+                hit_count = e.state.enemies[enemy_index].attack_power
+    monster = refs.get(actor["actor_ref"])
+    per_hit = monster.attack_power if monster is not None else 0
+    target_ref = choose_attack_target(actor["attack_target_options"], refs)
+    # 无合法攻击目标时为None（引擎prepare已置base_attack_actions=0）
+    target_option = next((o for o in actor["attack_target_options"] if o["ref"] == target_ref), None)
+    spell_mana_left = e.state.player.current_mana if e.state.player else 0
+    attacks = []
+    # 交替出手：一次提交＝一个行动，用道纹就不能再普攻（收到「攻击1＋道纹1」会被拒）。
+    for _ in range(0 if dao is not None else action_count):
+        hits = []
+        for _ in range(hit_count):
+            want_dodge = False if decline_spells else choose_dodge(
+                e, per_hit, budget_used=dodge_budget)
+            if want_dodge:
+                dodge_budget += 1
+                log.append(f"    闪避{per_hit}伤命中（速度-1）")
+            hit = {"target_ref": target_ref, "dodge": want_dodge,
+                   "blood_shadow": False,
+                   "spell_choices": _decline_spells(target_option) if decline_spells
+                   else build_spell_choices(target_option, player_ref,
+                                            mana_budget=spell_mana_left)}
+            if target_ref == player_ref and not decline_spells:
+                eligible = target_option.get("spell_options", {}) or {}
+                for timing in ("before", "after"):
+                    for sp in eligible.get(timing, []) or []:
+                        if hit["spell_choices"].get(timing, {}).get(sp["spell_name"], {}).get("use"):
+                            spell_mana_left = max(0, spell_mana_left - 2)
+            if want_dodge and target_option.get("dodge_relic_target_options"):
+                hit["dodge_relic_target_ref"] = target_option["dodge_relic_target_options"][0]["ref"]
+            hits.append(hit)
+        attacks.append({"hits": hits})
+    return ({"actor_ref": actor["actor_ref"], "daowen": dao,
+             "attack_actions": attacks}, dodge_budget)
+
+
+def _resolve_monster_turn_hand(e, log):
+    """怪物阶段：理智闪避 + 反应法术触发（先发制人/后发制人/生生不息）。
+
+    交替出手规则下每次只能提交一个行动者（见《规则正文》），因此按行动者逐个
+    prepare→resolve，直到敌方行动权用尽或轮回者阵亡。
+    """
+    results = []
+    dodge_budget = 0
+    while True:
+        player = e.state.player
+        if player is None or not player.is_alive:
+            break
+        prepared = e.execute_action("prepare_monster_phase", {})
+        if not prepared.get("success"):
+            if not results:
+                return prepared
+            break  # 行动权已交回轮回者侧：本轮怪物阶段正常结束
+        payload = prepared["result"]
+        actors = _wave_actors_first(e, list(payload["actors"]))
+        if not actors:
+            break
+        actor = actors[0]
+        choice, dodge_budget = _build_actor_choice(e, payload, actor, log, dodge_budget)
         result = e.execute_action("resolve_monster_phase", {
-            "token": prepared["result"]["token"], "choices": _wave_first(fallback)})
-        if result.get("success"):
-            log.append("  （首提被拒，已按同一token拒绝反应法术后重交成功）")
-        else:
-            result["primary_error"] = primary_error
-            result["error"] = (f"首提失败：{primary_error}；拒绝法术后的回退也失败："
-                               f"{result.get('error', '未知怪物阶段错误')}")
-            log.append(f"  怪物阶段回退仍被拒：{result.get('error')}")
-    # 记录法术触发
-    for hit in (result.get("result", {}).get("details") or []):
-        for lg in (hit.get("spell_logs") or []):
-            if lg.get("used"):
-                log.append(f"    法术【{lg['spell']}】→ {lg.get('daowen')}X={lg.get('x')} 对{lg.get('target')}")
-    return result
+            "token": payload["token"], "choices": [choice]})
+        if not result.get("success"):
+            primary_error = result.get("error", "未知怪物阶段错误")
+            log.append(f"  怪物阶段首提被拒（状态已回滚）：{primary_error}")
+            # 兜底：拒绝全部法术，但仍完整提交道纹契约（含波及的dodge_targets）。
+            fallback_choice, dodge_budget = _build_actor_choice(
+                e, payload, actor, log, dodge_budget, decline_spells=True)
+            result = e.execute_action("resolve_monster_phase", {
+                "token": payload["token"], "choices": [fallback_choice]})
+            if result.get("success"):
+                log.append("  （首提被拒，已按同一token拒绝反应法术后重交成功）")
+            else:
+                result["primary_error"] = primary_error
+                result["error"] = (f"首提失败：{primary_error}；拒绝法术后的回退也失败："
+                                   f"{result.get('error', '未知怪物阶段错误')}")
+                log.append(f"  怪物阶段回退仍被拒：{result.get('error')}")
+                return result
+        results.append(result)
+        # 记录法术触发
+        for hit in (result.get("result", {}).get("details") or []):
+            for lg in (hit.get("spell_logs") or []):
+                if lg.get("used"):
+                    log.append(f"    法术【{lg['spell']}】→ {lg.get('daowen')}X={lg.get('x')} 对{lg.get('target')}")
+        if (result.get("result") or {}).get("player_dead"):
+            break
+    if not results:
+        return {"success": True, "result": {"details": [], "player_dead": False},
+                "monster_actions": 0}
+    last = results[-1]
+    merged = [d for r in results
+              for d in ((r.get("result") or {}).get("details") or [])]
+    out = dict(last)
+    out["result"] = dict(last.get("result") or {})
+    out["result"]["details"] = merged
+    out["result"]["player_dead"] = any(
+        (r.get("result") or {}).get("player_dead") for r in results)
+    out["monster_actions"] = len(results)
+    return out
 
 
 def load_winner(e, snapshot):

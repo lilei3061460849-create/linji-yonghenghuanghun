@@ -410,6 +410,11 @@ def run_inter_dungeon_playthrough():
         be = e2.execute_action("battle_end", {})
         b_lines.extend(BR.format_battle_end(be.get("result") or be))
         battle_blocks.append("\n".join(b_lines))
+        # 2026-10-31：第7场战终不再自动开启死斗（改由【最终的冠冕】世界事件承载）；
+        # 本脚本是死斗脚手架，显式走旧入口。
+        if not e2.state.in_final_duel:
+            e2._trigger_final_crown()
+
 
     # =========================================================================
     # 第三阶段：第8场跨副本最终死斗（扭曲都市·叶清弦 VS 罪孽都市·苏星河）

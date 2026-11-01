@@ -557,6 +557,9 @@ def run_full_handplay_session(seed=42):
 
         b_end = e.execute_action("battle_end", {})
         assert b_end["success"], b_end
+        # 2026-10-31：战终不再自动开启死斗；本手操脚本显式走旧入口。
+        if not e.state.in_final_duel:
+            e._trigger_final_crown()
         shards_gained = b_end["result"].get("shards_gained", 0)
         b_lines.append("")
         b_lines.append("[战终]")

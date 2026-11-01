@@ -97,37 +97,30 @@ def test_bizhong_self_buff_makes_all_your_targets_unable_to_dodge():
     engine.combat.round_start()
     # 玩家对自己施必中2（self-buff，不需要target）
     calc = DaoWenEngine.resolve("必中", 2)
-    # 2026-10-12 用户令增强：效果键改名 bizhong_target_debuff（正式口径是给目标挂
-    # debuff）；target=None 的内部调用仍退回 self-buff 老行为。
-    assert "bizhong_target_debuff" in calc and calc["cost_mutation"] == 2
+    # 2026-11-01 用户令：必中＝发动者侧「接下来X次选中」，不做目标 debuff。
+    assert "bizhong_gain" in calc and calc["cost_mutation"] == 2
     engine.combat.apply_daowen_effect("必中", calc, player, target=None)
-    assert player.has_status("必中")
-    st = next(s for s in player.status_effects if s.name == "必中")
-    assert st.remaining_rounds == 2
+    assert engine.combat.bizhong_remaining(player) == 2
     assert player.mutation_count == 2
-    # 玩家打怪，dodge=True也无法闪避（is_must_hit=False 但 attacker 有必中buff）
+    # 玩家打怪：每次选中扣1次，该次目标无法闪避
     hp0 = m.current_hp
     engine.combat.resolve_attack(player, m, hit_index=0, is_must_hit=False, dodge=True)
-    assert m.current_hp < hp0, "必中姿态下目标无法闪避"
-    # 手动tick两轮验证状态递减
-    st.tick()
-    assert st.remaining_rounds == 1 and player.has_status("必中")
-    st.tick()
-    assert st.remaining_rounds == 0
-    player.status_effects = [s for s in player.status_effects if s.name != "必中" or s.remaining_rounds > 0]
-    assert not player.has_status("必中")
+    assert m.current_hp < hp0, "必中次数下目标无法闪避"
+    assert engine.combat.bizhong_remaining(player) == 1
+    # 次数耗尽后闪避恢复
+    engine.combat.resolve_attack(player, m, hit_index=0, is_must_hit=False, dodge=True)
+    assert engine.combat.bizhong_remaining(player) == 0
 
 
 def test_bizhong_refreshes_duration():
-    """重复施放必中X=延长（取max），不叠加层数。"""
+    """重复施放必中X＝次数叠加（下X次选中），不再有持续回合。"""
     combat = CombatEngine(GameState(), DiceEngine(seed=1))
     player = Entity(name="贾凡", entity_type="轮回者", blood_limit=60, current_hp=60)
     calc1 = DaoWenEngine.resolve("必中", 1)
     combat.apply_daowen_effect("必中", calc1, player, target=None)
     calc2 = DaoWenEngine.resolve("必中", 3)
     combat.apply_daowen_effect("必中", calc2, player, target=None)
-    s = next(s for s in player.status_effects if s.name == "必中")
-    assert s.remaining_rounds == 3
+    assert combat.bizhong_remaining(player) == 1 + 3
     assert player.mutation_count == 1 + 3
 
 
@@ -147,7 +140,12 @@ def test_no_bizhong_auto_dodge_still_works():
     engine.combat.reset_monster_activation()
     engine.state.current_round = 0
     engine.combat.round_start()
-    results = resolve_monster_phase(engine.combat, {m.name: "全力"}, dodge=True)
+    # 交替出手：一次提交＝一个行动，故「先发道纹、再普攻」分两步提交。
+    # 用通用【蓄锐·增】把这只怪的出手预算补到 2，不引入任何特例分支。
+    from tests.setup_support import grant_extra_actions
+    grant_extra_actions(m, 1)
+    resolve_monster_phase(engine.combat, {m.name: "全力"}, dodge=True)
+    results = resolve_monster_phase(engine.combat, {m.name: None}, dodge=True)
     hits = [d for d in results if d.get("attacker") == m.name]
     assert hits and hits[0].get("dodge_success") is True
 

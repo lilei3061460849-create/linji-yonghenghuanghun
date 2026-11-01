@@ -43,7 +43,9 @@ class DamageHealComparisonTests(unittest.TestCase):
 
     def test_healing_is_not_limited_by_actual_enemy_hp_loss(self):
         p, enemy = self.cast_pair(2, 1, shield=100)
-        self.assertEqual((enemy.current_hp, enemy.shield, p.current_hp), (100, 96, 54))
+        # 杀伐是「失去生命」不是【伤害】：格挡分文不吸，血照掉；
+        # 再生仍按自身X回复（不受目标实际失血是否被吸收影响）。
+        self.assertEqual((enemy.current_hp, enemy.shield, p.current_hp), (96, 100, 54))
 
     def test_bad_death_blocks_heal_not_damage(self):
         p, enemy = self.cast_pair(2, 1, block_heal=True)

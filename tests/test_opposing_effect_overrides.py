@@ -1,6 +1,7 @@
 import math
 import pytest
 from engine.models import Entity,StatusEffect
+from tests.setup_support import opponent_passes
 from tests.test_daowen_wiring import _engine,_give,_monster
 
 
@@ -84,6 +85,9 @@ def test_real_dingxing_cast_locks_post_payment_panel_then_later_force_can_overri
     power=p.current_mana;hits=p.current_speed
     p.current_mana=0;p.current_speed=1
     assert p.effective_attack_power()==power and p.effective_attack_count()==hits
+    # 交替出手：两次主动行动之间必须经过敌方一手，否则第二次发动会被优先权闸门拦下。
+    back=opponent_passes(e)
+    assert back.get('success'),back
     result=e.execute_action('use_daowen',{'daowen_name':'全速','x':1,'target_ref':'player:0'})
     assert result['success'],result
     assert p.effective_attack_count()==p.speed_limit

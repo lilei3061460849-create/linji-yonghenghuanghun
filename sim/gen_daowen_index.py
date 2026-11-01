@@ -128,7 +128,7 @@ def target_label(name):
     if name == "波及":
         return "X个（显式提交）"
     if name == "共罪":
-        return "2个（显式提交）"
+        return "X个非自身（显式提交）"
     if name == "超频":
         return "需显式选定"
     if name == "唤潮":
@@ -172,7 +172,11 @@ def region_daowen_order(region: str) -> list:
 CATEGORY = {}
 for n in SHAFA_LOOP_DAOWEN:
     CATEGORY[n] = "shaifa"
-CATEGORY["共罪"] = "other"
+CATEGORY["共罪"] = "unimpl"
+CATEGORY["怜悯"] = "other"
+# 2026-11-01：【透支】移出杀伐闭环、改为任意角色出生自带；【操作】【迟滞】新增通用道纹
+# （闭环连接词待定，暂列「其他通用」）。
+CATEGORY["透支"] = "other"
 for n in ORIGINAL_MONSTER_DAOWEN:
     CATEGORY[n] = "original"
 for n in MONSTER_TRANSFORM_DAOWEN:
@@ -190,12 +194,14 @@ for n in FIRST_EMBRACE_DAOWEN:
 for n, region in UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.items():
     CATEGORY[n] = "unimpl"
 
+# 「其他通用」按显式顺序渲染（不属于杀伐闭环、也不属于任何副本闭环的通用道纹）。
+OTHER_DAOWEN = ["怜悯", "透支"]
+
 assert set(CATEGORY) == (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)), (
     set(CATEGORY) ^ (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)))
 
 # 特殊注记（引擎机制，非数值）
 NOTES = {
-    "共罪": "两个目标之外，发动者始终追加一个支付名额；即使发动者已入选也追加。先按名额平分，再按实体合并扣款；特殊机制代价不分摊。",
     "血契": "按你的名义支付量让目标额外支付X倍同种资源，不是代付；目标资源不足扣至0，生命不足正常命零。血契不能局外生效。",
     "萎缩": "只禁止获得速度，不削减速限，也不阻止失去或支付速度；与超频是同域反转，既有增殖边保留为显式分叉。",
     "唯一": "任何方式成功使用过的道纹都进入历史；持续X内不能再次使用。唯一替换原尘封草案。",
@@ -207,6 +213,9 @@ NOTES = {
     "招魂": "唤回者为[造物]，[战终]消失。",
     "真理": "初拥之夜选项5授予的血族专属道纹。X=陈述句数：提出X句陈述，目标须逐句言明真理，任一句无法言明则无法开口，持续X回合；真伪由DM逐句裁定。冷却2场战斗。",
     "原初": "原初新定义：支付异变5X，借用目标身上自身未拥有的随机X种道纹；旧进化接口的指定借一种尚未同步，不可当作新规则已实现。",
+    "透支": "不在任何闭环内：任意角色出生自带，X每次自选。",
+    "操作": "发动时须预指定目标那一次非施法行动（攻击／跳过／使用消耗品）；未预指定的到该行动时作废、代价不退。",
+    "迟滞": "每一次行动所需出手+1，含闪避、招架这类零出手的回合外行动。",
 }
 
 def loop_chain(loop_name):
@@ -231,7 +240,7 @@ A("")
 draft_summary = (f"（含{len(DRAFT_DAOWEN)}种尚未接入运行时的草案节点）" if DRAFT_DAOWEN else "")
 A(f"本文件是**当前索引收录道纹（{len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)}种）的完整索引**{draft_summary}。道纹条目按归属分类：")
 category_summary = (
-    f"杀伐闭环（通用核心）{len(SHAFA_LOOP_DAOWEN)} ｜ 其他通用道纹 1 ｜ 原始怪物道纹 {len(ORIGINAL_MONSTER_DAOWEN)} ｜ "
+    f"杀伐闭环（通用核心）{len(SHAFA_LOOP_DAOWEN)} ｜ 其他通用道纹 {len(OTHER_DAOWEN)} ｜ 原始怪物道纹 {len(ORIGINAL_MONSTER_DAOWEN)} ｜ "
     f"怪物转化道纹 {len(MONSTER_TRANSFORM_DAOWEN)} ｜ 副本专属 "
     f"{'/'.join(str(len(region_daowen_order(r))) for r in REGION_EXCLUSIVE_DAOWEN)} ｜ "
     f"鲛族专属 {sum(len(pool) for pool in RACE_EXCLUSIVE_DAOWEN.values())}"
@@ -264,7 +273,7 @@ A("## 目录")
 A("")
 A("- [总览表](#总览表)")
 A(f"- [杀伐闭环（通用核心·{len(SHAFA_LOOP_DAOWEN)}）](#杀伐闭环通用核心{len(SHAFA_LOOP_DAOWEN)})")
-A("- [其他通用道纹（1）](#其他通用道纹1)")
+A(f"- [其他通用道纹（{len(OTHER_DAOWEN)}）](#其他通用道纹{len(OTHER_DAOWEN)})")
 A(f"- [原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）](#原始怪物道纹{len(ORIGINAL_MONSTER_DAOWEN)})")
 A(f"- [怪物转化道纹（{len(MONSTER_TRANSFORM_DAOWEN)}）](#怪物转化道纹{len(MONSTER_TRANSFORM_DAOWEN)})")
 for _r in REGION_EXCLUSIVE_DAOWEN:
@@ -292,7 +301,7 @@ CAT_LABEL = {
 }
 for name in sorted(DaoWenEngine._registry, key=lambda n: (list(CATEGORY).index(n), n)):
     pass
-order = (list(SHAFA_LOOP_DAOWEN) + ["共罪"] + sorted(ORIGINAL_MONSTER_DAOWEN)
+order = (list(SHAFA_LOOP_DAOWEN) + ["共罪", "怜悯"] + sorted(ORIGINAL_MONSTER_DAOWEN)
          + sorted(MONSTER_TRANSFORM_DAOWEN)
          + [n for r in REGION_EXCLUSIVE_DAOWEN for n in region_daowen_order(r)]
          + [n for pool in RACE_EXCLUSIVE_DAOWEN.values() for n in sorted(pool)]
@@ -343,8 +352,9 @@ section(f"杀伐闭环（通用核心·{len(SHAFA_LOOP_DAOWEN)}）", list(SHAFA_
                     "通用核心道纹为人类侧基础概念，局外可经学习/残韵获得。"],
         loop="杀伐闭环")
 
-section("其他通用道纹（1）", ["共罪"],
-        note_lines=["该类道纹不属于杀伐闭环，但属于当前可用通用道纹。"])
+section(f"其他通用道纹（{len(OTHER_DAOWEN)}）", OTHER_DAOWEN,
+        note_lines=["不属于杀伐闭环，也不属于任何副本闭环。",
+                    "【透支】不在任何闭环内：任意角色出生自带，X每次自选。"])
 
 section(f"原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）", sorted(ORIGINAL_MONSTER_DAOWEN),
         note_lines=[
@@ -418,7 +428,7 @@ A("5. **血族专属转换消耗品**：【逆命筹】当前尚无专属获取�
 A("6. **初拥专属**：【真理】仅由初拥之夜选项5授予，不可通过局外学习、【典当】发现或残韵获得。")
 A("7. **角色道纹唯一**：同名道纹不重复存在；通过残韵获得的道纹X按自由规则（自由控X）自定义。")
 A("8. **道纹默认局内发动**；局外发动须条文明示，当前明示项为【真理】【唤潮】【蜃景】；【唤潮】【蜃景】仅作用于开放地图。")
-A("9. **自由控X（自由规则的下属条文，不单独成规）**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】的X还受合法目标数封顶；【共罪】固定选择2个目标，X只决定支付与持续。")
+A("9. **自由控X（自由规则的下属条文，不单独成规）**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】的X还受合法目标数封顶；【共罪】的目标数随X（X个非自身目标），持续∞。")
 A("")
 
 out = ROOT / "全道纹索引.md"

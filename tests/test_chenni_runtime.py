@@ -5,6 +5,7 @@ from engine.gamedata import (
     REGION_EXCLUSIVE_DAOWEN, UNIMPLEMENTED_DAOWEN, learnability_error,
 )
 from engine.models import DaoWen, DaoWenInstance, Entity, Relic, StatusEffect
+from tests.setup_support import opponent_passes
 
 
 def _engine():
@@ -153,6 +154,7 @@ def test_blocked_player_has_no_action_or_round_cooldown_tick():
     _give(monster, "大梦")
     cast = _cast(engine, "沉溺", 1, "player:0")
     assert cast["success"] is True, cast
+    opponent_passes(engine)  # 交替出手：敌方【跳过】后轮回者才再次获得出手权
     _give(player, "封印")
     defined = engine.execute_action("define_spell", {"spell_name": "镇魔印"})
     assert defined["success"] is True, defined
@@ -221,12 +223,15 @@ def test_dameng_extra_rounds_consume_blocks_before_any_round_settlement():
     engine.state.opponent_relics = [
         Relic("守夜灯", "每经历一个回合获得当前世界回合数的法力")]
     engine.state.current_round = 10
+    # 本用例要连续发动两次（沉溺→大梦），按通用预算规则临时+1出手。
+    player.add_status(StatusEffect("疯狂", -1, 2, "test"))
     _give(player, "沉溺")
     _give(player, "大梦")
     target.add_status(StatusEffect("测试减益", 1, 1, "test"))
     player.add_status(StatusEffect("玩家状态", 3, 3, "test"))
 
     assert _cast(engine, "沉溺", 2, "enemy:0")["success"] is True
+    opponent_passes(engine)  # 交替出手：两次主动发动之间由敌方【跳过】
     result = _cast(engine, "大梦", 3, "enemy:0")
     assert result["success"] is True, result
     effects = result["execution"]["effects"]

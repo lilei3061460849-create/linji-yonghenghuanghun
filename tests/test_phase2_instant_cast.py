@@ -25,7 +25,7 @@ from engine.spell_execution import (
     ExecutionStatus, InterruptReason, Lifecycle, SpellExecution, StepResult, StepStatus,
     TriggerType,
 )
-from tests.setup_support import grant_extra_actions
+from tests.setup_support import advance_to_player_turn, grant_extra_actions
 from tests.test_dragon_heart import _new_engine, _start_with_enemy
 
 # 返回 dict 里是 .value 字符串；这里取枚举值做断言，避免在测试里手写字面量。
@@ -143,8 +143,11 @@ def test_instant_single_step():
     assert r["execution_status"] == EXECUTION_COMPLETED
     assert _statuses(resp) == [STEP_COMPLETED]
     # 伤害：落到目标身上的数值 = 执行日志里的实际伤害，且 >0
-    dealt = sum(e.get("actual_damage", 0) for e in r["steps"][0]["execution"]["effects"]
-                if e.get("type") == "damage")
+    # 杀伐是「使目标直接失去X²生命」（不吃格挡），日志里记作 target_life_loss，
+    # 不是 damage；两者都要计入实际掉血。
+    effects = r["steps"][0]["execution"]["effects"]
+    dealt = sum(e.get("actual_damage", 0) for e in effects if e.get("type") == "damage")
+    dealt += sum(e.get("lost", 0) for e in effects if e.get("type") == "target_life_loss")
     assert dealt > 0 and foe.current_hp == hp0 - dealt
     # 法力：杀伐 cost=X（与道纹引擎计算一致）
     calc = _expected_damage(engine, 2, foe)
@@ -493,7 +496,8 @@ def test_define_spell_defaults_battle_and_rejects_instant():
     assert spell.lifecycle == LIFECYCLE_BATTLE
     assert spell.trigger == "受到伤害前"
 
-    player.actions_used_this_round = 0
+    advanced = advance_to_player_turn(engine)
+    assert advanced["success"], advanced
     ok2 = engine.execute_action("define_spell", {"spell": {
         "name": "常驻反击", "required_daowen": ["杀伐"],
         "trigger_condition": "受到伤害前", "effect_flow": "发动杀伐X于攻击者",
@@ -501,7 +505,8 @@ def test_define_spell_defaults_battle_and_rejects_instant():
     assert ok2["success"], ok2
     assert next(s for s in player.spells if s.name == "常驻反击").lifecycle == LIFECYCLE_PERMANENT
 
-    player.actions_used_this_round = 0
+    advanced = advance_to_player_turn(engine)
+    assert advanced["success"], advanced
     bad = engine.execute_action("define_spell", {"spell": {
         "name": "瞬斩", "required_daowen": ["杀伐"],
         "trigger_condition": "瞬发", "effect_flow": "发动杀伐X于目标"}})

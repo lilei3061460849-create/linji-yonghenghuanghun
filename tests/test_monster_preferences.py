@@ -145,6 +145,8 @@ def test_removed_trigger_traits_stay_out_of_dao_wen_pool():
 
     DaoWenEngine.register_all()
     active = set(DaoWenEngine.list_all())
-    removed = set(RELICIZED_DAOWEN_SLOTS) | {"坠落", "眩晕", "飞行"}
+    # 飞行仍是现行原始道纹（全道纹索引「飞行」行 + 正文飞行X），不属于已退役名单。
+    removed = set(RELICIZED_DAOWEN_SLOTS) | {"坠落", "眩晕"}
 
     assert not (active & removed)
+    assert "飞行" in active

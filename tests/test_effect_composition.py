@@ -72,9 +72,17 @@ def _refill(engine):
 
 
 def _target_for(engine, piece: str):
+    """用 target_ref 指目标：同名怪物可能不止一只，按名字挑会被引擎拒绝。"""
+    refs = engine.combat._combat_entity_refs()
     if piece in _TARGET_SELF:
-        return engine.state.player.name
-    return next((e.name for e in engine.state.enemies if e.is_alive), None)
+        for ref, entity in refs.items():
+            if entity is engine.state.player:
+                return ref
+        return None
+    for ref, entity in refs.items():
+        if entity.is_alive and entity in engine.state.enemies:
+            return ref
+    return None
 
 
 def _cast(engine, piece: str, x: int = 1):
@@ -83,7 +91,7 @@ def _cast(engine, piece: str, x: int = 1):
     target = _target_for(engine, piece)
     params = {"daowen_name": name, "x": x}
     if target:
-        params["target"] = target
+        params["target_ref"] = target
     result = engine.execute_action("use_daowen", params)
     if result.get("success") is False and "出手" in str(result.get("error", "")):
         # 出手预算用完：开一个新回合（回合是规则的一部分，不是绕过）
@@ -396,7 +404,8 @@ def test_engine_stays_usable_after_a_tripped_fuse_in_a_combination(tmp_path, mon
     engine = build_battle_engine(tmp_path, name="combo_fuse")
     _grant(engine, *PIECES.values())
     _refill(engine)
-    monkeypatch.setattr(ResolutionContext, "MAX_DEPTH", 2)
+    # 单发道纹只进入一层结算：把上限压到 0 才能真正逼出保险丝。
+    monkeypatch.setattr(ResolutionContext, "MAX_DEPTH", 0)
     enemy = next(e for e in engine.state.enemies if e.is_alive)
     result = engine.execute_action("use_daowen",
                                    {"daowen_name": "杀伐", "x": 1, "target": enemy.name})

@@ -25,6 +25,56 @@ from ..models import MONSTER_MANA_RELIC
 
 
 class CostPaymentMixin:
+    # ==================== 【操作】：目标的下一次非施法行动由施法者决定 ====================
+
+    def caozuo_status_of(self, entity: Entity):
+        """返回该实体身上仍生效的【操作】状态。"""
+        return next((s for s in entity.get_status_effects("操作") if not s.is_expired), None)
+
+    @staticmethod
+    def caozuo_attack_matches(order: dict, hits) -> bool:
+        ordered_hits = order.get("hits")
+        if not isinstance(hits, list):
+            return False
+        if ordered_hits is None:
+            return all(isinstance(hit, dict) and hit.get("target_ref") == order["target_ref"]
+                       for hit in hits)
+        if len(hits) != len(ordered_hits):
+            return False
+        for hit, ordered in zip(hits, ordered_hits):
+            if not isinstance(hit, dict):
+                return False
+            if any(hit.get(key) != ordered.get(key)
+                   for key in ("target_ref", "damage", "dodge", "parry", "blood_shadow")):
+                return False
+        return True
+
+    def caozuo_check(self, entity: Entity, kind: str, payload=None):
+        """【操作】生效时，目标的下一次非施法行动必须等于施法者的预指定。
+
+        返回 None＝放行（含作废/消费两种情形）；返回 dict＝拒绝本次行动。
+        施法（`cast` 系列）不在【操作】管辖内，调用方不经过本函数。
+        """
+        status = self.caozuo_status_of(entity)
+        if status is None:
+            return None
+        order = status.effect_data.get("order")
+        if order is None:
+            # 施法者没有预指定：效果作废，代价不退，目标照常行动。
+            entity.status_effects.remove(status)
+            return None
+        matched = ((kind == "攻击" and self.caozuo_attack_matches(order, payload))
+                   or (kind == "使用消耗品" and order.get("action") == kind
+                       and order.get("item") == payload)
+                   or (kind == "跳过" and order.get("action") == kind))
+        if not matched:
+            caster = status.effect_data.get("caster_name") or "施法者"
+            return {"success": False,
+                    "error": (f"{entity.name}受【操作】影响：下一次行动必须按{caster}预指定的"
+                              f"【{order.get('action')}】执行")}
+        entity.status_effects.remove(status)
+        return None
+
     def pay_daowen_numeric_cost(self,name,calc,caster,*,dragon_heart_use=0,cost_share_target_ref=""):
         """同一份数值代价结算：正常效果与被闪避/血影免去效果的发动共用，不双付。"""
         cost_spec = None
@@ -69,6 +119,7 @@ class CostPaymentMixin:
         """冷却是发动代价，目标闪避也已支付；重复记账幂等，不清空原冷却。"""
         if calc.get("cost_type") != "冷却":
             return {}
+        self._refuse_blocked_payment(caster, "冷却")
         inst=caster.dao_wen.get(name)
         if inst is None:
             return {}
@@ -129,6 +180,23 @@ class CostPaymentMixin:
                  "amount": 10, "tags": {"relic", "must_hit"},
                  "parent_event_id": cost_ctx.event_id if cost_ctx else None})
         return {"target": target.name, **detail}
+
+    def blocked_payment_types(self, entity: Entity) -> set[str]:
+        """【怜悯】封锁的支付途径（一种；随状态到期清除）。"""
+        if entity is None:
+            return set()
+        return {normalize_payment_type(status.effect_data.get("blocked_type", ""))
+                for status in getattr(entity, "status_effects", ())
+                if status.name == "怜悯" and not status.is_expired
+                and status.effect_data.get("blocked_type")}
+
+    def payment_blocked(self, entity: Entity, cost_type: str) -> bool:
+        """该实体当前是否被禁止用这种途径支付。"""
+        return normalize_payment_type(cost_type) in self.blocked_payment_types(entity)
+
+    def _refuse_blocked_payment(self, entity: Entity, cost_type: str) -> None:
+        if self.payment_blocked(entity, cost_type):
+            raise ValueError(f"{entity.name}无法使用{normalize_payment_type(cost_type)}支付（【怜悯】生效中）")
 
     SHAREABLE_RESOURCE_TYPES = frozenset(RESOURCE_TYPES)
     # 兼容旧代码引用；现在只有资源支付可由共罪平分，特殊机制代价不在其中。
@@ -220,6 +288,7 @@ class CostPaymentMixin:
         cost_type = normalize_payment_type(cost_type)
         if cost_type not in set(RESOURCE_TYPES) | {"枯竭", "异变"}:
             raise ValueError(f"{cost_type}不是可支付的数值资源或特殊机制代价")
+        self._refuse_blocked_payment(payer, cost_type)
         if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
             raise ValueError("数值代价必须是非负整数")
         ally = None
@@ -600,6 +669,7 @@ class CostPaymentMixin:
         """
 
         cost_type = normalize_payment_type(cost_type)
+        self._refuse_blocked_payment(payer, cost_type)
         nominal = amount if nominal_amount is None else nominal_amount
         if (not isinstance(nominal, int) or isinstance(nominal, bool) or nominal < 0
                 or not isinstance(amount, int) or isinstance(amount, bool) or amount < 0):

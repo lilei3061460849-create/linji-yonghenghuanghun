@@ -156,7 +156,8 @@ def test_gongzui_shares_resources_in_both_directions_but_not_special_mechanisms(
         {"target_ref": "enemy:1", "dodge": False, "blood_shadow": False},
     ])
     assert result["success"] is True, result
-    assert player.current_mana == 98
+    # 2026-10-31 用户裁定：共罪改支付流血（生命）5X，X=2 → 10 点生命，不再扣法力。
+    assert player.current_hp == 70 and player.current_mana == 100
     assert player.get_status_value("共罪") == 1
     assert first.get_status_value("共罪") == second.get_status_value("共罪") == 1
 

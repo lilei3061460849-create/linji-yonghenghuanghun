@@ -12,7 +12,8 @@ Spell 没有 lifecycle 实例属性时按 permanent 处理（类属性默认值�
 import os
 import sys
 
-from tests.setup_support import begin_battle, begin_round, finish_initial_daowen
+from tests.setup_support import (advance_to_player_turn, begin_battle, begin_round,
+                                 finish_initial_daowen)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -57,7 +58,10 @@ def _define(e: GameEngine, name: str, **extra):
     definition = {"name": name, "required_daowen": ["再生"],
                   "trigger_condition": "失去生命后", "effect_flow": "发动再生X于自身"}
     definition.update(extra)
-    e.state.player.actions_used_this_round = 0
+    # 交替出手：定义法术是一次真实出手，连续定义要先把出手权按规则交回轮回者
+    # （敌方【休整】/回终/回始），不再靠手改 actions_used_this_round 绕过账本。
+    advanced = advance_to_player_turn(e)
+    assert advanced["success"], advanced
     return e.execute_action("define_spell", {"spell": definition})
 
 
@@ -113,7 +117,8 @@ def test_undefine_spell_removes_custom_definition_without_action_cost():
     _start_battle(e)
     _give_daowen(e, "再生")
     assert _define(e, "急救").get("success")
-    e.state.player.actions_used_this_round = 0
+    advanced = advance_to_player_turn(e)
+    assert advanced["success"], advanced
     result = e.execute_action("undefine_spell", {"spell_name": "急救"})
     assert result["success"], result
     assert result["result"]["removed"]["custom"] is True

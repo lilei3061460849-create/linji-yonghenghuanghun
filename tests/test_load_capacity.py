@@ -48,6 +48,7 @@ def _engine():
 
 def test_low_blood_does_not_limit_capacity():
     p = Entity("T", "轮回者", blood_limit=1)
+    p.dao_wen.clear()  # 2026-11-01：出生自带的【透支】另占一页，本用例测空页口径。
     assert p.load_capacity == p.daowen_capacity == p.relic_capacity == 10
     p.blood_limit = 900
     assert p.load_capacity == 10
@@ -105,6 +106,7 @@ def test_resonance_transform_keeps_holder_count_and_stays_within_capacity():
     p.blood_limit = 30                      # 额度 1 种
     p.dao_wen.clear()
     monster = Entity("M", "怪物", blood_limit=50, current_hp=50)
+    monster.dao_wen.clear()  # 出生自带的【透支】不参与本用例的换纹计数
     _grant(monster, "全力")                 # 残韵转化的是**目标怪物**的道纹
     e.state.enemies = [monster]
     e.state.resonance["反转"] = 1

@@ -47,6 +47,8 @@ def test_player_changes_only_target_keeps_x_and_own_cost_then_rule_ends():
     assert a.current_hp==97  # a支付篡改3，不是被杀伐打中。
     assert b.current_hp==96 and p.current_mana==before-2
     assert not p.has_status('篡改')
+    # 单行动契约：一轮一次出手；先让敌方【跳过】把优先权交回来，才能再打一手。
+    assert e.execute_action('skip',{'actor_ref':'enemy:0'})['success']
     result=use(e,a)
     assert result['success'] and a.current_hp==93
 

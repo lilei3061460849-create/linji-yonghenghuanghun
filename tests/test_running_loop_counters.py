@@ -60,6 +60,8 @@ def test_undying_floor_does_not_make_seal_reaction_fail():
 
 def test_relic_supply_can_be_removed_after_prefix_and_before_later_cost():
     e,p,a=setup('relic');_give(a,'豪夺');a.current_mana=a.mana_limit=100
+    # 豪夺＝支付 5X 真碎片夺 1 件遗物（不抢碎片），付不起就发不动。
+    a.shards=5
     assert paid_step(e,p,'透支',p,{'cost_channel':'衰老'}).status==StepStatus.COMPLETED
     assert paid_step(e,p,'杀伐',a).status==StepStatus.COMPLETED
     blood=p.blood_limit

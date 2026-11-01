@@ -16,7 +16,7 @@ import os
 import sys
 import pytest
 
-from tests.setup_support import finish_initial_daowen
+from tests.setup_support import advance_to_player_turn, finish_initial_daowen
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
@@ -63,9 +63,16 @@ def test_step1_mana_payment_and_rejection(tmp_path):
     assert p.current_mana == 6, "10 - 4 = 6"
 
     # 非法付费：试图发动杀伐10（需10法力，当前仅6）
+    # 交替出手：两次主动行动之间必须经过敌方一手，否则第二次会被优先权闸门拦下，
+    # 测不到「法力不足」这条拒绝理由。
+    advanced = advance_to_player_turn(e)
+    assert advanced["success"], advanced
     res_fail = e.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 10, "target_ref": "enemy:0"})
     assert res_fail["success"] is False
-    assert "法力不足" in res_fail["error"]
+    # 代价按《规则正文·代价》「付不起即不可发动」整笔支付：拒绝文案是
+    # 「无法完整承担法力10（可支付6）」，不再有旧的「法力不足」字样。
+    assert "无法完整承担法力10" in res_fail["error"], res_fail["error"]
+    assert "可支付6" in res_fail["error"], res_fail["error"]
     assert p.current_mana == 6, "扣费失败法力不得改变"
 
 
@@ -199,11 +206,12 @@ def test_step8_duel_alternation_and_exhaustion(tmp_path):
     e = _setup_engine(tmp_path)
     e.state.in_final_duel = True
     p = e.state.player
-    # DM裁定 2026-09-10：轮回者出手固定2次，速限不再换算出手数。
-    # 要造出「4动 vs 2动」的出手差，只能用【疯狂】+2。
+    # 《规则正文》第7条/第191行：所有角色每回合基础 1 次出手，再叠加通用修正。
+    # 要造出「一方多手、一方少手」的出手差，只能用【疯狂】这类通用修正（+2）。
     p.add_status(StatusEffect(name="疯狂", value=2, remaining_rounds=-1, source="test"))
-    opp = Entity(name="对手", blood_limit=42, current_hp=42, speed_limit=6, entity_type="轮回者")  # 2动
+    opp = Entity(name="对手", blood_limit=42, current_hp=42, speed_limit=6, entity_type="轮回者")
     e.state.enemies = [opp]
 
-    assert e.combat.single_round_action_count(p) == 4
-    assert e.combat.single_round_action_count(opp) == 2
+    assert e.combat.single_round_action_count(opp) == 1  # 基础1，无修正
+    assert e.combat.single_round_action_count(p) == 3     # 基础1 + 疯狂2
+    assert e.combat.single_round_action_count(p) > e.combat.single_round_action_count(opp)

@@ -123,6 +123,8 @@ def test_dodge_trigger_fires_on_successful_dodge():
     combat = CombatEngine(state, DiceEngine())
 
     refs = combat._combat_entity_refs()
-    before_shield = player.shield
+    # 【庇护】给的是免疫次数（status value），不再加[格挡]——格挡只来自遗物。
+    before_shelter = player.get_status_value("庇护")
     combat.resolve_attack(enemy, player, dodge=True, entity_refs=refs)
-    assert player.shield > before_shield, "成功闪避后「闪避时」反应应触发并加盾"
+    assert player.get_status_value("庇护") > before_shelter, \
+        "成功闪避后「闪避时」反应应触发（庇护免疫次数+X，时长X回合）"

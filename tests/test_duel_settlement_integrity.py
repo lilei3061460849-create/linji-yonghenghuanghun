@@ -81,25 +81,20 @@ def test_gain_shield_negative_never_below_zero():
     assert p.shield == 0
 
 
-def test_bihu_chain_may_exceed_blood_limit():
-    """实战回归：连续【庇护】叠盾**允许**越过血限（曾实测 68/36）。"""
+def test_shield_has_no_upper_bound():
+    """格挡没有上限：正文只写「可抵消等量伤害」，从未要求不超过[血限]。
+
+    庇护已按现行正文改为「免疫非[目标]来源的下 X 次失去生命」，不再产生格挡；
+    格挡的现有来源是遗物（避风铃、自缚等），因此这条护栏下沉到 Entity 口径直接钉住。
+    """
     engine = _engine("shield_chain")
     p = engine.state.player
-    p.dao_wen["庇护"] = DaoWenInstance(
-        DaoWen(name="庇护", formula="庇护X", cost_type="消耗",
-               cost_formula="X", effect_formula=""), x_value=0)
-    engine.execute_action("round_start", {})
     blood = p.blood_limit
-    p.current_mana = 999                      # 只测格挡累积，不让法力成为瓶颈
-    # 庇护X → 2X 格挡；累计 2*(5+30) = 70 > 血限 60，允许越过
-    for x in (5, 30):
-        p.actions_used_this_round = 0   # 只测格挡累积，不让出手次数成为瓶颈
-        engine.execute_action("use_daowen", {
-            "daowen_name": "庇护", "x": x, "target_ref": "player:0",
-            "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
-        })
+    p.gain_shield(35)
+    p.gain_shield(35)
     assert p.shield == 70, f"格挡应累积到 70，实际 {p.shield}"
     assert p.shield > blood, "格挡允许越过血限，不得被压帽"
+    assert p.gain_shield(-99) == 0, "扣盾只做下限 0 保护"
 
 
 # ------------------------------------------------------- 2. X=0 = 拒绝发动

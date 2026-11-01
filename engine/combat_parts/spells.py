@@ -672,7 +672,7 @@ class SpellReactionMixin:
     def pay_daowen_shard_cost(self, actor: Entity, name: str, calc: dict,
                               x: int) -> Optional[str]:
         """现役道纹的真／假碎片资源支付；两个池始终分开。"""
-        if name != "连击":
+        if not calc.get("cost_real_shards") and not calc.get("cost_fake_shards"):
             return None
         for resource, key in (("碎片", "cost_real_shards"), ("假碎片", "cost_fake_shards")):
             need = int(calc.get(key, 0) or 0)
@@ -1528,7 +1528,10 @@ class SpellReactionMixin:
             return False
         if self.state.on_player_side(holder) == self.state.on_player_side(target):
             return False
-        dmg = calc.get("target_damage") or calc.get("total_damage") or 0
+        # 反打同样是「选中敌方为目标」，敌方照常享有闪避窗口；
+        # 失去生命类效果（杀伐的生命-X²）也算需要权衡的威胁值。
+        dmg = (calc.get("target_damage") or calc.get("total_damage")
+               or calc.get("target_life_loss") or 0)
         if not dmg:
             return False
         if self.bizhong_remaining(holder) > 0:

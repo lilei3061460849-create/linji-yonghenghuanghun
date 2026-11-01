@@ -22,6 +22,10 @@ class DiceEngine:
         self._history: list[dict] = []     # 历史记录（可追溯）
         self.rerolls_pending: int = 0      # 逆命筹：剩余可重投次数（下次 auto_roll 起逐次消耗）
         self._rng = random.Random(seed)    # 引擎自身的随机源；传入seed可复现
+        # 世界事件（地图刷新/自主单位）专用随机源：与战斗骰流隔离。
+        # 若共用 _rng：随机刷一个冠冕就会挪动后续每一次战斗骰，回放不可比对；
+        # 而且 auto_roll 会消耗逆命筹——地图刷新不该花掉玩家的重投。
+        self._world_rng = random.Random(f"{seed}:world")
         self._seed = seed
     
     def create_pool(self, pool_name: str, options: list[Any]) -> dict:
@@ -89,6 +93,28 @@ class DiceEngine:
     def randrange(self, n: int) -> int:
         """委托给引擎自身的随机源，返回 [0, n) 之间的随机整数（供需要rng对象的调用方使用）"""
         return self._rng.randrange(n)
+
+    def world_roll(self, pool_name: str, options: list[Any], context: str = "") -> dict:
+        """世界事件专用自动结算：独立骰流、不消耗逆命筹、不扰动战斗骰。
+
+        结果结构与 auto_roll 一致（含 record.selected_index），便于审计与复现。
+        """
+        if not options:
+            raise ValueError(f"池 '{pool_name}' 不能为空")
+        pool_info = self.create_pool(pool_name, options)
+        number = self._world_rng.randrange(pool_info["count"]) + 1
+        result = self.resolve_pool(pool_name, number)
+        result["auto"] = True
+        result["channel"] = "world"
+        result["context"] = context
+        result["seed"] = self._seed
+        result["rerolled"] = False
+        if self._history:
+            self._history[-1]["auto"] = True
+            self._history[-1]["channel"] = "world"
+            self._history[-1]["context"] = context
+            self._history[-1]["seed"] = self._seed
+        return result
 
     def set_rerolls(self, count: int) -> None:
         """登记剩余可重投次数（可叠加）。"""

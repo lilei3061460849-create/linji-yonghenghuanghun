@@ -182,3 +182,30 @@ def test_survival_tiebreak_prefers_later_death():
     assert r is not None
     # 推演全败（同 -1）→ 死得晚的「乙」胜出（非提案序首选）
     assert r["action"] == "cast_乙", f"存活裁决失效: {r}"
+
+
+def test_candidate_merge_tolerates_list_params():
+    """提案去重键要能吃下列表参数（2026-10-31 死斗崩溃回归）。
+
+    【波及】的参数是 `dodge_targets=[{...}, {...}]`，【冰冻】是
+    `freeze_daowen=[...]`，【流动/遗忘】是 `status_indices={ref: [...]}`。
+    旧实现用 `tuple(sorted(params.items()))` 拼键，列表一进元组就
+    `TypeError: unhashable type: 'list'`，整场死斗直接崩在 WinOnlyAI 里。
+    """
+    from sim.win_only_ai import _candidate_key, _merge_ladder
+
+    bobo = {"action": "cast_daowen", "label": "波及X=1",
+            "params": {"daowen_name": "波及", "x": 1,
+                       "dodge_targets": [{"target_ref": "enemy:0", "dodge": False},
+                                         {"target_ref": "enemy:1", "dodge": False}]}}
+    ice = {"action": "cast_daowen", "label": "冰冻X=2",
+           "params": {"daowen_name": "冰冻", "x": 2,
+                      "freeze_daowen": ["杀伐", "再生"]}}
+    # 两个带列表的候选必须各有各的键
+    assert len({_candidate_key(bobo), _candidate_key(ice)}) == 2
+    # 列表与等价元组归一到同一个键（参数容器不同不该被当成两个动作）
+    assert (_candidate_key({"action": "a", "params": {"t": [1, 2]}})
+            == _candidate_key({"action": "a", "params": {"t": (1, 2)}}))
+    # 爬梯席并提案席：重复的不进，新的进，全程不抛 TypeError
+    merged = _merge_ladder([bobo], [dict(ice), dict(bobo)])
+    assert [c["label"] for c in merged] == ["波及X=1", "冰冻X=2"]

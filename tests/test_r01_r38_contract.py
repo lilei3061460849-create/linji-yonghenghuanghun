@@ -13,6 +13,7 @@ from engine.combat import CombatEngine
 from engine.daowen import DaoWenEngine
 from engine.dice import DiceEngine
 from engine.models import Consumable, DaoWen, DaoWenInstance, Entity, GameState, Relic, StatusEffect
+from sim.optional_actions import round_start_relic_choices
 
 
 def _engine(tmp_path, seed: int = 7) -> GameEngine:
@@ -139,20 +140,43 @@ def test_r11_r17_normal_two_stage_monster_choices(tmp_path):
     assert [o["name"] for o in actor["daowen_options"]] == ["杀伐"]
     assert {t["name"] for t in actor["attack_target_options"]} == {"轮回者", "友军"}
 
-    choices = [{
-        "actor_ref": "enemy:0",
-        "daowen": {"name": "杀伐", "target_ref": "friend:0", "dodge": False, "blood_shadow": False},
-        "attack_actions": [{"hits": [
-            {"target_ref": "player:0", "dodge": True, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}},
-            {"target_ref": "friend:0", "dodge": False, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}},
-        ]}],
-    }]
+    # 单行动契约：一次出手只能是道纹，或一次攻击；「道纹＋攻击」打包提交被拒。
+    friend_hp = friend.current_hp
     result = engine.execute_action("resolve_monster_phase", {
-        "token": prepared["result"]["token"], "choices": choices,
+        "token": prepared["result"]["token"],
+        "choices": [{
+            "actor_ref": "enemy:0",
+            "daowen": {"name": "杀伐", "target_ref": "friend:0", "dodge": False, "blood_shadow": False},
+            "attack_actions": [],
+        }],
     })
-    assert result["success"]
-    assert player.current_speed == 8
-    assert friend.current_hp < 40
+    assert result["success"], result.get("error")
+    assert friend.current_hp == friend_hp - 4, "杀伐X=2 → 生命-4（不是伤害，闪避与否都直接掉血）"
+
+    # 下一回合改走攻击：每段命中各自带显式闪避选择（玩家闪、友军不闪）。
+    assert engine.execute_action("skip", {"actor_ref": "player:0"})["success"]
+    assert engine.execute_action("round_end", {})["success"]
+    assert engine.execute_action("round_start", {
+        "relic_choices": round_start_relic_choices(engine)})["success"]
+    assert engine.execute_action("skip", {"actor_ref": "player:0"})["success"]
+    prepared2 = engine.execute_action("prepare_monster_phase", {})
+    assert prepared2["success"], prepared2.get("error")
+    result2 = engine.execute_action("resolve_monster_phase", {
+        "token": prepared2["result"]["token"],
+        "choices": [{
+            "actor_ref": "enemy:0",
+            "daowen": None,
+            "attack_actions": [{"hits": [
+                {"target_ref": "player:0", "dodge": True, "blood_shadow": False,
+                 "spell_choices": {"before": {}, "after": {}}},
+                {"target_ref": "friend:0", "dodge": False, "blood_shadow": False,
+                 "spell_choices": {"before": {}, "after": {}}},
+            ]}],
+        }],
+    })
+    assert result2["success"], result2.get("error")
+    assert player.current_speed == 8, "闪避一段 → 扣 1 点当前速度"
+    assert friend.current_hp < friend_hp - 4, "未闪避的命中照常扣血"
 
 
 def test_r11_r17_boundary_relic_and_first_aid_require_explicit_choices(tmp_path):
@@ -212,10 +236,9 @@ def test_r11_r17_aoe_and_control_dodge_are_explicit(tmp_path):
     actor = prepared["result"]["actors"][0]
     option = actor["daowen_options"][0]
     assert option["dodge_submission"] == "per_target"
-    attacks = [{"hits": [
-        {"target_ref": "player:0", "dodge": False, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}},
-        {"target_ref": "player:0", "dodge": False, "blood_shadow": False, "spell_choices": {"before": {}, "after": {}}},
-    ]}]
+    # 单行动契约：一笔提交只能是道纹，这里不再附带攻击块
+    # （dodge_targets 的合法性校验与是否附带攻击无关）。
+    attacks = []
     incomplete = [{"actor_ref": "enemy:0",
                    "daowen": {"name": "波及", "dodge": False, "blood_shadow": False},
                    "attack_actions": attacks}]
@@ -279,7 +302,7 @@ def test_r11_r17_impact_dodge_targets_are_bound_to_prepare_snapshot(tmp_path):
                 {"target_ref": "friend:1", "dodge": False, "blood_shadow": False},
                 {"target_ref": "player:0", "dodge": False, "blood_shadow": False},
             ]},
-            "attack_actions": [{"hits": []}],
+            "attack_actions": [],
         }],
     })
     assert not illegal["success"]
@@ -295,7 +318,7 @@ def test_r11_r17_impact_dodge_targets_are_bound_to_prepare_snapshot(tmp_path):
                 {"target_ref": "player:0", "dodge": False, "blood_shadow": False},
                 {"target_ref": "friend:0", "dodge": False, "blood_shadow": False},
             ]},
-            "attack_actions": [{"hits": []}],
+            "attack_actions": [],
         }],
     })
     assert resolved["success"]
@@ -310,9 +333,15 @@ def test_r11_r17_aoe_dodge_does_not_leak_into_next_resolution(tmp_path):
                     speed_limit=2, current_speed=2, attack_count=0, attack_power=1)
     first.speed_limit = first.current_speed = 2
     engine.state.enemies.append(second)
-    player.attack_count = 2
     _dw(player, "波及", 2)      # 面板固定 X=2 → 每次同时提交甲/乙（2026-10-09 起 X 下限 repealed）
     _dw(player, "杀伐", 1)
+
+    def _end_round():
+        """单行动契约：一轮一次出手；敌方向【跳过】即双方耗尽，可回终开新回合。"""
+        assert engine.execute_action("skip", {"actor_ref": "enemy:0"})["success"]
+        assert engine.execute_action("round_end", {})["success"]
+        assert engine.execute_action("round_start", {
+            "relic_choices": round_start_relic_choices(engine)})["success"]
 
     # 第一次：甲怪闪避不被标记，乙怪被标记（同一笔提交里逐目标闪避互不影响）
     one = engine.execute_action("use_daowen", {
@@ -321,9 +350,10 @@ def test_r11_r17_aoe_dodge_does_not_leak_into_next_resolution(tmp_path):
             {"target_ref": "enemy:1", "dodge": False, "blood_shadow": False},
         ],
     })
-    assert one["success"]
+    assert one["success"], one.get("error")
     assert not first.has_status("波及") and first.current_speed == 1
     assert second.has_status("波及")
+    _end_round()
 
     two = engine.execute_action("use_daowen", {
         "daowen_name": "波及", "x": 2, "dodge_targets": [
@@ -331,13 +361,13 @@ def test_r11_r17_aoe_dodge_does_not_leak_into_next_resolution(tmp_path):
             {"target_ref": "enemy:1", "dodge": False, "blood_shadow": False},
         ],
     })
-    assert two["success"]
+    assert two["success"], two.get("error")
     assert first.has_status("波及")
 
     # 三次结算互相独立：本回合各行动不残留旧闪避状态
     assert "_skip_aoe_names" not in vars(engine.combat)
-    # 杀伐打乙怪：甲怪有波及标记 → 数值平分（杀伐1X=5伤 → 2+3）
-    engine.state.player.actions_used_this_round = 0   # 轮回者每回合固定2次，前序行动已用满
+    _end_round()
+    # 杀伐打乙怪：甲怪有波及标记 → 数值平分（杀伐1X → 1点，甲0乙1）
     three = engine.execute_action("use_daowen", {
         "daowen_name": "杀伐", "x": 1, "target_ref": "enemy:1",
         "dodge": False, "blood_shadow": False,
@@ -519,7 +549,7 @@ def test_r25_r31_illegal_sculpture_and_live_battle_end(tmp_path):
 
 # R32-R38：持续语义与死斗
 
-def test_r32_r38_normal_deform_robbery_and_transform_restore(tmp_path):
+def test_r32_r38_normal_deform_burn_and_transform_restore(tmp_path):
     """2026-10-11 用户令：【衰败】删除，原「衰败发动不立即掉血、回始扣10%」段落移除。"""
     engine = _engine(tmp_path)
     player, monster = _controlled_combat(engine)
@@ -530,16 +560,18 @@ def test_r32_r38_normal_deform_robbery_and_transform_restore(tmp_path):
     engine.combat.round_end()
     assert monster.blood_limit == before_limit - 6
 
+    # 【烁金】（2026-10-31 取代已删【抢劫】）：只烧目标碎片，施法者不入账，无失速分支。
     monster.shards = 3
     engine.state.shards = 0
-    robbery = DaoWenEngine.resolve("抢劫", 1, target=monster, caster=player)
+    burn = DaoWenEngine.resolve("烁金", 1, target=monster, caster=player)
     speed = monster.current_speed
-    engine.combat.apply_daowen_effect("抢劫", robbery, player, monster)
-    assert monster.shards == 0 and engine.state.shards == 3 and monster.current_speed == speed
+    engine.combat.apply_daowen_effect("烁金", burn, player, monster)
+    assert monster.shards == 0 and engine.state.shards == 0 and monster.current_speed == speed
     monster.current_speed = 4
-    engine.combat.apply_daowen_effect("抢劫", robbery, player, monster)
-    assert monster.current_speed == 3  # 无碎片时才失去X速度
-    assert engine.state.shards == 3
+    engine.combat.apply_daowen_effect("烁金", burn, player, monster)
+    assert monster.shards == 0, "碎片不足减到0，不记负债"
+    assert monster.current_speed == 4, "烁金不再附带失速"
+    assert engine.state.shards == 0
 
     # 【变形】2026-09-17 用户令重做：互换**当前速度 ↔ 当前法力**
     # （旧版写遗留字段 attack_power / attack_count，属性统一后对轮回者无效）
