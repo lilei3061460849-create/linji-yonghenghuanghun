@@ -345,7 +345,12 @@ def _monster_choices(engine: GameEngine, actors: list[dict],
     """
     choices = []
     for actor in actors:
-        option = actor["daowen_options"][0] if actor.get("daowen_options") else None
+        targets_ = actor.get("attack_target_options") or []
+        # 【透支】只把资源换成法力、不改变战场：能普攻就不为它花掉唯一次出手
+        # （与 sim 的怪物选道纹口径一致）。
+        options = [o for o in (actor.get("daowen_options") or [])
+                   if not (o.get("name") == "透支" and targets_)]
+        option = options[0] if options else None
         dao = daowen_submission(option) if option else None
         action_count = int(actor.get("base_attack_actions") or 0)
         hit_count = int(actor.get("base_hits_per_attack") or 0)
@@ -358,7 +363,10 @@ def _monster_choices(engine: GameEngine, actors: list[dict],
                 index = int(str(actor["actor_ref"]).split(":", 1)[1])
                 hit_count = int(engine.state.enemies[index].attack_power)
         targets = actor.get("attack_target_options") or []
-        if not targets or action_count <= 0:
+        if dao is not None:
+            # 单行动契约：一手只能是道纹或一次攻击，不能同时提交。
+            attack_actions: list[dict] = []
+        elif not targets or action_count <= 0:
             attack_actions: list[dict] = []
         else:
             target_option = targets[0]

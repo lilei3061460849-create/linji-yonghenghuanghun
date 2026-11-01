@@ -72,6 +72,11 @@ def _pick_monster_daowen(engine, actor):
     （DM裁定2026-08-18：自保→输出→控制→机制，含半血/收割/连续压制修正）。
     本文件仅保留候选过滤与空候选回退的原有语义。
     """
+    # 2026-11-01：【透支】只把资源换成法力、不改变战场。自动角色能普攻时不为它
+    # 花掉唯一次出手，故把这类补给项从候选里摘掉（摘空 → 调用方照常提交攻击）。
+    if actor.get("attack_target_options"):
+        actor["daowen_options"] = [o for o in actor.get("daowen_options", [])
+                                   if o.get("name") not in ("透支",)]
     from sim.monster_targets import pick_monster_daowen_option
     opts = actor["daowen_options"]
     if not opts:
@@ -357,7 +362,9 @@ def _resolve_monster_turn(engine):
     # 所有战斗共用交替优先权；调用方结束我方决策后，显式交出剩余优先权。
     # 若轮回者一侧本回合已经交过优先权（`_ended_turn_sides` 已有记录），再【跳过】
     # 会被引擎按「所在阵营已结束本回合」拒绝——这一步只在还没交权时才做。
-    if (engine.state.duel_turn != "opponent_side"
+    if (engine.combat._combat_entity_refs().get("player:0") is not None
+            and engine.state.duel_turn != "opponent_side"
+            and engine.state.player is not None and engine.state.player.is_alive
             and "player_side" not in engine.combat._ended_turn_sides
             and engine.state.combat_subphase not in ("await_round_end", "await_round_start")):
         skipped = engine.execute_action("skip", {"actor_ref": "player:0"})
@@ -400,9 +407,10 @@ def _resolve_monster_turn(engine):
         dodge_budget = 0
         for actor, hits_n, target_ref in per_actor:
             dao = None
-            if actor["daowen_options"]:
-                option = (_pick_monster_daowen_avoiding_wave(engine, actor)
-                          if wave_retry else _pick_monster_daowen(engine, actor))
+            option = ((_pick_monster_daowen_avoiding_wave(engine, actor)
+                       if wave_retry else _pick_monster_daowen(engine, actor))
+                      if actor["daowen_options"] else None)
+            if option is not None:
                 dao = {"name": option["name"], "dodge": False, "blood_shadow": False,
                        "trigger_spell_choices": {holder: {sp["spell_name"]: {"use": False} for sp in spells}
                                                  for holder, spells in option.get("trigger_spell_options", {}).items()}}

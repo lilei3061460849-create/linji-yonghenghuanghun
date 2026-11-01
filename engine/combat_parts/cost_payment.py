@@ -33,6 +33,9 @@ class CostPaymentMixin:
 
     @staticmethod
     def caozuo_attack_matches(order: dict, hits) -> bool:
+        # 预指定的若不是【攻击】，本次攻击一律不合规（不能让匹配函数自己 KeyError）。
+        if order.get("action") != "攻击":
+            return False
         ordered_hits = order.get("hits")
         if not isinstance(hits, list):
             return False

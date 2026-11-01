@@ -76,14 +76,23 @@ MONSTER_DAOWEN_MECH = {
     # 副本专属（纯机制：无直接对敌伤害/控制收益）
     "变形", "分裂", "消灾", "招魂",
 }
+# 2026-11-01：通用道纹补入优先级表。
+# 操作／迟滞都是对敌限制，归控制组；
+# 透支只把资源换成法力、不改变战场，归「无收益补给」——没有别的选项时才用。
+MONSTER_DAOWEN_CONTROL |= {"操作", "迟滞"}
+MONSTER_DAOWEN_SUPPLY = {"透支"}
+
+
 def monster_daowen_group(name: str) -> int:
-    """道纹优先级组：0=自保 1=输出 2=控制 3=机制（表外道纹按机制兜底）。"""
+    """道纹优先级组：0=自保 1=输出 2=控制 3=机制 4=无收益补给（表外按机制兜底）。"""
     if name in MONSTER_DAOWEN_SELF:
         return 0
     if name in MONSTER_DAOWEN_OUTPUT:
         return 1
     if name in MONSTER_DAOWEN_CONTROL:
         return 2
+    if name in MONSTER_DAOWEN_SUPPLY:
+        return 4
     return 3
 def pick_monster_daowen_option(cands: list[dict], *, player_low: bool = False,
                                monster_low: bool = False,

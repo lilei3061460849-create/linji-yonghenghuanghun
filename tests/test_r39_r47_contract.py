@@ -168,8 +168,10 @@ def test_r41_boundary_daowen_max_uses_real_cost(tmp_path):
     engine = _engine(tmp_path); player, _ = _combat(engine)
     player.current_mana = 4
     player.dao_wen["杀伐"] = DaoWenInstance(DaoWen("杀伐", "", "消耗", "X", ""))
+    # 2026-11-01：出生自带【透支】也会各占一条 use_daowen 选项，按名字取【杀伐】。
     action = next(a for a in engine.get_available_actions()["actions"]
-                  if a.get("action_type") == "use_daowen")
+                  if a.get("action_type") == "use_daowen"
+                  and a["params_schema"].get("daowen_name") == "杀伐")
     assert action["params_schema"]["x"]["maximum"] == 4
 
 

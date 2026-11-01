@@ -143,6 +143,11 @@ def _pick_monster_daowen(engine, actor):
     （DM裁定2026-08-18：自保→输出→控制→机制，含半血/收割/连续压制修正）。
     本文件仅保留候选过滤与空候选回退的原有语义。
     """
+    # 2026-11-01：【透支】只把资源换成法力、不改变战场。自动角色能普攻时不为它
+    # 花掉唯一次出手，故把这类补给项从候选里摘掉（摘空 → 调用方照常提交攻击）。
+    if actor.get("attack_target_options"):
+        actor["daowen_options"] = [o for o in actor.get("daowen_options", [])
+                                   if o.get("name") not in ("透支",)]
     from sim.monster_targets import pick_monster_daowen_option
     opts = actor["daowen_options"]
     if not opts:
@@ -261,8 +266,8 @@ def _build_actor_choice(e, prepared, actor, log, dodge_budget, *, decline_spells
     dao = None
     action_count = actor["base_attack_actions"]
     hit_count = actor["base_hits_per_attack"]
-    if actor["daowen_options"]:
-        option = _pick_monster_daowen(e, actor)
+    option = _pick_monster_daowen(e, actor) if actor["daowen_options"] else None
+    if option is not None:
         if option is not None:
             dao = _monster_daowen_submission(e, actor, option)
             if option["resolves_as"] == "变形":

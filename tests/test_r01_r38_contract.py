@@ -137,7 +137,8 @@ def test_r11_r17_normal_two_stage_monster_choices(tmp_path):
 
     prepared = engine.execute_action("prepare_monster_phase", {})
     actor = prepared["result"]["actors"][0]
-    assert [o["name"] for o in actor["daowen_options"]] == ["杀伐"]
+    # 2026-11-01：出生自带【透支】也出现在怪物选项里（按名排序在前）。
+    assert [o["name"] for o in actor["daowen_options"]] == ["透支", "杀伐"]
     assert {t["name"] for t in actor["attack_target_options"]} == {"轮回者", "友军"}
 
     # 单行动契约：一次出手只能是道纹，或一次攻击；「道纹＋攻击」打包提交被拒。
@@ -234,7 +235,7 @@ def test_r11_r17_aoe_and_control_dodge_are_explicit(tmp_path):
     engine.state.current_round = 2
     prepared = engine.execute_action("prepare_monster_phase", {})
     actor = prepared["result"]["actors"][0]
-    option = actor["daowen_options"][0]
+    option = next(o for o in actor["daowen_options"] if o["name"] == "波及")
     assert option["dodge_submission"] == "per_target"
     # 单行动契约：一笔提交只能是道纹，这里不再附带攻击块
     # （dodge_targets 的合法性校验与是否附带攻击无关）。
@@ -287,7 +288,8 @@ def test_r11_r17_impact_dodge_targets_are_bound_to_prepare_snapshot(tmp_path):
     engine.state.current_round = 2
     prepared = engine.execute_action("prepare_monster_phase", {})
     token = prepared["result"]["token"]
-    option = prepared["result"]["actors"][0]["daowen_options"][0]
+    option = next(o for o in prepared["result"]["actors"][0]["daowen_options"]
+                  if o["name"] == "波及")
     assert [target["ref"] for target in option["dodge_target_options"]] == ["player:0", "friend:0"]
 
     # prepare后新增的实体不是本次快照目标：不能额外提交为波及目标。

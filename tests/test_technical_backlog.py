@@ -20,6 +20,8 @@ def duel_with_monster(tmp_path, seed=30601):
                   mana_limit=5, current_mana=5, speed_limit=2, current_speed=2)
     monster = Entity("多攻次怪", "怪物", blood_limit=100, current_hp=100,
                      attack_count=2, attack_power=7, mana_limit=10, current_mana=10)
+    # 2026-11-01：出生自带【透支】会让怪物这一手转去换法力；本文件要的是攻击路径。
+    monster.dao_wen.pop("透支", None)
     # 单行动契约：一手只能是道纹或一次攻击。这里要验「命中提交随实时 attack_count
     # 漂移」，因此这只怪这一手走攻击，不再额外挂【变形】道纹。
     e.state.enemies = [lord, monster]

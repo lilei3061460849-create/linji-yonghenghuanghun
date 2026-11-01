@@ -411,7 +411,7 @@ def test_fitness_fixed_mode_is_deterministic(monkeypatch, tmp_path):
     # 固定样本有效；无效局不得混进 fitness。2026-11-01 起杀伐闭环换血
     # （透支离环、操作/迟滞入环），该固定样本的胜负易位，仍是 1 局有效结果。
     assert sum(first[1:]) == 1 and set(first[1:]) <= {0, 1}
-    assert first[1:] == (0, 1)
+    assert first[1:] == (1, 0)   # (valid, invalid)：1 局有效、0 局无效
 
 
 def test_random_seed_mode_varies_samples():

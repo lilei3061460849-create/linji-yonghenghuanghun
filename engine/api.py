@@ -5443,6 +5443,11 @@ class GameEngine:
         other = "opponent_side" if current == "player_side" else "player_side"
         if not self._duel_side_can_act(current) and self._duel_side_can_act(other):
             self.state.duel_turn = other
+        elif (not self._duel_side_can_act(current) and not self._duel_side_can_act(other)
+                and self.state.combat_subphase == CombatSubphase.PLAYER_ACTIONS.value):
+            # 双方都拿不出可出手的人（例如轮回者被【封印】暂离、敌人又被限制了行动）：
+            # 没有任何一方能持有优先权，本回合直接进入回终。
+            self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
 
     def _advance_duel_turn(self):
         """一次出手后：对方还有余手则换边；否则本侧连动，余手不作废。
@@ -7940,7 +7945,10 @@ class GameEngine:
                  "consumables": auto_use_consumables(self.combat, ally)}
         cast = None
         for name, inst in ally.dao_wen.items():
-            if not inst.can_use() or name == "背负":
+            # 背负：自我伤害类，自主角色不得自行发动。
+            # 透支：只把资源换成法力、不改变战场，自主角色不为此花掉唯一次出手
+            # （2026-11-01 出生自带给每个人之后，不排除会挤掉真正的攻击）。
+            if not inst.can_use() or name in {"背负", "透支"}:
                 continue
             daowen_x = self._ally_daowen_x(ally, name, target)
             if daowen_x < 1:
@@ -7998,6 +8006,12 @@ class GameEngine:
         # 优先权闸门对所有战斗一致：只有敌方持有优先权时才能准备怪物行动。
         # 观众（`in_combat=False`）不产生出手权，因此它的场景天然不会把优先权
         # 交到玩家侧——不需要按模式开口子。
+        if (self.state.combat_subphase == CombatSubphase.AWAIT_ROUND_END.value
+                and not self._duel_side_can_act("player_side")
+                and not self._duel_side_can_act("opponent_side")):
+            return {"success": True, "action": "双方均已无可用出手，进入回终",
+                    "skipped": True,
+                    "result": {"token": None, "spell_logs": [], "skipped": [], "actors": []}}
         if (self.state.duel_turn != "opponent_side"
                 or "opponent_side" in self.combat._ended_turn_sides):
             return {"success": False,

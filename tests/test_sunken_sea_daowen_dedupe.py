@@ -19,7 +19,7 @@ def test_wave_moves_from_generic_loop_to_sunken_sea():
 
     loops = ResonanceEngine.CLOSED_LOOPS
     shafa = loops["杀伐闭环"]
-    assert ("连击", "转换", RELOCATED_DAOWEN_SLOTS["增殖"]) in shafa
+    assert ("迟滞", "转换", RELOCATED_DAOWEN_SLOTS["增殖"]) in shafa
     assert not any("波及" in (src, dst) for src, _, dst in shafa)
     assert not any("增殖" in (src, dst) for src, _, dst in shafa)
 
@@ -46,7 +46,7 @@ def test_deleted_sunken_sea_daowen_and_panel_tags_are_gone():
     indexed_count = len(re.findall(r"^### [\u4e00-\u9fff]{2}$", index, re.M))
     assert f"当前索引收录道纹（{indexed_count}种）" in index
     assert "流动】【遗忘】已接入运行时" in index
-    assert "杀伐闭环（通用核心）7" in index
+    assert "杀伐闭环（通用核心）8" in index
     assert "扭曲都市专属（6）" in index
     assert "沉沦海专属（7）" in index
     assert "鲛族专属（2）" in index

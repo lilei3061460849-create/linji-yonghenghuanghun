@@ -138,7 +138,9 @@ def _attack_block(actor: dict) -> list[dict]:
 def _legal_daowen(actor: dict) -> dict | None:
     if not actor["daowen_options"]:
         return None
-    chosen = actor["daowen_options"][0]
+    # 2026-11-01：出生自带【透支】也在选项里；本文件要驱动【波及】。
+    chosen = next((o for o in actor["daowen_options"] if o["name"] == "波及"),
+                  actor["daowen_options"][0])
     dao = {"name": chosen["name"], "dodge": False, "blood_shadow": False,
            "trigger_spell_choices": {h: {sp["spell_name"]: {"use": False} for sp in ss}
                                      for h, ss in chosen.get("trigger_spell_options", {}).items()}}
@@ -528,7 +530,8 @@ def test_placeholder_ai_casts_wave_without_rejection(tmp_path):
     player = _controlled_combat(e, [_magma_lizard(),
                                     Entity("石背熊", "怪物", blood_limit=100, current_hp=100,
                                            attack_count=1, attack_power=3)])
-    _dw(player, "波及", 0)  # 玩家唯一道纹：占位AI必然轮到它
+    _dw(player, "波及", 0)
+    player.dao_wen.pop("透支", None)  # 2026-11-01：出生自带透支，本用例要「唯一道纹」
     player.current_mana = 100
     ai = AIPlayer(e, backend=PlaceholderBackend(), auto_validate=False)
 
@@ -551,6 +554,9 @@ def test_monster_without_attack_targets_phase_still_settles(tmp_path):
     _full_setup(e)
     player = _controlled_combat(e, [_magma_lizard()])
     player.is_flying = True  # 怪物不飞行 → 选不中玩家 → 无合法攻击目标
+    # 2026-11-01：出生自带【透支】可支付（生命/血限/枯竭/速度），会让怪物永远有可选行动；
+    # 本用例要的是「没有任何可支付道纹」这一支，先摘掉透支。
+    e.state.enemies[0].dao_wen.pop("透支", None)
 
     prep = e.execute_action("prepare_monster_phase", {})
     # 怪物没有任何合法行动（无攻击目标、需目标道纹也无目标）时，prepare按【跳过】

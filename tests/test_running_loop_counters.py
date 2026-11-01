@@ -72,11 +72,17 @@ def test_relic_supply_can_be_removed_after_prefix_and_before_later_cost():
     assert p.blood_limit==blood-2
 
 
-def test_bizhong_can_close_reaction_window_not_a_proof_of_universal_no_counter():
+def test_bizhong_blocks_passive_actions_not_reaction_spells():
+    """2026-11-01 口径：必中只封被动行动（闪避/招架），不封反应型法术。
+
+    旧口径（必中封锁"回合外行动"整类，含反应法术）随 2026-11-01 改动一并废止：
+    必中现在记在发动者身上的"下X次选中"，只让那几次选中无法被闪避/招架。
+    """
     e,p,a=setup('locked');seal_reaction(e,a)
-    # 由真实必中效果建立回合外封锁，不靠猜旧状态名。
-    e.combat.apply_daowen_effect('必中',DaoWenEngine.resolve('必中',1,target=a),p,a)
-    assert e.combat.prepare_daowen_trigger_spells(p)=={}
+    e.combat.apply_daowen_effect('必中',DaoWenEngine.resolve('必中',1),p,None)
+    assert e.combat.bizhong_remaining(p)==1
+    # 反应法术窗口不受必中影响：必中不是"封锁一切响应"的通用反制。
+    assert e.combat.prepare_daowen_trigger_spells(p)!={}
 
 
 def test_instant_steps_do_not_silently_discard_selected_supply_channel():

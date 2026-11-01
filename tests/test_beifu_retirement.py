@@ -35,13 +35,15 @@ def test_event_friend_can_guard_without_beifu_or_spending_a_page(tmp_path):
     r = e.execute_action("resolve_event", {"event": "断桥余烬", "option_id": option["id"]})
     assert r["success"], r
     friend = next(f for f in e.state.friends if f.name == "岩行者")
-    assert not friend.dao_wen and friend.pages_used == 0
+    # 2026-11-01：出生自带【透支】占一页，其余道纹仍为空。
+    assert set(friend.dao_wen) == {"透支"} and friend.pages_used == 1
     e.state.phase = "in_combat"
     e.state.combat_subphase = "player_actions"
     r = e.execute_action("command_ally", {"ally_ref": "friend:0", "instruction": "护卫 3"})
     assert r["success"], r
     assert friend._beifu_left == 3 and friend.actions_used_this_round == 0
-    assert e.state.player.actions_used_this_round == 0 and friend.pages_used == 0
+    # 护卫只是指令，不改页数：透支那一页照记，页数仍为 1。
+    assert e.state.player.actions_used_this_round == 0 and friend.pages_used == 1
 
 
 def test_old_daowen_cannot_be_used_even_if_manually_loaded(tmp_path):
