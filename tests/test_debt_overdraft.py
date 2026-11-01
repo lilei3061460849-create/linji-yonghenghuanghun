@@ -185,18 +185,19 @@ def test_debt_zero_cost_xiuzheng_and_tansuo_allowed(tmp_path):
 
 
 def test_debt_zero_cost_learn_and_repair_allowed(tmp_path):
-    """负债下 0费学习(tier1)/0费维修(tier1) 可执行。"""
+    """负债下 0费学习(tier1)/0费改造(tier2) 可执行。"""
     e = _debt_engine(tmp_path)
     ok = e.execute_action("pre_battle_action", {
         "sub_action": "学习", "tier": 1, "name": "封印"})
     assert ok["success"], ok
     from engine.models import Consumable
-    e.state.current_region = "扭曲都市"   # 维修是扭曲都市专属行动
+    e.state.current_region = "扭曲都市"   # 改造是扭曲都市专属行动
     e.state.consumables.append(Consumable(
         name="绷带", effect="", max_uses=3, current_uses=1))
+    e.state.consumables.append(Consumable(
+        name="止血粉", effect="", max_uses=2, current_uses=1))
     ok2 = e.execute_action("pre_battle_action", {
-        "sub_action": "维修", "tier": 1,
-        "allocations": [{"item_ref": "consumable:0", "amount": 1}]})
+        "sub_action": "改造", "tier": 2, "names": ["绷带", "止血粉"], "target": "绷带"})
     assert ok2["success"], ok2
 
 

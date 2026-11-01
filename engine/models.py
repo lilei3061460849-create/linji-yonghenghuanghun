@@ -168,6 +168,10 @@ class Consumable:
     # 计数型消耗品的进度（2026-10-23：血翼「累计失去100%[血限]的生命」）。
     # 满一个阈值即兑换 1 点耐久，余数留在这里继续滚存。
     progress: int = 0
+    # 【改造】（扭曲都市专属行动，2026-11-01 由【维修】改做）并入本条的其它消耗品。
+    # 每项是原条目的字段快照（name/effect/kind/...）：使用本条时按顺序逐条结算这些
+    # 原始效果，本条自身效果留在 name/effect 与第一项里，不重复登记。
+    merged_sources: list = field(default_factory=list)
 
     @property
     def is_depleted(self) -> bool:
@@ -199,6 +203,7 @@ class Consumable:
             "kind": self.kind,
             "dragon_heart_type": self.dragon_heart_type,
             "progress": self.progress,
+            "merged_sources": [dict(source) for source in self.merged_sources],
         }
 
 

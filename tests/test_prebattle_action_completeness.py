@@ -1,4 +1,4 @@
-"""局外多档学习、共鸣与维修必须真实结算，不返回空指令。"""
+"""局外多档学习、共鸣与改造必须真实结算，不返回空指令。"""
 from engine.api import GameEngine
 from engine.models import Consumable, Entity
 
@@ -38,8 +38,9 @@ def test_available_prebattle_schemas_use_real_executable_parameter_names(tmp_pat
     assert {"heal_allocations", "tier"} <= set(by_sub_action["休整"])
     assert {"allocations", "tier"} <= set(by_sub_action["修行"])
     assert "tier" in by_sub_action["探索"]
-    assert "allocations" in by_sub_action["维修"]
-    assert "additional" not in by_sub_action["维修"]
+    assert {"tier", "names", "target"} <= set(by_sub_action["改造"])
+    assert "维修" not in by_sub_action, "维修已按 2026-11-01 用户令改为【改造】"
+    assert "additional" not in by_sub_action["改造"]
 
 
 def test_learning_two_daowen_applies_all_names(tmp_path):
@@ -92,32 +93,48 @@ def test_resonance_choose_requires_second_energy_and_applies_cost(tmp_path):
     assert any(relic.name == choice for relic in engine.state.relics)
 
 
-def test_repair_distributes_durability_and_rejects_overflow_atomically(tmp_path):
+def test_gaizao_merges_effects_into_target_and_charges_shards(tmp_path):
+    """改造：把多件不同名消耗品的全部效果叠到其中一件，被并入的条目移除。"""
     engine = _engine(tmp_path)
-    first = Consumable("甲", "", current_uses=1, max_uses=3)
-    second = Consumable("乙", "", current_uses=2, max_uses=3)
-    engine.state.consumables = [first, second]
+    first = Consumable("甲", "回复5生命", current_uses=1, max_uses=3)
+    second = Consumable("乙", "获得3格挡", current_uses=2, max_uses=3)
+    third = Consumable("丙", "造成4伤害", current_uses=1, max_uses=1)
+    engine.state.consumables = [first, second, third]
     engine.state.energy = 3
 
-    repaired = engine.execute_action("pre_battle_action", {
-        "sub_action": "维修", "tier": 2,
-        "allocations": [
-            {"item_ref": "consumable:0", "amount": 1},
-            {"item_ref": "consumable:1", "amount": 1},
-        ],
+    merged = engine.execute_action("pre_battle_action", {
+        "sub_action": "改造", "tier": 3, "names": ["甲", "乙", "丙"], "target": "乙",
     })
-    assert repaired["success"]
-    assert (first.current_uses, second.current_uses) == (2, 3)
-    assert engine.state.shards == 95
+    assert merged["success"], merged.get("error")
+    # 只叠效果、不叠耐久：目标条目耐久与上限不变
+    assert (second.current_uses, second.max_uses) == (2, 3)
+    # 顺序＝目标自身效果在前，其余按 names 顺序并入
+    assert second.effect == "获得3格挡；回复5生命；造成4伤害"
+    assert [source["name"] for source in second.merged_sources] == ["乙", "甲", "丙"]
+    assert [item.name for item in engine.state.consumables] == ["乙"]
+    assert engine.state.shards == 95          # 3件档价目 5 碎片
 
+
+def test_gaizao_rejects_duplicate_names_and_foreign_target_atomically(tmp_path):
+    """改造：同名、目标不在名单、件数与档位不符都在消耗精力前拒绝并退款。"""
+    engine = _engine(tmp_path)
+    engine.state.consumables = [Consumable("甲", "a"), Consumable("乙", "b")]
     engine.state.energy = 3
-    before = (first.current_uses, second.current_uses, engine.state.shards, engine.state.energy)
-    overflow = engine.execute_action("pre_battle_action", {
-        "sub_action": "维修", "tier": 1,
-        "allocations": [{"item_ref": "consumable:1", "amount": 1}],
-    })
-    assert not overflow["success"]
-    assert (first.current_uses, second.current_uses, engine.state.shards, engine.state.energy) == before
+
+    duplicated = engine.execute_action("pre_battle_action", {
+        "sub_action": "改造", "tier": 2, "names": ["甲", "甲"], "target": "甲"})
+    assert not duplicated["success"] and "不同名" in duplicated["error"]
+
+    foreign_target = engine.execute_action("pre_battle_action", {
+        "sub_action": "改造", "tier": 2, "names": ["甲", "乙"], "target": "丙"})
+    assert not foreign_target["success"] and "target" in foreign_target["error"]
+
+    wrong_tier = engine.execute_action("pre_battle_action", {
+        "sub_action": "改造", "tier": 4, "names": ["甲", "乙"], "target": "甲"})
+    assert not wrong_tier["success"]
+
+    assert engine.state.energy == 3, "被拒绝的改造必须退还精力"
+    assert [item.name for item in engine.state.consumables] == ["甲", "乙"]
 
 
 def test_rest_freely_splits_full_amount_without_combat_heal_tracking(tmp_path):

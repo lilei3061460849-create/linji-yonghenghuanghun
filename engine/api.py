@@ -712,17 +712,23 @@ class GameEngine:
 
     def _get_region_actions(self) -> list[dict]:
         if self.state.current_region == "扭曲都市":
-            repairable = [
-                {"item_ref": f"consumable:{index}", "name": item.name,
-                 "current_uses": item.current_uses, "max_uses": item.max_uses}
-                for index, item in enumerate(self.state.consumables)
-                if 0 < item.current_uses < item.max_uses
-            ]
-            return [{"id": "维修", "params_schema": {
-                "tier": [1, 2, 3],
-                "allocations": {"type": "list", "items": {
-                    "item_ref": repairable, "amount": "positive integer"},
-                    "constraint": "amount总和必须等于档位耐久点"},
+            mergeable = []
+            for index, item in enumerate(self.state.consumables):
+                allowed, reason = self._gaizao_eligible(item)
+                mergeable.append({
+                    "item_ref": f"consumable:{index}", "name": item.name,
+                    "effect": item.effect, "current_uses": item.current_uses,
+                    "max_uses": item.max_uses,
+                    "eligible": allowed, "reason": reason or None})
+            return [{"id": "改造", "params_schema": {
+                "tier": {2: "合并2件不同名消耗品（0碎片）",
+                         3: "合并3件不同名消耗品（5碎片）",
+                         4: "合并4件不同名消耗品（12碎片）"},
+                "names": mergeable,
+                "target": "接收全部效果的消耗品名，必须是names之一",
+                "constraint": ("names数量必须等于tier且互不同名；"
+                               "被并入的条目从持有中移除，目标条目耐久不变，"
+                               "效果叠加为目标条目的效果文本；使用目标条目时逐条结算全部来源效果"),
             }}]
         if self.state.current_region == "罪孽都市":
             return [{"id": "雇佣", "params_schema": {"name": "string", "blood_alloc": "integer",
@@ -3877,7 +3883,7 @@ class GameEngine:
             "修行": lambda p: p.get("tier", 1),
             "学习": lambda p: 3,
             "共鸣": lambda p: 1,
-            "维修": lambda p: 1,
+            "改造": lambda p: 1,
             "雇佣": lambda p: 1,
             "炼心": lambda p: 1,
             "造生": lambda p: 1,
@@ -4167,7 +4173,7 @@ class GameEngine:
             "学习": self._pre_battle_xuexi,
             "共鸣": self._pre_battle_gongming,
             "探索": self._pre_battle_tansuo,
-            "维修": self._pre_battle_weixiu,
+            "改造": self._pre_battle_gaizao,
             "雇佣": self._pre_battle_guyong,
             "炼心": self._pre_battle_lianxin,
             "造生": self._pre_battle_zaosheng,
@@ -4176,9 +4182,9 @@ class GameEngine:
         }
         # 2026-09-28：局外【忘忧】已删除，忘忧香效果为溢出回复转格挡。
 
-        # 副本专属行动门禁（规则正文：维修=扭曲都市、雇佣=罪孽都市、炼心=龙心谷专属）。
+        # 副本专属行动门禁（规则正文：改造=扭曲都市、雇佣=罪孽都市、炼心=龙心谷专属）。
         # 缺少该校验会让任意副本都能用他人专属行动，统计与平衡数据将失真。
-        REGION_EXCLUSIVE = {"维修": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "造生": "乱葬岗"}
+        REGION_EXCLUSIVE = {"改造": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "造生": "乱葬岗"}
         need_region = REGION_EXCLUSIVE.get(action)
         if action == "造生" and has_yaoguai_banner(self.state):
             need_region = None
@@ -4980,54 +4986,93 @@ class GameEngine:
                             f"其后还有{len(self.state.pending_event_queue)}个探索事件依次结算"),
         }
 
-    def _pre_battle_weixiu(self, params: dict) -> dict:
-        """维修：显式分配耐久，实际补入未耗尽消耗品且不得超过当前耐久上限。"""
-        tier = params.get("tier", 1)
-        tier_map = {1: (1, 0), 2: (2, 5), 3: (3, 12)}
-        if not isinstance(tier, int) or isinstance(tier, bool) or tier not in tier_map:
+    # 【改造】档位：合并的消耗品件数 → 碎片价目（沿用原【维修】1/2/3档的 0/5/12 阶梯）。
+    GAIZAO_TIERS = {2: 0, 3: 5, 4: 12}
+    # 不能参与改造的消耗品类别：雕塑绑定特定怪物、龙心是炼心产物、翼类每次使用需选模式。
+    GAIZAO_EXCLUDED_KINDS = {"sculpture", "dragon_heart", "wing"}
+
+    def _gaizao_eligible(self, item: Consumable) -> tuple[bool, str]:
+        """该消耗品能否被【改造】并入/接收。返回 (可否, 不可的原因)。"""
+        if item.name == "万钧印":
+            return False, "万钧印是被动触发，不能当作可使用条目"
+        if item.kind in self.GAIZAO_EXCLUDED_KINDS:
+            return False, f"{item.kind}类条目每次使用需要额外选择，效果不能简单叠加"
+        custom_item = custom_resources.get_consumable(item.name)
+        if custom_item is not None and custom_item.spec.get("trigger") is not None:
+            return False, "被动触发型消耗品不能手动使用，效果不能叠加"
+        return True, ""
+
+    def _pre_battle_gaizao(self, params: dict) -> dict:
+        """改造（扭曲都市专属）：选择2/3/4件不同名消耗品，把全部效果叠加到其中一件。
+
+        口径（2026-11-01 用户令，原【维修】撤销）：
+        - 档位＝参与件数：2件（0碎片）／3件（5碎片）／4件（12碎片），另耗1点精力；
+        - names 必须互不同名且都在持有中，target 必须是 names 之一；
+        - 目标条目的耐久与上限不变（只叠效果，不叠耐久）；
+        - 被并入的条目从持有中移除；目标条目的效果文本变为各条目效果之和，
+          使用它时按原顺序逐条结算全部来源效果，最后只扣它自己的1点耐久。
+        """
+        tier = params.get("tier", 2)
+        if (not isinstance(tier, int) or isinstance(tier, bool)
+                or tier not in self.GAIZAO_TIERS):
             self.state.energy += 1
-            return {"success": False, "error": "维修档位必须是1/2/3"}
-        points, cost = tier_map[tier]
-        allocations = params.get("allocations")
-        if not isinstance(allocations, list) or not allocations:
+            return {"success": False, "error": "改造档位必须是2/3/4（对应合并2/3/4件）"}
+        cost = self.GAIZAO_TIERS[tier]
+        names = params.get("names")
+        if not isinstance(names, list) or any(not isinstance(n, str) for n in names):
             self.state.energy += 1
-            return {"success": False, "error": "维修必须用allocations显式分配全部耐久点"}
-        refs = {f"consumable:{index}": item for index, item in enumerate(self.state.consumables)}
-        totals: dict[str, int] = {}
-        for entry in allocations:
-            if (not isinstance(entry, dict) or entry.get("item_ref") not in refs
-                    or not isinstance(entry.get("amount"), int) or isinstance(entry.get("amount"), bool)
-                    or entry["amount"] < 1):
-                self.state.energy += 1
-                return {"success": False, "error": "维修分配必须包含合法item_ref和正整数amount"}
-            ref = entry["item_ref"]
-            totals[ref] = totals.get(ref, 0) + entry["amount"]
-        if sum(totals.values()) != points:
+            return {"success": False, "error": "改造必须用names提交消耗品名列表"}
+        if len(names) != tier:
             self.state.energy += 1
-            return {"success": False, "error": f"维修{tier}档必须恰好分配{points}点耐久"}
-        for ref, amount in totals.items():
-            item = refs[ref]
-            if item.current_uses < 1:
+            return {"success": False, "error": f"改造{tier}档必须恰好选择{tier}件消耗品"}
+        if len(set(names)) != len(names):
+            self.state.energy += 1
+            return {"success": False, "error": "改造只能合并不同名的消耗品"}
+        target_name = params.get("target", "")
+        if target_name not in names:
+            self.state.energy += 1
+            return {"success": False, "error": "改造的target必须是names中的一个"}
+
+        resolved: dict[str, Consumable] = {}
+        for name in names:
+            item = next((c for c in self.state.consumables if c.name == name), None)
+            if item is None:
                 self.state.energy += 1
-                return {"success": False, "error": f"【{item.name}】耐久已归零，不能维修"}
-            if item.current_uses + amount > item.max_uses:
+                return {"success": False, "error": f"未持有消耗品【{name}】"}
+            allowed, reason = self._gaizao_eligible(item)
+            if not allowed:
                 self.state.energy += 1
-                return {"success": False,
-                        "error": f"【{item.name}】维修后将超过耐久上限{item.max_uses}"}
-        if cost > 0 and self.state.shards < cost:  # 负债口径：0费维修不属于支出
+                return {"success": False, "error": f"【{name}】{reason}"}
+            resolved[name] = item
+        if cost > 0 and self.state.shards < cost:  # 负债口径：0费档不属于支出
             self.state.energy += 1
             return {"success": False, "error": f"碎片不足，需要{cost}"}
 
+        target = resolved[target_name]
+        merged = [target] + [resolved[name] for name in names if name != target_name]
+        # 已并入过别的条目的效果一并搬过来，避免二次改造丢掉中间效果。
+        sources: list[dict] = []
+        for item in merged:
+            sources.extend(item.merged_sources or [{
+                "name": item.name, "effect": item.effect, "kind": item.kind,
+                "dragon_heart_type": item.dragon_heart_type,
+            }])
+        target.merged_sources = sources
+        target.effect = "；".join(dict.fromkeys(
+            source["effect"] for source in sources if source.get("effect")))
+        removed = [item.name for item in merged[1:]]
+        self.state.consumables = [c for c in self.state.consumables if c not in merged[1:]]
         self.state.shards -= cost
-        repaired = []
-        for ref, amount in totals.items():
-            item = refs[ref]
-            item.current_uses += amount
-            repaired.append({"item_ref": ref, "item": item.name, "amount": amount,
-                             "current_uses": item.current_uses, "max_uses": item.max_uses})
-        return {"success": True, "action": "维修",
-                "result": {"durability_points": points, "shard_cost": cost,
-                           "allocations": repaired}}
+        return {
+            "success": True, "action": "改造",
+            "result": {
+                "tier": tier, "merged_count": len(merged), "shard_cost": cost,
+                "target": target.name, "target_effect": target.effect,
+                "target_uses": target.current_uses, "target_max_uses": target.max_uses,
+                "absorbed": removed,
+                "sources": [source["name"] for source in sources],
+            },
+        }
 
     def _pre_battle_guyong(self, params: dict) -> dict:
         """
@@ -7225,6 +7270,59 @@ class GameEngine:
 
         if item.name == "万钧印":
             return {"success": False, "error": "万钧印在受到攻击时自动触发，不可主动使用"}
+
+        # 【改造】合成的条目：逐条结算被并入的原始效果，最后只扣它自己的1点耐久。
+        if item.merged_sources:
+            return self._consume_merged_item(item, params)
+
+        return self._consume_item_effect(item, params)
+
+    def _consume_merged_item(self, item: Consumable, params: dict) -> dict:
+        """使用【改造】合成条目：按原顺序逐条结算全部来源效果。
+
+        每个来源都用一份临时 Consumable 走同一条使用管线，因此耐久扣除只发生在
+        临时条目上；本条目最后只扣自己1点耐久，不会因并入几件就多扣几次。
+        某个来源因缺少自身必需参数而失败时，其余来源照常结算，失败原因逐条回传。
+        """
+        outcomes = []
+        for source in item.merged_sources:
+            payload = {key: source.get(key) for key in
+                       ("name", "effect", "kind", "dragon_heart_type")}
+            temp = Consumable(name=str(payload.get("name") or item.name),
+                              effect=str(payload.get("effect") or ""),
+                              current_uses=1, max_uses=1,
+                              kind=str(payload.get("kind") or "normal"),
+                              dragon_heart_type=str(payload.get("dragon_heart_type") or ""))
+            try:
+                outcome = self._consume_item_effect(temp, params)
+            except Exception as exc:  # 单条效果异常不拖垮其余来源
+                outcome = {"success": False, "error": f"效果结算异常：{exc}"}
+            entry = {"name": temp.name, "success": bool(outcome.get("success"))}
+            if outcome.get("error"):
+                entry["error"] = outcome["error"]
+            if outcome.get("result") is not None:
+                entry["result"] = outcome["result"]
+            outcomes.append(entry)
+        if not any(entry["success"] for entry in outcomes):
+            return {"success": False,
+                    "error": "改造条目的全部来源效果都未能结算",
+                    "sources": outcomes}
+        remaining = item.use()
+        return {
+            "success": True,
+            "action": f"使用改造消耗品【{item.name}】",
+            "result": {
+                "sources": outcomes,
+                "uses_remaining": remaining,
+                "max_uses": item.max_uses,
+                "is_depleted": item.is_depleted,
+            },
+            "state": self.combat._get_combat_state() if self.state.phase == GamePhase.IN_COMBAT.value else None,
+        }
+
+    def _consume_item_effect(self, item: Consumable, params: dict) -> dict:
+        """单件消耗品的真实结算（改造合成条目也复用这条管线）。"""
+        item_name = item.name
 
         # 扭曲工具库消耗品：引擎侧真实结算（F3）
         if item.name in TWISTED_TOOL_LIBRARY:
