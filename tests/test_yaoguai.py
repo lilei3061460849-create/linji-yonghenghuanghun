@@ -53,13 +53,13 @@ def pages_used(engine):
 
 def test_banner_houses_six_without_extra_pages_and_rejects_seventh(tmp_path):
     engine = make_engine(tmp_path, banner=True)
-    assert pages_used(engine) == 1  # 幡本身的一张法器页。
+    assert pages_used(engine) == 2  # 幡的一张法器页 + 出生自带【透支】一页。
 
     for index in range(BANNER_CAPACITY):
         result = create(engine, f"妖{index + 1}")
         assert result["success"], result
         assert result["result"]["banner_housed"] is True
-        assert pages_used(engine) == 1
+        assert pages_used(engine) == 2  # 幡页 + 透支页
 
     beings = owned_yaoguai(engine.state)
     assert len(beings) == BANNER_CAPACITY
@@ -69,26 +69,26 @@ def test_banner_houses_six_without_extra_pages_and_rejects_seventh(tmp_path):
     assert not denied["success"] and "最多收纳6只" in denied["error"]
     assert len(owned_yaoguai(engine.state)) == BANNER_CAPACITY
     assert engine.state.shards == shards
-    assert pages_used(engine) == 1
+    assert pages_used(engine) == 2
 
 
 def test_unhoused_yaoguai_cost_five_pages_each_and_failed_creation_is_atomic(tmp_path):
     engine = make_engine(tmp_path, banner=False)
     assert create(engine, "甲")["success"]
-    assert pages_used(engine) == 5
+    assert pages_used(engine) == 6  # 4 张妖傀页 + 透支页 + 原有 1 页
     assert create(engine, "乙")["success"]
-    assert pages_used(engine) == 10
+    assert pages_used(engine) == 11
 
     shards = engine.state.shards
     denied = create(engine, "丙")
     assert not denied["success"] and "每只占5张" in denied["error"]
     assert [being.name for being in owned_yaoguai(engine.state)] == ["甲", "乙"]
     assert engine.state.shards == shards
-    assert pages_used(engine) == 10
+    assert pages_used(engine) == 11
 
     # 取得幡后，已有两只也改为由幡承载；主人只支付幡的一页。
     engine.state.artifacts_owned.append(BANNER_NAME)
-    assert pages_used(engine) == 1
+    assert pages_used(engine) == 2  # 幡页 + 透支页
 
 
 def test_zaosheng_only_creates_and_generic_xiuxing_handles_growth(tmp_path):
@@ -251,4 +251,4 @@ def test_legacy_banner_name_migrates_and_dormancy_save_load_roundtrips(tmp_path)
     assert loaded_being.is_dormant and not loaded_being.is_alive
     assert loaded_being.current_hp == 9
     bind_resources(loaded_engine.state)
-    assert loaded_engine.state.player.pages_used == 1
+    assert loaded_engine.state.player.pages_used == 2  # 幡页 + 透支页

@@ -52,7 +52,8 @@ def test_starters_are_shafa_loop_not_forced_shaifa():
     from engine.gamedata import SHAFA_LOOP_DAOWEN
     assert bl.STARTERS == list(SHAFA_LOOP_DAOWEN)
     assert "连击" in bl.STARTERS and "再生" in bl.STARTERS
-    assert len(bl.STARTERS) == 7  # 波及属沉沦海，增殖属扭曲都市；均不在通用开局池
+    # 2026-11-01：新增【操作】【迟滞】进闭环 → 7 → 9?（透支不入池）
+    assert len(bl.STARTERS) == 8
 
 
 def test_play_does_not_inject_shaifa_when_not_discovered():
@@ -98,7 +99,7 @@ def test_choose_discovered_honors_prefer_only_when_offered():
     prefer = offered[1]
     chosen = choose_discovered_initial_daowen(engine, prefer=prefer)
     assert chosen["picked"] == prefer
-    assert list(engine.state.player.dao_wen) == [prefer]
+    assert set(engine.state.player.dao_wen) == {"透支", prefer}  # 出生自带透支
 
 
 def test_choose_discovered_rejects_missing_pending():
@@ -407,7 +408,10 @@ def test_fitness_fixed_mode_is_deterministic(monkeypatch, tmp_path):
     first = _fitness()
     second = _fitness()
     assert first == second
-    assert first[1:] == (1, 0)  # 固定样本有效；无效局不得混进 fitness
+    # 固定样本有效；无效局不得混进 fitness。2026-11-01 起杀伐闭环换血
+    # （透支离环、操作/迟滞入环），该固定样本的胜负易位，仍是 1 局有效结果。
+    assert sum(first[1:]) == 1 and set(first[1:]) <= {0, 1}
+    assert first[1:] == (0, 1)
 
 
 def test_random_seed_mode_varies_samples():

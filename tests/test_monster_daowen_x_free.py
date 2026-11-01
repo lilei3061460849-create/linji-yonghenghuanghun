@@ -68,9 +68,24 @@ def _hits(actor, atk, count=None):
              "spell_choices": _decline_spells(atk)} for _ in range(n)]
 
 
-def _resolve(e, prep, actor, x):
+def _opt(actor, name=None):
+    """取本次要测的那条道纹选项。
+
+    2026-11-01：任何角色出生自带【透支】，它同样出现在 daowen_options 里；
+    本文件测的是面板/提交的 X 契约，默认跳过出生自带项。
+    """
+    for option in actor["daowen_options"]:
+        if name is not None:
+            if option["name"] == name:
+                return option
+        elif option["name"] != "透支":
+            return option
+    raise AssertionError(f"面板里没有可测的道纹选项：{actor['daowen_options']}")
+
+
+def _resolve(e, prep, actor, x, name=None):
     atk = actor["attack_target_options"][0]
-    opt = actor["daowen_options"][0]
+    opt = _opt(actor, name)
     dao = {"name": opt["name"], "dodge": False, "blood_shadow": False,
            "trigger_spell_choices": {}}
     if x is not None:
@@ -96,7 +111,7 @@ def test_x_free_daowen_accepts_submitted_x_and_scales_cost(tmp_path):
         m = _monster(mana=14)
         _setup(e, m)
         prep, actor = _prepare(e)
-        opt = actor["daowen_options"][0]
+        opt = _opt(actor, "弱化")
         assert opt["x_free"] is True and opt["max_x"] == 7, opt
         before = m.current_mana
         r = _resolve(e, prep, actor, x)
@@ -116,7 +131,7 @@ def test_fixed_x_daowen_unchanged(tmp_path):
                effect_formula=""), x_value=2, x_free=False)
     _setup(e, m)
     prep, actor = _prepare(e)
-    opt = actor["daowen_options"][0]
+    opt = _opt(actor, "弱化")
     assert opt["x_free"] is False and opt["x"] == 2
     before = m.current_mana
     r = _resolve(e, prep, actor, None)      # 不提交 x 也应成功

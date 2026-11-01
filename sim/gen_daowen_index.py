@@ -177,8 +177,6 @@ CATEGORY["怜悯"] = "other"
 # 2026-11-01：【透支】移出杀伐闭环、改为任意角色出生自带；【操作】【迟滞】新增通用道纹
 # （闭环连接词待定，暂列「其他通用」）。
 CATEGORY["透支"] = "other"
-CATEGORY["操作"] = "other"
-CATEGORY["迟滞"] = "other"
 for n in ORIGINAL_MONSTER_DAOWEN:
     CATEGORY[n] = "original"
 for n in MONSTER_TRANSFORM_DAOWEN:
@@ -197,7 +195,7 @@ for n, region in UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.items():
     CATEGORY[n] = "unimpl"
 
 # 「其他通用」按显式顺序渲染（不属于杀伐闭环、也不属于任何副本闭环的通用道纹）。
-OTHER_DAOWEN = ["怜悯", "操作", "迟滞", "透支"]
+OTHER_DAOWEN = ["怜悯", "透支"]
 
 assert set(CATEGORY) == (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)), (
     set(CATEGORY) ^ (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)))

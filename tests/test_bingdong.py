@@ -55,17 +55,18 @@ def test_bingdong_clamps_x_before_cooldown_and_pauses_existing_effects():
     player.add_status(StatusEffect("飞行", value=1, remaining_rounds=3, source="test"))
     target.add_status(StatusEffect("飞行", value=2, remaining_rounds=3, source="test"))
 
-    # 提交X=5，目标实际只有2种：支付、冷却与冻结数量必须一起降到2。
-    result = _cast(engine, 5, ["杀伐", "飞行"])
+    # 提交X=5，目标实际只有3种（含出生自带【透支】）：支付、冷却与冻结数量一起降到3。
+    result = _cast(engine, 5, ["杀伐", "飞行", "透支"])
     assert result["success"] is True, result
-    assert result["calculation"]["x"] == 2
-    assert result["calculation"]["cost"] == 2
-    assert player.dao_wen["冰冻"].cooldown_remaining == 2
+    assert result["calculation"]["x"] == 3
+    assert result["calculation"]["cost"] == 3
+    assert player.dao_wen["冰冻"].cooldown_remaining == 3
     assert player.actions_used_this_round == 1
     assert target.dao_wen["杀伐"].ice_frozen
     assert target.dao_wen["飞行"].ice_frozen
     assert not target.dao_wen["杀伐"].can_use()
     assert not target.dao_wen["飞行"].can_use()
+    assert not target.dao_wen["透支"].can_use()
 
     # 既有飞行状态进入暂停区，不再让目标获得飞行保护，也不再倒计。
     assert not target.has_status("飞行")
@@ -75,9 +76,10 @@ def test_bingdong_clamps_x_before_cooldown_and_pauses_existing_effects():
     assert target.paused_status_effects[0].remaining_rounds == 3
     ice = target.get_status_effects("冰冻")[0]
     assert ice.remaining_rounds == -1
-    assert ice.effect_data["frozen_daowen"] == ["杀伐", "飞行"]
+    # 冻结名单内容为准，顺序不作契约。
+    assert sorted(ice.effect_data["frozen_daowen"]) == ["杀伐", "透支", "飞行"]
     exported = target.to_dict()
-    assert exported["ice_frozen_daowen"] == ["杀伐", "飞行"]
+    assert sorted(exported["ice_frozen_daowen"]) == ["杀伐", "透支", "飞行"]
     assert [status["name"] for status in exported["paused_status_effects"]] == ["飞行"]
     import pickle
     restored = pickle.loads(pickle.dumps(target))
@@ -100,6 +102,7 @@ def test_bingdong_requires_exact_distinct_owned_choices_without_payment():
 def test_bingdong_target_with_zero_daowen_auto_skips_without_cost():
     engine, player, target = _engine()
     _give(player, "冰冻")
+    target.dao_wen.clear()  # 2026-11-01：透支出生自带，要测「零道纹」得先清空
     result = _cast(engine, 4, [])
     assert result["success"] is True and result["skipped"] is True
     assert result["result"]["x"] == 0
@@ -150,8 +153,11 @@ def test_monster_phase_bingdong_uses_cooldown_x1_and_freezes_player_daowen():
                                    target_refs={"enemy:0": "player:0"})
     assert "error" not in result, result
     assert monster.dao_wen["冰冻"].cooldown_remaining == 1
-    assert player.dao_wen["杀伐"].ice_frozen
-    assert not player.dao_wen["再生"].ice_frozen
+    # 冷却型道纹固定 X=1：恰好冻结一种，且就是提交的那一种。
+    frozen = [name for name, inst in player.dao_wen.items() if inst.ice_frozen]
+    ice = player.get_status_effects("冰冻")[0]
+    assert frozen == list(ice.effect_data["frozen_daowen"]), (frozen, ice.effect_data)
+    assert len(frozen) == 1
 
 
 def test_tactical_ai_submits_bingdong_choices_for_stable_target():
@@ -163,7 +169,7 @@ def test_tactical_ai_submits_bingdong_choices_for_stable_target():
     ai = TacticalAI(engine)
     params = ai._params("冰冻", 5, target.name)
     assert params["target_ref"] == "enemy:0"
-    assert params["freeze_daowen"] == ["杀伐", "再生"]
+    assert params["freeze_daowen"] == ["透支", "杀伐", "再生"]
 
 
 def test_instant_spell_bingdong_uses_same_clamped_cost_and_effect():
@@ -173,19 +179,21 @@ def test_instant_spell_bingdong_uses_same_clamped_cost_and_effect():
     _give(target, "再生")
     execution = engine.combat.build_instant_execution(
         player, "发动冰冻X于目标", target,
-        [{"x": 5, "freeze_daowen": ["杀伐", "再生"], "dodge": False}],
+        [{"x": 5, "freeze_daowen": ["杀伐", "再生", "透支"], "dodge": False}],
         engine.combat._combat_entity_refs())
     results = execution.run_all()
     assert results[0].status.value == "completed"
-    assert results[0].x == 2
-    assert player.dao_wen["冰冻"].cooldown_remaining == 2
+    assert results[0].x == 3
+    assert player.dao_wen["冰冻"].cooldown_remaining == 3
     assert target.dao_wen["杀伐"].ice_frozen
     assert target.dao_wen["再生"].ice_frozen
+    assert target.dao_wen["透支"].ice_frozen
 
 
 def test_instant_spell_bingdong_zero_daowen_target_skips_without_cooldown():
     engine, player, target = _engine()
     _give(player, "冰冻")
+    target.dao_wen.clear()  # 2026-11-01：透支出生自带，要测「零道纹」得先清空
     execution = engine.combat.build_instant_execution(
         player, "发动冰冻X于目标", target,
         [{"x": 3, "freeze_daowen": [], "dodge": False}],
