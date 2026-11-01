@@ -363,6 +363,76 @@ def test_qianjingjia_only_triggers_on_attack_damage():
     assert m.current_hp == 100, "道纹伤害不得触发千荆甲"
 
 
+def _add_rival_with_qianjingjia(engine, hp=60, atk=10):
+    """敌方轮回者（守擂者）乙：敌方轮回者的遗物读 `state.opponent_relics`。"""
+    rival = Entity("乙轮回者", "轮回者", blood_limit=hp, current_hp=hp,
+                   mana_limit=50, current_mana=50, speed_limit=5, current_speed=5,
+                   attack_count=1, attack_power=atk)
+    engine.state.enemies = [rival]
+    engine.state.opponent_relics = [Relic(name="千荆甲", effect="")]
+    return rival
+
+
+def test_qianjingjia_both_sides_no_pingpong():
+    """双方都持千荆甲：A 普攻 B 只反噬一次，B 的千荆甲不会再弹回 A。
+
+    反噬是直接失血（subtype=relic_reflect），不是"受到攻击伤害"，
+    因此不构成 A→B→A 的循环：常规局面双方各掉等量生命，攻击照常落地。
+    """
+    engine = _setup(region="扭曲都市")
+    player = engine.state.player
+    engine.state.relics.append(Relic(name="千荆甲", effect=""))
+    rival = _add_rival_with_qianjingjia(engine, hp=60, atk=10)
+    player.current_hp, player.blood_limit = 60, 60
+    res = engine.combat.resolve_attack(
+        player, rival, hit_index=0, is_must_hit=True, dodge=False, allocated_damage=10)
+    assert res["damage_dealt"] == 10
+    assert player.current_hp == 50, "攻击者只被反噬一次（10），不会因自己也穿千荆甲而翻倍或反弹"
+    assert rival.current_hp == 50, "受击方的千荆甲不抵销攻击本身，伤害照常落地"
+
+
+def test_qianjingjia_both_sides_reflect_ignores_defender_shield():
+    """双方都有千荆甲时，反噬按分配伤害全额结算，不吃受击方格挡。"""
+    engine = _setup(region="扭曲都市")
+    player = engine.state.player
+    engine.state.relics.append(Relic(name="千荆甲", effect=""))
+    rival = _add_rival_with_qianjingjia(engine, hp=60, atk=10)
+    player.current_hp, player.blood_limit = 60, 60
+    player.shield = 6
+    rival.shield = 6
+    res = engine.combat.resolve_attack(
+        player, rival, hit_index=0, is_must_hit=True, dodge=False, allocated_damage=10)
+    assert res["shield_absorbed"] == 6
+    assert player.current_hp == 50, "反噬绕过格挡：攻击者照掉 10 点"
+    assert rival.current_hp == 56, "受击方只掉穿甲后的 4 点"
+
+
+def test_qianjingjia_mutual_kill_attacker_dies_first_damage_cancelled():
+    """双方都有千荆甲、攻击者残血：反噬先打死攻击者，本次攻击伤害不落地。"""
+    engine = _setup(region="扭曲都市")
+    player = engine.state.player
+    engine.state.relics.append(Relic(name="千荆甲", effect=""))
+    rival = _add_rival_with_qianjingjia(engine, hp=60, atk=10)
+    player.current_hp, player.blood_limit = 4, 60
+    res = engine.combat.resolve_attack(
+        player, rival, hit_index=0, is_must_hit=True, dodge=False, allocated_damage=10)
+    assert not player.is_alive, "攻击者被自己的攻击反噬致死"
+    assert res["damage_dealt"] == 0
+    assert rival.current_hp == 60, "攻击者已命零，受击方一点伤害都不吃"
+
+    # 反向：受击方残血、攻击者血厚 → 双方同时掉血，受击方死，攻击者活着
+    engine2 = _setup(region="扭曲都市")
+    p2 = engine2.state.player
+    engine2.state.relics.append(Relic(name="千荆甲", effect=""))
+    r2 = _add_rival_with_qianjingjia(engine2, hp=4, atk=10)
+    p2.current_hp, p2.blood_limit = 60, 60
+    res2 = engine2.combat.resolve_attack(
+        p2, r2, hit_index=0, is_must_hit=True, dodge=False, allocated_damage=10)
+    assert not r2.is_alive
+    assert res2["damage_dealt"] == 10
+    assert p2.current_hp == 50, "反噬在伤害落地前就结算，攻击者照样掉 10"
+
+
 def test_qianjingjia_absent_no_reflect():
     """边界：不持有遗物则无任何反噬。"""
     engine = _setup(region="扭曲都市")
