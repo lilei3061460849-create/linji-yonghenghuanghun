@@ -48,8 +48,8 @@ def _resolve_monster_turn_smart(engine):
         from sim.duel_common import _pick_monster_daowen
         has_guanchuan = False
         will_activate_nilin = False
-        if actor["daowen_options"]:
-            option = _pick_monster_daowen(engine, actor)
+        option = _pick_monster_daowen(engine, actor) if actor["daowen_options"] else None
+        if option is not None:
             if option.get("name") == "贯穿":
                 has_guanchuan = True
             elif option.get("name") == "逆鳞":
@@ -486,8 +486,8 @@ def run_full_handplay_session(seed=42):
                 from sim.duel_common import _pick_monster_daowen
                 has_guanchuan = False
                 will_activate_nilin = False
-                if actor["daowen_options"]:
-                    option = _pick_monster_daowen(e, actor)
+                option = _pick_monster_daowen(e, actor) if actor["daowen_options"] else None
+                if option is not None:
                     if option.get("name") == "贯穿":
                         has_guanchuan = True
                     elif option.get("name") == "逆鳞":

@@ -75,20 +75,21 @@ def test_banner_houses_six_without_extra_pages_and_rejects_seventh(tmp_path):
 def test_unhoused_yaoguai_cost_five_pages_each_and_failed_creation_is_atomic(tmp_path):
     engine = make_engine(tmp_path, banner=False)
     assert create(engine, "甲")["success"]
-    assert pages_used(engine) == 6  # 4 张妖傀页 + 透支页 + 原有 1 页
-    assert create(engine, "乙")["success"]
-    assert pages_used(engine) == 11
+    # 2026-11-01：一只妖傀 5 页 + 出生自带【透支】1 页 = 6/10，刚好再放不下一只。
+    assert pages_used(engine) == 6
 
     shards = engine.state.shards
-    denied = create(engine, "丙")
+    denied = create(engine, "乙")
     assert not denied["success"] and "每只占5张" in denied["error"]
-    assert [being.name for being in owned_yaoguai(engine.state)] == ["甲", "乙"]
-    assert engine.state.shards == shards
-    assert pages_used(engine) == 11
+    assert [being.name for being in owned_yaoguai(engine.state)] == ["甲"]
+    assert engine.state.shards == shards, "失败不得扣碎片"
+    assert pages_used(engine) == 6
 
-    # 取得幡后，已有两只也改为由幡承载；主人只支付幡的一页。
+    # 取得幡后，已有妖傀改为由幡承载；主人只支付幡的一页 + 透支页。
     engine.state.artifacts_owned.append(BANNER_NAME)
     assert pages_used(engine) == 2  # 幡页 + 透支页
+    assert create(engine, "乙")["success"]
+    assert pages_used(engine) == 2
 
 
 def test_zaosheng_only_creates_and_generic_xiuxing_handles_growth(tmp_path):

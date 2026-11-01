@@ -54,7 +54,7 @@ def test_daowen_sequence_position_survives_entity_seal_roundtrip():
     engine.state = GameState(player=target)
     sealed = engine._serialize_entity_full(target)
     restored = engine._deserialize_entity_full(sealed)
-    assert list(restored.dao_wen) == ["龙鳞", "固执"]
+    assert list(restored.dao_wen) == ["透支", "龙鳞", "固执"]  # 出生自带透支
     assert {s.name: s.daowen_order for s in restored.status_effects} == {"固执": 1, "龙鳞": 0}
     assert restored.ordered_statuses()[0].name == "龙鳞"
 

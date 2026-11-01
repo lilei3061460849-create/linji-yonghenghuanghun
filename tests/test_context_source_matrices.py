@@ -193,7 +193,7 @@ def test_death_vs_leave_resolution_matrix(tmp_path):
 
     result = engine.execute_action("battle_end", {})
     assert result["success"], result
-    assert result["result"]["shard_reward"] == 2
+    assert result["result"]["shard_reward"] == 7  # 2 + 出生自带透支×5
     assert result["result"]["death_shard_rewards"][0]["name"] == "Dead"
     assert result["result"]["death_shard_rewards"][0]["ctx"]["subtype"] == "death_shard_reward"
     assert result["result"]["removed_via_alt_path"][0]["name"] == "Left"

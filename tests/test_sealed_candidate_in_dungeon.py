@@ -87,10 +87,21 @@ def test_sealed_candidate_fights_in_dungeon():
     assert len(e.state.enemies) >= 1, "乱葬岗应出怪"
     ai = TacticalAI(e)
     survived = False
+    # 轮回者阵亡会走《死者之页》：驳回后本轮回结束、状态清回 setup，
+    # 因此"战斗推进过"必须在循环内记录，不能等结束后回读。
+    saw_battle = e.state.current_battle >= 1
+    max_round = 0
 
     def _drain_redemption():
         # 2026-10-13：内容漂移后本局中途刷出【救赎】待结算（此前种子无），不排空会阻塞
         # 后续行动；本条测的是封存角色参战，不是救赎，一律终结排空。
+        # 2026-11-01：同样地，轮回者阵亡会挂起《死者之页》待裁定，未裁定前引擎拒绝
+        # 一切行动；本条不验死者之书，统一按"驳回"排空（该轮回结束）。
+        while e._pending_interrupts:
+            interrupt = e._pending_interrupts[0]
+            itype = getattr(interrupt.interrupt_type, "value", interrupt.interrupt_type)
+            ruling = e.submit_ruling(itype, "驳回", {"action": "reject"})
+            assert ruling["success"], ruling
         while e.state.pending_redemption:
             rr = e.execute_action("resolve_redemption", {"option": "终结"})
             assert rr["success"], rr
@@ -100,7 +111,9 @@ def test_sealed_candidate_fights_in_dungeon():
         _drain_redemption()
         rs = e.execute_action("round_start", {"relic_choices": round_start_relic_choices(e)})
         assert rs["success"], rs
-        if not e.state.player.is_alive:
+        saw_battle = saw_battle or e.state.current_battle >= 1
+        max_round = max(max_round, e.state.current_round)
+        if not e.state.player or not e.state.player.is_alive:
             break
         _drain_redemption()
         ai.new_round()
@@ -108,22 +121,25 @@ def test_sealed_candidate_fights_in_dungeon():
         if not [x for x in e.state.enemies if x.is_alive]:
             survived = True
             break
-        if not e.state.player.is_alive:
+        if not e.state.player or not e.state.player.is_alive:
             break
         _drain_redemption()
         e.execute_action("resolve_ally_phases", {})
         if not [x for x in e.state.enemies if x.is_alive]:
             survived = True
             break
-        if not e.state.player.is_alive:
+        if not e.state.player or not e.state.player.is_alive:
             break
         _drain_redemption()
         for _ in range(12):
             if e.state.combat_subphase == "await_round_end":
                 break
+            _drain_redemption()
+            if not e.state.player or not e.state.player.is_alive:
+                break
             mp = _resolve_monster_turn(e)
             assert mp["success"], mp
-        if not e.state.player.is_alive:
+        if not e.state.player or not e.state.player.is_alive:
             break
         _drain_redemption()
         assert e.execute_action("round_end", {})["success"]
@@ -131,9 +147,10 @@ def test_sealed_candidate_fights_in_dungeon():
             survived = True
             break
     # 战斗必须正常推进（无论胜负都不崩）
-    assert e.state.current_battle == 1
-    assert e.state.current_round >= 1
-    assert survived or not e.state.player.is_alive, "战斗应分出胜负或玩家阵亡，不卡死"
+    assert saw_battle, "封存角色应能开战"
+    assert max_round >= 1, "战斗应至少推进一回合"
+    assert (survived or e.state.player is None or not e.state.player.is_alive), \
+        "战斗应分出胜负、轮回结束或玩家阵亡，不卡死"
 
 
 def test_sealed_candidate_dungeon_growth_applies():

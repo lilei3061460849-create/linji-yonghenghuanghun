@@ -23,7 +23,8 @@ def test_zengzhi_leaves_generic_core_and_enters_only_twisted_region_pool():
 
     shafa = ResonanceEngine.CLOSED_LOOPS["杀伐闭环"]
     relocated = RELOCATED_DAOWEN_SLOTS["增殖"]
-    assert ("连击", "转换", relocated) in shafa
+    # 2026-11-01：【迟滞】入环，取代连击直接连增殖位。
+    assert ("迟滞", "转换", relocated) in shafa
     # 2026-11-01：【透支】移出闭环改出生自带，增殖位直连贯穿位。
     assert (relocated, "曲解", "？？〔贯穿〕") in shafa
     assert not any("增殖" in (source, target) for source, _, target in shafa)

@@ -50,6 +50,11 @@ def _pick_monster_daowen(engine, actor):
     （DM裁定2026-08-18：自保→输出→控制→机制，含半血/收割/连续压制修正）。
     本文件仅保留候选过滤与空候选回退的原有语义。
     """
+    # 2026-11-01：【透支】只把资源换成法力、不改变战场。自动角色能普攻时不为它
+    # 花掉唯一次出手，故把这类补给项从候选里摘掉（摘空 → 调用方照常提交攻击）。
+    if actor.get("attack_target_options"):
+        actor["daowen_options"] = [o for o in actor.get("daowen_options", [])
+                                   if o.get("name") not in ("透支",)]
     from sim.monster_targets import pick_monster_daowen_option
     opts = actor["daowen_options"]
     if not opts:
@@ -177,8 +182,8 @@ def _resolve_monster_turn_with_spells(engine):
         dao = None
         action_count = actor["base_attack_actions"]
         hit_count = actor["base_hits_per_attack"]
-        if actor["daowen_options"]:
-            option = _pick_monster_daowen(engine, actor)
+        option = _pick_monster_daowen(engine, actor) if actor["daowen_options"] else None
+        if option is not None:
             dao = {"name": option["name"], "dodge": False, "blood_shadow": False,
                    "trigger_spell_choices": {holder: {sp["spell_name"]: {"use": False}
                                                       for sp in spells}
@@ -231,8 +236,8 @@ def _resolve_monster_turn_with_spells(engine):
     for actor in actors[:1]:
         dao = None
         hit_count_fb = actor["base_hits_per_attack"]
-        if actor["daowen_options"]:
-            option = _pick_monster_daowen(engine, actor)
+        option = _pick_monster_daowen(engine, actor) if actor["daowen_options"] else None
+        if option is not None:
             dao = {"name": option["name"], "dodge": False, "blood_shadow": False,
                    "trigger_spell_choices": {holder: {sp["spell_name"]: {"use": False}
                                                       for sp in spells}

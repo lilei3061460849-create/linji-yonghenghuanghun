@@ -597,8 +597,12 @@ class PlaceholderBackend(AIBackend):
                 dao = None
                 action_count = actor["base_attack_actions"]
                 hit_count = actor["base_hits_per_attack"]
-                if actor["daowen_options"]:
-                    option = actor["daowen_options"][0]
+                options = actor["daowen_options"]
+                if options and actor["attack_target_options"]:
+                    # 【透支】只把资源换成法力、不改变战场：能普攻就不为它花掉唯一次出手。
+                    options = [o for o in options if o["name"] != "透支"]
+                if options:
+                    option = options[0]
                     dao = {"name": option["name"], "dodge": False, "blood_shadow": False,
                            "trigger_spell_choices": {
                                holder: {spell["spell_name"]: {"use": False} for spell in spells}

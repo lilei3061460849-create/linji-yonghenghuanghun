@@ -98,14 +98,15 @@ def test_single_ten_node_core_loop():
     """正常路径：杀伐闭环为唯一核心闭环。
 
     2026-08-21：冲击改名波及、删缓慢/慈悲/切割；2026-11-01：【透支】移出闭环改
-    出生自带，节点 10 → 9，〔增殖〕位直连〔贯穿〕位。
+    出生自带、新增【操作】【迟滞】入环，边 10 → 11（含两个占位节点）。
     """
     assert "杀伐闭环" in R.CLOSED_LOOPS
     assert "切割闭环" not in R.CLOSED_LOOPS
     edges = R.CLOSED_LOOPS["杀伐闭环"]
-    assert len(edges) == 9
+    assert len(edges) == 11
     assert sorted(source for source, _, _ in edges) == sorted(target for _, _, target in edges)
-    assert is_reserved_slot(R.find_transformation("连击", "转换"))
+    assert R.find_transformation("连击", "曲解") == "迟滞"
+    assert is_reserved_slot(R.find_transformation("迟滞", "转换"))
     assert not any("增殖" in (src, dst) for src, _, dst in edges)
     assert R.find_transformation("超频", "反转", target_daowen="萎缩") == "萎缩"
     assert R.find_transformation("超频", "反转", target_daowen="增殖") == "增殖"

@@ -83,7 +83,8 @@ def test_zhuiqiuzhe_event_option1_hires_real_employee_with_fixed_panel():
     assert (emp.attack_count, emp.attack_power, emp.blood_limit) == (8, 2, 96)
     assert emp.is_deployed is False, "与DIY雇佣一致，默认待命"
     # 2026-10-03：【活血】删除，追求者面板剩 逆鳞/固执
-    assert set(emp.dao_wen) == set()  # 两条旧道纹已移到遗物/消耗品，不伪造道纹恢复。
+    # 两条旧道纹已移到遗物/消耗品，不伪造道纹恢复；只剩出生自带的【透支】。
+    assert set(emp.dao_wen) == {"透支"}
     # 面板不写死 X：x_free 且 x_value 归零，由发动时自选
     assert all(getattr(v, "x_free", False) and v.x_value == 0
                for v in emp.dao_wen.values())

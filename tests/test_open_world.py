@@ -960,6 +960,12 @@ def test_repeated_zaosheng_creates_another_map_yaoguai_without_growing_the_first
     engine.state.shards = 100
     assert engine.execute_action("world_initialize", {"width": 21, "height": 21})["success"]
 
+    # 2026-11-01：出生自带【透支】各占一页，两只未入幡妖傀 6+6 会超出 10 页；
+    # 本用例验的是造生的「新增不培养」语义，改为持幡（妖傀由幡承载，不占额外页）。
+    from engine.api import has_yaoguai_banner
+    from tests.test_yaoguai import BANNER_NAME
+    engine.state.artifacts_owned.append(BANNER_NAME)
+    assert has_yaoguai_banner(engine.state)
     first = engine.execute_action("pre_battle_action", {
         "sub_action": "造生", "name": "测试妖怪",
     })
@@ -971,8 +977,9 @@ def test_repeated_zaosheng_creates_another_map_yaoguai_without_growing_the_first
     being = beings[0]
     assert being.created_by_runtime_id == engine.state.player.runtime_id
     assert len(being.preferences) == 1
-    assert len(being.dao_wen) == 1
-    signature_daowen = next(iter(being.dao_wen))
+    assert len(being.dao_wen) == 2  # 造生给定的 1 种 + 出生自带【透支】
+    # 造生给定的是「签名道纹」，出生自带的【透支】不算。
+    signature_daowen = next(name for name in being.dao_wen if name != "透支")
     assert first["result"]["signature_daowen"] == signature_daowen
     assert being.runtime_id in engine.state.world_state["actors"]
 
@@ -1002,8 +1009,8 @@ def test_repeated_zaosheng_creates_another_map_yaoguai_without_growing_the_first
     assert being.created_being_vision_range == 1
     assert engine.state.world_state["actors"][being.runtime_id]["vision_range"] == 1
     assert len(being.preferences) == 1
-    assert list(being.dao_wen) == [signature_daowen]
-    assert len(second_being.preferences) == 1 and len(second_being.dao_wen) == 1
+    assert set(being.dao_wen) == {signature_daowen, "透支"}
+    assert len(second_being.preferences) == 1 and len(second_being.dao_wen) == 2
 
 
 def test_reincarnator_trade_requires_fair_offer_and_transfers_atomically(tmp_path):
@@ -2219,8 +2226,10 @@ def test_replay_terminates_on_a_crown_ending_instead_of_hanging():
     2026-10-31：世界层强制会合死斗已删除，这里退化为"跑完整局、终局合法、
     导出可校验"——不再要求世界自己把两名幸存者拽到地图中心。
     """
+    # 2026-11-01：开局池换血（透支出生自带、操作/迟滞入环）后，原种子 8 会在
+    # 地图遭遇里阵亡；改用仍能走到冠冕的种子，断言口径不变。
     replay = run_playthrough(
-        seed=8, region="龙心谷", player_name="测试轮回者",
+        seed=4, region="龙心谷", player_name="测试轮回者",
         blood_points=11, speed_points=6, mana_points=8,
     )
 

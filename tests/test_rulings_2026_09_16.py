@@ -141,7 +141,7 @@ def test_shard_formula_never_scaled_by_event_modifiers(tmp_path):
     base = _engine_with_dead_monster(tmp_path)
     r = base.execute_action("battle_end", {})
     assert r["success"], r
-    formula = math.ceil(200 * 0.02) + 1 * 5      # ⌈200×2%⌉ + 1道纹×5 = 4+5 = 9
+    formula = math.ceil(200 * 0.02) + 2 * 5      # ⌈200×2%⌉ + 2道纹×5 = 4+10 = 14（含出生自带透支）
     assert r["result"]["shard_reward"] == formula
     assert r["result"]["event_bonus_shards"] == 0
 
@@ -160,7 +160,7 @@ def test_bounty_paid_as_separate_line_item(tmp_path):
     e = _engine_with_dead_monster(tmp_path, bounty_reward=30)
     r = e.execute_action("battle_end", {})
     assert r["success"], r
-    formula = math.ceil(200 * 0.02) + 5
+    formula = math.ceil(200 * 0.02) + 2 * 5  # 4 + 2道纹（含透支）×5
     assert r["result"]["shard_reward"] == formula
     assert r["result"]["event_bonus_shards"] == 30
     assert any(b["name"] == "悬赏金" for b in r["result"]["event_bonuses"])

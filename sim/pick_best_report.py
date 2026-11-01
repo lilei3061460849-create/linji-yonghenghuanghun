@@ -65,6 +65,11 @@ def _pick_monster_daowen(engine, actor):
     （DM裁定2026-08-18：自保→输出→控制→机制，含半血/收割/连续压制修正）。
     本文件仅保留候选过滤与空候选回退的原有语义。
     """
+    # 2026-11-01：【透支】只把资源换成法力、不改变战场。自动角色能普攻时不为它
+    # 花掉唯一次出手，故把这类补给项从候选里摘掉（摘空 → 调用方照常提交攻击）。
+    if actor.get("attack_target_options"):
+        actor["daowen_options"] = [o for o in actor.get("daowen_options", [])
+                                   if o.get("name") not in ("透支",)]
     from sim.monster_targets import pick_monster_daowen_option
     opts = actor["daowen_options"]
     if not opts:
@@ -135,6 +140,15 @@ def _resolve_monster_turn(engine):
                 "skipped": True, "player_dead": not engine.state.player.is_alive}
     prepared = engine.execute_action("prepare_monster_phase", {})
     if not prepared.get("success"):
+        # 交替出手：怪物的行动权用完后优先权会弹回轮回者侧。此时轮回者本回合已无
+        # 出手（ai.take_turn 已跑完），按规则只能【跳过】把优先权交回，否则这一轮
+        # 无法收束到 await_round_end。
+        if "轮到player_side" in prepared.get("error", ""):
+            passed = engine.execute_action("skip", {})
+            if passed.get("success"):
+                return {"success": True, "result": {"details": [], "player_passed": True},
+                        "skipped": True,
+                        "player_dead": not engine.state.player.is_alive}
         return prepared
     if not prepared["result"].get("actors"):
         # prepare 无事可做：这一侧已经收手（可能已推进到 await_round_end）。
@@ -146,8 +160,8 @@ def _resolve_monster_turn(engine):
         dao = None
         action_count = actor["base_attack_actions"]
         hit_count = actor["base_hits_per_attack"]
-        if actor["daowen_options"]:
-            option = _pick_monster_daowen(engine, actor)
+        option = _pick_monster_daowen(engine, actor) if actor["daowen_options"] else None
+        if option is not None:
             dao = {"name": option["name"], "dodge": False, "blood_shadow": False,
                    "trigger_spell_choices": {holder: {sp["spell_name"]: {"use": False} for sp in spells}
                                                for holder, spells in option.get("trigger_spell_options", {}).items()}}
@@ -386,8 +400,8 @@ def play_and_record(region: str, seed: int, battles: int = 7):
             if battle_no == battles:
                 lines.append("")
                 lines.append(f"### 【最终的冠冕】触发前 · 当前生命 {hp_now}")
-                if e.state.current_battle == 7 and "final_crown" not in (be.get("result") or {}):
-                    be.setdefault("result", {})["final_crown"] = e._trigger_final_crown() or {}
+                if engine.state.current_battle == 7 and "final_crown" not in (be.get("result") or {}):
+                    be.setdefault("result", {})["final_crown"] = engine._trigger_final_crown() or {}
                 crown = be["result"].get("final_crown")
                 if crown:
                     lines.append(f"结算：{crown}")

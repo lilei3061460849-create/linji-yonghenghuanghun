@@ -243,6 +243,10 @@ def test_sealing_a_target_removes_it_from_later_monster_choices():
         DaoWen(name="封印", formula="", cost_type="异变", cost_formula="X",
                effect_formula=""), x_value=1, x_free=False)
     attacker = _monster("石背熊", hp=42, atk=1, power=7)
+    # 2026-11-01：出生自带【透支】总能支付（生命/血限/枯竭/速度），"无合法行动"不复存在；
+    # 本用例验的是封印后无可提交行动，故先摘掉两只怪的透支。
+    for _m in (sealer, attacker):
+        _m.dao_wen.pop("透支", None)
     engine.state.enemies.extend([sealer, attacker])
     assert engine.execute_action("round_start", {})["success"]
     hp_before = engine.state.player.current_hp

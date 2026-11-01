@@ -281,7 +281,8 @@ def test_moneybag_does_not_add_kill_shards():
     monster.is_alive = False
     engine.state.enemies.append(monster)
     r = engine.execute_action("battle_end", {})
-    assert r["result"]["shard_reward"] == 2, "第一杯不得额外加碎片，100血限×2%=2"
+    # 2026-11-01：怪物出生自带【透支】也算一种道纹 → 2 + 5 = 7。
+    assert r["result"]["shard_reward"] == 7, "第一杯不得额外加碎片，100血限×2%=2，再加透支×5"
 
 
 def test_tonghunbi_rejected_when_second_target_lacks_daowen():
