@@ -90,7 +90,7 @@ def test_a_legacy_call_without_ctx_is_marked_not_silent():
 
 # ==================== B. 两层链：攻击伤害 → 千荆甲反噬 ====================
 # 2026-10-03：【爆裂】道纹删除；反噬语义由通用遗物【千荆甲】承接
-# （你受到攻击伤害前，攻击者受到等量伤害）。
+# （你受到攻击伤害前，攻击者失去等量生命）。
 
 def _qianjingjia_arena(player_hp: int = 100, enemy_hp: int = 100):
     state, combat, player, enemy = _arena(player_hp=player_hp, enemy_hp=enemy_hp)

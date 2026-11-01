@@ -641,7 +641,8 @@ class DamageDeathMixin:
         # 2. 受到伤害前反噬 (千荆甲遗物：受到攻击伤害前，攻击者受等量伤害)
         before_res = self.hook_manager.apply_before_damage(target, amount, damage_type, source, self.state)
         # 千荆甲（通用遗物池，2026-10-03 出自被删【爆裂】道纹）：你受到攻击伤害**前**，
-        # 攻击者受到等量伤害。只对攻击行动（subtype=attack）生效，非攻击伤害不触发；
+        # 攻击者失去等量生命（2026-11-01 用户令：条文改「失去等量生命」，避免被读成再打一次伤害）。
+        # 只对攻击行动（subtype=attack）生效，非攻击伤害不触发；
         # 反噬本身是"直接失血"，不视为"受到攻击造成的伤害"，因此不会连环触发千荆甲/活血衣。
         # 归因口径沿用 2026-10-03 裁定：这笔失血记【千荆甲】。
         reflect_amount = 0
