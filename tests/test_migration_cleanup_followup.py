@@ -25,7 +25,7 @@ def test_legacy_panel_retypes_relic_without_losing_ability():
     m = make_monster_entity({"name": "旧面板", "blood_limit": 100,
                              "mana_limit": 5, "speed_limit": 2,
                              "dao_wen": {"疯狂": 3, "减速": 2, "杀伐": None}})
-    assert set(m.dao_wen) == {"杀伐"}
+    assert set(m.dao_wen) == {"杀伐", "透支"}  # 2026-11-01：透支出生自带
     assert {"疯狂", "减速"} <= {r.name for r in m.relics}
 
 

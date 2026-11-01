@@ -25,6 +25,56 @@ from ..models import MONSTER_MANA_RELIC
 
 
 class CostPaymentMixin:
+    # ==================== 【操作】：目标的下一次非施法行动由施法者决定 ====================
+
+    def caozuo_status_of(self, entity: Entity):
+        """返回该实体身上仍生效的【操作】状态。"""
+        return next((s for s in entity.get_status_effects("操作") if not s.is_expired), None)
+
+    @staticmethod
+    def caozuo_attack_matches(order: dict, hits) -> bool:
+        ordered_hits = order.get("hits")
+        if not isinstance(hits, list):
+            return False
+        if ordered_hits is None:
+            return all(isinstance(hit, dict) and hit.get("target_ref") == order["target_ref"]
+                       for hit in hits)
+        if len(hits) != len(ordered_hits):
+            return False
+        for hit, ordered in zip(hits, ordered_hits):
+            if not isinstance(hit, dict):
+                return False
+            if any(hit.get(key) != ordered.get(key)
+                   for key in ("target_ref", "damage", "dodge", "parry", "blood_shadow")):
+                return False
+        return True
+
+    def caozuo_check(self, entity: Entity, kind: str, payload=None):
+        """【操作】生效时，目标的下一次非施法行动必须等于施法者的预指定。
+
+        返回 None＝放行（含作废/消费两种情形）；返回 dict＝拒绝本次行动。
+        施法（`cast` 系列）不在【操作】管辖内，调用方不经过本函数。
+        """
+        status = self.caozuo_status_of(entity)
+        if status is None:
+            return None
+        order = status.effect_data.get("order")
+        if order is None:
+            # 施法者没有预指定：效果作废，代价不退，目标照常行动。
+            entity.status_effects.remove(status)
+            return None
+        matched = ((kind == "攻击" and self.caozuo_attack_matches(order, payload))
+                   or (kind == "使用消耗品" and order.get("action") == kind
+                       and order.get("item") == payload)
+                   or (kind == "跳过" and order.get("action") == kind))
+        if not matched:
+            caster = status.effect_data.get("caster_name") or "施法者"
+            return {"success": False,
+                    "error": (f"{entity.name}受【操作】影响：下一次行动必须按{caster}预指定的"
+                              f"【{order.get('action')}】执行")}
+        entity.status_effects.remove(status)
+        return None
+
     def pay_daowen_numeric_cost(self,name,calc,caster,*,dragon_heart_use=0,cost_share_target_ref=""):
         """同一份数值代价结算：正常效果与被闪避/血影免去效果的发动共用，不双付。"""
         cost_spec = None

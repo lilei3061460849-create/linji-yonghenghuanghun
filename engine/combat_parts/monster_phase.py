@@ -977,6 +977,18 @@ class MonsterPhaseMixin:
             dao_choice = choice.get("daowen")
             if choice.get("daowen_2") is not None:
                 raise ValueError(f"{monster.name}每次只能提交1个行动，不接受daowen_2")
+            # 【操作】：这次提交必须等于施法者预指定的那一次非施法行动。
+            if isinstance(dao_choice, dict):
+                _cz_kind, _cz_payload = "发动道纹", None
+            elif choice.get("attack_actions"):
+                _cz_kind = "攻击"
+                _cz_payload = [hit for action in choice["attack_actions"]
+                               for hit in (action.get("hits") or [])]
+            else:
+                _cz_kind, _cz_payload = "跳过", None
+            _cz_error = self.caozuo_check(monster, _cz_kind, _cz_payload)
+            if _cz_error:
+                raise ValueError(_cz_error["error"])
             options = {o["name"] for o in expected[actor_ref]["daowen_options"]}
             if not options and dao_choice is not None:
                 raise ValueError(f"{monster.name}本次没有合法道纹选项，daowen必须为null")

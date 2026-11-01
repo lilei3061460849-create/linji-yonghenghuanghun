@@ -27,6 +27,53 @@ RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
 RELOCATED_DAOWEN_SLOTS = {name: f"（待补）〔{name}〕" for name in ("增殖",)}
 
 
+# 【操作】可以被施法者预指定的行动种类（施法本身不在其中）。
+CAOZUO_ORDER_ACTIONS = ("攻击", "跳过", "使用消耗品")
+
+
+def normalize_caozuo_order(order):
+    """规范化【操作】的预指定行动。None＝未预指定（到点作废、代价不退）。"""
+    if order is None:
+        return None
+    if not isinstance(order, dict):
+        raise ValueError("操作的预指定行动必须是对象")
+    kind = order.get("action")
+    if kind == "跳过":
+        return {"action": "跳过"}
+    if kind == "使用消耗品":
+        item = order.get("item")
+        if not isinstance(item, str) or not item:
+            raise ValueError("操作的消耗品预指定缺少item")
+        return {"action": "使用消耗品", "item": item}
+    if kind == "攻击":
+        target_ref = order.get("target_ref")
+        if not isinstance(target_ref, str) or not target_ref:
+            raise ValueError("操作的攻击预指定缺少target_ref")
+        hits = order.get("hits")
+        if hits is not None:
+            if not isinstance(hits, list) or not hits:
+                raise ValueError("操作的攻击预指定hits必须是非空列表")
+            normalized = []
+            for hit in hits:
+                if not isinstance(hit, dict):
+                    raise ValueError("操作的攻击预指定每一击必须是对象")
+                hit_ref = hit.get("target_ref")
+                if not isinstance(hit_ref, str) or not hit_ref:
+                    raise ValueError("操作的攻击预指定每一击必须带target_ref")
+                damage = hit.get("damage", 0)
+                if not isinstance(damage, int) or isinstance(damage, bool) or damage < 0:
+                    raise ValueError("操作的攻击预指定每击damage必须是非负整数")
+                normalized.append({
+                    "target_ref": hit_ref, "damage": damage,
+                    "dodge": bool(hit.get("dodge", False)),
+                    "parry": bool(hit.get("parry", False)),
+                    "blood_shadow": bool(hit.get("blood_shadow", False)),
+                })
+            hits = normalized
+        return {"action": "攻击", "target_ref": target_ref, "hits": hits}
+    raise ValueError(f"操作的预指定行动只能用{'/'.join(CAOZUO_ORDER_ACTIONS)}")
+
+
 def is_reserved_slot(name) -> bool:
     """该名字是否为闭环上的非道纹占位节点；带内部标识的空位也算占位。"""
     return name in PLACEHOLDER_SLOTS or (
@@ -522,6 +569,42 @@ class DaoWenEngine:
             "summary": f"支付：{2 * x}法力，使{target_name}攻击力-{x}，永久"
         }
     
+
+    @staticmethod
+    def calculate_caozuo(x: int, target: Entity = None, order: Optional[dict] = None) -> dict:
+        """操作X：支付：法限X。[目标]除施法外的下一次行动由你决定。
+
+        施法者须在发动时预指定那一次行动（`order`）；未指定则效果作废、代价不退。
+        预指定的内容由【操作】状态记录，目标的下一次非施法行动必须照此执行。
+        """
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "操作",
+            "x": x,
+            "cost_type": CostType.SHRINK.value,
+            "cost_mana_cap": x,
+            "caozuo_order": order,
+            "summary": (f"支付：法限{x}，{target_name}除施法外的下一次行动由施法者决定"
+                        if order else f"支付：法限{x}，{target_name}除施法外的下一次行动由施法者决定（未预指定，将作废）"),
+        }
+
+    @staticmethod
+    def calculate_chizhi(x: int, target: Entity = None) -> dict:
+        """迟滞X：支付：冷却X。使[目标]行动所需出手+1，持续X。
+
+        「行动」按通用口径覆盖所有行动：攻击、施法、发动道纹、普通行动，
+        以及闪避、招架这类原本零出手的回合外行动。
+        """
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "迟滞",
+            "x": x,
+            "cost_type": CostType.COOLDOWN.value,
+            "cost": x,
+            "duration": x,
+            "action_cost_penalty": 1,
+            "summary": f"支付：冷却{x}，使{target_name}行动所需出手+1，持续{x}回合",
+        }
 
     @staticmethod
     def calculate_quansu(x: int, target: Entity = None) -> dict:
@@ -1025,6 +1108,8 @@ class DaoWenEngine:
             "增殖": cls.calculate_zengzhi,
             "束缚": cls.calculate_shufu,
             "透支": cls.calculate_touzhi,
+            "操作": cls.calculate_caozuo,
+            "迟滞": cls.calculate_chizhi,
             "封印": cls.calculate_fengyin,
             "怜悯": cls.calculate_lianmin,
             # 怪物原始（2026-10-25 用户令：【疯狂】【减速】遗物化，退出道纹体系）
@@ -1179,8 +1264,8 @@ class ResonanceEngine:
             # 波及迁入沉沦海、增殖迁入扭曲都市后，原位保留待补节点，不直连。
             ("连击", "转换", RELOCATED_DAOWEN_SLOTS["增殖"]),
             # 删除慈悲/切割/缓慢后保留既有空位；贯穿→(曲解)束缚：概念腐化。
-            (RELOCATED_DAOWEN_SLOTS["增殖"], "曲解", "透支"),
-            ("透支", "转换", RELICIZED_DAOWEN_SLOTS["贯穿"]),
+            # 2026-11-01 用户令：【透支】移出闭环，改为任意角色出生自带；两侧直连。
+            (RELOCATED_DAOWEN_SLOTS["增殖"], "曲解", RELICIZED_DAOWEN_SLOTS["贯穿"]),
             (RELICIZED_DAOWEN_SLOTS["贯穿"], "曲解", "束缚"),
             ("束缚", "曲解", "封印"),
             ("封印", "反转", "杀伐"),

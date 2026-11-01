@@ -19,7 +19,8 @@ def test_project_rules_are_extracted_from_their_authoritative_documents():
     facts = sync.extract_project_rules()
     assert [entry["name"] for entry in facts["event_daowen"]] == ["真理"]
     # 强化进入转化道纹后通用正文16条；副本定义41条，另有龙心谷3条支付待定草案。
-    assert len(facts["common_daowen"]) == 17
+    # 2026-11-01：新增【操作】【迟滞】两条通用道纹 → 17 → 19。
+    assert len(facts["common_daowen"]) == 19
     # 2026-10-31：共罪回到永夜庭主环并写进副本定义 → 副本专属道纹 44 → 45；
     # 同日罪孽都市删【抢劫】【勒索】、补【烁金】【交易】【赦免】【贿赂】→ 45 → 47。
     assert len(facts["dungeon_daowen"]) == 47

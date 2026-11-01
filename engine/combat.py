@@ -427,6 +427,25 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         if not self.state.hp_overflow_exempt(entity):
             entity.current_hp = min(entity.current_hp, entity.effective_blood_limit())
 
+    def charge_reaction_penalty(self, entity: Entity, label: str):
+        """【迟滞】等「行动所需出手+1」修正对回合外防御行动的扣账。
+
+        闪避、招架原本零出手；有该修正时按修正值真实记出手，剩余不足则本次防御
+        不能进行。返回 None＝可继续；返回 dict＝不能进行及原因。
+        怪物在非死斗战斗中不出手记账，与主动行动同一口径。
+        """
+        penalty = int(getattr(entity, "action_cost_penalty", 0) or 0)
+        if penalty <= 0:
+            return None
+        if entity.entity_type == "怪物" and not self.state.in_final_duel:
+            return None
+        budget = self.single_round_action_count(entity)
+        if entity.actions_used_this_round + penalty > budget:
+            return {"reason": f"【迟滞】{label}需{penalty}次出手",
+                    "budget": budget, "used": entity.actions_used_this_round}
+        entity.actions_used_this_round += penalty
+        return None
+
     def _note_dodge(self, entity: Entity, relic_target_ref: Optional[str] = None) -> dict:
         """闪避专属句：正文写「每次闪避后」的效果。失速/归零不在这里。"""
         extra = {}
@@ -825,6 +844,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 result["dodge_fail_reason"] = (
                     "目标被【必中】封锁回合外行动，无法闪避" if target_bizhonged
                     else "必中攻击无法闪避")
+            elif (penalty := self.charge_reaction_penalty(target, "闪避")) is not None:
+                result["dodge_success"] = False
+                result["dodge_fail_reason"] = penalty["reason"]
             elif target.current_speed >= 1:
                 extra = self._spend_dodge_speed(target, dodge_relic_target_ref)
                 result["dodge_success"] = True
@@ -855,6 +877,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 result["parry_fail_reason"] = "目标被【必中】封锁回合外行动，无法招架"
             elif target.current_speed < 1:
                 result["parry_fail_reason"] = "速度不足"
+            elif (penalty := self.charge_reaction_penalty(target, "招架")) is not None:
+                result["parry_success"] = False
+                result["parry_fail_reason"] = penalty["reason"]
             else:
                 self.pay_resource(
                     target, "速度", 1,

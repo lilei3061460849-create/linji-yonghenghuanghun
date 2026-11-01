@@ -112,6 +112,7 @@ def test_lines_reference_real_held_daowen():
 def test_no_daowen_falls_back_to_neutral_word():
     """边界：一个道纹都没有时不许编造，回退到「底牌」。"""
     st, a, _b = _arena(daowen=())
+    a.dao_wen.clear()  # 2026-11-01：【透支】出生自带，本用例要「一个道纹都没有」
     for seed in range(120):
         entry = utter(st, a, rng=random.Random(seed))
         for name in BRACKET.findall(entry["text"]):

@@ -50,7 +50,8 @@ def test_setup():
     assert result["result"]["relic_choices"] == relic_choices
     assert len(relic_choices) == 3 and len(set(relic_choices)) == 3
     assert engine.state.pending_initial_daowen_choices == []
-    assert engine.state.player.dao_wen == {}
+    # 2026-11-01：【透支】出生自带，属性分配后玩家已持有它。
+    assert list(engine.state.player.dao_wen) == ["透支"]
     print("  ✓ 属性分配正确，先列出3件遗物发现候选")
 
     blocked = engine.execute_action("setup_choose_initial_daowen", {"daowen_name": "杀伐"})
@@ -65,7 +66,7 @@ def test_setup():
     assert picked_relic["result"]["daowen_choices"] == choices
     assert len(choices) == 3 and len(set(choices)) == 3
     assert set(choices) <= set(SHAFA_LOOP_DAOWEN)
-    assert engine.state.player.dao_wen == {}
+    assert list(engine.state.player.dao_wen) == ["透支"]  # 出生自带
     print(f"  ✓ 显式选择开局遗物【{relic_choices[0]}】后，列出3个杀伐闭环发现候选")
 
     blocked = engine.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
@@ -80,12 +81,12 @@ def test_setup():
 
     illegal = engine.execute_action("setup_choose_initial_daowen", {"daowen_name": "狂暴"})
     assert not illegal["success"]
-    assert engine.state.player.dao_wen == {}
+    assert list(engine.state.player.dao_wen) == ["透支"]  # 出生自带
     print("  ✓ 非发现候选被拒绝")
 
     picked = engine.execute_action("setup_choose_initial_daowen", {"daowen_name": choices[0]})
     assert picked["success"]
-    assert set(engine.state.player.dao_wen) == {choices[0]}
+    assert set(engine.state.player.dao_wen) == {choices[0], "透支"}
     repeat = engine.execute_action("setup_choose_initial_daowen", {"daowen_name": choices[0]})
     assert not repeat["success"]
     removed = engine.execute_action("setup_choose_daowen", {"daowen": "波及"})

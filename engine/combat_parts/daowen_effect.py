@@ -1618,7 +1618,7 @@ class DaowenEffectMixin:
               # 波及标记由 use_daowen/怪物结算逐目标处理，不走通用状态块
               # 乱葬岗道纹已在上方乱葬岗段自行 add_status，跳过通用状态处理避免重复叠加
               and name not in ("勾魂", "冥气", "缄默", "波及", "共罪", "血契", "庇护", "强化", "弱化", "冰冻",
-                               "怜悯")):
+                               "怜悯", "迟滞", "操作")):
             duration = calc["duration"]  # 0不生效；只有显式-1表示持续∞。
             effect_target = target if target else caster
             # 自身作用型道纹（变形/超频等）作用于施法者
@@ -1699,6 +1699,34 @@ class DaowenEffectMixin:
             result["effects"].append({"type": "payment_block", "target": target.name,
                                       "blocked_type": kind,
                                       "duration": calc.get("duration", x)})
+
+        if name == "迟滞":
+            # 【迟滞】：每一次行动所需出手+1（含闪避/招架这类零出手的回合外行动）。
+            if target is None:
+                raise ValueError("迟滞需要显式目标")
+            penalty = max(1, int(calc.get("action_cost_penalty", 1) or 1))
+            duration = calc.get("duration", x)
+            target.add_status(self._daowen_status(
+                daowen_order=daowen_order, name="迟滞", value=penalty,
+                remaining_rounds=duration, source=caster.name,
+                effect_data={"action_cost_penalty": penalty}))
+            result["effects"].append({"type": "action_cost_penalty", "target": target.name,
+                                      "penalty": penalty, "duration": duration})
+
+        if name == "操作":
+            # 【操作】：把目标的下一次非施法行动交给施法者预指定。
+            # 未预指定时 order=None——到目标该行动时作废，代价不退。
+            if target is None:
+                raise ValueError("操作需要显式目标")
+            order = calc.get("caozuo_order")
+            target.add_status(self._daowen_status(
+                daowen_order=daowen_order, name="操作", value=1,
+                remaining_rounds=-1, source=caster.name,
+                effect_data={"caster_ref": str(caster.runtime_id),
+                             "caster_name": caster.name,
+                             "order": order}))
+            result["effects"].append({"type": "action_control", "target": target.name,
+                                      "caster": caster.name, "order": order})
 
         if name == "共罪":
             # 2026-10-31 用户裁定：X 个非自身目标之外，发动者始终追加一个支付名额；

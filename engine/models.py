@@ -535,6 +535,13 @@ class Entity:
             self.relics.append(
                 Relic(name=MONSTER_MANA_RELIC, effect=MONSTER_MANA_RELIC_EFFECT,
                       tags=["怪物自带"]))
+        # 2026-11-01 用户令：【透支】移出杀伐闭环，改为任意角色出生自带（X每次自选）。
+        # 造物不是角色，不在此列；任何构造路径（工厂/旧档/旧封存）都补齐同一不变量。
+        if self.entity_type != "造物" and "透支" not in self.dao_wen:
+            self.dao_wen["透支"] = DaoWenInstance(
+                dao_wen=DaoWen(name="透支", formula="透支X", cost_type="",
+                               cost_formula="", effect_formula=""),
+                x_free=True)
         if self.entity_type != "轮回者":
             if self.current_mana == 0 and self.mana_limit > 0:
                 self.current_mana = self.mana_limit
@@ -713,6 +720,14 @@ class Entity:
     @property
     def relic_capacity(self) -> int:
         return self._kind_capacity("遗物")
+
+    @property
+    def action_cost_penalty(self) -> int:
+        """【迟滞】等「行动所需出手+1」的通用修正。
+
+        对每一次行动生效，含闪避、招架这类原本零出手的回合外行动。
+        """
+        return max(0, self.get_status_value("迟滞"))
 
     @property
     def action_count(self) -> int:

@@ -4579,7 +4579,7 @@ class GameEngine:
             result["note"] = "交易仍在发现中：继续从当前候选里选择。"
         # 开局流程：先发现遗物，再发现初始道纹。
         if (source == "开局发现" and self.state.player is not None
-                and not self.state.player.dao_wen
+                and not any(n != "透支" for n in self.state.player.dao_wen)
                 and not self.state.pending_initial_daowen_choices):
             discovery = self._offer_initial_daowen_discovery("开局发现")
             if not discovery.get("success"):
@@ -5336,11 +5336,14 @@ class GameEngine:
             return {"success": False, "error": f"{entity.name}被龙息命零",
                     "dragon_breath": breath}
         budget = self._action_budget_of(entity)
-        if entity.actions_used_this_round >= budget:
+        # 【迟滞】：每一次行动所需出手+1（含闪避/招架这类原本零出手的行动）。
+        cost = 1 + int(getattr(entity, "action_cost_penalty", 0) or 0)
+        if entity.actions_used_this_round + cost > budget:
             return {"success": False,
                     "error": f"{entity.name}本回合出手已用完"
-                             f"({entity.actions_used_this_round}/{budget})"}
-        entity.actions_used_this_round += 1
+                             f"({entity.actions_used_this_round}/{budget}"
+                             + (f"，本次行动需{cost}次" if cost > 1 else "") + ")"}
+        entity.actions_used_this_round += cost
         return None
 
     def _consume_actions_or_error(self, entity: "Entity", count: int,
@@ -5819,6 +5822,10 @@ class GameEngine:
 
         name = params.get("daowen_name", "")
         x = params.get("x", 1)
+        # 【操作】：发动道纹不是「施法」，属于被【操作】管辖的那一次非施法行动。
+        caozuo_error = self.combat.caozuo_check(actor, "发动道纹")
+        if caozuo_error:
+            return caozuo_error
         if name == "唤潮":
             return self._action_tidecall(params, actor)
         if name == "蜃景":
@@ -5912,6 +5919,15 @@ class GameEngine:
                    or entry.get("dodge", False) and entry.get("blood_shadow", False)
                    for entry in pact_entries):
                 return {"success": False, "error": "共罪目标的dodge/blood_shadow必须为互斥布尔值"}
+        if name == "操作":
+            if not (target_ref or target_name):
+                return {"success": False, "error": "操作需要显式指定的[目标]"}
+            try:
+                from .daowen import normalize_caozuo_order
+                params = dict(params, caozuo_order=normalize_caozuo_order(
+                    params.get("caozuo_order")))
+            except ValueError as exc:
+                return {"success": False, "error": f"操作预指定无效：{exc}"}
         if name in ("赦免", "贿赂"):
             picked = [str(n) for n in (params.get("relic_names") or []) if n]
             if len(picked) != x or len(set(picked)) != x:
@@ -5992,6 +6008,8 @@ class GameEngine:
                 resolve_kw["blocked_type"] = params.get("lianmin_cost", "法力")
             if name in ("赦免", "贿赂"):
                 resolve_kw["relic_names"] = list(params.get("relic_names") or [])
+            if name == "操作":
+                resolve_kw["order"] = params.get("caozuo_order")
             if name == "再生":
                 resolve_kw["cost_channel"] = params.get("zaisheng_cost", "法力")
             calc = DaoWenEngine.resolve(name, x, **resolve_kw)
@@ -6801,6 +6819,9 @@ class GameEngine:
         duel_err = self._check_duel_turn_or_error(actor)
         if duel_err:
             return duel_err
+        caozuo_error = self.combat.caozuo_check(actor, "跳过")
+        if caozuo_error:
+            return caozuo_error
         # 只有显式 skip/rest 触发；敌方无合法行动时的自动跳过不触发遗物。
         shackle_effects = self.combat.resolve_heavy_shackles_on_skip(actor)
         self._advance_priority_skip()
@@ -6959,6 +6980,9 @@ class GameEngine:
         duel_error = self._check_duel_turn_or_error(attacker)
         if duel_error:
             return duel_error
+        caozuo_error = self.combat.caozuo_check(attacker, "攻击", hits)
+        if caozuo_error:
+            return caozuo_error
         budget_error = self._consume_action_or_error(attacker)
         if budget_error:
             return budget_error
@@ -7187,6 +7211,12 @@ class GameEngine:
                 break
         if item is None:
             return {"success": False, "error": f"找不到可用消耗品: {item_name}"}
+
+        # 【操作】：使用者（玩家/朋友/员工）的这一次行动必须等于预指定。
+        item_user = self.state.player
+        caozuo_error = self.combat.caozuo_check(item_user, "使用消耗品", item_name)
+        if caozuo_error:
+            return caozuo_error
 
         if item.name == "万钧印":
             return {"success": False, "error": "万钧印在受到攻击时自动触发，不可主动使用"}

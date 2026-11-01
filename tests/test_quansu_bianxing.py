@@ -41,11 +41,15 @@ def _monster(name="靶怪", speed=3, speed_limit=3, mana=10, mana_limit=10, hp=1
 # ==================== 【全速】攻击次数锁定 = [速限] ====================
 
 def test_quansu_renamed_from_chizhi():
-    """原名【迟滞】已改名【全速】，注册表里不再有"迟滞"。"""
+    """原名【迟滞】已改名【全速】；2026-11-01 起【迟滞】是另一条新道纹。"""
     from engine.daowen import DaoWenEngine as D
     D.register_all()
     assert "全速" in D._registry
-    assert "迟滞" not in D._registry
+    assert D.resolve("全速", 1)["attack_count_to_speed_limit"] is True
+    # 新【迟滞】只做出手加价，不是【全速】的旧实现。
+    chizhi = D.resolve("迟滞", 1)
+    assert chizhi["action_cost_penalty"] == 1
+    assert "attack_count_to_speed_limit" not in chizhi
 
 
 def test_quansu_locks_attack_count_to_speed_limit_for_player():
