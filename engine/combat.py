@@ -837,6 +837,18 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             result["note"] = "血影：支付生命10，本次判定被取消"
             return result
 
+        # 【束缚】限定只能施法（2026-11-01 用户令）：闪避、招架也是行动，同样不可选。
+        # 这不是新的旁路：束缚的旧闸门只管主动行动，零出手的响应行动原样沿用它。
+        if target.has_status("束缚"):
+            if dodge:
+                result["dodge_success"] = False
+                result["dodge_fail_reason"] = "受【束缚】影响，只能施法，无法闪避"
+            if parry:
+                result["parry_success"] = False
+                result["parry_fail_reason"] = "受【束缚】影响，只能施法，无法招架"
+            # 不能在这里返回：防御被封的本次攻击必须照常进入伤害结算。
+            dodge = parry = False
+
         # 闪避判定
         if dodge:
             if must_hit:
