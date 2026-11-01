@@ -251,7 +251,8 @@ def test_bizhong_blocks_counter_action_but_not_skip_or_own_continuation():
 
     rejected = _daowen(engine, "enemy:0", "player:0")
     assert rejected["success"] is False
-    assert "【必中】封锁回合外行动" in rejected["error"]
+    # 2026-11-01 口径：必中使目标无法行动（不再区分回合内外）。
+    assert "【必中】" in rejected["error"]
     assert monster.actions_used_this_round == 0
 
     resumed = _skip(engine, "enemy:0")

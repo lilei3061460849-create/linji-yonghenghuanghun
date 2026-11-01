@@ -43,10 +43,11 @@ def test_bound_player_can_cast_but_cannot_use_other_active_actions(tmp_path):
     action_types = {action["action_type"] for action in available["actions"]}
     # 交替出手：优先权在轮回者侧时不提供 prepare_monster_phase（旧断言把它当成
     # 常驻可选项，是「怪物阶段可随时准备」的过期口径）。这里锁的是「束缚者只剩法术行动」。
-    assert action_types == {"cast", "define_spell"}
+    # 2026-11-01：法术由道纹构成，直接发动单个道纹同属施法，束缚下放行。
+    assert action_types == {"cast", "define_spell", "use_daowen"}
     assert "prepare_monster_phase" not in action_types
-    assert "cast(flow=...)" in available["binding_restriction"]
-    assert "define_spell/cast(kind=spell)" in available["binding_restriction"]
+    assert "cast/define_spell" in available["binding_restriction"]
+    assert "use_daowen" in available["binding_restriction"]
 
     result = engine.execute_action("cast", {
         "flow": "发动杀伐X于目标",

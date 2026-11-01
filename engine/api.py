@@ -438,7 +438,8 @@ class GameEngine:
                 subphase = self.state.combat_subphase
                 allowed_by_subphase = {
                     CombatSubphase.PLAYER_ACTIONS.value: {
-                        "cast", "define_spell", "prepare_monster_phase"},
+                        "cast", "define_spell", "use_daowen",
+                        "prepare_monster_phase"},
                     CombatSubphase.AWAIT_ROUND_START.value: {"round_start"},
                 }
                 allowed = allowed_by_subphase.get(subphase)
@@ -450,10 +451,9 @@ class GameEngine:
                              or action.get("available", True))
                     ]
                     available["binding_restriction"] = (
-                        "【束缚】持续期间仅能施放瞬发法术cast(flow=...)，"
-                        "或定义/施展自定义法术define_spell/cast(kind=spell)；"
+                        "【束缚】持续期间仅能施法：施放法术cast/define_spell，"
+                        "或直接发动道纹use_daowen（法术由道纹构成，发动单个道纹同属施法）；"
                         "prepare_monster_phase/round_start只用于推进战斗流程。"
-                        "回合外防御反应与自动触发不受影响。"
                     )
                     existing_note = available.get("note", "")
                     available["note"] = "；".join(
@@ -5328,8 +5328,12 @@ class GameEngine:
             return {"success": False,
                     "error": f"{entity.name}被【必中】封锁回合外行动，无法插队"}
         if not self.combat.can_act(entity, action_type=action_type):
-            error = (f"{entity.name}受【束缚】影响，只能进行法术行动"
-                     if entity.has_status("束缚") else f"{entity.name}当前无法出手")
+            if self.combat.bizhong_action_locked(entity):
+                error = f"{entity.name}被【必中】锁定，无法行动"
+            elif entity.has_status("束缚"):
+                error = f"{entity.name}受【束缚】影响，只能进行法术行动"
+            else:
+                error = f"{entity.name}当前无法出手"
             return {"success": False, "error": error}
         breath = self.combat.apply_opposing_longxi(entity)
         if breath and not entity.is_alive:
@@ -5968,6 +5972,9 @@ class GameEngine:
             return duel_error
         if self.state.phase == "in_combat":
             if not self.combat.can_act(actor):
+                if self.combat.bizhong_action_locked(actor):
+                    return {"success": False,
+                            "error": f"{actor.name}被【必中】锁定，无法行动"}
                 return {"success": False, "error": f"{actor.name}当前无法出手"}
             budget = self._action_budget_of(actor)
             if actor.actions_used_this_round >= budget:

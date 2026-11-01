@@ -535,15 +535,14 @@ class DaoWenEngine:
         }
 
     @staticmethod
-    def calculate_bizhong(x: int) -> dict:
-        """必中X：支付：异变X。你选中的目标无法进行回合外行动，持续X。
+    def calculate_bizhong(x: int, target: Entity = None) -> dict:
+        """必中X：支付：异变X。使[目标]无法行动，持续X。
 
-        口径（2026-10-12 用户令增强，取代 2026-09-28 的 self-buff 口径）：
-        必中是给**目标**挂 debuff，不是给自己挂姿态。效果从「无法闪避」扩大为
-        「无法进行回合外行动」——即目标在该状态下不能 闪避 / 招架，也不能发动
-        任何反应型法术（受到伤害前/失去生命后/目标发动道纹前 等窗口）。
-        「未来可能新增的回合外行动」同样受此约束：新增反应窗口一律走
-        CombatEngine.out_of_turn_blocked() 这道闸，不要各自另立判断。
+        口径（2026-11-01 用户令）：必中给**目标**挂 debuff，目标在持续期内
+        「无法行动」——普攻、施法（含直接发动道纹）、使用消耗品、聚能、逃跑、
+        指挥，以及闪避、招架全部不可用。行动清单见《规则正文·基础定义·行动》。
+        主动行动走 CombatEngine.bizhong_action_locked()／can_act()，
+        响应行动走 out_of_turn_blocked()，两道闸都只认持续型 debuff。
         """
         return {
             "dao_wen": "必中",
@@ -551,7 +550,7 @@ class DaoWenEngine:
             "cost_type": CostType.MUTATION.value,
             "cost_mutation": x,
             "bizhong_target_debuff": x,   # 给目标挂持续X回合的必中debuff
-            "summary": f"异变+{x}，你选中的[目标]无法进行回合外行动，持续{x}回合"
+            "summary": f"异变+{x}，使[目标]无法行动，持续{x}回合"
         }
     
 

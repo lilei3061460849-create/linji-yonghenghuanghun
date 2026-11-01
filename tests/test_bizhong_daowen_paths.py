@@ -205,9 +205,10 @@ def test_bizhong_layers_persist_across_rounds_until_used():
 # ==================== 硬伤2 整环：必中 → debuff → 逼玩家用残韵 ====================
 
 def test_monster_cast_bizhong_self_then_forces_debuff():
-    """整环（2026-09-28 必中X最终=self-buff口径）：怪物施放必中X=3——给**自身**挂【必中】
-    姿态持续3回合；下一手怪物放勾魂，玩家提交 dodge 也无法闪避/抵抗（必中姿态下
-    怪物选中的目标无法闪避），被挂上勾魂。
+    """整环（2026-11-01 口径）：必中X=3 使[目标]无法行动，持续3回合。
+
+    怪物对玩家发动必中 → 玩家被挂【必中】；下一手怪物放勾魂，玩家提交 dodge 也
+    无法闪避（闪避是行动，已被必中封锁），被挂上勾魂。
     """
     e = _engine("loop")
     p = e.state.player
@@ -218,11 +219,12 @@ def test_monster_cast_bizhong_self_then_forces_debuff():
     e.state.enemies.append(m)
     e.combat.reset_monster_activation()
 
-    # 怪物对自己施必中3（self-buff，无目标）→ 怪物身上挂【必中】姿态
-    out1 = resolve_monster_phase(e.combat, {"enemy:0": "必中"})
+    # 怪物对玩家施必中3 → 玩家被挂【必中】，无法行动
+    out1 = resolve_monster_phase(e.combat, {"enemy:0": "必中"},
+                                 target_refs={"enemy:0": "player:0"})
     assert any(isinstance(d, dict) and d.get("daowen_activated") == "必中"
                for d in out1), out1
-    assert m.has_status("必中"), "怪物施必中X后自身应进入【必中】姿态"
+    assert p.has_status("必中"), "必中X必须挂在被选中的[目标]身上"
 
     # 下一回合：怪物放勾魂 → 怪物处于必中姿态 → 玩家无法闪避/抵抗 → 勾魂生效
     e.state.current_round = 3

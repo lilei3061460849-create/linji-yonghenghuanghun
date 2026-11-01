@@ -1860,6 +1860,16 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                             "note": "轮回者获得消耗品【自由结晶】(1/1)"})
         return effects
 
+    def bizhong_action_locked(self, entity: Entity) -> bool:
+        """【必中】X 的目标无法行动，持续X。
+
+        只认持续型 debuff（remaining_rounds > 0，必中X 挂在目标身上的那一层）；
+        `grant_bizhong` 留下的次数型标记 remaining_rounds == -1 属于攻击者的必中余数，
+        不是行动封锁，不能拦它自己出手。
+        """
+        st = next((s for s in entity.status_effects if s.name == "必中"), None)
+        return bool(st and st.remaining_rounds > 0)
+
     def can_act(self, entity: Entity, action_type: str | None = None) -> bool:
         """判断实体能否执行指定主动行动。
 
@@ -1867,11 +1877,14 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         普通行动判断，仍返回不可行动。被【封印】暂离者不在场上，任何行动都不可用。
         反应选择与自动触发不通过此主动行动门禁。
         """
+        # 2026-11-01：【必中】改口径为「目标无法行动」，任何行动都不可用。
+        # 【束缚】放行施法；法术由道纹构成，直接发动单个道纹同属施法（基础定义·施法）。
         return (entity.is_alive
                 and not self.state.is_sealed_away(entity)
                 and not self.chenni_round_blocked(entity)
+                and not self.bizhong_action_locked(entity)
                 and (not entity.has_status("束缚")
-                     or action_type in {"cast", "define_spell"}))
+                     or action_type in {"cast", "define_spell", "use_daowen"}))
 
     def yapo_target_lock_holder(self, attacker: Entity, target: Entity) -> Optional[Entity]:
         """返回限制这次选目标的【压迫】持有者；没有压迫限制则返回None。

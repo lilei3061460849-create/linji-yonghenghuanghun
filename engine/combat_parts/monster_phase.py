@@ -673,6 +673,11 @@ class MonsterPhaseMixin:
                 return {"monster": monster.name, "daowen_activated": name,
                         "resolves_as": effective_name, "target": target.name, "blood_shadow": True,
                         "trigger_spell_logs": trigger_logs}
+            elif dodge and (self.bizhong_action_locked(target)
+                            or target.has_status("束缚")):
+                # 【必中】目标无法行动 / 【束缚】只能施法：道纹提交的闪避同样不可用，
+                # 直接进入效果结算（与 resolve_attack 的闪避闸同口径）。
+                pass
             elif dodge:
                 self.pay_daowen_numeric_cost(effective_name,calc,monster)
                 self._spend_dodge_speed(target, choice.get("dodge_relic_target_ref"))
