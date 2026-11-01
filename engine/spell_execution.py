@@ -124,10 +124,31 @@ MAX_SPELL_LOOP_ITERATIONS = 10_000
 # 战场状态指纹（中断规则「单次循环前后战场所有状态无净变化」的判据）
 # ---------------------------------------------------------------------------
 
+# 会被后续结算读取、但不挂在面板上的实体计数。它们同样是「战场状态」：
+# 例如【癌变】按 total_healed 累计回复杀施法者，血炼周天每轮生命/法力净零、
+# 只有 total_healed 在涨——若不算进来，这条正规循环会在第 1 轮就被判无净变化。
+# 出手预算、遗物计数、使用历史一类的行动记账仍不属于战场状态，不参与比对。
+_BATTLE_COUNTER_FIELDS: tuple[str, ...] = (
+    "total_healed",          # 癌变：累计受到的恢复量
+    "healed_this_round",
+    "healed_this_battle",
+    "hp_lost_this_round",
+    "hp_lost_this_battle",
+    "chenglu_paid",          # 承露盏：本场已兑换的生命总额
+    "pending_exhaust_mana",  # 枯竭：下次战始要扣的法力
+    "deferred_damage",       # 缓厄沙漏：待结算的普通伤害
+    "shards",                # 碎片代价的余额（实体自带，供怪物/中立同样可比）
+    "fake_shards",
+    "no_action_rounds",      # 凡庸：连续未出手回合
+    "no_damage_rounds",      # 凡庸：连续未造成伤害回合
+)
+
+
 def _entity_battle_token(entity) -> tuple:
     """单个实体的战场状态指纹（口径见 法术索引.md「中断规则」）。
 
-    只收「战场状态」：生命、法力、速度、格挡、状态效果、道纹层数与层数值。
+    收「战场状态」：生命、法力、速度、格挡、飞行/离场标记、状态效果、
+    道纹层数与层数值，以及 _BATTLE_COUNTER_FIELDS 里会被后续结算读取的计数。
     出手预算、遗物计数、使用历史一类的行动记账不属于战场状态，不参与比对。
     """
     statuses = []
@@ -147,15 +168,32 @@ def _entity_battle_token(entity) -> tuple:
             bool(getattr(inst, "is_frozen", False)),
             bool(getattr(inst, "ice_frozen", False)),
         ))
+    counters = tuple(
+        _counter_token(getattr(entity, name, 0)) for name in _BATTLE_COUNTER_FIELDS
+    )
     return (
         int(getattr(entity, "current_hp", 0) or 0),
         int(getattr(entity, "current_mana", 0) or 0),
         int(getattr(entity, "current_speed", 0) or 0),
         int(getattr(entity, "shield", 0) or 0),
         bool(getattr(entity, "is_alive", True)),
+        bool(getattr(entity, "is_flying", False)),
+        bool(getattr(entity, "is_departed", False)),
         tuple(sorted(statuses)),
         tuple(sorted(daowen)),
+        counters,
     )
+
+
+def _counter_token(value) -> object:
+    """把计数转成可比较的稳定值（dict 列表按内容拍平，其余原样）。"""
+    if isinstance(value, dict):
+        return tuple(sorted((str(k), _counter_token(v)) for k, v in value.items()))
+    if isinstance(value, (list, tuple)):
+        return tuple(_counter_token(item) for item in value)
+    if isinstance(value, (int, float, str, bool)) or value is None:
+        return value
+    return str(value)
 
 
 def battlefield_fingerprint(engine, *extra_entities) -> tuple:
