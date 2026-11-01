@@ -535,22 +535,20 @@ class DaoWenEngine:
         }
 
     @staticmethod
-    def calculate_bizhong(x: int, target: Entity = None) -> dict:
-        """必中X：支付：异变X。使[目标]无法行动，持续X。
+    def calculate_bizhong(x: int) -> dict:
+        """必中X：支付：异变X。你接下来的X次选中，[目标]无法进行被动行动。
 
-        口径（2026-11-01 用户令）：必中给**目标**挂 debuff，目标在持续期内
-        「无法行动」——普攻、施法（含直接发动道纹）、使用消耗品、聚能、逃跑、
-        指挥，以及闪避、招架全部不可用。行动清单见《规则正文·基础定义·行动》。
-        主动行动走 CombatEngine.bizhong_action_locked()／can_act()，
-        响应行动走 out_of_turn_blocked()，两道闸都只认持续型 debuff。
+        口径（2026-11-01 用户令）：必中是**攻击者侧的次数资源**，不做目标 debuff，
+        也不夺走目标的行动。每次选中[目标]消耗1次，该次选中下目标不能闪避、招架
+        （被动行动见《规则正文·基础定义》）。次数记在发动者 _bizhong_left。
         """
         return {
             "dao_wen": "必中",
             "x": x,
             "cost_type": CostType.MUTATION.value,
             "cost_mutation": x,
-            "bizhong_target_debuff": x,   # 给目标挂持续X回合的必中debuff
-            "summary": f"异变+{x}，使[目标]无法行动，持续{x}回合"
+            "bizhong_gain": x,   # 记在发动者身上的「下X次选中」次数
+            "summary": f"异变+{x}，你接下来的{x}次选中，[目标]无法进行被动行动"
         }
     
 

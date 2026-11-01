@@ -219,12 +219,13 @@ def test_monster_cast_bizhong_self_then_forces_debuff():
     e.state.enemies.append(m)
     e.combat.reset_monster_activation()
 
-    # 怪物对玩家施必中3 → 玩家被挂【必中】，无法行动
+    # 怪物发动必中3 → 记在怪物自己身上（接下来3次选中，目标无法被动行动）
     out1 = resolve_monster_phase(e.combat, {"enemy:0": "必中"},
                                  target_refs={"enemy:0": "player:0"})
     assert any(isinstance(d, dict) and d.get("daowen_activated") == "必中"
                for d in out1), out1
-    assert p.has_status("必中"), "必中X必须挂在被选中的[目标]身上"
+    assert e.combat.bizhong_remaining(m) == 3
+    assert not p.has_status("必中"), "必中不再给目标挂 debuff"
 
     # 下一回合：怪物放勾魂 → 怪物处于必中姿态 → 玩家无法闪避/抵抗 → 勾魂生效
     e.state.current_round = 3

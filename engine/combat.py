@@ -823,8 +823,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             return bool(s and s.remaining_rounds > 0)  # -1 是次数型标记，不算真buff
         caster_has_bizhong_buff = _has_real_bizhong_buff(attacker)
         # 2026-10-12 用户令：必中X 改挂**目标**，故目标身上的【必中】debuff 同样封死闪避。
-        target_bizhonged = self.out_of_turn_blocked(target)
-        must_hit = (is_must_hit or caster_has_bizhong_buff or target_bizhonged
+        # 2026-11-01：必中＝发动者侧的「下X次选中」次数，选中即耗1次，该次目标不能
+        # 闪避/招架。目标身上的【必中】debuff 口径已废弃（不再夺走目标的行动）。
+        must_hit = (is_must_hit or caster_has_bizhong_buff
                     or self.consume_bizhong(attacker))
 
         # 血影（初拥之夜遗物，仅玩家自身持有）：非必中判定下，可支付生命10取消本次判定，是常规闪避外的另一选项
@@ -853,9 +854,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         if dodge:
             if must_hit:
                 result["dodge_success"] = False
-                result["dodge_fail_reason"] = (
-                    "目标被【必中】封锁回合外行动，无法闪避" if target_bizhonged
-                    else "必中攻击无法闪避")
+                result["dodge_fail_reason"] = "必中攻击无法闪避"
             elif (penalty := self.charge_reaction_penalty(target, "闪避")) is not None:
                 result["dodge_success"] = False
                 result["dodge_fail_reason"] = penalty["reason"]
@@ -882,11 +881,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         # 逐击招架：与闪避一样先支付1速度，但只免疫攻击伤害，不取消判定。
         # 真刀（分配伤害>0）成功后返还1速度；空刀不返还，因此可骗取速度。
         if parry:
-            if target_bizhonged:
-                # 2026-10-12 用户令：招架是回合外行动，【必中】下不得进行。
-                # 注意与闪避不同——招架失败不退速度（它本来就没支付）。
+            if must_hit:
+                # 必中次数已消耗：本次选中不允许被动行动。招架失败不退速度。
                 result["parry_success"] = False
-                result["parry_fail_reason"] = "目标被【必中】封锁回合外行动，无法招架"
+                result["parry_fail_reason"] = "必中攻击无法招架"
             elif target.current_speed < 1:
                 result["parry_fail_reason"] = "速度不足"
             elif (penalty := self.charge_reaction_penalty(target, "招架")) is not None:
@@ -1860,16 +1858,6 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                             "note": "轮回者获得消耗品【自由结晶】(1/1)"})
         return effects
 
-    def bizhong_action_locked(self, entity: Entity) -> bool:
-        """【必中】X 的目标无法行动，持续X。
-
-        只认持续型 debuff（remaining_rounds > 0，必中X 挂在目标身上的那一层）；
-        `grant_bizhong` 留下的次数型标记 remaining_rounds == -1 属于攻击者的必中余数，
-        不是行动封锁，不能拦它自己出手。
-        """
-        st = next((s for s in entity.status_effects if s.name == "必中"), None)
-        return bool(st and st.remaining_rounds > 0)
-
     def can_act(self, entity: Entity, action_type: str | None = None) -> bool:
         """判断实体能否执行指定主动行动。
 
@@ -1882,7 +1870,6 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         return (entity.is_alive
                 and not self.state.is_sealed_away(entity)
                 and not self.chenni_round_blocked(entity)
-                and not self.bizhong_action_locked(entity)
                 and (not entity.has_status("束缚")
                      or action_type in {"cast", "define_spell", "use_daowen"}))
 

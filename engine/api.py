@@ -5328,12 +5328,8 @@ class GameEngine:
             return {"success": False,
                     "error": f"{entity.name}被【必中】封锁回合外行动，无法插队"}
         if not self.combat.can_act(entity, action_type=action_type):
-            if self.combat.bizhong_action_locked(entity):
-                error = f"{entity.name}被【必中】锁定，无法行动"
-            elif entity.has_status("束缚"):
-                error = f"{entity.name}受【束缚】影响，只能进行法术行动"
-            else:
-                error = f"{entity.name}当前无法出手"
+            error = (f"{entity.name}受【束缚】影响，只能进行法术行动"
+                     if entity.has_status("束缚") else f"{entity.name}当前无法出手")
             return {"success": False, "error": error}
         breath = self.combat.apply_opposing_longxi(entity)
         if breath and not entity.is_alive:
@@ -5972,9 +5968,6 @@ class GameEngine:
             return duel_error
         if self.state.phase == "in_combat":
             if not self.combat.can_act(actor):
-                if self.combat.bizhong_action_locked(actor):
-                    return {"success": False,
-                            "error": f"{actor.name}被【必中】锁定，无法行动"}
                 return {"success": False, "error": f"{actor.name}当前无法出手"}
             budget = self._action_budget_of(actor)
             if actor.actions_used_this_round >= budget:

@@ -1557,33 +1557,13 @@ class DaowenEffectMixin:
             result["effects"].append({"type": "bizhong", "target": caster.name,
                                       "count": calc["guaranteed_hits"],
                                       "remaining": self.bizhong_remaining(caster)})
-        # 必中X（2026-10-12 用户令增强，取代 2026-09-28 的 self-buff 口径）：
-        # 规则文一直是「你选中的［目标］无法…」，故正式口径是给**目标**挂 debuff，
-        # 期间该目标无法进行回合外行动（闪避 / 招架 / 反应型法术），统一由
-        # CombatEngine.out_of_turn_blocked() 把关。
-        #
-        # target=None 时退回 2026-09-28 的 self-buff 老口径（自身姿态，期间你选中的
-        # 任何目标都无法闪避）。保留这条分支是为了不打断仍在无目标调用本效果键的
-        # 内部路径与历史用例；道纹发动本身按规则文要求指定目标。
-        if "bizhong_target_debuff" in calc:
-            rounds = int(calc["bizhong_target_debuff"])
-            bearer = target if target is not None else caster
-            existed = next((s for s in bearer.status_effects if s.name == "必中"), None)
-            if existed is not None:
-                existed.remaining_rounds = max(existed.remaining_rounds or 0, rounds)
-                existed.value = rounds
-                # 【必中】历史上是覆盖式刷新而非 add_status 的数值叠加，
-                # 但它仍是一轮新的发动：同样采用最后一次施加的 X/来源/顺序。
-                existed.refresh_order_from(self._daowen_status(
-                    daowen_order=daowen_order, name="必中", remaining_rounds=rounds,
-                    value=rounds, source=caster.name))
-            else:
-                bearer.add_status(self._daowen_status(daowen_order=daowen_order,
-                    name="必中", remaining_rounds=rounds, value=rounds,
-                    source=caster.name))
+        # 必中X（2026-11-01 用户令）：攻击者侧次数资源，不做目标 debuff。
+        # 「你接下来的X次选中，[目标]无法进行被动行动」——每次选中扣1次，
+        # 扣减与判定统一走 CombatEngine.consume_bizhong()。
+        if "bizhong_gain" in calc:
+            gained = self.grant_bizhong(caster, int(calc["bizhong_gain"]))
             result["effects"].append({
-                "type": "bizhong_target" if target is not None else "bizhong_self",
-                "target": bearer.name, "rounds": rounds})
+                "type": "bizhong_charges", "count": gained, "entity": caster.name})
 
         if name == "冰冻":
             selected = list(calc.get("freeze_daowen") or [])
