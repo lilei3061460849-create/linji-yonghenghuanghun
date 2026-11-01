@@ -125,16 +125,53 @@ def test_fixed_count_loop_runs_exactly_n_rounds():
     assert execution.status == ExecutionStatus.COMPLETED
 
 
-def test_loop_with_no_reachable_step_stops_instead_of_spinning():
-    """循环体里的分支都不成立 → 本轮无进展即停（不是无限空转，也不是中断）。"""
+def test_loop_with_no_reachable_step_interrupts_on_no_net_change():
+    """循环体里的分支都不成立 → 本轮零进展，单次循环前后战场无净变化 → 中断。
+
+    2026-11-01 用户补充中断规则：零进展与"执行了步骤但没改动战场"同归
+    `no_net_change` 中断，不再是"正常结束"。
+    """
     state, combat, player, enemy = _state(player_hp=100, mana=20)
     _give(player, "杀伐")
     execution = _cast(combat, player, enemy,
                       "若自身 生命 小于 0 则 发动杀伐X于目标→循环",
                       [{"x": 1, "dodge": False}])
-    assert execution.status == ExecutionStatus.COMPLETED
-    assert execution.loop_stop_reason == "no_progress"
+    assert execution.status == ExecutionStatus.INTERRUPTED
+    assert execution.interrupt_reason == InterruptReason.NO_NET_CHANGE
+    assert execution.loop_stop_reason == "no_net_change"
     assert execution.results == []
+    assert execution.logs()[-1]["interrupted"] == "no_net_change"
+
+
+def test_loop_interrupts_when_round_leaves_battlefield_unchanged(monkeypatch):
+    """某一步真的执行了、但循环前后战场所有状态无净变化 → 中断。
+
+    这里用指纹恒定的桩来构造"执行了却没有净变化"：验证判据挂在
+    战场指纹比对（生命/法力/速度/格挡/状态效果/道纹层数）上，
+    而不是只看"有没有执行过步骤"。
+    """
+    import engine.spell_execution as spell_execution
+
+    state, combat, player, enemy = _state(mana=100)
+    _give(player, "庇护")
+    monkeypatch.setattr(spell_execution, "battlefield_fingerprint",
+                        lambda *args, **kwargs: ("frozen",))
+    execution = _cast(combat, player, enemy, "发动庇护X于自身→循环", [{"x": 1}])
+    assert execution.status == ExecutionStatus.INTERRUPTED
+    assert execution.interrupt_reason == InterruptReason.NO_NET_CHANGE
+    assert len(execution.results) == 1  # 第一步照常结算并保留，不回溯撤销
+    assert execution.results[0].status == StepStatus.COMPLETED
+
+
+def test_loop_keeps_running_while_round_changes_battlefield():
+    """每轮都有净变化（法力/庇护层数变动）就不触发 no_net_change。"""
+    state, combat, player, enemy = _state(mana=20)
+    _give(player, "庇护")
+    execution = _cast(combat, player, enemy, "发动庇护X于自身→循环", [{"x": 1}],
+                      max_iterations=3)
+    assert execution.status == ExecutionStatus.COMPLETED
+    assert execution.loop_stop_reason == "max_iterations"
+    assert len(execution.results) == 3
 
 
 def test_loop_hits_engineering_fuse_with_explicit_reason(monkeypatch):

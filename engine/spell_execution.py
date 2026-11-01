@@ -107,6 +107,9 @@ class InterruptReason(str, Enum):
     CASTER_UNAVAILABLE = "caster_unavailable"
     ACTION_INSUFFICIENT = "action_insufficient"
     TRIGGER_CHOICES_INVALID = "trigger_choices_invalid"
+    # 规则中断（2026-11-01 用户补充中断规则）：单次循环前后战场所有状态
+    # 无净变化。零进展（本轮一步都没执行）与执行了步骤但没改动战场同归此条。
+    NO_NET_CHANGE = "no_net_change"
     # 工程安全阀：循环次数超过 MAX_SPELL_LOOP_ITERATIONS。
     # 正常规则循环不会触达；触达说明程序不满足任何规则终止条件。
     LOOP_GUARD = "loop_guard"
@@ -115,6 +118,69 @@ class InterruptReason(str, Enum):
 # 工程安全阀（不是游戏规则）。与旧 MAX_SPELL_LOOP_CYCLES 同值：法术索引
 # 已向用户承诺"1 万次"这个数量级，且正常法力池远不可能触达。
 MAX_SPELL_LOOP_ITERATIONS = 10_000
+
+
+# ---------------------------------------------------------------------------
+# 战场状态指纹（中断规则「单次循环前后战场所有状态无净变化」的判据）
+# ---------------------------------------------------------------------------
+
+def _entity_battle_token(entity) -> tuple:
+    """单个实体的战场状态指纹（口径见 法术索引.md「中断规则」）。
+
+    只收「战场状态」：生命、法力、速度、格挡、状态效果、道纹层数与层数值。
+    出手预算、遗物计数、使用历史一类的行动记账不属于战场状态，不参与比对。
+    """
+    statuses = []
+    for effect in getattr(entity, "status_effects", ()) or ():
+        statuses.append((
+            str(getattr(effect, "name", "")),
+            int(getattr(effect, "value", 0) or 0),
+            int(getattr(effect, "remaining_rounds", 0) or 0),
+            str(getattr(effect, "source", "")),
+        ))
+    daowen = []
+    for name, inst in (getattr(entity, "dao_wen", {}) or {}).items():
+        daowen.append((
+            str(name),
+            int(getattr(inst, "x_value", 0) or 0),
+            int(getattr(inst, "cooldown_remaining", 0) or 0),
+            bool(getattr(inst, "is_frozen", False)),
+            bool(getattr(inst, "ice_frozen", False)),
+        ))
+    return (
+        int(getattr(entity, "current_hp", 0) or 0),
+        int(getattr(entity, "current_mana", 0) or 0),
+        int(getattr(entity, "current_speed", 0) or 0),
+        int(getattr(entity, "shield", 0) or 0),
+        bool(getattr(entity, "is_alive", True)),
+        tuple(sorted(statuses)),
+        tuple(sorted(daowen)),
+    )
+
+
+def battlefield_fingerprint(engine, *extra_entities) -> tuple:
+    """本场所有参战实体的战场状态指纹（与实体顺序无关的稳定元组）。
+
+    取自 GameState 的轮回者、朋友、员工、临时朋友、敌人与商人，再并上调用方
+    明确点名的实体（施法者/对手，防止上限外的实体漏算）。拿不到 GameState 时
+    只比对点名实体，绝不因取不到状态就静默判成"没有变化"。
+    """
+    pools: list = []
+    state = getattr(engine, "state", None)
+    if state is not None:
+        pools.append(getattr(state, "player", None))
+        for attr in ("friends", "employees", "temp_friends", "enemies"):
+            pools.extend(getattr(state, attr, []) or [])
+        pools.append(getattr(state, "merchant", None))
+    pools.extend(extra_entities)
+
+    tokens = {}
+    for index, entity in enumerate(pools):
+        if entity is None:
+            continue
+        key = getattr(entity, "runtime_id", None) or f"#{id(entity)}"
+        tokens[key] = _entity_battle_token(entity)
+    return tuple(sorted((str(key), token) for key, token in tokens.items()))
 
 
 # ---------------------------------------------------------------------------
@@ -467,15 +533,31 @@ class SpellExecution:
             rounds += 1
             self.loop_iterations = rounds
             executed_before = self._executed_count()
+            # 逐轮重取：循环体外的步骤也会改动战场，不能只在首次循环前取一次。
+            battlefield_before = self._battlefield_now()
             yield from self._run_steps(
                 node.body, iteration=rounds if iteration == 0 else iteration)
             if not self.is_running:
                 break
-            if self._executed_count() == executed_before:
-                # 本轮没有任何一步真正执行（例如条件不再成立、目标全部失效）：
-                # 没有进展就不再空转——这是循环的规则终止条件之一，不是中断。
-                self.loop_stop_reason = "no_progress"
+            # 中断规则（2026-11-01 用户补充）：单次循环前后战场所有状态无净
+            # 变化 → 法术中断。零进展（本轮一步都没执行）与执行了步骤但没改动
+            # 战场同归此条，不再作为"正常结束"返回。
+            no_step_executed = self._executed_count() == executed_before
+            # 读档重放不重新执行效果，此刻的 state 是暂停点状态而非当轮状态，
+            # 比对指纹会误判；重放只按已记录的控制流/结果复原。
+            no_net_change = (not self._replay_mode
+                             and self._battlefield_now() == battlefield_before)
+            if no_step_executed or no_net_change:
+                self.loop_stop_reason = "no_net_change"
+                detail = ("本轮没有任何一步真正执行" if no_step_executed
+                          else "本轮前后战场状态无净变化")
+                self._stop(ExecutionStatus.INTERRUPTED,
+                           InterruptReason.NO_NET_CHANGE,
+                           f"第{rounds}轮{detail}，循环按中断规则中止")
                 break
+
+    def _battlefield_now(self) -> tuple:
+        return battlefield_fingerprint(self.engine, self.caster, self.attacker)
 
     def _evaluate_condition(self, node) -> bool:
         evaluator = getattr(self.engine, "_evaluate_spell_condition", None)
@@ -591,8 +673,8 @@ class SpellExecution:
             if extra.get("trigger_spell_logs"):
                 entry["trigger_spell_logs"] = extra["trigger_spell_logs"]
             out.append(entry)
-        if self.loop_stop_reason == "no_progress" and out:
-            out[-1]["loop_stop"] = "no_progress"
+        if self.loop_stop_reason and out:
+            out[-1]["loop_stop"] = self.loop_stop_reason
         if self.interrupt_reason and (
                 not self.results
                 or self.results[-1].status not in (StepStatus.INTERRUPTED, StepStatus.FAILED)):
