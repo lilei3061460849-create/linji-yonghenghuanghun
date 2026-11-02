@@ -1,4 +1,9 @@
-"""十页共用承载下，遗物满页发现必须仍能替换/放弃脱困。"""
+"""遗物发现/替换/放弃的脱困出口。
+
+2026-11-01（重构1）：遗物已脱离死者之页，"满页"不再是遗物获得的障碍；
+现在的额度是**启用槽**＝ceil(血限/30)，满了就以 enabled=False 入库，
+不会出现"必须放弃奖励才能继续"的死局——本文件改为验证这一新口径。
+"""
 import os
 import sys
 
@@ -45,9 +50,11 @@ def _engine_at_capacity():
 
 # ---------- 正常路径 ----------
 
-def test_deadlock_is_real_without_an_escape():
-    """前置校验（2026-10-22 改版）：待选门禁仍在，但选择本身不再被承载拒绝——
-    超额拿到的遗物持有但停用，死结从源头上解开。"""
+def test_relic_discovery_never_hits_a_page_deadlock():
+    """待选门禁仍在（必须先选），但选择本身永不被页数拒绝。
+
+    血限30 → 1 个启用槽且已被 held 占用：新遗物照样入库，只是 enabled=False。
+    """
     e, held, fresh = _engine_at_capacity()
 
     blocked = e.execute_action("battle_start", {})
@@ -55,9 +62,11 @@ def test_deadlock_is_real_without_an_escape():
     assert "必须先从发现候选中选择1件遗物" in blocked["error"]
 
     pick = e.execute_action("choose_discovered_relic", {"relic_name": fresh[0]})
-    assert pick["success"] is False and "死者之页" in pick["error"]
-    assert {x.name for x in e.state.relics} == {held}
-    assert e.state.pending_relic_choices == fresh
+    assert pick["success"] is True, pick
+    owned = {x.name for x in e.state.relics}
+    assert owned == {held, fresh[0]}, "奖励必须真的到手，不再被页数吞掉"
+    assert {r.name for r in e.state.relics if r.enabled} == {held}, "启用槽已满 → 新件停用入库"
+    assert e.state.pending_relic_choices == []
 
 
 def test_discard_clears_pending_and_lets_the_game_proceed():

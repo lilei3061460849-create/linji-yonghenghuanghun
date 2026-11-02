@@ -13,8 +13,8 @@ def test_retired_registration_pool_and_resonance():
     assert "蒙蔽" not in MONSTER_TRANSFORM_DAOWEN
     assert "蒙蔽" not in DaoWenEngine.TRANSFORMED_DAOWEN
     with pytest.raises(ValueError): DaoWenEngine.resolve("蒙蔽", 2)
-    assert any(is_reserved_slot(n) and "蒙蔽" in n
-               for src, _, dst in ResonanceEngine.CLOSED_LOOPS["怪物原始道纹"] for n in (src, dst))
+    # 2026-11-02：原始／转化分支树并入通用四面体三·四，占位整批撤销。
+    assert all("蒙蔽" not in n for n in ResonanceEngine.nodes_of_region("通用"))
 
 
 def test_lamp_uses_durability_and_keeps_status_effect():

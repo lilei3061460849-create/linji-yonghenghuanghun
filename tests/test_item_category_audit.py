@@ -245,3 +245,16 @@ def test_pool_relics_all_in_index():
     text = (ROOT / "物品索引.md").read_text(encoding="utf-8")
     for n, _ in GameEngine.RELIC_DEFS:
         assert f"### {n}" in text, f"遗物池【{n}】在物品索引无条目"
+
+
+def test_qianjingjia_wording_is_life_loss_not_damage():
+    """2026-11-01 用户令：【千荆甲】条文改「攻击者失去等量生命」。
+
+    反噬是直接失血，不产生一次新的伤害。旧的「攻击者受到等量伤害」会被读成
+    再打一次伤害（从而被格挡/减伤/伤害触发链吃住），池文本与索引必须同时改口。
+    """
+    pool = dict(GameEngine.RELIC_DEFS)["千荆甲"]
+    index = (ROOT / "物品索引.md").read_text(encoding="utf-8")
+    for text, where in ((pool, "RELIC_DEFS"), (index, "物品索引.md")):
+        assert "攻击者失去等量生命" in text, f"{where}：千荆甲条文未改口"
+        assert "攻击者受到等量伤害" not in text, f"{where}：千荆甲仍留着有歧义的旧措辞"

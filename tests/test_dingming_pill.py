@@ -61,8 +61,8 @@ def test_old_daowen_is_retired_and_slot_cannot_be_obtained():
     assert "固执" not in SHAFA_LOOP_DAOWEN
     with pytest.raises(ValueError, match="未知道纹"):
         DaoWenEngine.resolve("固执", 1)
-    assert any(is_reserved_slot(n) and "固执" in n
-               for src, _, dst in ResonanceEngine.CLOSED_LOOPS["杀伐闭环"] for n in (src, dst))
+    # 2026-11-02 四面体大改：占位节点整批撤销，通用四面体里没有「固执」。
+    assert all("固执" not in n for n in ResonanceEngine.nodes_of_region("通用"))
 
 
 def test_legacy_relic_name_migrates_without_changing_effect():

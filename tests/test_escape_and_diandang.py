@@ -125,9 +125,12 @@ def test_diandang_x2_forgets_4_and_pends_2_groups_with_capacity_gate():
     engine.state.enemies.append(m)
     engine.state.phase = "in_combat"
 
-    r = engine.execute_action("use_daowen", {"daowen_name": "典当", "x": 2})
+    # 2026-11-01 用户令：失忆2X 必须由调用方显式指定要永久销毁的 4 种道纹。
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "典当", "x": 2,
+        "forget_daowen": ["杀伐", "庇护", "再生", "束缚"]})
     assert r["success"], r
-    assert list(player.dao_wen) == ["典当"], "失忆4种应按持有顺序忘记典当以外的全部"
+    assert list(player.dao_wen) == ["典当"], "只保留未被指定的典当，其余4种全部永久销毁"
     queue = engine.state.pending_diandang_discoveries
     assert len(queue) == 2
 
@@ -161,7 +164,8 @@ def test_diandang_discovery_pool_matches_learnability():
     player = engine.state.player
     _grant(engine, ["典当", "庇护"])
     engine.state.phase = "in_combat"
-    r = engine.execute_action("use_daowen", {"daowen_name": "典当", "x": 1})
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "典当", "x": 1, "forget_daowen": ["杀伐", "庇护"]})
     assert r["success"], r
     group = engine.state.pending_diandang_discoveries[0]
     assert 1 <= len(group) <= 3
@@ -182,7 +186,8 @@ def test_diandang_stale_group_discarded_without_consuming():
     player = engine.state.player
     _grant(engine, ["典当", "庇护"])
     engine.state.phase = "in_combat"
-    r = engine.execute_action("use_daowen", {"daowen_name": "典当", "x": 1})
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "典当", "x": 1, "forget_daowen": ["杀伐", "庇护"]})
     assert r["success"], r
     group = list(engine.state.pending_diandang_discoveries[0])
     # 模拟发现之后通过其他途径获得全部候选
@@ -200,7 +205,8 @@ def test_diandang_reject_wrong_choice_lists_valid():
     engine = _new_engine("wrong")
     _grant(engine, ["典当", "庇护"])
     engine.state.phase = "in_combat"
-    r = engine.execute_action("use_daowen", {"daowen_name": "典当", "x": 1})
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "典当", "x": 1, "forget_daowen": ["杀伐", "庇护"]})
     assert r["success"], r
     group = list(engine.state.pending_diandang_discoveries[0])
     # 【典当】自身已持有，永不出池 → 必不在组

@@ -50,11 +50,12 @@ def test_huifeng_damage_records_speed_loss_parent_event():
 
     assert lost == 2
     assert player.current_speed == 8
-    assert enemy.current_hp == 94
+    # 2026-11-02：每次速度实际变化固定 5 点伤害（旧版为 3×失去点数）。
+    assert enemy.current_hp == 95
     speed_event = getattr(player, "_speed_change_events", [])[0]
     assert speed_event["amount"] == -2
     # 回锋刀实际造成伤害已经落地，damage_dealt_this_round 仍保持旧逻辑累加。
-    assert player.damage_dealt_this_round == 6
+    assert player.damage_dealt_this_round == 5
 
     enemy.current_hp = 100
     detail = combat._trigger_huifeng_on_speed_loss(player, 1, "enemy:0", speed_ctx={

@@ -315,6 +315,7 @@ def test_full_dodge_cancels_an_attack(tmp_path):
     foe = e.state.enemies[0]
     foe.blood_limit = 500
     foe.current_hp = 500
+    foe.speed_limit = 9        # 2026-11-01 重构2：当前速度写入处封顶在[速限]
     foe.current_speed = 9
 
     from tests.attack_support import resolve_attack
@@ -383,13 +384,13 @@ def test_resonance_converts_holder_daowen_and_grants_one_copy(tmp_path):
     assert e.state.resonance.get("曲解", 0) >= 1
 
     r = e.execute_action("use_resonance", {
-        "source_daowen": "再生", "resonance_type": "曲解", "target_daowen": "庇护", "target_ref": _ref(e, foe)})
+        "source_daowen": "再生", "resonance_type": "曲解", "target_daowen": "连击", "target_ref": _ref(e, foe)})
     assert r["success"], r
     dest = r["result"]["target"]
-    assert dest == "庇护"
+    assert dest == "连击"
     assert "再生" not in foe.dao_wen, "源道纹必须消失"
-    assert "庇护" in foe.dao_wen, "持有者变为转化后的道纹"
-    assert "庇护" in p.dao_wen, "施法者同时获得转化后的道纹"
+    assert "连击" in foe.dao_wen, "持有者变为转化后的道纹"
+    assert "连击" in p.dao_wen, "施法者同时获得转化后的道纹"
     assert r["granted_daowen"] == dest
 
 
@@ -397,22 +398,22 @@ def test_resonance_never_creates_a_duplicate_name(tmp_path):
     """边界：施法者已持有同名道纹时，只消耗残韵、不重复授予。"""
     e = _battle_engine(tmp_path, "reso_dup")
     p, foe = e.state.player, e.state.enemies[0]
-    _give(p, "庇护")
+    _give(p, "连击")
     _give(foe, "再生")
     e.state.resonance["曲解"] = 2
 
     r = e.execute_action("use_resonance", {
-        "source_daowen": "再生", "resonance_type": "曲解", "target_daowen": "庇护", "target_ref": _ref(e, foe)})
+        "source_daowen": "再生", "resonance_type": "曲解", "target_daowen": "连击", "target_ref": _ref(e, foe)})
     assert r["success"], r
     assert r["granted_daowen"] is None, "已持有同名道纹时不得重复授予"
-    assert list(p.dao_wen).count("庇护") == 1
+    assert list(p.dao_wen).count("连击") == 1
 
     # 再转一次：持有者侧同样不得出现两份同名
     _give(foe, "再生")
     r2 = e.execute_action("use_resonance", {
-        "source_daowen": "再生", "resonance_type": "曲解", "target_daowen": "庇护", "target_ref": _ref(e, foe)})
+        "source_daowen": "再生", "resonance_type": "曲解", "target_daowen": "连击", "target_ref": _ref(e, foe)})
     assert r2["success"], r2
-    assert list(foe.dao_wen).count("庇护") == 1, "持有者侧同名只保留一份"
+    assert list(foe.dao_wen).count("连击") == 1, "持有者侧同名只保留一份"
     assert "再生" not in foe.dao_wen
 
 

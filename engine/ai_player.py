@@ -679,6 +679,14 @@ class PlaceholderBackend(AIBackend):
                               "dodge": False, "blood_shadow": False,
                               "trigger_spell_choices": {}}
                     if "actor_ref" in schema: params["actor_ref"] = schema["actor_ref"]
+                    # 失忆代价（点金/典当）：AI 必须自己把要永久销毁的道纹列出来。
+                    # 引擎不再替调用方按持有顺序代选；这里按 schema 公布的可选池
+                    # 取前 x 个，作为 AI 的显式选择提交。
+                    forget_schema = schema.get("forget_daowen")
+                    if isinstance(forget_schema, dict):
+                        pool = [n for n in (forget_schema.get("choices") or []) if n]
+                        per_x = int(forget_schema.get("per_x", 1) or 1)
+                        params["forget_daowen"] = pool[:x * per_x]
                     if schema["daowen_name"] == "波及" and engine is not None:
                         # 波及X：必须恰好提交X个存活非自身目标（schema上限已按目标数封顶）
                         refs = engine.combat._combat_entity_refs()

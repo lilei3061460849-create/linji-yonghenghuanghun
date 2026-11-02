@@ -335,14 +335,24 @@ class DamageDeathMixin:
         if conversion and record is not None:
             record["blood_wing_conversion"] = conversion
 
-    def _execute_diaoling(self, caster: Entity, exempt_target: Entity,
+    def _execute_diaoling(self, caster: Entity, exempt_targets: Entity | list[Entity],
                           threshold: int) -> list[dict]:
-        """一次性【凋零】：按施放当次快照，判死除目标外的低生命角色。
+        """一次性【凋零】：按施放当次快照，判死除[目标]外的低生命角色。
+
+        2026-11-02 用户令：**豁免的是"本次发动的全部[目标]"这一个集合**，不是
+        逐个目标分别结算。波及/多目标提交时 {A, B} 同属一个豁免集合——绝不能
+        写成 `for t in targets:` 分次执行，否则 A 会把 B 判死、B 再把 A 判死，
+        两个本该被豁免的目标互相杀。这里先固定豁免集合，再统一挑出待判死对象，
+        最后一次性进入死亡管线。
 
         先收齐本次所有对象再进入统一死亡管线；不挂状态，也不因后续生命变化、
         死亡连锁或新角色入场追加检查。直接判死而非伤害，故绕过生命下限。
         """
         threshold = max(0, int(threshold))
+        if isinstance(exempt_targets, (list, tuple, set)):
+            exempt = {id(entity) for entity in exempt_targets if entity is not None}
+        else:
+            exempt = {id(exempt_targets)} if exempt_targets is not None else set()
         entities = list({
             entity.runtime_id: entity
             for entity in (self.state.get_all_player_side()
@@ -351,7 +361,7 @@ class DamageDeathMixin:
         }.values())
         pending = [
             entity for entity in entities
-            if (entity is not exempt_target
+            if (id(entity) not in exempt
                 and not getattr(entity, "is_departed", False)
                 and not getattr(entity, "_death_triggers_emitted", False)
                 and entity.current_hp <= threshold)
@@ -641,7 +651,8 @@ class DamageDeathMixin:
         # 2. 受到伤害前反噬 (千荆甲遗物：受到攻击伤害前，攻击者受等量伤害)
         before_res = self.hook_manager.apply_before_damage(target, amount, damage_type, source, self.state)
         # 千荆甲（通用遗物池，2026-10-03 出自被删【爆裂】道纹）：你受到攻击伤害**前**，
-        # 攻击者受到等量伤害。只对攻击行动（subtype=attack）生效，非攻击伤害不触发；
+        # 攻击者失去等量生命（2026-11-01 用户令：条文改「失去等量生命」，避免被读成再打一次伤害）。
+        # 只对攻击行动（subtype=attack）生效，非攻击伤害不触发；
         # 反噬本身是"直接失血"，不视为"受到攻击造成的伤害"，因此不会连环触发千荆甲/活血衣。
         # 归因口径沿用 2026-10-03 裁定：这笔失血记【千荆甲】。
         reflect_amount = 0
@@ -1156,12 +1167,182 @@ class DamageDeathMixin:
         holder.sealed_relics[first] = max(holder.sealed_relics.get(first, 0), rounds)
         return first
 
+    def _relic_steal_candidates(self, target: Entity) -> list[str]:
+        """【豪夺】可夺取的遗物名（目标真正持有、未被封印、未被夺走）。
+
+        夺取候选的唯一定义点：发动前的能力校验与实际夺取必须读同一份列表，
+        否则会出现"校验通过、实际无可夺对象"的空放。
+        """
+        if target is None:
+            return []
+        if target is self.state.player:
+            tgt_list, tgt_sealed, tgt_stolen = (self.state.relics,
+                                                self.state.sealed_relics,
+                                                self.state.stolen_relics)
+        else:
+            tgt_list = list(getattr(target, "relics", None) or [])
+            tgt_sealed = getattr(target, "sealed_relics", None) or {}
+            tgt_stolen = getattr(target, "stolen_relics", None) or {}
+        if not tgt_list:
+            return []
+        sealed_names = {k for k, v in (tgt_sealed or {}).items() if v > 0}
+        already_stolen = {k for k, v in (tgt_stolen or {}).items()
+                          if isinstance(v, dict) and v.get("remaining", 0) > 0}
+        return [relic.name for relic in tgt_list
+                if relic.name not in sealed_names and relic.name not in already_stolen]
+
+    # 旧 `_haoduo_status_of(holder, name)` 已由 `find_haoduo_status(name)` 取代：
+    # 后者全场定位（【流动】可能把镜像搬到别人身上），"只在持有者身上找"正是
+    # 报告 P2-5 的脱节来源。
+
+    def _return_stolen_relic(self, holder: Entity, holder_list: list,
+                             relic_name: str, info: dict) -> str:
+        """把到期的豪夺遗物还给原持有者；返回遗物名（找不到原位时也返回，便于记账）。"""
+        relic_obj = next((r for r in holder_list if r.name == relic_name), None)
+        if relic_obj is None:
+            return ""
+        holder_list.remove(relic_obj)
+        if info.get("target_is_player"):
+            self.state.relics.append(relic_obj)
+            return relic_name
+        # 回给对应实体：按 from_entity_name 在 enemies/friends/employees/temp_friends 里找
+        for lst in (self.state.enemies, getattr(self.state, "friends", []),
+                    getattr(self.state, "employees", []),
+                    getattr(self.state, "temp_friends", [])):
+            owner = next((e for e in lst if e.name == info.get("from_entity_name")), None)
+            if owner is not None:
+                if not hasattr(owner, "relics"):
+                    owner.relics = []
+                owner.relics.append(relic_obj)
+                break
+        return relic_name
+
+    def _stolen_ledger(self, holder: Entity) -> dict:
+        """某个实体身上"被夺遗物"的账本（玩家侧账本在 GameState 上）。"""
+        if holder is self.state.player:
+            return self.state.stolen_relics
+        ledger = getattr(holder, "stolen_relics", None)
+        if ledger is None:
+            holder.stolen_relics = ledger = {}
+        return ledger
+
+    def _stolen_relic_list(self, holder: Entity) -> list:
+        """某个实体实际存放遗物的列表（玩家侧 = GameState.relics）。"""
+        if holder is self.state.player:
+            return self.state.relics
+        if not hasattr(holder, "relics") or holder.relics is None:
+            holder.relics = []
+        return holder.relics
+
+    def find_haoduo_status(self, relic_name: str) -> tuple[Optional[Entity], Optional[StatusEffect]]:
+        """全场定位某件被夺遗物的【豪夺】镜像状态（可能已被【流动】搬到别人身上）。"""
+        if not relic_name:
+            return None, None
+        for entity in self._combat_entity_refs().values():
+            for status in list(getattr(entity, "status_effects", []) or []):
+                if (status.name == "豪夺" and not status.is_expired
+                        and status.effect_data.get("relic_name") == relic_name):
+                    return entity, status
+        return None, None
+
+    def _release_stolen_relic(self, holder: Entity, relic_name: str, *,
+                              reason: str = "manual") -> Optional[dict]:
+        """立即归还一件被夺遗物：清账本 + 摘掉任意持有者身上的镜像状态 + 送回原主。
+
+        2026-11-02 修复3：**状态与账本必须同时对同一件遗物生效**。
+        【遗忘】把【豪夺】状态移除时立刻走这里，不让遗物在账本里"裸奔"到期。
+        """
+        ledger = self._stolen_ledger(holder)
+        info = ledger.pop(relic_name, None)
+        if not isinstance(info, dict):
+            return None
+        _, status = self.find_haoduo_status(relic_name)
+        if status is not None:
+            for entity in self._combat_entity_refs().values():
+                if status in (getattr(entity, "status_effects", []) or []):
+                    entity.status_effects.remove(status)
+        returned = self._return_stolen_relic(
+            holder, self._stolen_relic_list(holder), relic_name, info)
+        return {"type": "haoduo_returned", "relic": relic_name,
+                "returned_to": returned or "",
+                "from": holder.name, "reason": reason,
+                "round": self.state.current_round}
+
+    def _release_stolen_relic_anywhere(self, relic_name: str, *,
+                                       reason: str = "manual") -> Optional[dict]:
+        """按遗物名归还：先看镜像状态所在实体，再扫全场账本。
+
+        【豪夺】的镜像状态可以被【流动】搬到别的角色身上，账本却留在遗物所在的
+        角色身上；两条线都必须能找到对方，才谈得上"真账本"。
+        """
+        status_holder, _status = self.find_haoduo_status(relic_name)
+        candidates: list[Entity] = []
+        if status_holder is not None:
+            candidates.append(status_holder)
+        candidates.append(self.state.player)
+        candidates.extend(e for e in self._combat_entity_refs().values()
+                          if e is not self.state.player)
+        for entity in candidates:
+            if entity is None:
+                continue
+            ledger = (self.state.stolen_relics if entity is self.state.player
+                      else getattr(entity, "stolen_relics", None))
+            if isinstance(ledger, dict) and relic_name in ledger:
+                return self._release_stolen_relic(entity, relic_name, reason=reason)
+        return None
+
+    def _tick_stolen_relics(self, holder: Entity) -> list[str]:
+        """持有者账本里的豪夺遗物递减 1 回合，到期归还。
+
+        2026-11-02 修复3：**`remaining_rounds` 是唯一计时准绳**，账本只记
+        "谁夺了谁的什么东西"。【豪夺】状态可能被【流动】搬到别人身上、被
+        【回响】延长、被【遗忘】抹掉——三种情况都以状态自身的回合数为准：
+          - 状态还在（无论在哪）：递减它，账本同步镜像；
+          - 状态没了（遗忘/剥离）：立即提前归还，不等账本倒计时。
+        【回终】与【大梦】额外回合都走这里，保证只有一处计时。
+        """
+        ledger = (self.state.stolen_relics if holder is self.state.player
+                  else getattr(holder, "stolen_relics", None))
+        if not isinstance(ledger, dict):
+            return []
+        returned: list[str] = []
+        for relic_name, info in list(ledger.items()):
+            if not isinstance(info, dict):
+                ledger.pop(relic_name, None)
+                continue
+            _status_holder, status = self.find_haoduo_status(relic_name)
+            if status is None:
+                # 镜像被移除 → 提前归还（真账本与状态同生共死）
+                released = self._release_stolen_relic(holder, relic_name, reason="status_gone")
+                if released and released.get("returned_to"):
+                    returned.append(relic_name)
+                continue
+            status.remaining_rounds = int(status.remaining_rounds) - 1
+            if status.remaining_rounds < 0:
+                status.remaining_rounds = 0
+            info["remaining"] = int(status.remaining_rounds)
+            if info["remaining"] > 0:
+                continue
+            ledger.pop(relic_name, None)
+            for entity in self._combat_entity_refs().values():
+                if status in (getattr(entity, "status_effects", []) or []):
+                    entity.status_effects.remove(status)
+            name = self._return_stolen_relic(
+                holder, self._stolen_relic_list(holder), relic_name, info)
+            if name:
+                returned.append(name)
+        return returned
+
     def _steal_one_relic(
-        self, caster: Entity, target: Entity, rounds: int,
+        self, caster: Entity, target: Entity, rounds: int, relic_name: str = "",
     ) -> str:
         """豪夺X（2026-09-28）：消耗5X碎片，夺取[目标]1件遗物持续X回合。
         夺取期间施法者真正持有该遗物（享受其被动），目标暂时失去；回终递减回合，到期归还。
         返回被夺取的遗物名；目标无遗物可夺返回\"\"。
+
+        2026-11-01 用户令：必须由施法者显式指定夺哪一件（`relic_name`）；
+        旧调用方（怪物阶段/直连 apply）未指定时沿用"取第一件可夺遗物"的兼容口径，
+        玩家侧 API 在扣费前已强制要求显式提交，故不会再出现替玩家挑选。
         """
         # 定位遗物容器
         if target is self.state.player:
@@ -1180,14 +1361,18 @@ class DamageDeathMixin:
                 caster.relics = []
             cst_list = caster.relics
             cst_stolen = caster.stolen_relics
-        # 过滤出真正"在目标身上、未被封印、未被夺取走"的候选
-        sealed_names = {k for k, v in (tgt_sealed or {}).items() if v > 0}
-        already_stolen = {k for k, v in (tgt_stolen or {}).items() if v.get("remaining", 0) > 0}
-        candidates = [r for r in tgt_list
-                      if r.name not in sealed_names and r.name not in already_stolen]
+        # 过滤出真正"在目标身上、未被封印、未被夺取走"的候选（唯一定义点）
+        allowed = set(self._relic_steal_candidates(target))
+        candidates = [r for r in tgt_list if r.name in allowed]
         if not candidates:
             return ""
-        stolen = candidates[0]
+        wanted = str(relic_name or "").strip()
+        if wanted:
+            stolen = next((r for r in candidates if r.name == wanted), None)
+            if stolen is None:
+                return ""
+        else:
+            stolen = candidates[0]
         # 从目标列表移除
         tgt_list.remove(stolen)
         # 加入施法者列表（标记为"豪夺来的"，到期归还）
@@ -1198,75 +1383,55 @@ class DamageDeathMixin:
             "from_entity_name": target.name,
             "target_is_player": target is self.state.player,
         }
+        # 持续回合的对外可见载体：挂一个同名状态在**夺取方**身上，
+        # 使【回响】能按通用"持续Y"口径选中并延长。2026-11-02 修复3：
+        # 状态自身的 remaining_rounds 是唯一计时准绳（`_tick_stolen_relics`
+        # 每回终手动递减它），账本只记"谁夺了谁的什么"，两边一一对应。
+        caster.add_status(StatusEffect(
+            name="豪夺", remaining_rounds=max(1, int(rounds)),
+            value=max(1, int(rounds)), source=caster.name,
+            effect_data={"source_daowen": "豪夺", "relic_name": stolen.name,
+                         "from_entity_name": target.name,
+                         # 由 _tick_stolen_relics 手动递减，通用回终不再减一次。
+                         "manual_round_countdown": True}))
         return stolen.name
 
     def _tick_sealed_and_stolen_relics(self) -> dict:
-        """[回终]处理封印/豪夺遗物的回合递减，到期归还（2026-09-28 加入豪夺归还）。"""
+        """[回终]处理封印/豪夺遗物的回合递减，到期归还（2026-09-28 加入豪夺归还）。
+
+        2026-11-01 修复：`expired_seals` / `expired_steals` 必须在**函数入口**初始化。
+        原实现在 for 循环体内定义，玩家被【沉溺】阻断时 `break` 会跳过定义，
+        函数末尾的 return 随即抛 UnboundLocalError，整场战斗卡死。
+        """
         returned: list[str] = []
+        expired_seals: list[str] = []
+        expired_steals: list[str] = []
         # —— 己方（state）——
-        for holder_list, holder_stolen, sealed_attr in (
-            (self.state.relics, self.state.stolen_relics, self.state.sealed_relics),
-        ):
-            if self.chenni_round_blocked(self.state.player):
-                break
+        if not self.chenni_round_blocked(self.state.player):
             # 封印递减
-            expired_seals = []
+            sealed_attr = self.state.sealed_relics
             for name in list(sealed_attr.keys()):
                 sealed_attr[name] -= 1
                 if sealed_attr[name] <= 0:
                     expired_seals.append(name)
                     del sealed_attr[name]
-            # 豪夺递减（玩家侧持有别人遗物）
-            expired_steals = []
-            for name, info in list(holder_stolen.items()):
-                info["remaining"] -= 1
-                if info["remaining"] <= 0:
-                    expired_steals.append(name)
-            # 归还豪夺遗物（简易策略：回到原 owner 列表末尾，且解除对方封印冲突）
-            for name in expired_steals:
-                info = holder_stolen.pop(name)
-                relic_obj = next((r for r in holder_list if r.name == name), None)
-                if relic_obj is not None:
-                    holder_list.remove(relic_obj)
-                    # 还原到原目标
-                    if info.get("target_is_player"):
-                        self.state.relics.append(relic_obj)
-                    else:
-                        # 回给对应实体：按 from_entity_name 在 enemies/friends/employees/temp_friends 里找
-                        for lst in (self.state.enemies, getattr(self.state, "friends", []),
-                                    getattr(self.state, "employees", []),
-                                    getattr(self.state, "temp_friends", [])):
-                            owner = next((e for e in lst if e.name == info.get("from_entity_name")), None)
-                            if owner is not None:
-                                if not hasattr(owner, "relics"):
-                                    owner.relics = []
-                                owner.relics.append(relic_obj)
-                                break
-                    returned.append(name)
+            # 豪夺递减（玩家侧持有别人遗物），到期归还
+            returned.extend(self._tick_stolen_relics(self.state.player))
+        expired_steals = list(returned)
         # —— 每个非玩家实体：递减其自身 sealed_relics / stolen_relics ——
+        # 2026-11-01：豪夺改用与玩家侧同一个 _tick_stolen_relics（账本唯一事实源 +
+        # 同步移除镜像状态 + 按 from_entity_name 归还），不再在这里另写一套递减。
         for entity in self._combat_entity_refs().values():
             if entity is self.state.player or self.chenni_round_blocked(entity):
                 continue
-            for attr in ("sealed_relics", "stolen_relics"):
-                d = getattr(entity, attr, None) or {}
-                for name in list(d.keys()):
-                    d[name] = (d[name] - 1) if isinstance(d[name], int) else dict(d[name])
-                    if isinstance(d[name], int):
-                        if d[name] <= 0:
-                            del d[name]
-                    else:
-                        d[name]["remaining"] -= 1
-                        if d[name]["remaining"] <= 0:
-                            # 简单归还：如果是 stolen 则移回 state.relics（若 from player）
-                            info = d.pop(name)
-                            if attr == "stolen_relics" and info.get("target_is_player", False):
-                                relic_obj = next((r for r in entity.relics if r.name == name), None) \
-                                    if hasattr(entity, "relics") else None
-                                if relic_obj is not None and relic_obj in entity.relics:
-                                    entity.relics.remove(relic_obj)
-                                if relic_obj is not None:
-                                    self.state.relics.append(relic_obj)
-                                returned.append(name)
+            sealed = getattr(entity, "sealed_relics", None)
+            if isinstance(sealed, dict):
+                for name in list(sealed.keys()):
+                    sealed[name] = sealed[name] - 1
+                    if sealed[name] <= 0:
+                        del sealed[name]
+                        expired_seals.append(name)
+            returned.extend(self._tick_stolen_relics(entity))
         return {"expired_seals": expired_seals, "returned_steals": returned}
 
     def _xijie_steal(self, caster: Entity, target: Entity, damage_amount: int) -> int:

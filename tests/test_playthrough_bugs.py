@@ -98,10 +98,10 @@ def _resolve_prepared_monsters(engine: GameEngine, daowen_name: str | None = Non
 # ========================================================================
 
 def test_resonance_on_enemy_grants_dest_and_rewrites_next_activation():
-    """正常路径：反转敌方【全力】→ 敌人永久变为【弱化】，贾凡同时永久获得【弱化】。
+    """正常路径：反转敌方【全力】→ 敌人永久变为【全速】，贾凡同时永久获得【全速】。
 
     2026-10-03：原用例把敌方【狂暴】反转成其转化分支；【狂暴】删除后该边不存在，
-    改用仍有效的 全力→(反转)→弱化。
+    改用 2026-11-02 四面体三的 全力→(反转)→全速。
     """
     engine = _engine("res_happy")
     engine.state.resonance["反转"] = 1
@@ -118,10 +118,10 @@ def test_resonance_on_enemy_grants_dest_and_rewrites_next_activation():
         "source_daowen": "全力", "resonance_type": "反转", "target_ref": "enemy:0",
     })
     assert r["success"], r
-    assert r["granted_daowen"] == "弱化"
-    assert "弱化" in engine.state.player.dao_wen
+    assert r["granted_daowen"] == "全速"
+    assert "全速" in engine.state.player.dao_wen
     assert "全力" not in monster.dao_wen
-    assert "弱化" in monster.dao_wen
+    assert "全速" in monster.dao_wen
     assert engine.state.resonance["反转"] == 0
 
     finish_round(engine)
@@ -129,13 +129,13 @@ def test_resonance_on_enemy_grants_dest_and_rewrites_next_activation():
     hand_priority_to_enemy(engine)
     prepared = engine.execute_action("prepare_monster_phase", {})
     actor = prepared["result"]["actors"][0]
-    option = next(o for o in actor["daowen_options"] if o["name"] == "弱化")
+    option = next(o for o in actor["daowen_options"] if o["name"] == "全速")
     assert option, "改写后的【加速】应成为怪物可发动道纹"
     phase = engine.execute_action("resolve_monster_phase", {
         "token": prepared["result"]["token"],
         "choices": [{
             "actor_ref": actor["actor_ref"],
-            "daowen": {"name": "弱化", "target_ref": "player:0",
+            "daowen": {"name": "全速", "target_ref": "player:0",
                        "dodge": False, "blood_shadow": False, "trigger_spell_choices": {}},
             # 交替出手：一次提交＝一个行动，发道纹时不再捆绑攻击组。
             "attack_actions": [],
@@ -143,17 +143,18 @@ def test_resonance_on_enemy_grants_dest_and_rewrites_next_activation():
     })
     assert phase["success"], phase
     details = phase["result"]["details"]
-    activated = [d for d in details if d.get("daowen_activated") == "弱化"]
-    assert activated, f"应发动永久改写后的弱化: {details}"
-    assert engine.state.player.has_status("弱化"), "改写后的道纹必须真实生效"
-    assert "弱化" in monster.dao_wen and "全力" not in monster.dao_wen
+    activated = [d for d in details if d.get("daowen_activated") == "全速"]
+    assert activated, f"应发动永久改写后的全速: {details}"
+    # 全速：使[目标]攻击次数等同其速限，持续X——落到玩家身上就是「全速」状态。
+    assert engine.state.player.has_status("全速"), "改写后的道纹必须真实生效"
+    assert "全速" in monster.dao_wen and "全力" not in monster.dao_wen
 
 
 def test_resonance_no_duplicate_when_caster_already_owns_dest():
     """边界：施法者已持有变化后道纹则不重复获得；目标道纹仍永久变化。"""
     engine = _engine("res_bound")
     engine.state.resonance["反转"] = 1
-    _give_daowen(engine.state.player, "弱化")
+    _give_daowen(engine.state.player, "全速")
     engine.execute_action("battle_start", {})
     monster = Entity(name="唯一全力", entity_type="怪物", blood_limit=80, current_hp=80,
                      attack_count=1, attack_power=4)
@@ -168,9 +169,9 @@ def test_resonance_no_duplicate_when_caster_already_owns_dest():
     })
     assert r["success"], r
     assert r["granted_daowen"] is None
-    assert list(engine.state.player.dao_wen).count("弱化") == 1
+    assert list(engine.state.player.dao_wen).count("全速") == 1
     assert "全力" not in monster.dao_wen
-    assert "弱化" in monster.dao_wen
+    assert "全速" in monster.dao_wen
 
 
 def test_resonance_fails_without_holder_or_stock():

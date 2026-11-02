@@ -417,7 +417,9 @@ def test_duel_opponent_wave_hits_player_side_not_self():
     friend = challenger.state.friends[0]
     refs = challenger.combat._combat_entity_refs()
     friend_ref = next(ref for ref, e in refs.items() if e is friend)
-    # 对手标记挑战者与队友乙（波及X=2 消耗 3X=6 法力；新口径下对手法限只有 3，先补足）
+    # 对手标记挑战者与队友乙（波及X=2 消耗 3X=6 法力；新口径下对手法限只有 3，
+    # 2026-11-01 重构2 起 current_mana 写入处封顶在[法限]，必须先抬法限）
+    opp.mana_limit = 20
     opp.current_mana = 20
     r = challenger.execute_action("use_daowen", {
         "actor": opp.name, "daowen_name": "波及", "x": 2,
@@ -558,6 +560,9 @@ def test_duel_round_end_keeps_both_reincarnator_mana():
     assert rs["success"] is True
     assert player.current_mana == player.mana_limit
     assert opp.current_mana == opp.mana_limit
+    # 2026-11-01 重构2：写入当前法力时封顶在[法限]，先确保两条上限足够。
+    player.mana_limit = max(player.mana_limit, 9)
+    opp.mana_limit = max(opp.mana_limit, 11)
     player.current_mana = 9
     opp.current_mana = 11
 

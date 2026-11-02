@@ -29,9 +29,11 @@ def test_rebirth_cost_channels_and_healing_are_unified():
 def test_self_feed_is_not_a_registered_daowen_and_path_points_to_rebirth():
     DaoWenEngine.register_all()
     assert "自食" not in DaoWenEngine._registry
+    # 2026-11-02 四面体三：全力 曲解 → 弱化（原「全力→曲解→再生」已撤边），
+    # 但「自食」这个旧名依然不在注册表里。
     paths = ResonanceEngine.get_available_resonance("全力")
     assert any(
-        path["resonance_type"] == "曲解" and path["target_daowen"] == "再生"
+        path["resonance_type"] == "曲解" and path["target_daowen"] == "弱化"
         for path in paths
     )
 

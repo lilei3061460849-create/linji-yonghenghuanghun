@@ -87,7 +87,7 @@ def _game_with_three_slots(tmp_path):
 def test_blood_pact_shares_every_supported_numeric_cost(
     cost_type: str, player_field: str,
 ):
-    """六种资源共用总线；两个目标与发动者追加名额共同承担总支付5。"""
+    """六种资源共用总线；总支付5由三个名额各扣 ceil(5/3)=2（2026-11-02 向上取整）。"""
     state, combat, player, ally = _state_with_blood_pact()
     state.relics.clear()
     second = Entity("第二同伴", "朋友", blood_limit=80, current_hp=80,
@@ -101,24 +101,25 @@ def test_blood_pact_shares_every_supported_numeric_cost(
 
     losses = [old - getattr(entity, player_field)
               for old, entity in zip(before, members)]
-    assert sorted(losses) == [1, 2, 2]
+    assert losses == [2, 2, 2]
+    # 每份向上取整，故三人实扣合计 6 > 名义 5——规则明确口径，不做随机余数分配。
     assert result["owner"]["paid"] + sum(
-        part["paid"] for part in result["shared_with"]) == 5
-    assert result["actual_paid"] == 5
+        part["paid"] for part in result["shared_with"]) == 6
+    assert result["actual_paid"] == 6
 
 
 def test_blood_pact_cost_one_and_dragon_heart_order():
-    """代价1只落一个名额；龙心先抵3，再由三个名额平分剩余6。"""
+    """代价1时每个名额都扣 ceil(1/3)=1；龙心先抵3，再由三个名额各扣 ceil(6/3)=2。"""
     state, combat, player, ally = _state_with_blood_pact()
     state.relics.clear()
     second = Entity("第二同伴", "朋友", blood_limit=80, current_hp=80)
     state.friends.append(second)
     _bind_gongzui(player, [ally, second])
     one = combat.pay_resource(player, "生命", 1)
-    assert sorted([100 - player.current_hp, 80 - ally.current_hp,
-                   80 - second.current_hp]) == [0, 0, 1]
+    assert [100 - player.current_hp, 80 - ally.current_hp,
+            80 - second.current_hp] == [1, 1, 1]
     assert one["owner"]["paid"] + sum(
-        part["paid"] for part in one["shared_with"]) == 1
+        part["paid"] for part in one["shared_with"]) == 3
 
     heart = Consumable(
         "生命龙心", "抵消生命", current_uses=3, max_uses=3,
@@ -127,9 +128,9 @@ def test_blood_pact_cost_one_and_dragon_heart_order():
     result = combat.pay_resource(player, "生命", 9, dragon_heart_use=3)
     assert result["dragon_heart_offset"] == 3
     assert result["remaining"] == 6
-    # 首次随机1加本次每人2：三人累计承担分别为2/2/3。
-    assert sorted([100 - player.current_hp, 80 - ally.current_hp,
-                   80 - second.current_hp]) == [2, 2, 3]
+    # 首次每人1，本次每人2 → 三人累计各承担3。
+    assert [100 - player.current_hp, 80 - ally.current_hp,
+            80 - second.current_hp] == [3, 3, 3]
     assert heart.current_uses == 0
 
 
@@ -180,10 +181,10 @@ def test_event_and_daowen_costs_use_blood_pact_bus(tmp_path):
     state.enemies.append(target)
     calc = DaoWenEngine.resolve("连击", 5, target=target)
     combat.apply_daowen_effect("连击", calc, player, target)
-    # 连击5支付生命25，三个名额分为8/8/9；连同事件15，总支付40。
+    # 连击5支付生命25，三个名额各扣 ceil(25/3)=9；连同事件15(每人5)各扣14。
     losses = sorted([100 - player.current_hp, 80 - ally.current_hp,
                      80 - second.current_hp])
-    assert losses == [13, 13, 14]
+    assert losses == [14, 14, 14]
 
 
 def test_gongzui_daowen_binds_two_targets_who_share_resource_payments(tmp_path):
@@ -235,7 +236,7 @@ def test_gongzui_daowen_binds_two_targets_who_share_resource_payments(tmp_path):
 
 
 def test_gongzui_targets_must_be_non_self_and_caster_still_adds_a_slot(tmp_path):
-    """2026-10-31：共罪改选 X 个非自身目标；发动者仍额外占一个支付名额。"""
+    """2026-10-31：共罪改选 X 个非自身目标；2026-11-02：组内每人严格 1 份，去重后 ceil 均摊。"""
     state, combat, player, ally = _state_with_blood_pact()
     state.relics.clear()
     player.dao_wen["共罪"] = DaoWenInstance(DaoWen(
@@ -287,11 +288,11 @@ def test_gongzui_targets_must_be_non_self_and_caster_still_adds_a_slot(tmp_path)
     hp_after_cast, ally_hp_after_cast = player.current_hp, ally.current_hp
     receipt = combat.pay_numeric_cost(player, "生命", 5)
     player_loss, ally_loss = hp_after_cast - player.current_hp, ally_hp_after_cast - ally.current_hp
-    # 两个名额平分 5：余数按随机分配，方向不固定（(3,2)/(2,3) 都合法）。
-    assert sorted((player_loss, ally_loss)) == [2, 3]
+    # 两个名额平分 5：每份向上取整 ceil(5/2)=3，两边都扣 3（不再是 2/3 随机）。
+    assert sorted((player_loss, ally_loss)) == [3, 3]
     assert receipt["owner"]["paid"] == player_loss
     assert receipt["shared_with"][0]["paid"] == ally_loss
-    assert receipt["actual_paid"] == 5
+    assert receipt["actual_paid"] == 6
 
 
 def test_regeneration_is_four_x_and_old_contracts_are_removed():
@@ -515,7 +516,8 @@ def test_huangfu_spell_mana_payment_uses_gongzui_bus(tmp_path):
     })
     assert result["success"], result
     after = sum(entity.current_mana for entity in (player, ally, second))
-    assert before - after == 4  # 黄符名义3 + 杀伐法力1
+    # 黄符名义3 + 杀伐法力1，两笔各按 ceil(3/3)=1、ceil(1/3)=1 分给三个名额 → 合计6。
+    assert before - after == 6
     payment = result["result"]["huangfu_mana_payment"]
     assert payment["actual_paid"] == 3 and payment["nominal_amount"] == 3
     assert engine.state.enemies[0].current_hp == 99

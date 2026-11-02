@@ -65,10 +65,12 @@ def test_hooks_normal_incoming_and_reflect():
     assert attacker.current_hp == 42, "数值层不得自己扣血（双扣回归防护）"
     assert manager.apply_before_damage(target, adjusted, "普通", attacker, state) == {}
 
-    # 3. 闪避触发避风铃（获得3格挡）
+    # 3. 闪避句不在 Hook 层实现（2026-11-02 清理死代码）：避风铃的 +3 由
+    #    CombatEngine._note_dodge() 结算，见 test_effect_chain_audit
+    #    ::test_d_dodge_grants_shield_once_through_engine_path。
     dodge_res = manager.apply_dodge(target, state)
-    assert dodge_res["shield_gained"] == 3
-    assert target.shield == 3
+    assert dodge_res == {}
+    assert target.shield == 0
 
 
 def test_combat_event_serialization():
@@ -96,9 +98,10 @@ def test_hooks_boundary_conditions():
 
     zero_speed_entity = Entity(name="零速者", blood_limit=30, current_hp=30, speed_limit=0, entity_type="轮回者")
     zero_speed_entity.current_speed = 0
-    d_res = manager.apply_dodge(zero_speed_entity, state)
-    assert d_res["shield_gained"] == 3
-    assert zero_speed_entity.shield == 3  # 闪避句只+3；归零+15走失速总线
+    # 闪避句只有引擎侧实现（_note_dodge）；归零 +15 由失速总线
+    # （_trigger_bifengling_zero）负责，Hook 层两者都不再重复实现。
+    assert manager.apply_dodge(zero_speed_entity, state) == {}
+    assert zero_speed_entity.shield == 0
 
     # 叠鳞甲每笔非代价伤害固定减1，最低为0；旧龙鳞X状态不再参与。
     dragon_target = Entity(name="龙族", blood_limit=40, current_hp=40, entity_type="怪物")

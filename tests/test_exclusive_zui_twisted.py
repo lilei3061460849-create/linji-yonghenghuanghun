@@ -53,6 +53,12 @@ def _add_monster(engine, name="靶怪", hp=100, atk=5, shards=0, **kw):
     return m
 
 
+def _forget_names(engine, count, keep="典当"):
+    """测试侧的显式失忆选择：由调用方给出要永久销毁的道纹名（引擎不再代选）。"""
+    player = engine.state.player
+    return [n for n in player.dao_wen if n != keep][:count]
+
+
 def _apply_monster_daowen(engine, caster, name, x, target=None):
     target = target or caster
     calc = DaoWenEngine.resolve(name, x, target=target, caster=caster)
@@ -134,9 +140,11 @@ def test_normal_diandang_forgets_2x_and_pends_discovery():
     engine = _setup(); _grant(engine, ["典当", "杀伐", "庇护"])
     player = engine.state.player
     m = _add_monster(engine, shards=10)
-    r = engine.execute_action("use_daowen", {"daowen_name": "典当", "x": 1, "target": m.name})
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "典当", "x": 1, "target": m.name,
+        "forget_daowen": _forget_names(engine, 2)})
     assert r["success"], r
-    # 代价失忆2：按持有顺序优先忘记典当以外的道纹（杀伐、庇护），典当自身保留
+    # 代价失忆2：只销毁调用方显式点名的两种（这里是杀伐、庇护），典当自身保留
     assert "杀伐" not in player.dao_wen and "庇护" not in player.dao_wen
     assert "典当" in player.dao_wen
     # 发现获得1种：pending 一组3选1（学习口径：已持有/异副本专属不出池）
@@ -204,8 +212,9 @@ def test_normal_haoduo_steals_relic_for_x_rounds():
     m.relics = [Relic(name="防弹插板", effect="伤害减半"), Relic(name="其他", effect="x")]
     engine.state.shards = 100
     shards_before = engine.state.shards
-    r = engine.execute_action("use_daowen", {"daowen_name": "豪夺", "x": 2, "target": m.name})
-    assert r["success"], r
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "豪夺", "x": 2, "target": m.name,
+        "relic_name": "防弹插板"})   # 多件可夺遗物 → 必须显式指定
     assert engine.state.shards == shards_before - 10, "消耗5X=10碎片"
     # 敌人失去防弹插板
     assert not any(r.name == "防弹插板" for r in m.relics)
@@ -215,15 +224,17 @@ def test_normal_haoduo_steals_relic_for_x_rounds():
     assert engine.state.stolen_relics["防弹插板"]["remaining"] == 2
 
 
-def test_haoduo_no_relic_no_effect():
+def test_haoduo_without_stealable_relic_is_refused_before_payment():
+    """2026-11-01 用户令：没有可夺遗物必须在扣费前中止，不许吞掉 5X 碎片空放。"""
     engine = _setup(); _grant(engine, ["豪夺"])
     m = _add_monster(engine, shards=0)
     m.relics = []
     engine.state.shards = 100
     r = engine.execute_action("use_daowen", {"daowen_name": "豪夺", "x": 1, "target": m.name})
-    # 无遗物时仍会成功（没东西可夺），但不扣遗物
-    assert r["success"]
+    assert r["success"] is False and "没有可夺取的遗物" in r["error"], r
+    assert engine.state.shards == 100, "发不动时不得扣碎片"
     assert engine.state.stolen_relics == {}
+    assert engine.state.player.actions_used_this_round == 0
 
 
 def test_legacy_dikou_name_rejected():
@@ -325,7 +336,7 @@ def test_boundary_jiachao_fake_lost_first():
 
 # ==================== 千荆甲（通用遗物；承接已删【爆裂】的反噬口径） ====================
 # 2026-10-03 用户令：【爆裂】道纹删除，反噬语义改由遗物【千荆甲】承接
-# （受到攻击伤害前，攻击者受到等量伤害）。原爆裂的持续X到期用例随道纹删除一并移除。
+# （受到攻击伤害前，攻击者失去等量生命）。原爆裂的持续X到期用例随道纹删除一并移除。
 
 def test_normal_qianjingjia_reflects_before_damage():
     """正常：怪物攻击持【千荆甲】的玩家 → 攻击者先受等量伤害，攻击照常落地。"""
@@ -361,6 +372,76 @@ def test_qianjingjia_only_triggers_on_attack_damage():
     m = _add_monster(engine, hp=100, atk=5)
     _apply_monster_daowen(engine, m, "杀伐", 2, target=player)
     assert m.current_hp == 100, "道纹伤害不得触发千荆甲"
+
+
+def _add_rival_with_qianjingjia(engine, hp=60, atk=10):
+    """敌方轮回者（守擂者）乙：敌方轮回者的遗物读 `state.opponent_relics`。"""
+    rival = Entity("乙轮回者", "轮回者", blood_limit=hp, current_hp=hp,
+                   mana_limit=50, current_mana=50, speed_limit=5, current_speed=5,
+                   attack_count=1, attack_power=atk)
+    engine.state.enemies = [rival]
+    engine.state.opponent_relics = [Relic(name="千荆甲", effect="")]
+    return rival
+
+
+def test_qianjingjia_both_sides_no_pingpong():
+    """双方都持千荆甲：A 普攻 B 只反噬一次，B 的千荆甲不会再弹回 A。
+
+    反噬是直接失血（subtype=relic_reflect），不是"受到攻击伤害"，
+    因此不构成 A→B→A 的循环：常规局面双方各掉等量生命，攻击照常落地。
+    """
+    engine = _setup(region="扭曲都市")
+    player = engine.state.player
+    engine.state.relics.append(Relic(name="千荆甲", effect=""))
+    rival = _add_rival_with_qianjingjia(engine, hp=60, atk=10)
+    player.current_hp, player.blood_limit = 60, 60
+    res = engine.combat.resolve_attack(
+        player, rival, hit_index=0, is_must_hit=True, dodge=False, allocated_damage=10)
+    assert res["damage_dealt"] == 10
+    assert player.current_hp == 50, "攻击者只被反噬一次（10），不会因自己也穿千荆甲而翻倍或反弹"
+    assert rival.current_hp == 50, "受击方的千荆甲不抵销攻击本身，伤害照常落地"
+
+
+def test_qianjingjia_both_sides_reflect_ignores_defender_shield():
+    """双方都有千荆甲时，反噬按分配伤害全额结算，不吃受击方格挡。"""
+    engine = _setup(region="扭曲都市")
+    player = engine.state.player
+    engine.state.relics.append(Relic(name="千荆甲", effect=""))
+    rival = _add_rival_with_qianjingjia(engine, hp=60, atk=10)
+    player.current_hp, player.blood_limit = 60, 60
+    player.shield = 6
+    rival.shield = 6
+    res = engine.combat.resolve_attack(
+        player, rival, hit_index=0, is_must_hit=True, dodge=False, allocated_damage=10)
+    assert res["shield_absorbed"] == 6
+    assert player.current_hp == 50, "反噬绕过格挡：攻击者照掉 10 点"
+    assert rival.current_hp == 56, "受击方只掉穿甲后的 4 点"
+
+
+def test_qianjingjia_mutual_kill_attacker_dies_first_damage_cancelled():
+    """双方都有千荆甲、攻击者残血：反噬先打死攻击者，本次攻击伤害不落地。"""
+    engine = _setup(region="扭曲都市")
+    player = engine.state.player
+    engine.state.relics.append(Relic(name="千荆甲", effect=""))
+    rival = _add_rival_with_qianjingjia(engine, hp=60, atk=10)
+    player.current_hp, player.blood_limit = 4, 60
+    res = engine.combat.resolve_attack(
+        player, rival, hit_index=0, is_must_hit=True, dodge=False, allocated_damage=10)
+    assert not player.is_alive, "攻击者被自己的攻击反噬致死"
+    assert res["damage_dealt"] == 0
+    assert rival.current_hp == 60, "攻击者已命零，受击方一点伤害都不吃"
+
+    # 反向：受击方残血、攻击者血厚 → 双方同时掉血，受击方死，攻击者活着
+    engine2 = _setup(region="扭曲都市")
+    p2 = engine2.state.player
+    engine2.state.relics.append(Relic(name="千荆甲", effect=""))
+    r2 = _add_rival_with_qianjingjia(engine2, hp=4, atk=10)
+    p2.current_hp, p2.blood_limit = 60, 60
+    res2 = engine2.combat.resolve_attack(
+        p2, r2, hit_index=0, is_must_hit=True, dodge=False, allocated_damage=10)
+    assert not r2.is_alive
+    assert res2["damage_dealt"] == 10
+    assert p2.current_hp == 50, "反噬在伤害落地前就结算，攻击者照样掉 10"
 
 
 def test_qianjingjia_absent_no_reflect():

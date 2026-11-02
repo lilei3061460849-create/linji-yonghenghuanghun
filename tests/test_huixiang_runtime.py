@@ -62,12 +62,19 @@ def test_empty_ambiguous_or_expired_selection_does_not_pay(durations):
     assert (p.current_mana, p.actions_used_this_round) == before
 
 
-def test_infinity_stays_infinity_and_is_not_added_as_minus_one():
+def test_infinity_status_is_not_a_legal_target_and_never_pays():
+    """2026-11-01 用户令：回响只收"正数持续回合"的状态。
+
+    ∞/-1（强化/弱化/冰冻/波及/共罪…）、纯次数型（庇护、篡改、出土、沉溺、
+    操作、必中）都不可能被"延长"改变任何结算值，因此必须在扣费之前就拒绝，
+    而不是照收 5X 法力换来一次 before==after 的空结算。
+    """
     e, p, t = setup('infinity')
     t.add_status(StatusEffect('永久', -1, value=6))
     result = cast(e, t, x=4)
-    assert result['success'], result
-    assert p.current_mana == 80
+    assert not result['success'], result
+    assert '没有可被【回响】延长的状态' in result['error'], result
+    assert p.current_mana == 100 and p.actions_used_this_round == 0
     assert t.status_effects[0].remaining_rounds == -1
     assert t.status_effects[0].value == 6
 
@@ -114,8 +121,11 @@ def test_wave_missing_secondary_selection_is_rejected_before_payment():
     e, p, a = setup('wave_bad')
     b = _monster(e, '另一个回响靶')
     a.status_effects.append(StatusEffect('甲', 2))
+    # 波及目标身上有两种**可延长**的持续状态 → 不能擅选第一项
+    # （∞/次数型状态已被 2026-11-01 的候选过滤排除，不再参与歧义判定）。
     b.status_effects.append(StatusEffect('乙', 5))
-    e.combat._toggle_wave_mark(b, p)  # 乙与波及标记两种，不能擅选第一项。
+    b.status_effects.append(StatusEffect('丙', 4))
+    e.combat._toggle_wave_mark(b, p)
     before = p.current_mana, p.actions_used_this_round
     assert not cast(e, a)['success']
     assert (p.current_mana, p.actions_used_this_round) == before

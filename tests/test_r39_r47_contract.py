@@ -509,7 +509,8 @@ def test_r46_boundary_death_dodge_dragon_and_might_triggers(tmp_path):
     engine.state.relics = [Relic("避风铃", ""), Relic("回锋刀", ""),
                            Relic("焦黑发丝", ""), Relic("龙威", "", tags=["龙族"])]
     engine.combat._spend_dodge_speed(player, "enemy:0")
-    assert player.shield == 3 and enemy.current_hp == 97
+    # 2026-11-02：回锋刀每次速度实际变化固定 5 点伤害（旧版 3×失去点数）。
+    assert player.shield == 3 and enemy.current_hp == 95
     engine.state.relics.append(Relic("龙族血脉", "", tags=["龙族"]))
     # 2026-09-13 全局上限：焦黑发丝的 +2 需要[速限]有空间，否则被上限吃掉。
     player.speed_limit = max(player.speed_limit, player.current_speed + 2)

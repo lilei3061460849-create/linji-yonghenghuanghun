@@ -19,17 +19,21 @@ def test_project_rules_are_extracted_from_their_authoritative_documents():
     facts = sync.extract_project_rules()
     assert [entry["name"] for entry in facts["event_daowen"]] == ["真理"]
     # 强化进入转化道纹后通用正文16条；副本定义41条，另有龙心谷3条支付待定草案。
-    # 2026-11-01：新增【操作】【迟滞】两条通用道纹 → 17 → 19。
-    assert len(facts["common_daowen"]) == 19
+    # 2026-11-01：新增【操纵】【迟滞】两条通用道纹 → 17 → 19；
+    # 2026-11-02：篡改由荒疫移入通用，定义搬进通用正文 → 19 → 20。
+    assert len(facts["common_daowen"]) == 20
     # 2026-10-31：共罪回到永夜庭主环并写进副本定义 → 副本专属道纹 44 → 45；
     # 同日罪孽都市删【抢劫】【勒索】、补【烁金】【交易】【赦免】【贿赂】→ 45 → 47。
-    assert len(facts["dungeon_daowen"]) == 47
+    # 2026-11-02 四面体大改：罪孽补【典当】【假钞】定义、扭曲补【饥饿】【扭曲】、
+    # 沉沦海补【涌潮】→ 47 → 50。
+    assert len(facts["dungeon_daowen"]) == 50
     assert len(facts["spells"]) == 10  # 2026-09-16：删「血溅五步」（无引擎流程的空名字）
     assert len(facts["dungeons"]) == 8
     assert len(facts["monsters"]) == 48  # 36 + 乱葬岗12(已实现)
     diff = sync.diff_project_daowen()
     assert diff["in_file_only"] == [], "通用或已实现副本正文不得定义未登记的道纹"
-    assert set(diff["draft_only"]) == {"炽热", "熔化", "锻造"}
+    # 2026-11-02：龙心谷三纹实装，草案清单清空。
+    assert set(diff["draft_only"]) == set()
     # diff 的范围是「通用＋已实现副本」；草案和种族道纹有自己的事实源，不能为使
     # 双向列表为空而被误搬进通用正文。除此之外不允许出现新的 engine-only 缺口。
     from engine.gamedata import RACE_EXCLUSIVE_DAOWEN, UNIMPLEMENTED_DAOWEN

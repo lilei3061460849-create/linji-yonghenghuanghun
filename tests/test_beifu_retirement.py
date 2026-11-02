@@ -13,8 +13,8 @@ def test_retirement_registration_learning_and_loop():
     assert "背负" not in REGION_EXCLUSIVE_DAOWEN["龙心谷"]
     with pytest.raises(ValueError):
         DaoWenEngine.resolve("背负", 1)
-    assert any(is_reserved_slot(n) and "背负" in n
-               for src, _, dst in ResonanceEngine.CLOSED_LOOPS["龙心谷闭环"] for n in (src, dst))
+    # 2026-11-02 四面体大改：遗物化占位不再保留，龙心谷四面体里根本没有「背负」。
+    assert all("背负" not in n for n in ResonanceEngine.nodes_of_region("龙心谷"))
 
 
 def test_panel_and_legacy_configuration_do_not_grant_beifu():

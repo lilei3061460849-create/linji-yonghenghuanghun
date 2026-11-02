@@ -155,8 +155,7 @@ class SpellReactionMixin:
             flow = self.SPELL_FLOWS.get(spell.name)
             if flow is None:
                 continue
-            if all(d in holder.dao_wen and holder.dao_wen[d].can_use()
-                   for d in spell.required_daowen):
+            if all(holder.can_use_daowen(d) for d in spell.required_daowen):
                 flows[spell.name] = flow
         return flows
 
@@ -169,8 +168,7 @@ class SpellReactionMixin:
         for name, required in self.BUILTIN_SPELL_DAOWEN.items():
             if name in defined or name not in self.SPELL_FLOWS:
                 continue
-            if all(d in holder.dao_wen and holder.dao_wen[d].can_use()
-                   for d in required):
+            if all(holder.can_use_daowen(d) for d in required):
                 out.append(name)
         return sorted(out)
 
@@ -284,8 +282,12 @@ class SpellReactionMixin:
         if self.out_of_turn_blocked(holder):
             return flows
         for name, flow in self._builtin_spell_flows(holder).items():
-            if flow.get("trigger") == trigger:
-                flows[name] = flow
+            if flow.get("trigger") != trigger:
+                continue
+            if not all(holder.can_use_daowen(name) for name in flow.get("required_daowen", ())):
+                # 【唯一】锁死的道纹同样不能作为反应/时点法术的起手
+                continue
+            flows[name] = flow
         spells_by_name = {spell.name: spell for spell in holder.spells}
         for spell_name in self._ordered_spell_names(holder):
             spell = spells_by_name[spell_name]
@@ -298,7 +300,7 @@ class SpellReactionMixin:
                         continue  # 解析失败=违规或格式错，不触发
                     spell._parsed_flow = flow
             if (flow["trigger"] == trigger
-                    and all(name in holder.dao_wen and holder.dao_wen[name].can_use()
+                    and all(holder.can_use_daowen(name)
                             for name in spell.required_daowen)):
                 flows[spell.name] = flow
         return flows
@@ -671,11 +673,31 @@ class SpellReactionMixin:
 
     def pay_daowen_shard_cost(self, actor: Entity, name: str, calc: dict,
                               x: int) -> Optional[str]:
-        """现役道纹的真／假碎片资源支付；两个池始终分开。"""
-        if not calc.get("cost_real_shards") and not calc.get("cost_fake_shards"):
+        """现役道纹的碎片支付（2026-11-01 用户令的口径）。
+
+        - 支付[碎片]的额度 = 真碎片 + 假碎片；实际扣除**先假后真**，
+          与"失去碎片"的优先序一致。假碎片因此不再是"支付通道里不存在的钱"。
+        - [假碎片]代价仍然只能由假碎片池承担（那是它自己的资源类型）。
+        - 两种代价同时存在时先付[假碎片]，再付[碎片]（碎片池会吃掉剩余假碎片），
+          并在任何扣款之前做完合计校验，避免"付了一半再报错"。
+        """
+        real_need = int(calc.get("cost_real_shards", 0) or 0)
+        fake_need = int(calc.get("cost_fake_shards", 0) or 0)
+        if real_need <= 0 and fake_need <= 0:
             return None
-        for resource, key in (("碎片", "cost_real_shards"), ("假碎片", "cost_fake_shards")):
-            need = int(calc.get(key, 0) or 0)
+        fake_avail = max(0, int(getattr(self.state if actor is self.state.player else actor,
+                                        "fake_shards", 0) or 0))
+        real_avail = max(0, int(getattr(self.state if actor is self.state.player else actor,
+                                        "shards", 0) or 0))
+        if fake_need > fake_avail:
+            return (f"{actor.name}无法完整承担假碎片{fake_need}"
+                    f"（可支付{fake_avail}）")
+        shard_capacity = max(0, fake_avail - fake_need) + real_avail
+        if real_need > shard_capacity:
+            return (f"{actor.name}无法完整承担碎片{real_need}"
+                    f"（可支付{shard_capacity}：真碎片{real_avail}＋假碎片"
+                    f"{max(0, fake_avail - fake_need)}）")
+        for resource, need in (("假碎片", fake_need), ("碎片", real_need)):
             if need <= 0:
                 continue
             try:
@@ -898,6 +920,18 @@ class SpellReactionMixin:
             x = effective_x
             entry_dict = dict(entry_dict, x=x)
 
+        # --- 【唯一】（2026-11-02 修复1）---
+        # 施法者身上有【唯一】且该道纹已成功使用过 → 正常规则阻断。
+        # 必须与【冰冻】同一条通道：INTERRUPTED / DAOWEN_UNUSABLE，整个法术
+        # 中断但已结算步骤保留，API 仍返回 success=True；绝不进 FAILED 通道。
+        if caster.daowen_locked_by_unique(daowen):
+            return StepResult(
+                status=StepStatus.INTERRUPTED, daowen=daowen, x=x,
+                target_ref=target_ref, target_name=target.name,
+                reason=InterruptReason.DAOWEN_UNUSABLE,
+                detail=f"【唯一】生效中：{caster.name}已经用过【{daowen}】，本步无法发动",
+                iteration=iteration)
+
         # --- 道纹可用性 ---
         dw_inst = caster.dao_wen.get(daowen)
         allowed_by_catalysis=(dw_inst is not None and dw_inst is _cooldown_permission
@@ -985,6 +1019,9 @@ class SpellReactionMixin:
 
         # --- 真正执行道纹效果 ---
         self.pay_daowen_cooldown(daowen,calc,caster)
+        # 【回锋刀】的缺省目标需要知道"当前法术步骤的主目标"（2026-11-02）。
+        previous_spell_target = getattr(self, "_huifeng_spell_target", None)
+        self._huifeng_spell_target = target
         try:
             execution = self.apply_daowen_effect(daowen,calc,caster,target,
                 dragon_heart_use=entry_dict.get("dragon_heart_use",0),
@@ -997,6 +1034,8 @@ class SpellReactionMixin:
                 reason=InterruptReason.INVALID_INPUT,
                 detail=f"道纹{daowen}执行失败: {exc}",
                 trigger_spell_logs=trigger_logs, iteration=iteration)
+        finally:
+            self._huifeng_spell_target = previous_spell_target
 
         self.consume_tamper(caster, tamper_rule)
         return StepResult(
@@ -1108,7 +1147,19 @@ class SpellReactionMixin:
             flows = self._eligible_spell_flows(holder, trigger)
             subject_of = self._reaction_subject_of(holder, attacker)
             logs = []
-            for spell_name, flow in flows.items():
+            # 2026-11-02 修复5：四个伤害/失血时点的候选顺序，与全局时点统一走
+            # `_ordered_trigger_entries`（completion_order → 发现序），不再按
+            # `_eligible_spell_flows` 的 dict 声明顺序遍历。
+            ordered = [
+                (spell_name, flow) for _ref, _holder, spell_name, flow in
+                self._ordered_trigger_entries(
+                    refs, trigger, include_holder=lambda candidate: candidate is holder)
+            ]
+            if not ordered and flows:
+                # 兜底：refs 里没有该持有者时（外部/测试构造的局部 refs），
+                # 仍按原有声明顺序结算，绝不因为排序口径而漏触发。
+                ordered = list(flows.items())
+            for spell_name, flow in ordered:
                 decision = submitted.get(spell_name)
                 if not decision or not decision.get("use"):
                     logs.append({"spell": spell_name, "used": False})

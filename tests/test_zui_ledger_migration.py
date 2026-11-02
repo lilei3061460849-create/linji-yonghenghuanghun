@@ -45,21 +45,19 @@ def test_duming_is_no_longer_a_daowen_and_is_in_the_relic_pool():
     with pytest.raises(ValueError):
         DaoWenEngine.resolve("赌命", 1)
 
-    # 2026-10-31：勒索、抢劫删除，罪孽都市闭环重画为八边；赌命仍不在环内。
-    assert RELICIZED_SLOT == "？？"
-    assert RELICIZED_SLOT not in DaoWenEngine._registry
-    loop = ResonanceEngine.CLOSED_LOOPS["罪孽都市闭环"]
-    assert ("假钞", "曲解", "交易") in loop
-    assert ("点金", "反转", "烁金") in loop
-    assert len(loop) == 8 and not any("赌命" in (src, dst) for src, _, dst in loop)
+    # 2026-11-02：罪孽都市改为两个四面体，不再有「？？」占位；赌命仍不在关系表内。
+    edges = ResonanceEngine.edges_of_region("罪孽都市")
+    assert ("点金", "曲解", "假钞") in edges
+    assert ("点金", "反转", "烁金") in edges
+    assert len(edges) == 12 and not any("赌命" in (src, dst) for src, _, dst in edges)
     options = ResonanceEngine.get_available_resonance("假钞")
     assert not any(option["target_daowen"] == "赌命" for option in options)
-    assert any(option["target_daowen"] == "交易" and not option.get("reserved")
+    # 四面体一：假钞 反转⇄典当、曲解⇄点金。
+    assert any(option["target_daowen"] == "点金" and not option.get("reserved")
                for option in options)
     stock = {"曲解": 1}
-    converted = ResonanceEngine.apply_resonance(
-        "假钞", "曲解", True, True, stock, target_daowen="交易")
-    assert converted["success"] is True and converted["target"] == "交易"
+    converted = ResonanceEngine.apply_resonance("假钞", "曲解", True, True, stock)
+    assert converted["success"] is True and converted["target"] == "点金"
 
 
 # ==================== 声明映射 ====================

@@ -25,11 +25,11 @@ from ..models import MONSTER_MANA_RELIC
 
 
 class CostPaymentMixin:
-    # ==================== 【操作】：目标的下一次非施法行动由施法者决定 ====================
+    # ============ 【操纵】：目标接下来X次非施法行动由施法者控制 ============
 
     def caozuo_status_of(self, entity: Entity):
-        """返回该实体身上仍生效的【操作】状态。"""
-        return next((s for s in entity.get_status_effects("操作") if not s.is_expired), None)
+        """返回该实体身上仍生效的【操纵】状态（方法名沿用旧名 caozuo_*）。"""
+        return next((s for s in entity.get_status_effects("操纵") if not s.is_expired), None)
 
     @staticmethod
     def caozuo_attack_matches(order: dict, hits) -> bool:
@@ -52,18 +52,30 @@ class CostPaymentMixin:
                 return False
         return True
 
-    def caozuo_check(self, entity: Entity, kind: str, payload=None):
-        """【操作】生效时，目标的下一次非施法行动必须等于施法者的预指定。
+    def caozuo_consumes_use(self, entity: Entity, status) -> None:
+        """消耗 1 次【操纵】名额；名额归零时移除状态。"""
+        remaining = int(status.effect_data.get("remaining_uses", 1) or 0) - 1
+        if remaining <= 0:
+            if status in entity.status_effects:
+                entity.status_effects.remove(status)
+            return
+        status.effect_data["remaining_uses"] = remaining
+        status.value = remaining
 
+    def caozuo_check(self, entity: Entity, kind: str, payload=None):
+        """【操纵】生效时，目标接下来 X 次非施法行动都必须等于施法者给出的指令。
+
+        （2026-11-02 用户令：【操作】改名【操纵】，作用范围由「下一次」改为「下X次」。）
+        每次通过校验消耗 1 次名额，名额用完状态消失。
         返回 None＝放行（含作废/消费两种情形）；返回 dict＝拒绝本次行动。
-        施法（`cast` 系列）不在【操作】管辖内，调用方不经过本函数。
+        施法（`cast` 系列）不在【操纵】管辖内，调用方不经过本函数。
         """
         status = self.caozuo_status_of(entity)
         if status is None:
             return None
         order = status.effect_data.get("order")
         if order is None:
-            # 施法者没有预指定：效果作废，代价不退，目标照常行动。
+            # 施法者没有给出指令：效果作废，代价不退，目标照常行动。
             entity.status_effects.remove(status)
             return None
         matched = ((kind == "攻击" and self.caozuo_attack_matches(order, payload))
@@ -73,9 +85,10 @@ class CostPaymentMixin:
         if not matched:
             caster = status.effect_data.get("caster_name") or "施法者"
             return {"success": False,
-                    "error": (f"{entity.name}受【操作】影响：下一次行动必须按{caster}预指定的"
-                              f"【{order.get('action')}】执行")}
-        entity.status_effects.remove(status)
+                    "error": (f"{entity.name}受【操纵】影响：接下来"
+                              f"{status.effect_data.get('remaining_uses', 1)}次行动"
+                              f"必须按{caster}指定的【{order.get('action')}】执行")}
+        self.caozuo_consumes_use(entity, status)
         return None
 
     def pay_daowen_numeric_cost(self,name,calc,caster,*,dragon_heart_use=0,cost_share_target_ref=""):
@@ -207,7 +220,12 @@ class CostPaymentMixin:
     SPECIAL_MECHANISM_COSTS = frozenset(SPECIAL_COST_TYPES)
 
     def _blood_pact_group(self, payer: Optional[Entity]) -> list[Entity]:
-        """返回存活的共罪支付名额；同一实体可因发动者追加名额而出现两次。"""
+        """返回存活的共罪支付名额。
+
+        2026-11-02 用户令：**每个角色严格只占 1 份名额**。目标组由【共罪X】的
+        X 个非自身目标 + 发动者本身组成（X+1 人 = X+1 份），同一实体不得因为
+        "发动者追加名额"再占第二份，否则它会替全组多摊一份代价。
+        """
         if payer is None or getattr(self.state, "phase", "") != "in_combat":
             return []
         pacts = [status for status in payer.status_effects
@@ -224,9 +242,16 @@ class CostPaymentMixin:
                 raw_ids = [pact.source]
         if not isinstance(raw_ids, list):
             raw_ids = [raw_ids]
-        ids = [str(value) for value in raw_ids if value]
+        # 去重：同一 runtime_id 只保留第一次出现的那一份名额。
+        ids: list[str] = []
+        for value in raw_ids:
+            if not value:
+                continue
+            text = str(value)
+            if text not in ids:
+                ids.append(text)
         payer_id = str(payer.runtime_id)
-        # 旧存档若只记录目标，至少补入实际支付者；新状态的追加名额不去重。
+        # 旧存档若只记录目标，至少补入实际支付者（已在内则不重复占位）。
         if payer_id not in ids:
             ids.append(payer_id)
         refs = {str(entity.runtime_id): entity
@@ -264,10 +289,19 @@ class CostPaymentMixin:
             "生命": entity.current_hp,
             "血限": entity.effective_blood_limit(),
             "法力": entity.current_mana,
-            "法限": entity.mana_limit,
+            # 【涌潮】期间法限视为∞：能支付的"法限"代价随之无上限。
+            "法限": entity.effective_mana_limit(),
             "速度": entity.current_speed,
             "速限": entity.speed_limit,
-            "碎片": (self.state.shards if entity is self.state.player else entity.shards),
+            # 2026-11-01 用户令：支付[碎片]的可用额度＝真碎片＋假碎片。
+            # 实际扣除仍先假后真（与"失去碎片"同一优先序），但"能不能付得起"
+            # 必须按两池合计判定，否则假碎片在支付通道里等于不存在。
+            "碎片": (
+                max(0, int(getattr(self.state if entity is self.state.player else entity,
+                                   "shards", 0) or 0))
+                + max(0, int(getattr(self.state if entity is self.state.player else entity,
+                                     "fake_shards", 0) or 0))
+            ),
             "假碎片": (self.state.fake_shards if entity is self.state.player
                        else getattr(entity, "fake_shards", 0)),
             "枯竭": max(0, entity.mana_limit
@@ -284,7 +318,7 @@ class CostPaymentMixin:
         cost_share_target_ref: str = "",
         forced: bool = False,
     ) -> tuple[Entity, int, Optional[Entity], int]:
-        """纯校验并计算共罪拆分；无法整除的余数按随机数分配（平分规则，2026-08-21）。
+        """纯校验并计算共罪拆分；无法整除时**每份向上取整**（见 `_divide_flat`）。
 
         forced=True 跳过足额校验（共罪资格与存活校验保留）：用于裁定为
         “付不起照扣、正常死亡”的自动代价（2026-10-13 血族血脉）。"""
@@ -301,6 +335,7 @@ class CostPaymentMixin:
         if pact_group:
             if cost_share_target_ref:
                 raise ValueError("共罪持续期间由绑定目标组自动平分，不接受单目标分担引用")
+            # 共罪：N 份各扣 ceil(M/N)，绝不随机分配余数（2026-11-02 用户令）。
             parts = self._divide_flat(amount, len(pact_group)) if pact_group else []
             required = {}
             for entity, part in zip(pact_group, parts):
@@ -322,7 +357,7 @@ class CostPaymentMixin:
             ally = self.blood_pact_targets(payer).get(cost_share_target_ref)
             if ally is None:
                 raise ValueError("cost_share_target_ref必须指向共罪指定的存活目标")
-            # 共罪：数值型代价可与一名存活的朋友或员工平分；无法整除时余数按随机数分配。
+            # 共罪：数值型代价可与一名存活的朋友或员工平分；无法整除时每份向上取整。
             owner_amount, ally_amount = self._divide_flat(amount, 2)
         for entity, part in ((payer, owner_amount), (ally, ally_amount)):
             if entity is None or part <= 0:
@@ -408,10 +443,26 @@ class CostPaymentMixin:
             detail = {"mana_before": before, "mana_after": payer.current_mana}
         elif cost_type in {"碎片", "假碎片"}:
             pool = self.state if payer is self.state.player else payer
-            field = "shards" if cost_type == "碎片" else "fake_shards"
-            before = max(0, int(getattr(pool, field, 0) or 0))
-            setattr(pool, field, max(0, before - amount))
-            detail = {"resource_before": before, "resource_after": getattr(pool, field)}
+            if cost_type == "碎片":
+                # 2026-11-01 用户令：支付[碎片]时先扣[假碎片]，不足部分再扣真[碎片]。
+                fake_before = max(0, int(getattr(pool, "fake_shards", 0) or 0))
+                real_before = max(0, int(getattr(pool, "shards", 0) or 0))
+                use_fake = min(fake_before, amount)
+                use_real = min(real_before, amount - use_fake)
+                pool.fake_shards = fake_before - use_fake
+                pool.shards = real_before - use_real
+                detail = {
+                    "resource_before": fake_before + real_before,
+                    "resource_after": pool.fake_shards + max(0, int(pool.shards)),
+                    "fake_shards_before": fake_before, "fake_shards_after": pool.fake_shards,
+                    "real_shards_before": real_before, "real_shards_after": pool.shards,
+                    "fake_shards_used": use_fake, "real_shards_used": use_real,
+                }
+            else:
+                field = "fake_shards"
+                before = max(0, int(getattr(pool, field, 0) or 0))
+                setattr(pool, field, max(0, before - amount))
+                detail = {"resource_before": before, "resource_after": getattr(pool, field)}
         elif cost_type == "枯竭":
             payer.pending_exhaust_mana = (
                 int(getattr(payer, "pending_exhaust_mana", 0) or 0) + amount)
@@ -611,20 +662,45 @@ class CostPaymentMixin:
                         f"{flavor} {entity.name}已异变为怪物，与原队伍开战"}
 
     def _divide_flat(self, total: int, count: int) -> list[int]:
-        """平分规则（2026-08-21）：总数值在 count 个目标间平均分配；
-        无法整除时余数按随机数分配（引擎随机源，可复现）。"""
+        """平分规则的唯一实现（2026-11-02 用户令）：**每一份一律向上取整（ceil）**。
+
+        `ceil(M / N) = (M + N - 1) // N`，负数按绝对值取整后还原符号。
+        余数不再随机落到某一个人头上——随机分配会让"1 点生命由 2 人共罪分担"
+        变成一人扣 1、一人扣 0，规则上不成立。向上取整后**每份都可能被抬高**，
+        因此多份之和允许大于原数值（2 人共罪各扣 1 点 = 合计 2 点）。
+
+        全仓库的分摊/平分（共罪代价、波及效果、庇护次数、妖怪休眠恢复池……）
+        都走这一个口；不要在别处另写 divmod 或随机分配余数。
+        """
         if count <= 0:
             return []
         neg = total < 0
-        total = abs(total)
-        base, rem = divmod(total, count)
-        pieces = [base] * count
-        if rem:
-            pool = list(range(count))
-            for _ in range(rem):
-                idx = pool.pop(self.dice.randrange(len(pool)))
-                pieces[idx] += 1
+        magnitude = abs(int(total))
+        share = (magnitude + count - 1) // count
+        pieces = [share] * count
         return [-p for p in pieces] if neg else pieces
+
+    def _divide_quota(self, total: int, count: int) -> list[int]:
+        """把**执行配额**（如【催化】要执行的步骤数）按 ceil 分给 count 个持有者，
+        并截断使总和严格等于 total。
+
+        与 `_divide_flat` 的分工：`_divide_flat` 分的是"每份数值"，向上取整后
+        允许总量膨胀；配额不是数值而是**动作次数**，多出来的份额会凭空多发动
+        一次道纹，因此这里把超出部分从末位削掉，保持 sum(parts) == total。
+        """
+        if count <= 0:
+            return []
+        total = max(0, int(total))
+        share = (total + count - 1) // count
+        pieces = [share] * count
+        excess = share * count - total
+        index = count - 1
+        while excess > 0 and index >= 0:
+            cut = min(excess, pieces[index])
+            pieces[index] -= cut
+            excess -= cut
+            index -= 1
+        return pieces
 
     def _wave_targets(self, caster: Entity) -> list[Entity]:
         """拥有施法者建立的波及效果的存活角色（不含施法者自身）。"""
@@ -688,7 +764,8 @@ class CostPaymentMixin:
                     payer, cost_type, amount,
                     cost_share_target_ref=cost_share_target_ref,
                     dragon_heart_use=dragon_heart_use, ctx=ctx,
-                    cost_context=cost_context, forced=forced)
+                    cost_context=cost_context, forced=forced,
+                    trigger_blood_pact=trigger_blood_pact)
                 payment["nominal_amount"] = nominal
                 if trigger_blood_pact and nominal > 0 and cost_type in RESOURCE_TYPES:
                     payment["blood_pact_effects"] = self._trigger_xueqi_payment(
@@ -744,8 +821,12 @@ class CostPaymentMixin:
                 owner=payer, mechanic="cost", subtype="blood_pact_echo", amount=amount,
                 tags=(set(parent_ctx.tags) if parent_ctx else set()) | {"blood_pact_echo"},
                 parent_event_id=parent_ctx.event_id if parent_ctx else None)
+            # 2026-11-02 修复2：血契回声是"被迫支付"，绝不能再触发目标身上的
+            # 血契回声——否则 A→B→A 互为血契时会无界递归（RecursionError），
+            # 单向链也会按 X 的幂级数层层放大。递归锁落在 trigger_blood_pact。
             payment = self.pay_numeric_cost(
-                target, resource_type, amount, forced=True, ctx=ctx)
+                target, resource_type, amount, forced=True, ctx=ctx,
+                trigger_blood_pact=False)
             effects.append({"type": "blood_pact_echo", "source": payer.name,
                             "target": target.name, "resource": resource_type,
                             "nominal_amount": nominal_amount, "multiplier": status.value,
@@ -754,12 +835,24 @@ class CostPaymentMixin:
 
     @staticmethod
     def _dragon_heart_matches(item: Consumable, cost_type: str) -> bool:
-        if item.kind != "dragon_heart" or item.is_depleted:
-            return False
-        if normalize_payment_type(item.dragon_heart_type) != cost_type:
+        """该条目是否携带匹配类型的【××龙心】（含【改造】并入的情形）。
+
+        龙心是被动效果：持有期间按耐久抵扣对应代价。改造把它并进别的条目后，
+        名字不再等于「××龙心」，所以按 effect_sources() 逐个来源判定；
+        抵扣消耗的是合成后共用的耐久池（item.current_uses）。
+        """
+        if item.is_depleted:
             return False
         legacy = next((old for old, new in LEGACY_COST_ALIASES.items() if new == cost_type), None)
-        return item.name in {f"{cost_type}龙心", f"{legacy}龙心" if legacy else ""}
+        expected = {f"{cost_type}龙心", f"{legacy}龙心" if legacy else ""}
+        for source in item.effect_sources():
+            if source.get("kind") != "dragon_heart":
+                continue
+            if normalize_payment_type(source.get("dragon_heart_type") or "") != cost_type:
+                continue
+            if source.get("name") in expected:
+                return True
+        return False
 
     def _pay_numeric_cost_inner(
         self,
@@ -772,8 +865,13 @@ class CostPaymentMixin:
         ctx: Optional[EffectContext | dict] = None,
         cost_context: Optional[EffectContext | dict] = None,
         forced: bool = False,
+        trigger_blood_pact: bool = True,
     ) -> dict:
-        """代价支付的实现体（对外契约见 pay_numeric_cost）。"""
+        """代价支付的实现体（对外契约见 pay_numeric_cost）。
+
+        trigger_blood_pact=False 表示这次支付本身是**派生支付**（血契回声），
+        其共罪份额也不得再各自触发血契——否则回声→份额→回声会无界续链。
+        """
         cost_type = normalize_payment_type(cost_type)
         if not isinstance(dragon_heart_use, int) or isinstance(dragon_heart_use, bool) or dragon_heart_use < 0:
             raise ValueError("dragon_heart_use必须是非负整数")
@@ -805,8 +903,9 @@ class CostPaymentMixin:
         if pact_group:
             if cost_share_target_ref:
                 raise ValueError("共罪持续期间由全部支付名额自动平分，不接受单目标分担引用")
+            # 共罪：每位成员各扣 ceil(剩余/N)，向上取整，不随机分配余数。
             parts = self._divide_flat(remaining, len(pact_group))
-            # 先按支付名额分，再按实体合并；同一实体占两份时只扣款/触发一次。
+            # 名额已按 runtime_id 去重，这里仍按实体归并一次作为防御。
             shares = []
             share_indices = {}
             for entity, part in zip(pact_group, parts):
@@ -832,8 +931,12 @@ class CostPaymentMixin:
                 if entity is payer:
                     owner_detail = detail
                 else:
-                    detail["blood_pact_effects"] = self._trigger_xueqi_payment(
-                        entity, cost_type, part, normalized_ctx)
+                    # 共罪份额仍然是"该成员在支付"，故照常触发他自己的血契；
+                    # 但 `trigger_blood_pact=False` 时（血契回声/派生支付）绝不能再
+                    # 逐份续链——向上取整后每份必≥1，续链就成了无界级联。
+                    if trigger_blood_pact:
+                        detail["blood_pact_effects"] = self._trigger_xueqi_payment(
+                            entity, cost_type, part, normalized_ctx)
                     shared_details.append(detail)
             return {
                 "cost_type": cost_type, "requested": amount,
@@ -849,7 +952,8 @@ class CostPaymentMixin:
         owner_detail = self._apply_numeric_cost_part(payer, cost_type, owner_amount, normalized_ctx)
         ally_detail = (self._apply_numeric_cost_part(ally, cost_type, ally_amount, normalized_ctx)
                        if ally is not None else None)
-        if ally is not None and ally_amount > 0 and cost_type in RESOURCE_TYPES:
+        if (ally is not None and ally_amount > 0 and cost_type in RESOURCE_TYPES
+                and trigger_blood_pact):
             ally_detail["blood_pact_effects"] = self._trigger_xueqi_payment(
                 ally, cost_type, ally_amount, normalized_ctx)
         # 2026-10-23 用户令：真龙之心改为「实际支付的数值型代价自动记门槛」，

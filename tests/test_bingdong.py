@@ -36,14 +36,15 @@ def _cast(engine, x, choices, target_ref="enemy:0"):
     })
 
 
-def test_bingdong_registry_and_sinking_sea_loop():
+def test_bingdong_registry_and_sinking_sea_tetrahedra():
     target = Entity("目标", "怪物")
     calc = DaoWenEngine.resolve("冰冻", 3, target=target)
     assert calc["cost_type"] == "冷却" and calc["cost"] == 3
     assert calc["duration"] == -1 and calc["freeze_count"] == 3
-    assert ResonanceEngine.find_transformation("遗忘", "曲解") == "冰冻"
+    # 2026-11-02 四面体：沉沦海·二 曲解 大梦⇄冰冻（双向）；遗忘的曲解出口在四面体一。
     assert ResonanceEngine.find_transformation("冰冻", "曲解", "大梦") == "大梦"
     assert ResonanceEngine.find_transformation("大梦", "曲解", "冰冻") == "冰冻"
+    assert ResonanceEngine.find_transformation("遗忘", "曲解", "波及") == "波及"
     assert ResonanceEngine.find_transformation("遗忘", "曲解", "大梦") is None
 
 

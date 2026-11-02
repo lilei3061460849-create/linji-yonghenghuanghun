@@ -245,14 +245,15 @@ def test_monster_cast_bizhong_self_then_forces_debuff():
         prepared=prepared)
     assert p.has_status("勾魂"), "怪物处于必中姿态，勾魂必须命中生效"
 
-    # 【冥气】已遗物化删除；勾魂的【反转】路径现在指向不可获得的「？？」占位。
-    # 尝试残韵不得消耗资源，也不能凭空获得已删除道纹。
+    # 2026-11-02 乱葬岗四面体：勾魂 反转⇄招魂，是真实可达的边；
+    # 真正无效的是被撤销的遗物化节点【冥气】——残韵不得凭空获得它，
+    # 也不得因此在失败时扣掉残韵或清掉已生效的 debuff。
     e.state.resonance = {"反转": 1}
     r = e.execute_action("use_resonance", {"source_daowen": "勾魂",
                                            "resonance_type": "反转",
-                                           "target_ref": "enemy:0"})
+                                           "target_ref": "enemy:0",
+                                           "target_daowen": "冥气"})
     assert r.get("success") is False, r.get("error")
-    assert "？？" in r.get("error", "")
     assert "勾魂" in m.dao_wen and "冥气" not in m.dao_wen
     assert e.state.resonance.get("反转", 0) == 1
-    assert p.has_status("勾魂"), "失败的占位路径不得清除已生效 debuff"
+    assert p.has_status("勾魂"), "失败路径不得清除已生效 debuff"

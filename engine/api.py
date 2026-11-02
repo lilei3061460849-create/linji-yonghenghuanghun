@@ -28,9 +28,8 @@ from .world import (ALLY_KINDS, ALLY_SUGGESTION_RANGE, ALLY_SUGGESTIONS,
 from .enums import (GamePhase, CombatSubphase, ActionPhase, TriggerTiming,
                     InterruptType, EntityType, EffectScope, EffectPolarity)
 from .dice import DiceEngine
-from .death_pages import can_accept as can_accept_page_resource
 from .yaoguai import (
-    BANNER_NAME, BANNER_CAPACITY, UNHOUSED_PAGE_COST,
+    BANNER_NAME, BANNER_CAPACITY,
     find_owned_yaoguai, has_banner as has_yaoguai_banner, owned_yaoguai,
 )
 from .daowen import (DaoWenEngine, ResonanceEngine, PURIFIABLE_COST_KINDS,
@@ -46,7 +45,7 @@ from .consumables import (
     WING_BLOOD, WING_EMBER, WING_MODE_FLEE, WING_MODE_FLY, WING_MODE_LIFESTEAL,
     WING_MODE_SUPPRESS, WING_MODES, WING_STATUS_LIFESTEAL, WING_STATUS_SUPPRESS,
     make_wing_item)
-from .events import EventPool
+from .events import EventPool, TWISTED_TOOL_LIBRARY
 from .rule_repository import RuleRepository
 from .spell_execution import InterruptReason, SpellExecution
 from .dungeons import DEFAULT_INDEX
@@ -87,18 +86,6 @@ from .handlers.duel import (
 )
 
 
-# 扭曲都市废墟设施工具库（9件：名→(耐久, 效果文本逐字)）
-TWISTED_TOOL_LIBRARY = {
-    "反怪物电击枪": (3, "对一个[目标]造成25点伤害；若[目标]处于【飞行】，额外造成15点伤害。"),
-    "备用血泵": (3, "使自身获得20点［回复］；若自身当前生命≤30%，额外获得30点格挡。"),
-    "强光探照灯": (2, "使一个[目标]陷入【蒙蔽2】"),
-    "高压水枪": (2, "清除全场所有敌方[目标]身上的所有“持续X”效果"),
-    "储能电池": (3, "立即获得12点法力。"),
-    "急救箱": (2, "使自身获得[回复25]，并清除自身身上一种“持续X”的负面减益。"),
-    "干扰仪": (2, "使全场所有敌方[目标]本回合无法发动自身道纹"),
-    "高爆手雷": (2, "对一个[目标]造成15点伤害，并使其本回合攻击次数-1"),
-    "万钧印": (3, "有[目标]发动攻击时，可将其改为该攻击者对自己发动攻击；每触发一次消耗1点耐久。"),
-}
 
 # 自由结晶随机代价池（2026-10-05 用户令）：代价一节中可数值化的八种代价，共计10。
 # 【唯一】无数值、无法按 X=10 结算，不入池（见 物品索引.md#自由结晶）。
@@ -712,17 +699,26 @@ class GameEngine:
 
     def _get_region_actions(self) -> list[dict]:
         if self.state.current_region == "扭曲都市":
-            repairable = [
-                {"item_ref": f"consumable:{index}", "name": item.name,
-                 "current_uses": item.current_uses, "max_uses": item.max_uses}
-                for index, item in enumerate(self.state.consumables)
-                if 0 < item.current_uses < item.max_uses
-            ]
-            return [{"id": "维修", "params_schema": {
-                "tier": [1, 2, 3],
-                "allocations": {"type": "list", "items": {
-                    "item_ref": repairable, "amount": "positive integer"},
-                    "constraint": "amount总和必须等于档位耐久点"},
+            mergeable = []
+            for index, item in enumerate(self.state.consumables):
+                mergeable.append({
+                    "item_ref": f"consumable:{index}", "name": item.name,
+                    "effect": item.effect, "current_uses": item.current_uses,
+                    "max_uses": item.max_uses,
+                    "passive_sources": [source["name"] for source in item.effect_sources()
+                                        if Consumable.source_is_passive(source)],
+                    "sources": [source["name"] for source in item.effect_sources()]})
+            return [{"id": "改造", "params_schema": {
+                "tier": {2: "合并2件不同名消耗品（0碎片）",
+                         3: "合并3件不同名消耗品（5碎片）",
+                         4: "合并4件不同名消耗品（12碎片）"},
+                "names": mergeable,
+                "target": "接收全部效果的消耗品名，必须是names之一",
+                "constraint": ("names数量必须等于tier且互不同名；"
+                               "被并入的条目从持有中移除，其当前耐久与耐久上限一并叠加到目标条目；"
+                               "效果叠加为目标条目的效果文本；使用目标条目时逐条结算全部来源效果。"
+                               "被动型效果（龙心、万钧印）随条目携带、不参与手动结算；"
+                               "翼类／雕塑等需要选择的效果用source_params按来源名分别提交"),
             }}]
         if self.state.current_region == "罪孽都市":
             return [{"id": "雇佣", "params_schema": {"name": "string", "blood_alloc": "integer",
@@ -815,10 +811,10 @@ class GameEngine:
             if (name == "封印" and player.entity_type == "轮回者"
                     and any(sp.name == "镇魔印" for sp in (getattr(player, "spells", None) or []))):
                 continue
-            if not instance.can_use():
+            if not player.can_use_daowen(name):
                 actions.append({"action_type": "use_daowen", "available": False,
                                 "params_schema": {"daowen_name": name},
-                                "reason": "冷却中或被封印"})
+                                "reason": "冷却中/被封印/【唯一】锁死"})
                 continue
             max_x = self._max_legal_daowen_x(player, name)
             # 【真理】X=陈述句数（2026-10-23 用户裁定）；只需目标与待裁定陈述，
@@ -845,6 +841,8 @@ class GameEngine:
                        if name == "连击" else {}),
                     **({"lianmin_cost": list(DaoWenEngine.PAYABLE_TYPES)}
                        if name == "怜悯" else {}),
+                    **({"relic_name": "目标可夺取的遗物名；目标有多件时必须显式指定，无可夺遗物则本次发动被拒绝且不支付代价"}
+                       if name == "豪夺" else {}),
                     **({"cost_choices": "净化：支付法力20X；显式选择目标拥有的数值类代价及层数，格式为[{type: 血限/枯竭/法限/速度/异变, layers: 正整数}]；可混选多种，所有layers之和不得超过X；单选项省略layers时默认吃满X；不能选择失忆或冷却"} if name == "净化" else {}),
                     "cost_share_target_ref": (
                         [{"ref": ref, "name": entity.name}
@@ -864,6 +862,15 @@ class GameEngine:
                                   "dodge": "敌对目标可选布尔值",
                                   "blood_shadow": "可选布尔值"},
                     }
+            if name in ("点金", "典当"):
+                # 失忆代价必须显式选纹（2026-11-01 用户令）：把候选直接公布，
+                # 缺失/数量不符会被 use_daowen 在扣费前拒绝。
+                params_schema["forget_daowen"] = {
+                    "count": f"{'X' if name == '点金' else '2X'}（随发动X）",
+                    "per_x": 1 if name == "点金" else 2,
+                    "choices": custom_resources.amnesia_candidates(player),
+                    "note": "道纹名数组；未提交或数量不符将被拒绝且不扣任何代价",
+                }
             _custom = custom_resources.get(name)
             if (_custom is not None and _custom.category == "道纹"
                     and _custom.spec.get("cost", {}).get("type") == "失忆"):
@@ -878,7 +885,7 @@ class GameEngine:
             if actor is player or not self.state.on_player_side(actor):
                 continue
             for name, instance in actor.dao_wen.items():
-                if not instance.can_use():
+                if not actor.can_use_daowen(name):
                     continue
                 fixed_x = instance.x_value if instance.x_value > 0 else 1
                 # 波及X（固定X）：合法目标不足X时该指令永远无法发动——
@@ -907,8 +914,7 @@ class GameEngine:
             spell = known.get(spell_name) or self.combat.spell_definition(player, spell_name)
             if spell is None:
                 continue
-            usable = all(n in player.dao_wen and player.dao_wen[n].can_use()
-                         for n in spell.required_daowen)
+            usable = all(player.can_use_daowen(n) for n in spell.required_daowen)
             actions.append({"action_type": "define_spell",
                             "params_schema": {"spell_name": spell_name},
                             "available": usable,
@@ -2562,9 +2568,8 @@ class GameEngine:
                 inventory = self.state.relics if is_player else entity.relics
                 owned_names = {relic.name for relic in inventory}
                 relic_name = location.get("relic_name", location.get("name", ""))
-                capacity = getattr(entity, "relic_capacity", 10**9)
-                # 2026-10-27：各方均按剩余死者之页拾取，满页留在原地。
-                if relic_name not in owned_names and can_accept_page_resource(entity, "遗物", relic_name):
+                # 2026-11-01 重构1：遗物已脱离死者之页，拾取不再受页数拦截。
+                if relic_name not in owned_names:
                     relic = Relic(name=relic_name, effect=location.get("relic_effect", ""),
                                   tags=list(location.get("relic_tags") or []))
                     inventory.append(relic)
@@ -2634,8 +2639,8 @@ class GameEngine:
                 continue
             owned = {relic.name for relic in entity.relics}
             stock = next((relic for relic in merchant.relics if relic.name not in owned), None)
-            can_buy = (stock is not None
-                       and len(owned) < int(getattr(entity, "relic_capacity", 10**9)))
+            # 2026-11-01 重构1：遗物不再占死者之页，NPC 买入不再受"承载件数"拦截。
+            can_buy = stock is not None
             if can_buy and entity.shards >= price:
                 # 固定参考价避免NPC凭空议价；库存与货币由真实实体状态原子转移。
                 merchant.relics.remove(stock)
@@ -3155,10 +3160,9 @@ class GameEngine:
                         if actor_entity is not None:
                             is_player = actor_entity is self.state.player
                             owned_relics = self.state.relics if is_player else actor_entity.relics
-                            capacity = (actor_entity.relic_capacity if is_player
-                                        else getattr(actor_entity, "relic_capacity", 10**9))
                             owned_names = {relic.name for relic in owned_relics}
-                            if location.get("relic_name") not in owned_names and can_accept_page_resource(actor_entity, "遗物", location.get("relic_name")):
+                            # 2026-11-01 重构1：遗物不占页，拾取不再有页数门禁。
+                            if location.get("relic_name") not in owned_names:
                                 relic = Relic(name=location["relic_name"],
                                               effect=location.get("relic_effect", ""),
                                               tags=list(location.get("relic_tags") or []))
@@ -3435,9 +3439,8 @@ class GameEngine:
                     return {"success": False, "error": f"你没有遗物【{give_relic}】"}
                 if request_relic and target_relic is None:
                     return {"success": False, "error": f"对方没有遗物【{request_relic}】"}
-                target_relic_count = len({r.name for r in target_entity.relics})
-                if give_relic and not request_relic and target_relic_count >= target_entity.relic_capacity:
-                    return {"success": False, "error": "对方遗物承载已满，无法接收你的遗物"}
+                # 2026-11-01 重构1：遗物不占页、持有不限量，交易不再因"承载满"拒绝；
+                # 对方的启用槽位若已满，新到手的遗物按停用入库即可。
                 # 默认议价基准：一件遗物按10碎片估值。目标只接受自己收到的价值不低于付出的报价。
                 value_received = offer_shards + (10 if give_relic else 0)
                 value_given = request_shards + (10 if request_relic else 0)
@@ -3877,7 +3880,7 @@ class GameEngine:
             "修行": lambda p: p.get("tier", 1),
             "学习": lambda p: 3,
             "共鸣": lambda p: 1,
-            "维修": lambda p: 1,
+            "改造": lambda p: 1,
             "雇佣": lambda p: 1,
             "炼心": lambda p: 1,
             "造生": lambda p: 1,
@@ -4167,7 +4170,7 @@ class GameEngine:
             "学习": self._pre_battle_xuexi,
             "共鸣": self._pre_battle_gongming,
             "探索": self._pre_battle_tansuo,
-            "维修": self._pre_battle_weixiu,
+            "改造": self._pre_battle_gaizao,
             "雇佣": self._pre_battle_guyong,
             "炼心": self._pre_battle_lianxin,
             "造生": self._pre_battle_zaosheng,
@@ -4176,9 +4179,9 @@ class GameEngine:
         }
         # 2026-09-28：局外【忘忧】已删除，忘忧香效果为溢出回复转格挡。
 
-        # 副本专属行动门禁（规则正文：维修=扭曲都市、雇佣=罪孽都市、炼心=龙心谷专属）。
+        # 副本专属行动门禁（规则正文：改造=扭曲都市、雇佣=罪孽都市、炼心=龙心谷专属）。
         # 缺少该校验会让任意副本都能用他人专属行动，统计与平衡数据将失真。
-        REGION_EXCLUSIVE = {"维修": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "造生": "乱葬岗"}
+        REGION_EXCLUSIVE = {"改造": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "造生": "乱葬岗"}
         need_region = REGION_EXCLUSIVE.get(action)
         if action == "造生" and has_yaoguai_banner(self.state):
             need_region = None
@@ -4371,14 +4374,14 @@ class GameEngine:
         ("叠鳞甲", "你受到的所有伤害-1，最低为0。"),
         ("血誓戒", "[回始]首次主动支付生命时，获得等同于本次实际支付生命的格挡；若支付后生命≤30%，改为获得等量生命"),
         ("同魂笔", "当你对[目标]发动残韵时，可以选择另一个[目标]，使其拥有的一种道纹受到同种残韵影响。"),
-        ("回锋刀", "每失去1点速度后，对[目标]造成3点伤害；[回始]，对[目标]造成3×（你的[速限]-你的当前速度）的伤害。"),
+        ("回锋刀", "每当你的当前速度发生实际变化时（增加或减少均算），对[目标]造成5点伤害；[回始]，对[目标]造成3×（你的[速限]-你的当前速度）的伤害。"),
         ("避风铃", "每次闪避后获得3格挡；当前速度归零时获得15格挡"),
         ("守夜灯", "[回增]，你获得等同于增加后当前回合数的法力。"),
         ("无所求", "每当你在事件中选择「拒绝」类选项，永久获得1点属性点。"),
         ("忘忧香", "你受到溢出的回复时将其转化为等量格挡"),
         ("承露盏", "每累计失去10点生命，获得1点法力。本场累计，余数滚存，[战始]归零。"),
         # 2026-10-03 新增 5 件（承接被删道纹，全部加入通用遗物池）：
-        ("千荆甲", "你受到攻击伤害（指攻击行动所造成的伤害）前，攻击者受到等量伤害。"),
+        ("千荆甲", "你受到攻击伤害（指攻击行动所造成的伤害）前，攻击者失去等量生命。"),
         
         ("癫狂之脑", "你每回合的出手次数+1，受到的攻击伤害翻倍"),
         ("活血衣", "你受到攻击造成的伤害后，恢复等同其一半的生命"),
@@ -4613,17 +4616,30 @@ class GameEngine:
         if choice not in self.state.pending_item_choices:
             return {"success": False, "error": "只能选择本次发现列出的消耗品",
                     "choices": list(self.state.pending_item_choices)}
-        if choice not in TWISTED_TOOL_LIBRARY:
+        # 2026-11-02【锻造】实装：候选池扩到全部固定规格消耗品
+        # （扭曲都市工具库 + 事件消耗品），两者规格都是既有登记，不接受自定义物品。
+        from .events import EVENT_CONSUMABLES
+        spec_pool = {**TWISTED_TOOL_LIBRARY, **EVENT_CONSUMABLES}
+        if choice not in spec_pool:
             return {"success": False, "error": f"未知工具: {choice}"}
-        durability, effect = TWISTED_TOOL_LIBRARY[choice]
+        durability, effect = spec_pool[choice]
+        # 【锻造】发现：耐久按本次 X 覆盖（上限取 max(基准上限, X)），其余发现走原规格。
+        forge_uses = int(getattr(self.state, "pending_item_bonus_uses", 0) or 0)
+        if forge_uses:
+            current_uses = forge_uses
+            max_uses = max(int(durability), forge_uses)
+        else:
+            current_uses = max_uses = int(durability)
         self.state.consumables.append(Consumable(
-            name=choice, effect=effect, current_uses=durability, max_uses=durability,
+            name=choice, effect=effect, current_uses=current_uses, max_uses=max_uses,
         ))
         source = self.state.pending_item_source
         self.state.pending_item_choices = []
         self.state.pending_item_source = ""
+        self.state.pending_item_bonus_uses = 0
         return {"success": True, "action": "选择发现消耗品",
-                "result": {"item": choice, "durability": durability, "source": source}}
+                "result": {"item": choice, "durability": current_uses,
+                           "max_durability": max_uses, "source": source}}
 
     def _action_discard_discovered_item(self, params: dict) -> dict:
         """放弃本次消耗品发现（与 discard_discovered_relic 对称的出口）。
@@ -4637,6 +4653,7 @@ class GameEngine:
         source = self.state.pending_item_source
         self.state.pending_item_choices = []
         self.state.pending_item_source = ""
+        self.state.pending_item_bonus_uses = 0
         return {"success": True, "action": "放弃发现消耗品",
                 "result": {"discarded_choices": choices, "source": source,
                            "note": "本次发现不取任何消耗品，待选列表已清空"}}
@@ -4980,54 +4997,85 @@ class GameEngine:
                             f"其后还有{len(self.state.pending_event_queue)}个探索事件依次结算"),
         }
 
-    def _pre_battle_weixiu(self, params: dict) -> dict:
-        """维修：显式分配耐久，实际补入未耗尽消耗品且不得超过当前耐久上限。"""
-        tier = params.get("tier", 1)
-        tier_map = {1: (1, 0), 2: (2, 5), 3: (3, 12)}
-        if not isinstance(tier, int) or isinstance(tier, bool) or tier not in tier_map:
+    # 【改造】档位：合并的消耗品件数 → 碎片价目（沿用原【维修】1/2/3档的 0/5/12 阶梯）。
+    GAIZAO_TIERS = {2: 0, 3: 5, 4: 12}
+
+    def _pre_battle_gaizao(self, params: dict) -> dict:
+        """改造（扭曲都市专属）：选择2/3/4件不同名消耗品，把全部效果叠加到其中一件。
+
+        口径（2026-11-01 用户令，原【维修】撤销；同日补正：耐久同样叠加、被动效果照常携带）：
+        - 档位＝参与件数：2件（0碎片）／3件（5碎片）／4件（12碎片），另耗1点精力；
+        - names 必须互不同名且都在持有中，target 必须是 names 之一；
+        - 被并入条目的**当前耐久与耐久上限一并叠加**到目标条目，目标条目成为唯一的耐久池；
+        - 效果文本变为各条目效果之和；使用它时按原顺序逐条结算全部来源效果，
+          最后只扣它自己的1点耐久；
+        - 被动型效果（【龙心】的代价抵扣、【万钧印】的改道）随条目携带，靠
+          `effect_sources()` 对持有判定可见，不参与手动结算；翼类/雕塑等需要选择的效果
+          用 `source_params` 按来源名分别提交参数。
+        """
+        tier = params.get("tier", 2)
+        if (not isinstance(tier, int) or isinstance(tier, bool)
+                or tier not in self.GAIZAO_TIERS):
             self.state.energy += 1
-            return {"success": False, "error": "维修档位必须是1/2/3"}
-        points, cost = tier_map[tier]
-        allocations = params.get("allocations")
-        if not isinstance(allocations, list) or not allocations:
+            return {"success": False, "error": "改造档位必须是2/3/4（对应合并2/3/4件）"}
+        cost = self.GAIZAO_TIERS[tier]
+        names = params.get("names")
+        if not isinstance(names, list) or any(not isinstance(n, str) for n in names):
             self.state.energy += 1
-            return {"success": False, "error": "维修必须用allocations显式分配全部耐久点"}
-        refs = {f"consumable:{index}": item for index, item in enumerate(self.state.consumables)}
-        totals: dict[str, int] = {}
-        for entry in allocations:
-            if (not isinstance(entry, dict) or entry.get("item_ref") not in refs
-                    or not isinstance(entry.get("amount"), int) or isinstance(entry.get("amount"), bool)
-                    or entry["amount"] < 1):
-                self.state.energy += 1
-                return {"success": False, "error": "维修分配必须包含合法item_ref和正整数amount"}
-            ref = entry["item_ref"]
-            totals[ref] = totals.get(ref, 0) + entry["amount"]
-        if sum(totals.values()) != points:
+            return {"success": False, "error": "改造必须用names提交消耗品名列表"}
+        if len(names) != tier:
             self.state.energy += 1
-            return {"success": False, "error": f"维修{tier}档必须恰好分配{points}点耐久"}
-        for ref, amount in totals.items():
-            item = refs[ref]
-            if item.current_uses < 1:
+            return {"success": False, "error": f"改造{tier}档必须恰好选择{tier}件消耗品"}
+        if len(set(names)) != len(names):
+            self.state.energy += 1
+            return {"success": False, "error": "改造只能合并不同名的消耗品"}
+        target_name = params.get("target", "")
+        if target_name not in names:
+            self.state.energy += 1
+            return {"success": False, "error": "改造的target必须是names中的一个"}
+
+        resolved: dict[str, Consumable] = {}
+        for name in names:
+            item = next((c for c in self.state.consumables if c.name == name), None)
+            if item is None:
                 self.state.energy += 1
-                return {"success": False, "error": f"【{item.name}】耐久已归零，不能维修"}
-            if item.current_uses + amount > item.max_uses:
-                self.state.energy += 1
-                return {"success": False,
-                        "error": f"【{item.name}】维修后将超过耐久上限{item.max_uses}"}
-        if cost > 0 and self.state.shards < cost:  # 负债口径：0费维修不属于支出
+                return {"success": False, "error": f"未持有消耗品【{name}】"}
+            resolved[name] = item
+        if cost > 0 and self.state.shards < cost:  # 负债口径：0费档不属于支出
             self.state.energy += 1
             return {"success": False, "error": f"碎片不足，需要{cost}"}
 
+        target = resolved[target_name]
+        merged = [target] + [resolved[name] for name in names if name != target_name]
+        # 已并入过别的条目的效果一并搬过来，避免二次改造丢掉中间效果。
+        sources: list[dict] = []
+        for item in merged:
+            sources.extend(item.merged_sources or [{
+                "name": item.name, "effect": item.effect, "kind": item.kind,
+                "dragon_heart_type": item.dragon_heart_type,
+            }])
+        target.merged_sources = sources
+        target.effect = "；".join(dict.fromkeys(
+            source["effect"] for source in sources if source.get("effect")))
+        # 耐久同样叠加：被并入条目的当前耐久与上限都进目标条目，合成后只有一个耐久池。
+        absorbed_uses = sum(item.current_uses for item in merged[1:])
+        absorbed_max = sum(item.max_uses for item in merged[1:])
+        target.current_uses += absorbed_uses
+        target.max_uses += absorbed_max
+        removed = [item.name for item in merged[1:]]
+        self.state.consumables = [c for c in self.state.consumables if c not in merged[1:]]
         self.state.shards -= cost
-        repaired = []
-        for ref, amount in totals.items():
-            item = refs[ref]
-            item.current_uses += amount
-            repaired.append({"item_ref": ref, "item": item.name, "amount": amount,
-                             "current_uses": item.current_uses, "max_uses": item.max_uses})
-        return {"success": True, "action": "维修",
-                "result": {"durability_points": points, "shard_cost": cost,
-                           "allocations": repaired}}
+        return {
+            "success": True, "action": "改造",
+            "result": {
+                "tier": tier, "merged_count": len(merged), "shard_cost": cost,
+                "target": target.name, "target_effect": target.effect,
+                "target_uses": target.current_uses, "target_max_uses": target.max_uses,
+                "absorbed_uses": absorbed_uses, "absorbed_max_uses": absorbed_max,
+                "absorbed": removed,
+                "sources": [source["name"] for source in sources],
+            },
+        }
 
     def _pre_battle_guyong(self, params: dict) -> dict:
         """
@@ -5139,12 +5187,13 @@ class GameEngine:
             return {"success": False,
                     "error": f"煌妖幡最多收纳{BANNER_CAPACITY}只妖怪，无法继续创造"}
         if not banner:
-            from .death_pages import bind_resources
-            bind_resources(self.state)
-            if player.pages_used + UNHOUSED_PAGE_COST > player.load_capacity:
-                return {"success": False,
-                        "error": f"未入幡妖怪每只占{UNHOUSED_PAGE_COST}张死者之页；"
-                                 f"当前已用{player.pages_used}/{player.load_capacity}页，无法创造新妖怪"}
+            # 2026-11-01 重构3.2：预检走 death_pages.yaoguai_creation_error，
+            # 与事务层 growth_error 用同一套投影键（妖怪本体5页；签名道纹记在
+            # 妖怪自身页上；偏爱遗物在重构1后已不占页），不再各写一份近似算式。
+            from .death_pages import yaoguai_creation_error
+            page_error = yaoguai_creation_error(self.state)
+            if page_error:
+                return {"success": False, "error": page_error}
 
         cost = 10
         if self.state.shards < cost:
@@ -5179,6 +5228,11 @@ class GameEngine:
         signature_name = str(self.dice.auto_roll(
             "created_being_signature_daowen", sorted(signature_values),
             context=f"{name}造生：抽取一次性专属道纹")["selected"])
+        if not banner:
+            from .death_pages import yaoguai_creation_error
+            page_error = yaoguai_creation_error(self.state, signature_name)
+            if page_error:
+                return {"success": False, "error": page_error}
         signature_x = signature_values[signature_name]
         preference = str(self.dice.auto_roll(
             "created_being_initial_preference", list(MONSTER_PREFERENCE_POOL),
@@ -5827,7 +5881,7 @@ class GameEngine:
 
         name = params.get("daowen_name", "")
         x = params.get("x", 1)
-        # 【操作】：发动道纹不是「施法」，属于被【操作】管辖的那一次非施法行动。
+        # 【操纵】：发动道纹不是「施法」，属于被【操纵】管辖的非施法行动。
         caozuo_error = self.combat.caozuo_check(actor, "发动道纹")
         if caozuo_error:
             return caozuo_error
@@ -5862,6 +5916,10 @@ class GameEngine:
 
         if not dw_instance.can_use():
             return {"success": False, "error": f"道纹{name}不可用（冷却/封印）"}
+        # 【唯一】（2026-11-02 修复1）：规则阻断走明确文案，不再靠计算层抛异常。
+        if actor.daowen_locked_by_unique(name):
+            return {"success": False,
+                    "error": f"【唯一】生效中：{actor.name}已经用过【{name}】，不能再次使用"}
 
         if not isinstance(x, int) or isinstance(x, bool) or x < 1:
             return {"success": False, "error": "X必须≥1且为整数"}
@@ -5924,15 +5982,15 @@ class GameEngine:
                    or entry.get("dodge", False) and entry.get("blood_shadow", False)
                    for entry in pact_entries):
                 return {"success": False, "error": "共罪目标的dodge/blood_shadow必须为互斥布尔值"}
-        if name == "操作":
+        if name == "操纵":
             if not (target_ref or target_name):
-                return {"success": False, "error": "操作需要显式指定的[目标]"}
+                return {"success": False, "error": "操纵需要显式指定的[目标]"}
             try:
                 from .daowen import normalize_caozuo_order
                 params = dict(params, caozuo_order=normalize_caozuo_order(
                     params.get("caozuo_order")))
             except ValueError as exc:
-                return {"success": False, "error": f"操作预指定无效：{exc}"}
+                return {"success": False, "error": f"操纵指令无效：{exc}"}
         if name in ("赦免", "贿赂"):
             picked = [str(n) for n in (params.get("relic_names") or []) if n]
             if len(picked) != x or len(set(picked)) != x:
@@ -6013,7 +6071,8 @@ class GameEngine:
                 resolve_kw["blocked_type"] = params.get("lianmin_cost", "法力")
             if name in ("赦免", "贿赂"):
                 resolve_kw["relic_names"] = list(params.get("relic_names") or [])
-            if name == "操作":
+            if name == "操纵":
+                # 剩余次数＝X（2026-11-02 用户令：由「下一次」改为「下X次」）。
                 resolve_kw["order"] = params.get("caozuo_order")
             if name == "再生":
                 resolve_kw["cost_channel"] = params.get("zaisheng_cost", "法力")
@@ -6028,6 +6087,54 @@ class GameEngine:
         if calc.get("cost_type") == "失忆" and calc.get("cost", 0) > len(actor.dao_wen):
             return {"success": False,
                     "error": f"失忆{calc.get('cost', 0)}无法支付：{actor.name}仅持有{len(actor.dao_wen)}种道纹"}
+        if int(calc.get("forget_daowen") or 0) > 0:
+            # 2026-11-01 用户令：失忆必须显式选纹，严禁按持有顺序替玩家代选。
+            # 校验放在任何支付之前——不合法的选择不扣法力、不扣碎片、不消耗出手。
+            try:
+                calc["forget_daowen_names"] = self.combat.resolve_forget_daowen(
+                    actor, name, int(calc["forget_daowen"]), params.get("forget_daowen"))
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
+
+        if name == "招魂":
+            # 2026-11-01 用户令（修复6）：场上没有可唤回的怪物尸体时，必须在
+            # **扣法力前**拒绝，不能先付3X法力再记一句"没有可唤回的怪物尸体"。
+            # 2026-11-01 重构3.1：多具尸体时**允许**调用方用 revive_monster 指定
+            # 唤回哪一具；未指定（或只有一具）时默认取最近一具（dead_monsters[-1]）。
+            corpses = [e for e in self.state.dead_monsters
+                       if getattr(e, "entity_type", "") == "怪物"]
+            if not corpses:
+                return {"success": False,
+                        "error": "【招魂】场上没有可唤回的怪物尸体，本次发动不成立，不支付法力"}
+            corpse_names = [e.name for e in corpses]
+            wanted = str(params.get("revive_monster") or "").strip()
+            if wanted and wanted not in corpse_names:
+                return {"success": False,
+                        "error": f"【招魂】没有名为「{wanted}」的怪物尸体，可选 {corpse_names}"}
+            calc["revive_monster_name"] = wanted or corpse_names[-1]
+
+        if name == "豪夺":
+            # 2026-11-01 用户令：无可夺遗物必须在**扣费前**中止，禁止吞掉5X碎片空放；
+            # 多件可夺时玩家必须显式提交 relic_name（唯一候选才允许省略）。
+            if target is actor:
+                return {"success": False,
+                        "error": "【豪夺】必须以他人为[目标]：夺取自身的遗物不产生任何转移"}
+            pool = self.combat._relic_steal_candidates(target)
+            if not pool:
+                return {"success": False,
+                        "error": f"【豪夺】{target.name}没有可夺取的遗物"
+                                 f"（已封印/已被夺走的不算），本次发动不成立，不支付任何代价"}
+            wanted = str(params.get("relic_name") or params.get("haoduo_relic") or "").strip()
+            if wanted and wanted not in pool:
+                return {"success": False,
+                        "error": f"【豪夺】目标没有可夺取的遗物「{wanted}」，可选 {pool}"}
+            if not wanted:
+                if len(pool) > 1:
+                    return {"success": False,
+                            "error": f"【豪夺】{target.name}有多件可夺遗物{pool}，"
+                                     f"必须用relic_name显式指定要夺哪一件"}
+                wanted = pool[0]
+            calc["haoduo_relic_name"] = wanted
 
         # 「发动道纹」的共用前置环节（与法术每一步同一实现，见
         # CombatEngine._daowen_step_preflight）：缄默面具 → 目标发动道纹前反应 →
@@ -6140,11 +6247,17 @@ class GameEngine:
             execution = {"daowen": name, "effects": logs,
                          "custom": True, "x": x}
         else:
-            execution = self._execute_daowen_effect(
-                name, calc, actor, target, dragon_heart_use,
-                cost_share_target_ref=params.get("cost_share_target_ref", ""),
-                aoe_targets_override=aoe_targets_override,
-            )
+            # 【回锋刀】缺省目标的依据之一：本次发动的 [目标]（2026-11-02）。
+            previous_spell_target = getattr(self.combat, "_huifeng_spell_target", None)
+            self.combat._huifeng_spell_target = target
+            try:
+                execution = self._execute_daowen_effect(
+                    name, calc, actor, target, dragon_heart_use,
+                    cost_share_target_ref=params.get("cost_share_target_ref", ""),
+                    aoe_targets_override=aoe_targets_override,
+                )
+            finally:
+                self.combat._huifeng_spell_target = previous_spell_target
         if name == "交易":
             # 【交易】发现X件遗物：逐次 3 选 1，本场战斗内有效（战终清除）。
             self.state.pending_relic_discovery_rounds = max(0, int(x) - 1)
@@ -6220,19 +6333,32 @@ class GameEngine:
         return None
 
     def _permanently_convert_daowen(self, holder: Entity, source: str, dest: str) -> bool:
-        """永久结算原次道纹变化；出土按剩余次数保留原实例，同名不重复。"""
+        """永久结算原次道纹变化；出土按剩余次数保留原实例，同名不重复。
+
+        2026-11-02 修复4：**转换不得洗白任何"正在受限"的实例状态**。
+        新实例一律继承原实例的冷却（按场/按回合两种）、封印与冰冻标记，
+        否则「残韵把冷却中的道纹换成同代价的新名字」＝凭空刷新一次冷却。
+        【出土】只负责"保留原纹不删"，原道纹自身的冷却/冻结状态不受影响
+        （它本来就没被改写），衍生出的新实例同样继承同一份受限状态。
+        """
         if source not in holder.dao_wen or self._conversion_capacity_error(holder, source, dest):
             return False
         if holder.entity_type == "怪物" and source in ORIGINAL_MONSTER_DAOWEN:
             holder._had_monster_daowen = True
         old = holder.dao_wen[source]
         if dest not in holder.dao_wen:
-            holder.dao_wen[dest] = DaoWenInstance(DaoWen(
+            converted = DaoWenInstance(DaoWen(
                 name=dest, formula=f"{dest}X",
                 cost_type=old.dao_wen.cost_type,
                 cost_formula=old.dao_wen.cost_formula,
                 effect_formula=old.dao_wen.effect_formula,
             ), x_value=old.x_value)
+            # 受限状态随实例一起搬：冷却、封印、冰冻、按回合冷却。
+            converted.cooldown_remaining = old.cooldown_remaining
+            converted.cooldown_rounds_remaining = getattr(old, "cooldown_rounds_remaining", 0)
+            converted.is_frozen = old.is_frozen
+            converted.ice_frozen = getattr(old, "ice_frozen", False)
+            holder.dao_wen[dest] = converted
         if dest != source:
             rule = self._excavation_rule(holder)
             if rule is None:
@@ -6898,7 +7024,7 @@ class GameEngine:
                 "target_ref": [o["ref"] for o in target_options],
                 "damage": "非负整数；所有击的总和不得超过damage_budget",
                 "dodge": "boolean", "parry": "boolean", "blood_shadow": "boolean",
-                "dodge_relic_target_ref": "持有回锋刀且闪避时必填",
+                "dodge_relic_target_ref": "持有回锋刀且闪避时：多目标必填，唯一候选可省略（引擎自动取缺省目标）",
                 "spell_choices": "按目标spell_options完整提交",
             } for _ in range(attacker.effective_attack_count())],
         }
@@ -6949,8 +7075,14 @@ class GameEngine:
                 if self.state._relic_active(target, "回锋刀"):
                     rr = hit.get("dodge_relic_target_ref")
                     allowed = {x["ref"] for x in legal[ref]["dodge_relic_target_options"]}
-                    if rr not in allowed:
-                        return {"success": False, "error": "回锋刀触发必须显式提交合法dodge_relic_target_ref"}
+                    # 2026-11-02：1v1 只有一个敌对目标时无需再选，引擎按缺省目标
+                    # 自动结算（见 CombatEngine._default_huifeng_target）；多目标才
+                    # 要求显式提交，避免把 5 点伤害打到错误的对手身上。
+                    if not rr and len(allowed) == 1:
+                        pass
+                    elif rr not in allowed:
+                        return {"success": False,
+                                "error": "回锋刀触发必须显式提交合法dodge_relic_target_ref"}
             if hit["blood_shadow"]:
                 if not legal[ref]["can_blood_shadow"]:
                     return {"success": False, "error": f"{target.name}不能使用血影"}
@@ -7066,6 +7198,10 @@ class GameEngine:
         """
         self.state.enemies.clear()
         self.state.temp_friends.clear()
+        # 2026-11-01 重构1：逃跑/血翼脱战同样要收口战斗期的遗物临时突破
+        # （清掉【交易】的"本场"遗物，再把已启用件数压回 ceil(血限/30)）。
+        self._clear_battle_only_relics()
+        self.state.enforce_enabled_relic_limit()
         # 2026-10-14：逃跑不走战终结算，【增殖】战终待决随脱战作废（不得带入下场）。
         for emp in self.state.employees:
             if emp.is_alive and not emp.is_debt_bound:
@@ -7217,7 +7353,7 @@ class GameEngine:
         if item is None:
             return {"success": False, "error": f"找不到可用消耗品: {item_name}"}
 
-        # 【操作】：使用者（玩家/朋友/员工）的这一次行动必须等于预指定。
+        # 【操纵】：使用者（玩家/朋友/员工）的这一次行动必须等于施法者指令。
         item_user = self.state.player
         caozuo_error = self.combat.caozuo_check(item_user, "使用消耗品", item_name)
         if caozuo_error:
@@ -7225,6 +7361,76 @@ class GameEngine:
 
         if item.name == "万钧印":
             return {"success": False, "error": "万钧印在受到攻击时自动触发，不可主动使用"}
+
+        # 【改造】合成的条目：逐条结算被并入的原始效果，最后只扣它自己的1点耐久。
+        if item.merged_sources:
+            return self._consume_merged_item(item, params)
+
+        return self._consume_item_effect(item, params)
+
+    def _consume_merged_item(self, item: Consumable, params: dict) -> dict:
+        """使用【改造】合成条目：按原顺序逐条结算全部来源效果。
+
+        每个来源都用一份临时 Consumable 走同一条使用管线，因此耐久扣除只发生在
+        临时条目上；本条目最后只扣自己1点耐久（耐久池已由改造合并）。
+        某个来源因缺少自身必需参数而失败时，其余来源照常结算，失败原因逐条回传。
+        被动型来源（龙心／万钧印）随条目携带、不参与手动结算，记为 passive。
+        需要选择的效果（翼类模式、雕塑模式）可用 params["source_params"][来源名] 分别提交。
+        """
+        base_params = {key: value for key, value in params.items() if key != "source_params"}
+        per_source = params.get("source_params")
+        if not isinstance(per_source, dict):
+            per_source = {}
+        outcomes = []
+        executed = 0
+        for source in item.effect_sources():
+            name = str(source.get("name") or item.name)
+            if Consumable.source_is_passive(source):
+                outcomes.append({"name": name, "success": True, "passive": True,
+                                 "detail": "被动效果随条目携带，不参与手动结算"})
+                continue
+            payload = {key: source.get(key) for key in
+                       ("name", "effect", "kind", "dragon_heart_type")}
+            temp = Consumable(name=name,
+                              effect=str(payload.get("effect") or ""),
+                              current_uses=1, max_uses=1,
+                              kind=str(payload.get("kind") or "normal"),
+                              dragon_heart_type=str(payload.get("dragon_heart_type") or ""))
+            own = per_source.get(name)
+            source_params = dict(base_params)
+            if isinstance(own, dict):
+                source_params.update(own)
+            try:
+                outcome = self._consume_item_effect(temp, source_params)
+            except Exception as exc:  # 单条效果异常不拖垮其余来源
+                outcome = {"success": False, "error": f"效果结算异常：{exc}"}
+            executed += 1
+            entry = {"name": name, "success": bool(outcome.get("success"))}
+            if outcome.get("error"):
+                entry["error"] = outcome["error"]
+            if outcome.get("result") is not None:
+                entry["result"] = outcome["result"]
+            outcomes.append(entry)
+        if executed and not any(entry["success"] for entry in outcomes if not entry.get("passive")):
+            return {"success": False,
+                    "error": "改造条目的全部来源效果都未能结算",
+                    "sources": outcomes}
+        remaining = item.use()
+        return {
+            "success": True,
+            "action": f"使用改造消耗品【{item.name}】",
+            "result": {
+                "sources": outcomes,
+                "uses_remaining": remaining,
+                "max_uses": item.max_uses,
+                "is_depleted": item.is_depleted,
+            },
+            "state": self.combat._get_combat_state() if self.state.phase == GamePhase.IN_COMBAT.value else None,
+        }
+
+    def _consume_item_effect(self, item: Consumable, params: dict) -> dict:
+        """单件消耗品的真实结算（改造合成条目也复用这条管线）。"""
+        item_name = item.name
 
         # 扭曲工具库消耗品：引擎侧真实结算（F3）
         if item.name in TWISTED_TOOL_LIBRARY:
@@ -7948,7 +8154,7 @@ class GameEngine:
             # 背负：自我伤害类，自主角色不得自行发动。
             # 透支：只把资源换成法力、不改变战场，自主角色不为此花掉唯一次出手
             # （2026-11-01 出生自带给每个人之后，不排除会挤掉真正的攻击）。
-            if not inst.can_use() or name in {"背负", "透支"}:
+            if not ally.can_use_daowen(name) or name in {"背负", "透支"}:
                 continue
             daowen_x = self._ally_daowen_x(ally, name, target)
             if daowen_x < 1:
@@ -9726,7 +9932,11 @@ class GameEngine:
 
         relic_end = self.combat.process_relics(TriggerTiming.BATTLE_END)
         # 【交易】发现的遗物只在本场战斗内有效：战终结算完再移除。
-        self._clear_battle_only_relics()
+        cleared_battle_relics = self._clear_battle_only_relics()
+        # 2026-11-01 重构1（方案A 收口）：战斗中的临时突破（【赦免】强制启用、
+        # 【交易】发现、【豪夺】夺取）在战终、临时遗物清除与到期归还之后压回
+        # ceil(血限/30)：按持有顺序保留前 N 件为启用，其余转 enabled=False。
+        disabled_relics = self.state.enforce_enabled_relic_limit()
         # 全局法术【战终】：必须在本函数下方"清除局内状态/法力相关计数"之前
         # 结算，否则法术依赖的道纹/法力/状态在校验时已经被清空，永远无法
         # 满足条件（与遗物战终结算 relic_end 同一时序原则：先结算再清理）。
@@ -10000,6 +10210,8 @@ class GameEngine:
             "removed_via_alt_path": removed,
             "death_shard_rewards": death_rewards,
             "relic_end_logs": relic_end,
+            "battle_only_relics_cleared": cleared_battle_relics,
+            "relics_disabled_over_limit": disabled_relics,
             "zengzhi_settled": zengzhi_settled,
             "zi_yu_logs": zi_yu_logs,
             "spell_logs": spell_logs,

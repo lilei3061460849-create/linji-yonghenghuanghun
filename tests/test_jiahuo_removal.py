@@ -37,20 +37,18 @@ def test_jiahuo_is_not_registered():
     from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
 
     assert "嫁祸" not in REGION_EXCLUSIVE_DAOWEN["龙心谷"]
-    assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == set()
+    # 2026-11-02：龙心谷四面体四节点（锻造/熔化/炽热/淬火）全部实装。
+    assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == {"锻造", "熔化", "炽热", "淬火"}
 
 
-def test_longji_loop_still_closes_with_six_edges():
-    """旧道纹退出后，六个独立占位节点仍保持单环，不授予旧道纹。"""
-    loop = ResonanceEngine.CLOSED_LOOPS["龙心谷闭环"]
-    assert (RELICIZED_DAOWEN_SLOTS["裂变"], "转换",
-            RELICIZED_DAOWEN_SLOTS["背负"]) in loop
-    assert len(loop) == 6
-    outs = {a for a, _, _ in loop}
-    ins = {c for _, _, c in loop}
-    assert outs == ins, "闭环节点入出必须一一对应"
-    assert len(outs) == len(loop), "每个节点只能出现一次，否则不是单环"
-    assert all(is_reserved_slot(name) for name in outs)
+def test_longji_tetrahedron_holds_no_retired_names():
+    """旧道纹退出后，龙心谷四面体只由真实道纹构成，不复活任何旧名。"""
+    loop = ResonanceEngine.edges_of_region("龙心谷")
+    assert len(loop) == 6, "四面体 4 节点 6 边"
+    nodes = {n for src, _, dst in loop for n in (src, dst)}
+    assert nodes == {"锻造", "熔化", "炽热", "淬火"}
+    retired = {"加害", "龙鳞", "逆鳞", "裂变", "背负", "伤痕", "嫁祸"}
+    assert not (nodes & retired), f"龙心谷四面体复活了已退役道纹：{nodes & retired}"
 
 
 def test_no_runtime_trace_left_in_production_or_sim():

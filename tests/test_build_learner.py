@@ -466,7 +466,7 @@ def test_choose_pre_battle_respects_region_exclusive():
     e.execute_action("setup_choose_region", {"region": "龙心谷"})
     picked = {bl.choose_pre_battle(e, [], 1, _r.Random(i), bl.DEFAULT_POLICY)[0]
               for i in range(200)}
-    assert "维修" not in picked, "扭曲都市专属的【维修】不该在龙心谷被选中"
+    assert "改造" not in picked, "扭曲都市专属的【改造】不该在龙心谷被选中"
     assert "雇佣" not in picked, "罪孽都市专属的【雇佣】不该在龙心谷被选中"
 
 
@@ -479,7 +479,7 @@ def test_region_exclusive_enforced_by_engine():
     finish_initial_daowen(e)
     e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
     _finish_region_setup(e, "龙心谷")
-    r = e.execute_action("pre_battle_action", {"sub_action": "维修", "tier": 1})
+    r = e.execute_action("pre_battle_action", {"sub_action": "改造", "tier": 2})
     assert not r["success"]
     assert "扭曲都市" in r["error"]
     # 被拒绝时精力必须退还，否则会白白损失一次行动

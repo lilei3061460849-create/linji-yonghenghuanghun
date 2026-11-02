@@ -158,7 +158,8 @@ class MonsterPhaseMixin:
             ]
             if not monster.has_status("干扰"):
                 for name, inst in monster.dao_wen.items():
-                    if (name in round_used or not inst.can_use()
+                    # 【唯一】（2026-11-02 修复1）：锁死的道纹不再公布为可选行动
+                    if (name in round_used or not monster.can_use_daowen(name)
                             or name not in DaoWenEngine.list_all()):
                         continue
                     rewritten_as = (self._resonance_rewrites.get(id(monster)) or {}).get(name)
@@ -178,6 +179,21 @@ class MonsterPhaseMixin:
                     if effective_name == "冰冻":
                         legal_targets = [option for option in legal_targets
                                          if refs[option["ref"]].dao_wen]
+                    # 2026-11-01：没有可唤回尸体的【招魂】、目标身上没有可夺遗物的
+                    # 【豪夺】都属于"发不动"——prepare 阶段就不再公布，否则驱动方
+                    # 反复挑中同一张、每次都被跳过，回合永远结算不完。
+                    if effective_name == "招魂" and not any(
+                            getattr(dead, "entity_type", "") == "怪物"
+                            for dead in self.state.dead_monsters):
+                        continue
+                    if effective_name == "豪夺":
+                        legal_targets = [
+                            option for option in legal_targets
+                            if (refs[option["ref"]] is not monster
+                                and self._relic_steal_candidates(refs[option["ref"]]))
+                        ]
+                        if not legal_targets:
+                            continue
                     if "龙威" in self.state.dragon_traits and self.state.player and self.state.player.is_alive:
                         legal_targets = [target for target in legal_targets
                                          if (not self.state.on_player_side(refs[target["ref"]])
@@ -492,6 +508,12 @@ class MonsterPhaseMixin:
                 return {"monster": monster.name, "daowen_skipped": name,
                         "resolves_as": effective_name, "reason": "目标没有道纹，冰冻X自动降为0"}
 
+        # 【唯一】（2026-11-02 修复1）：准备阶段之后才被锁上时，本次视为发不动
+        # （不付代价、不占出手），而不是让计算层抛异常。
+        if monster.daowen_locked_by_unique(effective_name):
+            return {"monster": monster.name, "daowen_skipped": name,
+                    "resolves_as": effective_name,
+                    "reason": f"【唯一】生效中：已经用过【{effective_name}】，本次无法发动"}
         # 先完成完整闪避提交的静态校验，再支付任何代价或改变激活状态。
         calc = DaoWenEngine.resolve(effective_name, effective_x, target=target, caster=monster)
         if effective_name == "冰冻":
@@ -507,6 +529,30 @@ class MonsterPhaseMixin:
         if not self._monster_can_pay_calc_cost(monster, calc):
             return {"monster": monster.name, "daowen_skipped": name,
                     "resolves_as": effective_name, "reason": "无法支付代价"}
+        if effective_name == "招魂":
+            # 2026-11-01：没有可唤回尸体时本次发不动（不付3X法力、不占出手）。
+            corpses = [e for e in self.state.dead_monsters
+                       if getattr(e, "entity_type", "") == "怪物"]
+            if not corpses:
+                return {"monster": monster.name, "daowen_skipped": name,
+                        "resolves_as": effective_name,
+                        "reason": "场上没有可唤回的怪物尸体"}
+            wanted = str(choice.get("revive_monster") or "")
+            names = [e.name for e in corpses]
+            if wanted and wanted not in names:
+                raise ValueError(f"【招魂】没有名为「{wanted}」的怪物尸体，可选 {names}")
+            calc["revive_monster_name"] = wanted or names[-1]
+        if effective_name == "豪夺":
+            # 2026-11-01：目标没有可夺遗物 → 本次发不动（不付5X碎片，不占出手）。
+            pool = self._relic_steal_candidates(target)
+            if not pool:
+                return {"monster": monster.name, "daowen_skipped": name,
+                        "resolves_as": effective_name,
+                        "reason": f"{getattr(target, 'name', '目标')}没有可夺取的遗物"}
+            wanted = str(choice.get("relic_name") or "")
+            if wanted and wanted not in pool:
+                raise ValueError(f"【豪夺】目标没有可夺取的遗物「{wanted}」，可选 {pool}")
+            calc["haoduo_relic_name"] = wanted or pool[0]
         # 2026-09-16 用户令：怪物支付法力（旧条文"不支付法力"已废止）。
         # 付不起的情况已由上一闸门挡掉，这里只做实际支付。
         # 注意：法力同时就是[攻击力]，此刻支付会削弱本回合**之后**的普攻——
@@ -558,7 +604,10 @@ class MonsterPhaseMixin:
                 if want_dodge and not must_hit_preview and self.state.side_has(entity, "回锋刀"):
                     allowed = {t_opt["ref"] for t_opt in prepared_option["target_options"]
                                if not self.state.on_player_side(refs[t_opt["ref"]])}
-                    if entry.get("dodge_relic_target_ref") not in allowed:
+                    # 唯一候选时引擎自动取缺省目标（2026-11-02），多目标才要求显式提交。
+                    if not entry.get("dodge_relic_target_ref") and len(allowed) == 1:
+                        pass
+                    elif entry.get("dodge_relic_target_ref") not in allowed:
                         raise ValueError("回锋刀触发必须显式提交合法目标")
                 aoe_dodge_choices.append((entity, want_dodge, entry))
             if dodge not in (None, False):
@@ -576,7 +625,9 @@ class MonsterPhaseMixin:
             if dodge and not must_hit_preview and self.state.side_has(target, "回锋刀"):
                 allowed = {entry["ref"] for entry in prepared_option["target_options"]
                            if self.state.on_player_side(refs[entry["ref"]]) != self.state.on_player_side(target)}
-                if choice.get("dodge_relic_target_ref") not in allowed:
+                if not choice.get("dodge_relic_target_ref") and len(allowed) == 1:
+                    pass
+                elif choice.get("dodge_relic_target_ref") not in allowed:
                     raise ValueError("回锋刀触发必须显式提交合法目标")
             if choice.get("dodge_targets") not in (None, []):
                 raise ValueError(f"道纹【{effective_name}】不接受dodge_targets")
@@ -980,7 +1031,7 @@ class MonsterPhaseMixin:
             dao_choice = choice.get("daowen")
             if choice.get("daowen_2") is not None:
                 raise ValueError(f"{monster.name}每次只能提交1个行动，不接受daowen_2")
-            # 【操作】：这次提交必须等于施法者预指定的那一次非施法行动。
+            # 【操纵】：这次提交必须等于施法者指令（每次消耗1次名额）。
             if isinstance(dao_choice, dict):
                 _cz_kind, _cz_payload = "发动道纹", None
             elif choice.get("attack_actions"):

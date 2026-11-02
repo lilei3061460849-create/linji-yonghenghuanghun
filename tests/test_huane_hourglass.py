@@ -124,8 +124,8 @@ def test_retires_daowen_and_retypes_monster_panels():
     assert "裂变" not in DaoWenEngine.list_all()
     assert "裂变" not in REGION_EXCLUSIVE_DAOWEN["龙心谷"]
     with pytest.raises(ValueError): DaoWenEngine.resolve("裂变", 2)
-    loop = ResonanceEngine.CLOSED_LOOPS["龙心谷闭环"]
-    assert any(is_reserved_slot(n) and "裂变" in n for src, _, dst in loop for n in (src, dst))
+    # 2026-11-02 四面体大改：遗物化占位整批撤销，龙心谷四面体里没有「裂变」。
+    assert all("裂变" not in n for n in ResonanceEngine.nodes_of_region("龙心谷"))
     pool = parse_monster_pool(Path(__file__).resolve().parents[1] / "副本索引.md")
     for name in ("碎岩鸮", "熔洞蛛"):
         monster = make_monster_entity(next(d for d in pool["龙心谷"] if d["name"] == name))

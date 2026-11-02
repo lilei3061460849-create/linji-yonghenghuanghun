@@ -1,4 +1,9 @@
-"""2026-10-27：十张死者之页，四类共用且与血限脱钩。"""
+"""死者之页容量回归。
+
+2026-10-27：十张死者之页，与血限脱钩。
+2026-11-01（重构1）：**遗物脱离页数体系**——只统计道纹／消耗品／法器；
+遗物的承载改为"已启用件数 ≤ ceil(血限/30)"，见 test_relic_enabled_limit.py。
+"""
 import pickle
 import pytest
 from engine.models import Entity, Relic, Consumable, DaoWen, DaoWenInstance
@@ -16,15 +21,19 @@ def test_everyone_defaults_to_ten_independent_of_blood(blood):
     assert p.load_capacity == 10
     p.relics.clear()  # 怪物默认自带痛苦的偏爱，清除后再测试空页。
     p.dao_wen.clear()  # 2026-11-01：出生自带的【透支】另占一页，本用例测空页口径。
-    assert p.daowen_capacity == 10 and p.relic_capacity == 10
+    assert p.daowen_capacity == 10
     grant_dw(p, "杀伐")
     p.relics.append(Relic("叠鳞甲", ""))
     p.consumables.append(Consumable("破障晶", "", 2, 2))
     p.artifacts.append("法器甲")
-    assert p.pages_used == 4 and p.daowen_capacity == 7
-    assert p.relic_capacity == 7
+    # 2026-11-01 重构1：遗物不占页 → 这里只算 道纹1 + 消耗品1 + 法器1 = 3 页。
+    assert p.pages_used == 3 and p.daowen_capacity == 8
     p.blood_limit = 1
-    assert p.pages_used == 4 and p.load_capacity == 10
+    assert p.pages_used == 3 and p.load_capacity == 10
+    # 遗物完全不进账本；持有再多也不涨页。
+    p.relics.extend(Relic(f"额外{i}", "") for i in range(5))
+    assert p.pages_used == 3
+    assert p.relic_capacity == p.enabled_relic_limit == 1   # ceil(1/30)
 
 
 def test_four_categories_share_pages_and_duplicates_do_not_charge_twice(tmp_path):
@@ -35,15 +44,15 @@ def test_four_categories_share_pages_and_duplicates_do_not_charge_twice(tmp_path
     e.state.consumables = [Consumable("乙", "", 2, 2), Consumable("乙", "", 0, 2)]
     e.state.artifacts_owned = ["丙"]
     bind_resources(e.state)
-    assert p.pages_used == 10
-    assert can_accept(p, "消耗品", "乙") and not can_accept(p, "消耗品", "丁")
-    assert not can_accept(p, "遗物", "乙")
-    assert p.daowen_capacity == 7
+    # 道纹7 + 消耗品乙1 + 法器丙1 = 9 页；遗物甲已不占页。
+    assert p.pages_used == 9
+    assert can_accept(p, "消耗品", "乙") and can_accept(p, "消耗品", "丁")
+    assert p.daowen_capacity == 8
     del p.dao_wen["纹0"]
-    assert p.pages_used == 9 and can_accept(p, "消耗品", "丁")
+    assert p.pages_used == 8 and can_accept(p, "消耗品", "丁")
 
 
-@pytest.mark.parametrize("kind", ["道纹", "遗物", "法器", "消耗品"])
+@pytest.mark.parametrize("kind", ["道纹", "法器", "消耗品"])
 def test_transaction_rejects_eleventh_kind_without_charging_or_advancing_rng(tmp_path, monkeypatch, kind):
     e = engine(tmp_path); p = e.state.player
     for i in range(9): grant_dw(p, str(i))  # 另1页是出生自带的【透支】
@@ -87,15 +96,19 @@ def test_full_pages_leave_map_item_and_allow_same_type_pickup(tmp_path):
     assert npc.pages_used == 10
 
 
-def test_relics_do_not_have_separate_enabled_quota(tmp_path):
+def test_relics_never_occupy_death_pages(tmp_path):
+    """2026-11-01 重构1：持有 9 件遗物不占任何死者之页。"""
     e = engine(tmp_path); p = e.state.player
-    p.blood_limit = 1
-    e.state.relics = [Relic(str(i), "") for i in range(9)]  # 另1页是出生自带的【透支】
+    p.blood_limit = 300          # ceil(300/30)=10 个启用槽，避免撞启用上限
+    e.state.relics = [Relic(str(i), "") for i in range(9)]
     bind_resources(e.state)
+    pages_before = p.pages_used
+    assert pages_before == len(p.dao_wen)          # 【透支】出生自带
     assert e.state.set_active_relics([str(i) for i in range(9)])[0]
     assert all(r.enabled for r in e.state.relics)
+    assert p.pages_used == pages_before, "遗物进出启用状态都不改变页数"
     assert e.state.toggle_relic("0") == (True, False)
-    assert p.pages_used == 10  # 停用不释放页。
+    assert p.pages_used == pages_before
     assert e.state.toggle_relic("0") == (True, True)
 
 

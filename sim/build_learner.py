@@ -617,7 +617,7 @@ BEHAVIOR_TO_POLICY = {
     "附煞强化": "附煞", "探索寻机": "探索",
     # "领悟残韵" 已随【领悟】删除（DM裁定 2026-09-10）；历史知识里的该标签由
     # 下面 BEHAVIOR_TO_POLICY.get() 返回 None 安全忽略。
-    "雇佣支援": "雇佣", "炼心固本": "炼心", "维修续用": "维修",
+    "雇佣支援": "雇佣", "炼心固本": "炼心", "改造叠效": "改造",
 }
 BEHAVIOR_RULES = {
     "修行提战力": "局外修行把精力换属性点", "修行提战力·高档": "高档修行(tier≥2)加速成长",
@@ -625,7 +625,7 @@ BEHAVIOR_RULES = {
     "残血休整": "血线≤30%时休整保命", "共鸣强化": "共鸣提升道纹配合",
     "附煞强化": "乱葬岗附煞加效", "探索寻机": "探索事件换资源",
     "雇佣支援": "雇佣帮手分压", "炼心固本": "龙心谷炼心",
-    "备齐反应法术": "学习先发制人/生生不息/后发制人", "维修续用": "维修回复消耗品耐久",
+    "备齐反应法术": "学习先发制人/生生不息/后发制人", "改造叠效": "改造把多件消耗品效果叠成一件",
 }
 
 
@@ -655,8 +655,8 @@ def _tag_behavior(behaviors, act, params, e, battle_no):
         behaviors.append("雇佣支援")
     elif act == "炼心":
         behaviors.append("炼心固本")
-    elif act == "维修":
-        behaviors.append("维修续用")
+    elif act == "改造":
+        behaviors.append("改造叠效")
 
 
 def _record_behaviors(telemetry: dict, behaviors: list, r: dict) -> None:
@@ -1603,14 +1603,14 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
 
 
 # 局外行动权重：AI 按此概率挑选（引擎当前可用行动）
-# （忘忧/献祭需道具，雇佣仅罪孽都市，维修仅扭曲都市，炼心仅龙心谷）
+# （忘忧/献祭需道具，雇佣仅罪孽都市，改造仅扭曲都市，炼心仅龙心谷）
 DEFAULT_POLICY = {
     "修行": 30, "学习": 25, "休整": 15, "共鸣": 10,
-    "探索": 8, "炼心": 2, "维修": 2, "雇佣": 2, "附煞": 18,
+    "探索": 8, "炼心": 2, "改造": 2, "雇佣": 2, "附煞": 18,
     # 【领悟】已删除（DM裁定 2026-09-10）：残韵不再能凭精力白拿。
 }
 
-REGION_ACTION = {"炼心": "龙心谷", "维修": "扭曲都市", "雇佣": "罪孽都市", "附煞": "乱葬岗"}
+REGION_ACTION = {"炼心": "龙心谷", "改造": "扭曲都市", "雇佣": "罪孽都市", "附煞": "乱葬岗"}
 
 
 def choose_pre_battle(e, todo, battle_no, rng, policy):
@@ -1621,9 +1621,13 @@ def choose_pre_battle(e, todo, battle_no, rng, policy):
         need = REGION_ACTION.get(act)
         if need and e.state.current_region != need:
             continue
-        if act == "维修" and not any(0 < item.current_uses < item.max_uses
-                                      for item in e.state.consumables):
-            continue
+        if act == "改造":
+            # 改造只叠效果、不补耐久：至少要凑得出2件不同名的可改造消耗品。
+            eligible = {item.name for item in e.state.consumables
+                        if item.name != "万钧印" and item.kind == "normal"
+                        and not item.merged_sources}
+            if len(eligible) < 2:
+                continue
         if act == "学习" and not todo:
             continue
         if act == "学习" and p is not None and len(p.dao_wen) >= p.daowen_capacity:
@@ -1696,12 +1700,20 @@ def choose_pre_battle(e, todo, battle_no, rng, policy):
         heal = base[tier] + bonus
         return act, {"tier": tier, "heal_allocations": [
             {"target_ref": "player:0", "amount": heal}]}
-    if act == "维修":
-        index = next(index for index, item in enumerate(e.state.consumables)
-                     if 0 < item.current_uses < item.max_uses)
-        return act, {"tier": 1, "allocations": [
-            {"item_ref": f"consumable:{index}", "amount": 1},
-        ]}
+    if act == "改造":
+        eligible = [item for item in e.state.consumables
+                    if item.name != "万钧印" and item.kind == "normal"
+                    and not item.merged_sources]
+        picked = []
+        seen = set()
+        for item in eligible:
+            if item.name in seen:
+                continue
+            seen.add(item.name)
+            picked.append(item.name)
+            if len(picked) == 2:
+                break
+        return act, {"tier": 2, "names": picked, "target": picked[0]}
     if act == "雇佣":
         return act, {"name": f"雇员{rng.randrange(1000)}", "blood_alloc": 8, "atk_bundles": 4}
     return act, {}

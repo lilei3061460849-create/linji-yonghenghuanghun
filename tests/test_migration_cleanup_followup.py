@@ -30,7 +30,7 @@ def test_legacy_panel_retypes_relic_without_losing_ability():
 
 
 def test_merfolk_rewards_are_independent_options_not_resonance_nodes():
-    loop = ResonanceEngine.CLOSED_LOOPS["沉沦海闭环"]
+    loop = ResonanceEngine.edges_of_region("沉沦海")
     assert not any(n in {"唤潮", "蜃景"} for src, _, dst in loop for n in (src, dst))
     text = (ROOT / "副本/沉沦海.md").read_text()
     assert "随后5选1" in text

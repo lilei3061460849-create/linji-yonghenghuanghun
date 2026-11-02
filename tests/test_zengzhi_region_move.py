@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from engine.daowen import (
-    DaoWenEngine, ResonanceEngine, RELOCATED_DAOWEN_SLOTS,
+    DaoWenEngine, ResonanceEngine,
 )
 from engine.gamedata import (
     REGION_EXCLUSIVE_DAOWEN,
@@ -21,17 +21,17 @@ def test_zengzhi_leaves_generic_core_and_enters_only_twisted_region_pool():
         region for region, pool in REGION_EXCLUSIVE_DAOWEN.items() if "增殖" in pool
     ] == ["扭曲都市"]
 
-    shafa = ResonanceEngine.CLOSED_LOOPS["杀伐闭环"]
-    relocated = RELOCATED_DAOWEN_SLOTS["增殖"]
-    # 2026-11-01：【迟滞】入环，取代连击直接连增殖位。
-    assert ("迟滞", "转换", relocated) in shafa
-    # 2026-11-01：【透支】移出闭环改出生自带，增殖位直连贯穿位。
-    assert (relocated, "曲解", "？？〔贯穿〕") in shafa
-    assert not any("增殖" in (source, target) for source, _, target in shafa)
+    # 2026-11-02 四面体大改：增殖不再住在通用环里，旧占位槽也随之作废；
+    # 它现在只在扭曲都市·四面体二里与 饥饿／扭曲／坏死 相连。
+    generic_nodes = ResonanceEngine.nodes_of_region("通用")
+    assert "增殖" not in generic_nodes
+    assert not any("增殖" in (source, target)
+                   for source, _, target in ResonanceEngine.edges_of_region("通用"))
 
-    twisted = ResonanceEngine.CLOSED_LOOPS["扭曲都市闭环"]
-    assert ("超频", "反转", "增殖") in twisted
-    assert ("增殖", "转换", "坏死") in twisted
+    twisted = ResonanceEngine.tetrahedra_of_region("扭曲都市")["扭曲都市·四面体二"]
+    assert ("增殖", "反转", "饥饿") in twisted
+    assert ("增殖", "转换", "扭曲") in twisted
+    assert ("增殖", "曲解", "坏死") in twisted
 
 
 def test_zengzhi_is_not_in_generic_learning_pool_outside_twisted_city():
@@ -55,21 +55,19 @@ def test_twisted_learning_still_requires_an_existing_region_exclusive():
 
 
 def test_zengzhi_resonance_is_bidirectional_between_new_neighbors():
-    branches = ResonanceEngine.find_transformations("超频", "反转")
-    assert {item["target_daowen"] for item in branches} == {"增殖", "萎缩"}
-    assert ResonanceEngine.find_transformation("超频", "反转") is None  # 分叉必须显式选择
-    assert ResonanceEngine.find_transformation("超频", "反转", "增殖") == "增殖"
-    assert ResonanceEngine.find_transformation("超频", "反转", "萎缩") == "萎缩"
-    assert ResonanceEngine.find_transformation("增殖", "反转") == "超频"
-    assert ResonanceEngine.find_transformation("增殖", "转换") == "坏死"
-    assert ResonanceEngine.find_transformation("坏死", "转换") == "增殖"
+    # 四面体二内：增殖 反转⇄饥饿、转换⇄扭曲、曲解⇄坏死，三条边都双向可走。
+    assert ResonanceEngine.find_transformation("增殖", "反转") == "饥饿"
+    assert ResonanceEngine.find_transformation("增殖", "转换") == "扭曲"
+    assert ResonanceEngine.find_transformation("增殖", "曲解") == "坏死"
+    assert ResonanceEngine.find_transformation("饥饿", "反转") == "增殖"
+    assert ResonanceEngine.find_transformation("扭曲", "转换") == "增殖"
+    assert ResonanceEngine.find_transformation("坏死", "曲解") == "增殖"
     forward = ResonanceEngine.apply_resonance(
-        "超频", "反转", caster_has_daowen=True, target_has_daowen=True,
-        target_daowen="增殖")
-    reverse = ResonanceEngine.apply_resonance(
         "增殖", "反转", caster_has_daowen=True, target_has_daowen=True)
-    assert forward["success"] and forward["target"] == "增殖"
-    assert reverse["success"] and reverse["target"] == "超频"
+    reverse = ResonanceEngine.apply_resonance(
+        "饥饿", "反转", caster_has_daowen=True, target_has_daowen=True)
+    assert forward["success"] and forward["target"] == "饥饿"
+    assert reverse["success"] and reverse["target"] == "增殖"
 
 
 def test_other_dungeon_monster_panels_no_longer_carry_zengzhi():

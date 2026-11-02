@@ -143,12 +143,13 @@ def test_hp_zero_is_dormancy_and_monster_blood_limit_is_shared_without_waking(tm
                      current_hp=0, is_alive=False)
     engine.state.enemies = [monster]
     assert engine.combat._check_hp_zero_death(monster) is True
-    # 25点总池在两个休眠目标间整数平分，余数只影响其中一只。
-    assert sorted([first.current_hp, second.current_hp]) == [12, 13]
+    # 25点总池在两个休眠目标间平分，每份向上取整 ceil(25/2)=13 → 各13（2026-11-02）。
+    assert sorted([first.current_hp, second.current_hp]) == [13, 13]
     assert first.is_dormant and second.is_dormant
     assert not first.is_alive and not second.is_alive
     recovery = monster._death_ctx["yaoguai_recovery"]
-    assert sum(item["heal_amount"] for item in recovery) == 25
+    # 每份向上取整后，恢复总量允许超过血限池（13+13=26），池不再是硬上限。
+    assert sum(item["heal_amount"] for item in recovery) == 26
     assert all(item["recovery_pool"] == 25 and item["dormant_count"] == 2
                for item in recovery)
 
