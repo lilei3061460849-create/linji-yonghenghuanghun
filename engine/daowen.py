@@ -649,6 +649,56 @@ class DaoWenEngine:
         }
 
     @staticmethod
+    def calculate_chire(x: int, target: Entity = None) -> dict:
+        """炽热X（2026-11-02 用户令实装）：支付：法力3X。
+
+        使[目标]所有消耗品的当前耐久 -X，最低为 0。只削当前耐久，不销毁条目：
+        0 耐久只是不能使用，仍可被具体维修/物品效果恢复，这一点与【熔化】相反。
+        """
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "炽热", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 3 * x,
+            "consumable_durability_loss": x,
+            "summary": f"支付：法力{3 * x}，使{target_name}所有消耗品当前耐久-{x}（最低0，不销毁）",
+        }
+
+    @staticmethod
+    def calculate_ronghua(x: int, target: Entity = None) -> dict:
+        """熔化X（2026-11-02 用户令实装）：支付：法力5X。
+
+        销毁[目标]所有当前耐久 ≤ X 的消耗品条目（含 0 耐久）。与【炽热】不同，
+        这里是移除条目本身，切断之后对原条目的恢复与同名合并路径。
+        """
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "熔化", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 5 * x,
+            "consumable_destroy_threshold": x,
+            "summary": f"支付：法力{5 * x}，销毁{target_name}当前耐久≤{x}的全部消耗品",
+        }
+
+    @staticmethod
+    def calculate_duanzao(x: int) -> dict:
+        """锻造X（2026-11-02 用户令实装）：支付：法力5X。
+
+        发现一个既有固定规格消耗品，给予其 X 点耐久（当前耐久与耐久上限同取 X）。
+        不接受自定义物品名称或效果：候选池只含已登记的固定规格消耗品。
+        """
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        return {
+            "dao_wen": "锻造", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 5 * x,
+            "consumable_forge_uses": x,
+            "summary": f"支付：法力{5 * x}，发现一个消耗品并给予其{x}耐久",
+        }
+
+    @staticmethod
     def calculate_yongchao(x: int, target: Entity = None) -> dict:
         """涌潮X（2026-11-02 用户令新增，源出遗物【苍白之花】）：支付：法限X。
 
@@ -1193,6 +1243,9 @@ class DaoWenEngine:
             "饥饿": cls.calculate_ji_e,
             "扭曲": cls.calculate_niuqu,
             "淬火": cls.calculate_cuihuo,
+            "炽热": cls.calculate_chire,
+            "熔化": cls.calculate_ronghua,
+            "锻造": cls.calculate_duanzao,
             "涌潮": cls.calculate_yongchao,
             "迟滞": cls.calculate_chizhi,
             "封印": cls.calculate_fengyin,

@@ -1482,6 +1482,10 @@ class GameState:
     # 消耗品【发现】候选（如扭曲都市完成事件后的工具发现）。
     pending_item_choices: list[str] = field(default_factory=list)
     pending_item_source: str = ""
+    # 【锻造】（2026-11-02 实装）：本次发现领取时把当前耐久/上限覆盖成 X；0 表示不覆盖。
+    pending_item_bonus_uses: int = 0
+    # 【锻造】每次发动的 rolls 名序号，保证同回合多次发动的抽取可复现且不互相复用。
+    forge_discovery_count: int = 0
     # 两阶段怪物决策：prepare产生的合法选项与一次性token；resolve后清空。
     pending_monster_phase: dict = field(default_factory=dict)
     # 两阶段攻击：prepare绑定行动者、逐击合法目标与反应选项；resolve后清空。

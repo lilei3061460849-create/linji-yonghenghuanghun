@@ -45,7 +45,7 @@ from .consumables import (
     WING_BLOOD, WING_EMBER, WING_MODE_FLEE, WING_MODE_FLY, WING_MODE_LIFESTEAL,
     WING_MODE_SUPPRESS, WING_MODES, WING_STATUS_LIFESTEAL, WING_STATUS_SUPPRESS,
     make_wing_item)
-from .events import EventPool
+from .events import EventPool, TWISTED_TOOL_LIBRARY
 from .rule_repository import RuleRepository
 from .spell_execution import InterruptReason, SpellExecution
 from .dungeons import DEFAULT_INDEX
@@ -86,18 +86,6 @@ from .handlers.duel import (
 )
 
 
-# 扭曲都市废墟设施工具库（9件：名→(耐久, 效果文本逐字)）
-TWISTED_TOOL_LIBRARY = {
-    "反怪物电击枪": (3, "对一个[目标]造成25点伤害；若[目标]处于【飞行】，额外造成15点伤害。"),
-    "备用血泵": (3, "使自身获得20点［回复］；若自身当前生命≤30%，额外获得30点格挡。"),
-    "强光探照灯": (2, "使一个[目标]陷入【蒙蔽2】"),
-    "高压水枪": (2, "清除全场所有敌方[目标]身上的所有“持续X”效果"),
-    "储能电池": (3, "立即获得12点法力。"),
-    "急救箱": (2, "使自身获得[回复25]，并清除自身身上一种“持续X”的负面减益。"),
-    "干扰仪": (2, "使全场所有敌方[目标]本回合无法发动自身道纹"),
-    "高爆手雷": (2, "对一个[目标]造成15点伤害，并使其本回合攻击次数-1"),
-    "万钧印": (3, "有[目标]发动攻击时，可将其改为该攻击者对自己发动攻击；每触发一次消耗1点耐久。"),
-}
 
 # 自由结晶随机代价池（2026-10-05 用户令）：代价一节中可数值化的八种代价，共计10。
 # 【唯一】无数值、无法按 X=10 结算，不入池（见 物品索引.md#自由结晶）。
@@ -4628,17 +4616,30 @@ class GameEngine:
         if choice not in self.state.pending_item_choices:
             return {"success": False, "error": "只能选择本次发现列出的消耗品",
                     "choices": list(self.state.pending_item_choices)}
-        if choice not in TWISTED_TOOL_LIBRARY:
+        # 2026-11-02【锻造】实装：候选池扩到全部固定规格消耗品
+        # （扭曲都市工具库 + 事件消耗品），两者规格都是既有登记，不接受自定义物品。
+        from .events import EVENT_CONSUMABLES
+        spec_pool = {**TWISTED_TOOL_LIBRARY, **EVENT_CONSUMABLES}
+        if choice not in spec_pool:
             return {"success": False, "error": f"未知工具: {choice}"}
-        durability, effect = TWISTED_TOOL_LIBRARY[choice]
+        durability, effect = spec_pool[choice]
+        # 【锻造】发现：耐久按本次 X 覆盖（上限取 max(基准上限, X)），其余发现走原规格。
+        forge_uses = int(getattr(self.state, "pending_item_bonus_uses", 0) or 0)
+        if forge_uses:
+            current_uses = forge_uses
+            max_uses = max(int(durability), forge_uses)
+        else:
+            current_uses = max_uses = int(durability)
         self.state.consumables.append(Consumable(
-            name=choice, effect=effect, current_uses=durability, max_uses=durability,
+            name=choice, effect=effect, current_uses=current_uses, max_uses=max_uses,
         ))
         source = self.state.pending_item_source
         self.state.pending_item_choices = []
         self.state.pending_item_source = ""
+        self.state.pending_item_bonus_uses = 0
         return {"success": True, "action": "选择发现消耗品",
-                "result": {"item": choice, "durability": durability, "source": source}}
+                "result": {"item": choice, "durability": current_uses,
+                           "max_durability": max_uses, "source": source}}
 
     def _action_discard_discovered_item(self, params: dict) -> dict:
         """放弃本次消耗品发现（与 discard_discovered_relic 对称的出口）。
@@ -4652,6 +4653,7 @@ class GameEngine:
         source = self.state.pending_item_source
         self.state.pending_item_choices = []
         self.state.pending_item_source = ""
+        self.state.pending_item_bonus_uses = 0
         return {"success": True, "action": "放弃发现消耗品",
                 "result": {"discarded_choices": choices, "source": source,
                            "note": "本次发现不取任何消耗品，待选列表已清空"}}

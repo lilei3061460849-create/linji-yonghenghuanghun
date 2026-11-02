@@ -37,23 +37,9 @@ DaoWenEngine.register_all()
 
 # 纯草案节点只收录定义，不进入DaoWenEngine运行时注册表。
 # 流动与遗忘已于2026-10-29接入运行时，改从DaoWenEngine docstring取正本。
-DRAFT_DAOWEN = {
-    "炽热": {
-        "cost": "支付：待定",
-        "effect": "使[目标]所有消耗品当前耐久-X，最低为0。",
-        "params": ["x", "target"],
-    },
-    "熔化": {
-        "cost": "支付：待定",
-        "effect": "销毁[目标]所有当前耐久≤X的消耗品。",
-        "params": ["x", "target"],
-    },
-    "锻造": {
-        "cost": "支付：待定",
-        "effect": "发现一个消耗品，给予其X耐久，持续∞。",
-        "params": ["x"],
-    },
-}
+# 2026-11-02 用户令：龙心谷【炽热】【熔化】【锻造】已实装，草案字典清空。
+# 这里只预留给未来的纯草案节点（未注册进 DaoWenEngine 的候选），实装后必须移出。
+DRAFT_DAOWEN = {}
 
 # 面板行两种历史格式都要认：旧 `名字（血限×法限/速限，道纹…）`、新 `名字（血限/法限/速限，道纹…）`。
 # （2026-10-03 修：旧正则只认旧的 × 格式，导致「承载怪物」整列被清空。）
@@ -155,7 +141,7 @@ def target_label(name):
 # 随进程变化的哈希序——每次重新生成索引，副本专属段与总览表里的行序都会漂移。
 # 这里改为确定口径：先按该副本闭环链的出场顺序，其余按名字排序补齐。
 def region_daowen_order(region: str) -> list:
-    # 支付待定草案也归入其副本小节，但与可学习/可发动的专属池分开标记。
+    # 纯草案节点（未注册进运行时的候选）也归入其副本小节，与可学习/可发动的专属池分开标记。
     ns = set(REGION_EXCLUSIVE_DAOWEN[region]) | {
         name for name, owner in UNIMPLEMENTED_DAOWEN.items()
         if owner == region and name in DRAFT_DAOWEN
@@ -394,8 +380,8 @@ for region in REGION_EXCLUSIVE_DAOWEN:
         notes.append("【流动】【遗忘】已接入运行时；流动须另选接收目标，二者均按X选择持续状态，数量不足时拒绝发动。")
         notes.append("【涌潮】为 2026-11-02 新增（源出遗物【苍白之花】），与【冰冻】互为反转，已接入运行时。")
     if region == "龙心谷":
-        notes.append("【炽热】【熔化】【锻造】为用户确认的支付待定草案，不可学习、通过残韵获得或发动；【锻造】只发现既有固定规格消耗品，不接受自定义物品效果。")
-        notes.append("【淬火】为 2026-11-02 新增并已接入运行时（支付已定），与【炽热】互为反转。")
+        notes.append("龙心谷四面体四节点【锻造】【熔化】【炽热】【淬火】均已接入运行时（2026-11-02 用户令：三纹由草案直接实装）。")
+        notes.append("【锻造】只发现既有固定规格消耗品，不接受自定义物品名称或效果；领取时耐久按本次 X 覆盖。")
     section(f"{region}专属（{len(ns)}）", list(ns), note_lines=notes,
             loop=region, loop_title=region)
     if region == "龙心谷":

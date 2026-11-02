@@ -32,7 +32,8 @@ def test_project_rules_are_extracted_from_their_authoritative_documents():
     assert len(facts["monsters"]) == 48  # 36 + 乱葬岗12(已实现)
     diff = sync.diff_project_daowen()
     assert diff["in_file_only"] == [], "通用或已实现副本正文不得定义未登记的道纹"
-    assert set(diff["draft_only"]) == {"炽热", "熔化", "锻造"}
+    # 2026-11-02：龙心谷三纹实装，草案清单清空。
+    assert set(diff["draft_only"]) == set()
     # diff 的范围是「通用＋已实现副本」；草案和种族道纹有自己的事实源，不能为使
     # 双向列表为空而被误搬进通用正文。除此之外不允许出现新的 engine-only 缺口。
     from engine.gamedata import RACE_EXCLUSIVE_DAOWEN, UNIMPLEMENTED_DAOWEN

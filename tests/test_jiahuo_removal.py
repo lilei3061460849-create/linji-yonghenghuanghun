@@ -37,8 +37,8 @@ def test_jiahuo_is_not_registered():
     from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
 
     assert "嫁祸" not in REGION_EXCLUSIVE_DAOWEN["龙心谷"]
-    # 2026-11-02：龙心谷唯一专属道纹是新增并已实装的【淬火】。
-    assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == {"淬火"}
+    # 2026-11-02：龙心谷四面体四节点（锻造/熔化/炽热/淬火）全部实装。
+    assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == {"锻造", "熔化", "炽热", "淬火"}
 
 
 def test_longji_tetrahedron_holds_no_retired_names():

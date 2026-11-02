@@ -343,6 +343,60 @@ class DaowenEffectMixin:
                 raise ValueError("篡改多目标道纹须由持有者选择全部target_refs，防御提交须与之对应")
         return selected, rule
 
+    FORGE_DISCOVERY_CHOICES = 3
+
+    def _consumable_holder_list(self, target):
+        """取目标实际持有消耗品的**同一个列表对象**（便于原地削减/删除条目）。"""
+        if target is self.state.player:
+            return self.state.consumables
+        return getattr(target, "consumables", None) or []
+
+    @staticmethod
+    def _fixed_spec_consumable_pool() -> list[str]:
+        """【锻造】候选池：只含已登记的固定规格消耗品，不接受自定义名称或效果。"""
+        from ..events import EVENT_CONSUMABLES, TWISTED_TOOL_LIBRARY
+        return list(dict.fromkeys([*TWISTED_TOOL_LIBRARY, *EVENT_CONSUMABLES]))
+
+    def _offer_forge_discovery(self, caster, uses: int, result: dict) -> None:
+        """【锻造】发现流程：列出既有固定规格消耗品候选，领取时把耐久置为 X。"""
+        pool = [name for name in self._fixed_spec_consumable_pool()]
+        if not pool:
+            raise ValueError("锻造没有可发现的消耗品")
+        if caster is self.state.player and self.state.pending_item_choices:
+            raise ValueError("已有待选择的消耗品发现，请先处理完再发动锻造")
+        remaining = list(pool)
+        choices: list[str] = []
+        seq = int(getattr(self.state, "forge_discovery_count", 0) or 0)
+        for slot in range(min(self.FORGE_DISCOVERY_CHOICES, len(remaining))):
+            roll = self.dice.auto_roll(
+                f"duanzao_{seq}_{slot + 1}", remaining,
+                context=f"【锻造】{caster.name}发现第{slot + 1}个消耗品候选")
+            choices.append(remaining.pop(roll["record"]["selected_index"]))
+        if caster is self.state.player:
+            self.state.forge_discovery_count = seq + 1
+            self.state.pending_item_choices = list(choices)
+            self.state.pending_item_source = "锻造"
+            self.state.pending_item_bonus_uses = uses
+            result["effects"].append({
+                "type": "consumable_discovery", "source": "锻造",
+                "choices": list(choices), "uses": uses,
+                "note": "用 choose_discovered_item 领取；耐久按本次X覆盖"})
+            return
+        # 怪物即时领取：取首个候选，耐久按本次 X。
+        from ..events import EVENT_CONSUMABLES, TWISTED_TOOL_LIBRARY
+        pick = choices[0]
+        base_uses, effect = {**EVENT_CONSUMABLES, **TWISTED_TOOL_LIBRARY}[pick]
+        item = Consumable(name=pick, effect=effect,
+                          current_uses=uses, max_uses=max(int(base_uses), uses))
+        holder = getattr(caster, "consumables", None)
+        if holder is None:
+            holder = []
+            caster.consumables = holder
+        holder.append(item)
+        result["effects"].append({
+            "type": "consumable_forged", "holder": caster.name, "item": pick,
+            "uses": uses, "max_uses": item.max_uses})
+
     @staticmethod
     def consume_tamper(actor, rule):
         if rule is not None and any(s is rule for s in actor.status_effects) and rule.value > 0:
@@ -1915,8 +1969,7 @@ class DaowenEffectMixin:
             if target is None:
                 raise ValueError("淬火需要显式目标")
             gain = max(1, int(calc.get("consumable_durability_gain") or x))
-            items = (self.state.consumables if target is self.state.player
-                     else (getattr(target, "consumables", None) or []))
+            items = self._consumable_holder_list(target)
             touched = []
             for item in list(items):
                 if getattr(item, "current_uses", None) is None:
@@ -1929,6 +1982,47 @@ class DaowenEffectMixin:
             result["effects"].append({
                 "type": "consumable_durability_gain", "target": target.name,
                 "gain": gain, "items": touched})
+
+        if name in ("炽热", "熔化"):
+            # 【炽热】【熔化】（2026-11-02 用户令实装）：
+            #   炽热：目标所有消耗品当前耐久 -X，最低 0，条目保留（0 耐久只是不能用）。
+            #   熔化：直接销毁目标当前耐久 ≤ X 的条目（含 0 耐久），切断后续恢复/同名合并。
+            if target is None:
+                raise ValueError(f"{name}需要显式目标")
+            items = self._consumable_holder_list(target)
+            touched, destroyed = [], []
+            if name == "炽热":
+                loss = max(1, int(calc.get("consumable_durability_loss") or x))
+                for item in list(items):
+                    if getattr(item, "current_uses", None) is None:
+                        continue
+                    before = int(item.current_uses)
+                    item.current_uses = max(0, before - loss)
+                    touched.append({"item": item.name, "before": before,
+                                    "durability": item.current_uses,
+                                    "max_durability": int(getattr(item, "max_uses", 0) or 0)})
+                result["effects"].append({
+                    "type": "consumable_durability_loss", "target": target.name,
+                    "loss": loss, "items": touched})
+            else:
+                threshold = max(1, int(calc.get("consumable_destroy_threshold") or x))
+                for item in list(items):
+                    if getattr(item, "current_uses", None) is None:
+                        continue
+                    if int(item.current_uses) > threshold:
+                        continue
+                    items.remove(item)
+                    destroyed.append({"item": item.name,
+                                      "durability": int(item.current_uses)})
+                result["effects"].append({
+                    "type": "consumable_destroyed", "target": target.name,
+                    "threshold": threshold, "items": destroyed})
+
+        if name == "锻造":
+            # 【锻造】（2026-11-02 用户令实装）：发现一个既有固定规格消耗品，
+            # 给予其 X 点耐久（当前耐久与上限同取 max(基准上限, X)）。不接受自定义名称/效果。
+            uses = max(1, int(calc.get("consumable_forge_uses") or x))
+            self._offer_forge_discovery(caster, uses, result)
 
         if name == "共罪":
             # X 个非自身目标 + 发动者本身 = X+1 份名额；2026-11-02 用户令：
