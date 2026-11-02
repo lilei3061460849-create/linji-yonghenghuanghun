@@ -26,7 +26,7 @@ def test_three_daowen_are_written_into_dragon_valley_text_and_index():
     assert "支付待定" not in dungeon
 
     index = (ROOT / "全道纹索引.md").read_text(encoding="utf-8")
-    assert "当前索引收录道纹（60种）" in index
+    assert "本索引收录 60 条道纹" in index
     assert "尚未接入运行时的草案节点" not in index
     for name in NAMES:
         assert f"### {name}\n" in index

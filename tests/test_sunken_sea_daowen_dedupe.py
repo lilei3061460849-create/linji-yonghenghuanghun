@@ -44,8 +44,8 @@ def test_deleted_sunken_sea_daowen_and_panel_tags_are_gone():
     assert "扩散" not in index
     assert "道纹数量8" in dungeon  # 2026-11-02 新增【涌潮】
     indexed_count = len(re.findall(r"^### [\u4e00-\u9fff]{2}$", index, re.M))
-    assert f"当前索引收录道纹（{indexed_count}种）" in index
-    assert "流动】【遗忘】已接入运行时" in index
+    assert f"本索引收录 {indexed_count} 条道纹" in index
+    assert "【流动】【遗忘】须按X选择持续状态" in index
     assert "通用核心（四面体一·二）8" in index  # 通用四面体一·二共 8 节点
     assert "扭曲都市专属（8）" in index  # 补【饥饿】【扭曲】
     assert "沉沦海专属（8）" in index  # 补【涌潮】
