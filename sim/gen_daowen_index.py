@@ -192,7 +192,7 @@ for n in FIRST_EMBRACE_DAOWEN:
 for n, region in UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.items():
     CATEGORY[n] = "unimpl"
 
-# 「其他通用」按显式顺序渲染（不属于杀伐闭环、也不属于任何副本闭环的通用道纹）。
+# 「其他通用」按显式顺序渲染（不属于通用四面体、也不属于任何副本四面体的通用道纹）。
 OTHER_DAOWEN = ["透支", "篡改"]
 
 assert set(CATEGORY) == (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)), (
@@ -242,7 +242,7 @@ A("")
 draft_summary = (f"（含{len(DRAFT_DAOWEN)}种尚未接入运行时的草案节点）" if DRAFT_DAOWEN else "")
 A(f"本文件是**当前索引收录道纹（{len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)}种）的完整索引**{draft_summary}。道纹条目按归属分类：")
 category_summary = (
-    f"杀伐闭环（通用核心）{len(SHAFA_LOOP_DAOWEN)} ｜ 其他通用道纹 {len(OTHER_DAOWEN)} ｜ 原始怪物道纹 {len(ORIGINAL_MONSTER_DAOWEN)} ｜ "
+    f"通用核心（四面体一·二）{len(SHAFA_LOOP_DAOWEN)} ｜ 其他通用道纹 {len(OTHER_DAOWEN)} ｜ 原始怪物道纹 {len(ORIGINAL_MONSTER_DAOWEN)} ｜ "
     f"怪物转化道纹 {len(MONSTER_TRANSFORM_DAOWEN)} ｜ 副本专属 "
     f"{'/'.join(str(len(region_daowen_order(r))) for r in REGION_EXCLUSIVE_DAOWEN)} ｜ "
     f"鲛族专属 {sum(len(pool) for pool in RACE_EXCLUSIVE_DAOWEN.values())}"
@@ -426,7 +426,7 @@ A("---")
 A("")
 A("## 道纹归属与学习规则")
 A("")
-A("1. **杀伐闭环（通用核心）**：开局发现初始道纹的来源；人类侧基础概念。")
+A("1. **通用核心（四面体一·二）**：开局发现初始道纹的来源；人类侧基础概念。")
 A("2. **副本专属**：学习门槛=先经残韵从本副本怪物转化获得至少一种；其它副本专属不可学。")
 A("3. **怪物转化**：只能由自身已持有道纹经残韵变化获得（施法者同时获得）；原始⇄转化双向，反向可把转化道纹变回原始道纹。")
 A("4. **原始怪物**：可经残韵（含转化道纹反向）永久获得，局外【学习】亦可习得；怪物发动按条目支付代价（全力异变5X、必中异变X；减速／疯狂已是遗物，冷却类X≤1）；可作为【原初X】的借用对象，但原初不再仅限原始怪物道纹池；旧进化接口尚未同步随机X种规则。")

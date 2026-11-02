@@ -29,9 +29,9 @@
 | # | 角色 | 原始文件 | SHA-256 |
 | --- | --- | --- | --- |
 | 1 | 世界观正典（故事文档） | [故事文档.md](故事文档.md) | `2504d352fca6b81d3d03ac08474ef5eaafc185fc4cedecb8e9533fd89bd77661` |
-| 2 | AI 角色扮演约束（节选：职责、性格、扮演要求） | [AI_EXPERIENCE.md](AI_EXPERIENCE.md) | `8cf5f975341a1b040b53fd33b9239ba86c7d31e7b01cd53420f7336e0f5f14f5` |
-| 3 | 机制速查·行动 | [规则正文.md](规则正文.md) | `495fb329fef5115e32a4fffe36935be75e1ccaf91ec0c299d98ed6daa3362d08` |
-| 4 | 机制速查·道纹 | [全道纹索引.md](全道纹索引.md) | `243171ea0debcc86acfd461fad452e0e5464c252ba3efec107e637e127d5bc85` |
+| 2 | AI 角色扮演约束（节选：职责、性格、扮演要求） | [AI_EXPERIENCE.md](AI_EXPERIENCE.md) | `b4f94eb6444096efaa084f34f43f3b7ad4dce94930b9c237f96ba4e958d1b88b` |
+| 3 | 机制速查·行动 | [规则正文.md](规则正文.md) | `e4d2122fad0fcd5da869b39d8488843efdd46b0a9fd60891a4f37fbd287c1dac` |
+| 4 | 机制速查·道纹 | [全道纹索引.md](全道纹索引.md) | `1419b2a93392626a8b6d1eec363fcdd6f2c23e4da6d09876c1fcbfe6f78ddb71` |
 | 5 | 机制速查·物品 | [物品索引.md](物品索引.md) | `5cc224c8103e5b9d02d59ff2d41073d8dda65bfc6b90e9f9df267ea56bd755aa` |
 | 6 | 机制速查·法术 | [法术索引.md](法术索引.md) | `2e890b84dc8f79a15e44edef2cb0521df017228018a44b2371ac0aed45f55fe1` |
 | 7 | 机制速查·副本 | [副本索引.md](副本索引.md) | `975a32f319ceffb189e77bc3751e550b0eca126b61fa9414205a22fce891f366` |
@@ -161,7 +161,7 @@
 ### 来源 2：AI 角色扮演约束（节选：职责、性格、扮演要求）
 
 - 路径：`AI_EXPERIENCE.md`
-- SHA-256：`8cf5f975341a1b040b53fd33b9239ba86c7d31e7b01cd53420f7336e0f5f14f5`
+- SHA-256：`b4f94eb6444096efaa084f34f43f3b7ad4dce94930b9c237f96ba4e958d1b88b`
 
 ```markdown
 ### 职责划分
@@ -214,7 +214,7 @@
 ### 来源 3：机制速查·行动
 
 - 路径：`规则正文.md`
-- SHA-256：`495fb329fef5115e32a4fffe36935be75e1ccaf91ec0c299d98ed6daa3362d08`
+- SHA-256：`e4d2122fad0fcd5da869b39d8488843efdd46b0a9fd60891a4f37fbd287c1dac`
 
 ```markdown
 视野内目标：任何进入你视野的角色（敌人、中立、[朋友]、[员工]皆同）都可以成为战斗对象；是否开战由你自己决定，让行＝不开战。已开始的战斗按本节流程结算。
@@ -239,7 +239,7 @@
 ### 来源 4：机制速查·道纹
 
 - 路径：`全道纹索引.md`
-- SHA-256：`243171ea0debcc86acfd461fad452e0e5464c252ba3efec107e637e127d5bc85`
+- SHA-256：`1419b2a93392626a8b6d1eec363fcdd6f2c23e4da6d09876c1fcbfe6f78ddb71`
 
 ```markdown
 （共 57 条）

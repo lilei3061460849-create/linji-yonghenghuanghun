@@ -214,7 +214,7 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 
 | 行动类型 | 说明 |
 |---------|------|
-| `setup_attributes` | 分配初始25属性点，并从杀伐闭环发现3种初始道纹候选 |
+| `setup_attributes` | 分配初始25属性点，并从通用四面体一·二发现3种初始道纹候选 |
 | `setup_choose_initial_daowen` | 从发现候选中显式选择1种作为初始道纹 |
 | `resolve_redemption` | 救赎触发后选择接纳为待命员工（自定义员工名）或无视 |
 | `setup_choose_resonance` | 选择初始残韵 |
