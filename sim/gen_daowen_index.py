@@ -321,7 +321,9 @@ def section(title, names, note_lines=(), loop=None, loop_title=None):
         A("")
     for name in names:
         A(f"### {name}")
-        A(f"X：{costs[name]}。{effects[name]}" if effects[name] else f"X：{costs[name]}。")
+        # 条目正文必须以道纹名开头：旧模板漏了名字，只渲染成「X：支付：…」。
+        A(f"{name}X：{costs[name]}。{effects[name]}" if effects[name]
+          else f"{name}X：{costs[name]}。")
         meta = [f"[目标]：{target_label(name)}"]
         if name in DRAFT_DAOWEN:
             meta.append("执行状态：当前定义尚未实现")

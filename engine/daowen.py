@@ -232,11 +232,11 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_lianji(x: int, target: Entity = None, cost_channel: str = "生命") -> dict:
-        """连击X（2026-10-22 由【血债】改名）：支付六选一（见 LIANJI_CHANNELS 价格表）。
+        """连击X（2026-10-22 由【血债】改名）：支付六选一（见 LIANJI_CHANNELS 价格表）。选择[目标]5X次，每次对其造成1点伤害。
 
-        选择[目标] 5X 次，每次对其造成 1 点伤害。支付途径只改倍率，
-        效果恒同；cost_channel 缺省生命（怪物/旧调用/预设法术不传参即原行为），
-        碎片与假碎片是两个独立通道，只扣各自池子（不走「假碎片优先」的合并失去）。
+        支付途径只改倍率，效果恒同；cost_channel 缺省生命（怪物/旧调用/预设法术不传参
+        即原行为），碎片与假碎片是两个独立通道，只扣各自池子（不走「假碎片优先」的
+        合并失去）。
         """
         cost_channel = normalize_payment_type(cost_channel)
         target_name = target.name if target is not None else "未选定目标"
@@ -577,9 +577,8 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_caozuo(x: int, target: Entity = None, order: Optional[dict] = None) -> dict:
-        """操纵X（2026-11-02 由【操作】改名）：支付：法限X。
+        """操纵X（2026-11-02 由【操作】改名）：支付：法限X。使[目标]接下来X次除施法外的行动由你控制（旧版只管「下一次」）。
 
-        使[目标]接下来 **X 次**除施法外的行动由你控制（旧版只管「下一次」）。
         控制的实现方式仍是「施法者在发动/控制时给出指令」：`order` 由【操纵】状态
         记录，目标每做一次非施法行动都必须照此执行，并消耗 1 次名额；名额用完状态
         消失。未给出指令时状态作废、代价不退（沿用既有口径）。
@@ -599,9 +598,9 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_ji_e(x: int, target: Entity = None) -> dict:
-        """饥饿X（2026-11-02 用户令补回漏项）：支付：法力2X。
+        """饥饿X（2026-11-02 用户令补回漏项）：支付：法力2X。使[目标]的[血限]等同其当前生命，持续X；到期恢复施加前的[血限]。
 
-        使[目标]的[血限]等同其当前生命，持续X；到期恢复施加前的[血限]。
+        [血限]与当前生命按施加时的快照对齐，剩余回合按普通持续状态递减。
         """
         if x < 1:
             raise ValueError("X必须为正整数")
@@ -618,9 +617,7 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_niuqu(x: int, target: Entity = None) -> dict:
-        """扭曲X（2026-11-02 用户令新增）：支付：法力3X。
-
-        使[目标]的累积治疗量翻倍X次（×2^X）；翻倍后立即按[癌变]阈值复核一次。
+        """扭曲X（2026-11-02 用户令新增）：支付：法力3X。使[目标]的累积治疗量翻倍X次（×2^X）；翻倍后立即按[癌变]阈值复核一次。
         """
         if x < 1:
             raise ValueError("X必须为正整数")
@@ -634,9 +631,7 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_cuihuo(x: int, target: Entity = None) -> dict:
-        """淬火X（2026-11-02 用户令新增）：支付：法力2X。
-
-        使[目标]所有消耗品的当前耐久 +X（不超过各自的耐久上限）。
+        """淬火X（2026-11-02 用户令新增）：支付：法力2X。使[目标]所有消耗品的当前耐久+X（不超过各自的耐久上限）。
         """
         if x < 1:
             raise ValueError("X必须为正整数")
@@ -650,9 +645,8 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_chire(x: int, target: Entity = None) -> dict:
-        """炽热X（2026-11-02 用户令实装）：支付：法力3X。
+        """炽热X（2026-11-02 用户令实装）：支付：法力3X。使[目标]所有消耗品的当前耐久-X，最低为0；只削当前耐久，不销毁条目。
 
-        使[目标]所有消耗品的当前耐久 -X，最低为 0。只削当前耐久，不销毁条目：
         0 耐久只是不能使用，仍可被具体维修/物品效果恢复，这一点与【熔化】相反。
         """
         if x < 1:
@@ -667,10 +661,9 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_ronghua(x: int, target: Entity = None) -> dict:
-        """熔化X（2026-11-02 用户令实装）：支付：法力5X。
+        """熔化X（2026-11-02 用户令实装）：支付：法力5X。销毁[目标]所有当前耐久≤X的消耗品条目（含0耐久）。
 
-        销毁[目标]所有当前耐久 ≤ X 的消耗品条目（含 0 耐久）。与【炽热】不同，
-        这里是移除条目本身，切断之后对原条目的恢复与同名合并路径。
+        与【炽热】不同，这里是移除条目本身，切断之后对原条目的恢复与同名合并路径。
         """
         if x < 1:
             raise ValueError("X必须为正整数")
@@ -684,9 +677,8 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_duanzao(x: int) -> dict:
-        """锻造X（2026-11-02 用户令实装）：支付：法力5X。
+        """锻造X（2026-11-02 用户令实装）：支付：法力5X。发现一个既有固定规格消耗品，给予其X点耐久（当前耐久与耐久上限同取X）。
 
-        发现一个既有固定规格消耗品，给予其 X 点耐久（当前耐久与耐久上限同取 X）。
         不接受自定义物品名称或效果：候选池只含已登记的固定规格消耗品。
         """
         if x < 1:
@@ -700,10 +692,9 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_yongchao(x: int, target: Entity = None) -> dict:
-        """涌潮X（2026-11-02 用户令新增，源出遗物【苍白之花】）：支付：法限X。
+        """涌潮X（2026-11-02 用户令新增，源出遗物【苍白之花】）：支付：法限X。使[目标]的[法限]变为无限，当前法力可以突破法限，持续X回合。
 
-        使[目标]的[法限]变为无限——当前法力可以突破法限，持续X回合；到期把
-        当前法力压回原法限。
+        到期把当前法力压回原法限。
         """
         if x < 1:
             raise ValueError("X必须为正整数")
