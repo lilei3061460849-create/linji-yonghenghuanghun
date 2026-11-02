@@ -1114,6 +1114,14 @@ class Entity:
         """当前生效血限：增殖是真正无穷约束，blood_limit保留既有基础账本。"""
         return math.inf if self.has_status("无限血限") else self.blood_limit
 
+    def effective_mana_limit(self):
+        """当前生效法限：【涌潮】的无限法限是真正无穷，mana_limit 保留基础账本。
+
+        与 `effective_blood_limit`（【增殖】）同构；当前法力能否突破法限仍由
+        `_current_ceiling` / `GameState.mana_overflow_exempt` 统一判定。
+        """
+        return math.inf if self.has_status("无限法限") else self.mana_limit
+
     def heal(self, amount: int) -> dict:
         """回复生命。
 
@@ -2045,7 +2053,13 @@ class GameState:
         2026-11-01 重构2：这里成为唯一实现，`CombatEngine.mana_overflow_exempt`
         只是转调；`Entity.__setattr__` 的封顶也读同一条判定。
         """
-        if entity is None or entity is not self.player:
+        if entity is None:
+            return False
+        # 【涌潮】（2026-11-02）：无限法限对任何持有者生效（敌我同规则）。
+        if any(status.name == "无限法限" and not status.is_expired
+               for status in getattr(entity, "status_effects", ()) or ()):
+            return True
+        if entity is not self.player:
             return False
         return self._relic_active(entity, "苍白之花")
 

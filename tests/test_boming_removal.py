@@ -28,19 +28,24 @@ def test_boming_is_not_registered():
     from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
 
     assert "搏命" not in REGION_EXCLUSIVE_DAOWEN["扭曲都市"]
+    # 2026-11-02：扭曲都市四面体补齐【饥饿】【扭曲】两个空位。
     assert REGION_EXCLUSIVE_DAOWEN["扭曲都市"] == {
-        "变形", "定型", "超频", "增殖", "坏死", "萎缩"}
+        "变形", "定型", "超频", "增殖", "坏死", "萎缩", "饥饿", "扭曲"}
 
 
-def test_twisted_loop_keeps_seven_edges_with_zengzhi_in_former_slot():
-    loop = ResonanceEngine.CLOSED_LOOPS["扭曲都市闭环"]
-    assert ("超频", "反转", "增殖") in loop
-    assert ("增殖", "转换", "坏死") in loop
-    assert len(loop) == 7
-    outs = {a for a, _, _ in loop}
-    ins = {c for _, _, c in loop}
-    assert outs == ins, "闭环节点入出必须一一对应"
-    assert len(outs) == len(loop), "每个节点只能出现一次，否则不是单环"
+def test_twisted_tetrahedra_keep_zengzhi_in_the_second_one():
+    edges = ResonanceEngine.edges_of_region("扭曲都市")
+    assert ("增殖", "反转", "饥饿") in edges
+    assert ("增殖", "转换", "扭曲") in edges
+    assert ("增殖", "曲解", "坏死") in edges
+    # 每个四面体 4 节点 6 边：任两节点恰好一条边、三种残韵各两条。
+    for name, tetra in ResonanceEngine.tetrahedra_of_region("扭曲都市").items():
+        nodes = {n for src, _r, dst in tetra for n in (src, dst)}
+        assert len(nodes) == 4, f"{name} 不是四面体"
+        assert len(tetra) == 6, f"{name} 边数不是6"
+        # 排序按 Python 字符串序（三/转/曲），只锁"每种恰好两条"。
+        counts = {r: [x for _s, x, _d in tetra].count(r) for r in ("反转", "转换", "曲解")}
+        assert counts == {"反转": 2, "转换": 2, "曲解": 2}
     DaoWenEngine.register_all()
     assert "增殖" in DaoWenEngine._registry
 

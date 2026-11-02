@@ -1462,6 +1462,27 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
                 expired = target.tick_status_effects()
                 if expired:
+                    if "无限法限" in expired and not self.state.mana_overflow_exempt(target):
+                        before_mana = target.current_mana
+                        target.current_mana = min(target.current_mana, target.mana_limit)
+                        effects.append({
+                            "type": "infinite_mana_limit_expired",
+                            "entity": target.name,
+                            "mana_limit": target.mana_limit,
+                            "mana_before": before_mana,
+                            "mana_after": target.current_mana,
+                        })
+                    if "饥饿" in expired and hasattr(target, "_hunger_original_blood_limit"):
+                        restored_limit = int(target._hunger_original_blood_limit)
+                        del target._hunger_original_blood_limit
+                        self._apply_blood_limit_change(
+                            target, restored_limit - int(target.blood_limit), "饥饿", "up",
+                            source_type="daowen", subtype="hunger_expire",
+                            tags={"daowen", "hunger"})
+                        effects.append({
+                            "type": "hunger_expired", "entity": target.name,
+                            "blood_limit": target.blood_limit,
+                        })
                     if "无限血限" in expired and not self.state.hp_overflow_exempt(target):
                         before_hp = target.current_hp
                         target.current_hp = min(target.current_hp, target.blood_limit)
@@ -1586,6 +1607,29 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 continue
             expired = entity.tick_status_effects()
             if expired:
+                # 【涌潮】到期：当前法力压回原法限（无限法限只是"持续X回合"的豁免）。
+                if "无限法限" in expired and not self.state.mana_overflow_exempt(entity):
+                    before_mana = entity.current_mana
+                    entity.current_mana = min(entity.current_mana, entity.mana_limit)
+                    effects.append({
+                        "type": "infinite_mana_limit_expired",
+                        "entity": entity.name,
+                        "mana_limit": entity.mana_limit,
+                        "mana_before": before_mana,
+                        "mana_after": entity.current_mana,
+                    })
+                # 【饥饿】到期：把施加前的[血限]还原（血限上涨不产生失血）。
+                if "饥饿" in expired and hasattr(entity, "_hunger_original_blood_limit"):
+                    restored_limit = int(entity._hunger_original_blood_limit)
+                    del entity._hunger_original_blood_limit
+                    self._apply_blood_limit_change(
+                        entity, restored_limit - int(entity.blood_limit), "饥饿", "up",
+                        source_type="daowen", subtype="hunger_expire",
+                        tags={"daowen", "hunger"})
+                    effects.append({
+                        "type": "hunger_expired", "entity": entity.name,
+                        "blood_limit": entity.blood_limit,
+                    })
                 # 【增殖】到期后恢复基础血限；若当前生命超出基础血限，按恢复后的血限封顶。
                 if "无限血限" in expired and not self.state.hp_overflow_exempt(entity):
                     before_hp = entity.current_hp

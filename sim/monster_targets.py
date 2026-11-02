@@ -79,7 +79,7 @@ MONSTER_DAOWEN_MECH = {
 # 2026-11-01：通用道纹补入优先级表。
 # 操作／迟滞都是对敌限制，归控制组；
 # 透支只把资源换成法力、不改变战场，归「无收益补给」——没有别的选项时才用。
-MONSTER_DAOWEN_CONTROL |= {"操作", "迟滞"}
+MONSTER_DAOWEN_CONTROL |= {"操纵", "迟滞"}
 MONSTER_DAOWEN_SUPPLY = {"透支"}
 
 

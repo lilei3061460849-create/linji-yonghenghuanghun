@@ -30,10 +30,12 @@ INDEX = ROOT / "全道纹索引.md"
 def test_daowen_index_is_up_to_date_with_the_engine():
     """索引必须等于当前生成器输出；漏重生成即为失败。"""
     index_text = INDEX.read_text(encoding="utf-8")
-    assert "当前索引收录道纹（56种）" in index_text
+    assert "当前索引收录道纹（60种）" in index_text
     assert "（含3种尚未接入运行时的草案节点）" in index_text
-    assert "（反转）→？？（反向）" in index_text
+    # 2026-11-02 四面体大改：遗物化占位整批撤销，索引里不应再有「？？」节点。
+    assert "？？」" not in index_text.replace("`？？`", "")
     assert "（反转）→加害（反向）" not in index_text
+    assert "四面体" in index_text
     if not INDEX.exists():
         pytest.skip("全道纹索引.md 不存在")
     proc = subprocess.run(

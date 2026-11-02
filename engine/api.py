@@ -5879,7 +5879,7 @@ class GameEngine:
 
         name = params.get("daowen_name", "")
         x = params.get("x", 1)
-        # 【操作】：发动道纹不是「施法」，属于被【操作】管辖的那一次非施法行动。
+        # 【操纵】：发动道纹不是「施法」，属于被【操纵】管辖的非施法行动。
         caozuo_error = self.combat.caozuo_check(actor, "发动道纹")
         if caozuo_error:
             return caozuo_error
@@ -5980,15 +5980,15 @@ class GameEngine:
                    or entry.get("dodge", False) and entry.get("blood_shadow", False)
                    for entry in pact_entries):
                 return {"success": False, "error": "共罪目标的dodge/blood_shadow必须为互斥布尔值"}
-        if name == "操作":
+        if name == "操纵":
             if not (target_ref or target_name):
-                return {"success": False, "error": "操作需要显式指定的[目标]"}
+                return {"success": False, "error": "操纵需要显式指定的[目标]"}
             try:
                 from .daowen import normalize_caozuo_order
                 params = dict(params, caozuo_order=normalize_caozuo_order(
                     params.get("caozuo_order")))
             except ValueError as exc:
-                return {"success": False, "error": f"操作预指定无效：{exc}"}
+                return {"success": False, "error": f"操纵指令无效：{exc}"}
         if name in ("赦免", "贿赂"):
             picked = [str(n) for n in (params.get("relic_names") or []) if n]
             if len(picked) != x or len(set(picked)) != x:
@@ -6069,7 +6069,8 @@ class GameEngine:
                 resolve_kw["blocked_type"] = params.get("lianmin_cost", "法力")
             if name in ("赦免", "贿赂"):
                 resolve_kw["relic_names"] = list(params.get("relic_names") or [])
-            if name == "操作":
+            if name == "操纵":
+                # 剩余次数＝X（2026-11-02 用户令：由「下一次」改为「下X次」）。
                 resolve_kw["order"] = params.get("caozuo_order")
             if name == "再生":
                 resolve_kw["cost_channel"] = params.get("zaisheng_cost", "法力")
@@ -7350,7 +7351,7 @@ class GameEngine:
         if item is None:
             return {"success": False, "error": f"找不到可用消耗品: {item_name}"}
 
-        # 【操作】：使用者（玩家/朋友/员工）的这一次行动必须等于预指定。
+        # 【操纵】：使用者（玩家/朋友/员工）的这一次行动必须等于施法者指令。
         item_user = self.state.player
         caozuo_error = self.combat.caozuo_check(item_user, "使用消耗品", item_name)
         if caozuo_error:

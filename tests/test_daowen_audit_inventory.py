@@ -59,7 +59,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertNotIn('馈赠', {r['name'] for r in self.rows})
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
         self.assertNotRegex(dungeon, r'馈赠(?:X|\d+)')
-        self.assertIn('⇄（转换）？？⇄（曲解）长夜X', dungeon)
+        self.assertIn('永夜庭四面体：反转 血契X⇄共罪X、不死X⇄怜悯X', dungeon)
         scraps = (ROOT / '废稿汇总.md').read_text(encoding='utf-8')
         self.assertIn('| A09 | 馈赠、受击次数供法力', scraps)
         self.assertIn('使目标受击时获得X点法力，持续∞', scraps)
@@ -67,8 +67,8 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
     def test_round_blocking_is_implemented_sea_reversal(self):
         sea = (ROOT / '副本/沉沦海.md').read_text(encoding='utf-8')
         night = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
-        self.assertIn('大梦X ⇄（反转）【沉溺X】', sea)
-        self.assertIn('7.沉溺X（大梦反转分支）：支付：法力10X。', sea)
+        self.assertIn('沉沦海·四面体二：反转 大梦X⇄沉溺X、冰冻X⇄涌潮X', sea)
+        self.assertIn('8.沉溺X（四面体二）：支付：法力10X。', sea)
         self.assertIn('使[目标]无法经历X个回合。', sea)
         self.assertIn('中断该次回合，并使剩余阻断次数-1', sea)
         self.assertIn('普通回合与大梦产生的额外回合均适用', sea)
@@ -138,20 +138,21 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
         self.assertNotRegex(dungeon, r'失血(?:X|\d)')
         # 2026-10-31：共罪回到永夜庭主环，血契改为环外（不占主环格）。
-        self.assertIn('共罪X⇄（曲解）？？⇄（反转）饥饿X', dungeon)
+        self.assertIn('转换 血契X⇄怜悯X、共罪X⇄不死X', dungeon)
         self.assertIn('生命减少视为失血', dungeon)
         scraps = (ROOT / '废稿汇总.md').read_text(encoding='utf-8')
         self.assertIn('| A10 | 失血道纹、伤害来源自反噬', scraps)
         self.assertIn('法力3X，使目标每次造成伤害时失去等量生命，持续X', scraps)
 
-    def test_hunger_draft_temporarily_lowers_blood_limit(self):
-        dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
-        self.assertIn('8.饥饿X：支付：法力10X。使[目标]的血限降至当前生命，持续X。', dungeon)
-        self.assertNotIn('[目标]失去等同已损生命的生命，持续 X', dungeon)
+    def test_hunger_moved_to_twisted_city_and_implemented(self):
+        """2026-11-02：饥饿由永夜庭移入扭曲都市、代价改法力2X，并接入运行时。"""
+        dungeon = (ROOT / '副本/扭曲都市.md').read_text(encoding='utf-8')
+        self.assertIn('6.饥饿X（2026-11-02 由永夜庭移入并改价）：支付：法力2X。', dungeon)
+        night = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
+        self.assertNotIn('饥饿X：支付', night)
         row = next(r for r in self.rows if r['name'] == '饥饿')
-        self.assertFalse(row['runtime'])
-        self.assertIn('相反效果统一后生效覆盖先生效', row['note'])
-        # 文本护栏不代表已验证增殖覆盖或无限数值反制。
+        self.assertTrue(row['runtime'])
+        self.assertIn('后生效覆盖先生效', row['note'])
 
     def test_opposing_effects_follow_latest_effect_rule(self):
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
@@ -170,7 +171,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertNotIn('选择自身一种【尘封】', dungeon)
         self.assertNotIn('支付：法力3X。使[目标]获得X层【异变】', dungeon)
         self.assertIn('5.唯一X：支付：法力5X。使[目标]无法使用用过的道纹，持续X。', dungeon)
-        self.assertIn('唯一替换原【尘封】草案', dungeon)
+        self.assertIn('【感染】【重演】【原初】不再占关系位', dungeon)
         self.assertNotIn('5.尘封X：', dungeon)
         self.assertNotRegex(dungeon, r'，尘封[，）]')
         by_name = {r['name']: r for r in self.rows}
@@ -190,8 +191,13 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertTrue(row['runtime'])
 
     def test_tampering_retains_target_selection_rule(self):
+        """2026-11-02：篡改移入通用正文，荒疫古城不再写它。"""
         dungeon = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
-        self.assertIn('4.篡改X：支付：生命3X。使[目标]接下来X次发动道纹的目标由你选择。', dungeon)
+        self.assertNotIn('篡改X：支付', dungeon)
+        rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
+        self.assertIn('篡改X（2026-11-02 由荒疫古城移入通用，关系见通用四面体四）：'
+                      '支付：生命3X。使[目标]接下来X次发动道纹时的目标由你选择。', rules)
+        self.assertIn('**通用·四面体四**：反转 必中⇄飞行、压迫⇄篡改', rules)
         row = next(r for r in self.rows if r['name'] == '篡改')
         self.assertEqual(row['review'], '暂未发现结构违规')
         self.assertTrue(row['runtime'])
@@ -244,7 +250,8 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertNotIn('嗜血', {r['name'] for r in self.rows})
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
         self.assertNotRegex(dungeon, r'嗜血(?:X|\d)')
-        self.assertIn('【？？】⇄（转换）？？', dungeon)
+        self.assertNotIn('？？', dungeon.split('道纹定义：')[0].replace(
+            '原「？？」占位撤销', ''))
         self.assertIn('| A15 | 嗜血原回终草案、延迟伤害兑换回复',
                       (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
 
@@ -267,7 +274,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
     def test_diaoling_is_reviewed_runtime_graveyard_daowen(self):
         dungeon = (ROOT / '副本/乱葬岗.md').read_text(encoding='utf-8')
         index = (ROOT / '全道纹索引.md').read_text(encoding='utf-8')
-        self.assertIn('7.凋零X（2026-10-29 补入勾魂—招魂之间）：支付：法力10X。', dungeon)
+        self.assertIn('3.凋零X：支付：法力10X。', dungeon)
         self.assertIn('除[目标]外，当前生命≤X的角色立即死亡。', dungeon)
         self.assertIn('一次性瞬发效果，只在施放当次按场上快照判定', dungeon)
         self.assertIn('施法者并非目标时同样参与判定', dungeon)

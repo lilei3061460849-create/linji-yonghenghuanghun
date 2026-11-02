@@ -92,18 +92,20 @@ def test_retired_daowen_are_gone_from_registry_and_loops():
                        for src, _, dst in loop), name
 
 
-def test_loop_is_eight_edges_in_the_given_order():
-    loop = ResonanceEngine.CLOSED_LOOPS["罪孽都市闭环"]
-    assert loop == [
-        ("点金", "反转", "烁金"),
-        ("烁金", "转换", "假钞"),
-        ("假钞", "曲解", "交易"),
-        ("交易", "转换", "赦免"),
-        ("赦免", "反转", "贿赂"),
-        ("贿赂", "曲解", "豪夺"),
-        ("豪夺", "转换", "典当"),
-        ("典当", "曲解", "点金"),
-    ]
+def test_two_tetrahedra_each_with_six_edges():
+    """2026-11-02 用户令：罪孽都市改为两个四面体，各 4 节点 6 边。"""
+    tetra = ResonanceEngine.tetrahedra_of_region("罪孽都市")
+    assert set(tetra) == {"罪孽都市·四面体一", "罪孽都市·四面体二"}
+    assert set(tetra["罪孽都市·四面体一"]) == {
+        ("点金", "反转", "烁金"), ("假钞", "反转", "典当"),
+        ("点金", "转换", "典当"), ("烁金", "转换", "假钞"),
+        ("点金", "曲解", "假钞"), ("烁金", "曲解", "典当"),
+    }
+    assert set(tetra["罪孽都市·四面体二"]) == {
+        ("交易", "反转", "豪夺"), ("赦免", "反转", "贿赂"),
+        ("交易", "转换", "赦免"), ("豪夺", "转换", "贿赂"),
+        ("交易", "曲解", "贿赂"), ("豪夺", "曲解", "赦免"),
+    }
 
 
 def test_reversal_edges_are_bidirectional_and_no_fork_left():

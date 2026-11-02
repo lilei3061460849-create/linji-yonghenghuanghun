@@ -1,4 +1,7 @@
-"""【操作】【迟滞】口径：预指定 / 未预指定作废不退 / 出手加价对每一次行动同口径。"""
+"""【操纵】【迟滞】口径：指令 / 未给指令作废不退 / 出手加价对每一次行动同口径。
+
+2026-11-02 用户令：【操作】改名【操纵】，作用范围由「下一次」改为「下X次」。
+"""
 from engine.daowen import DaoWenEngine, normalize_caozuo_order
 from tests.test_daowen_wiring import _engine, _give, _monster
 
@@ -6,7 +9,7 @@ from tests.test_daowen_wiring import _engine, _give, _monster
 def setup(suffix):
     e = _engine('caozuo_chizhi_' + suffix)
     p = e.state.player
-    _give(p, '操作')
+    _give(p, '操纵')
     _give(p, '迟滞')
     a = _monster(e, '受术者', hp=100)
     e.execute_action('round_start', {})
@@ -15,7 +18,7 @@ def setup(suffix):
 
 def apply_caozuo(e, caster, target, x=1, order=None):
     calc = DaoWenEngine.calculate_caozuo(x, target, normalize_caozuo_order(order))
-    return e.combat.apply_daowen_effect('操作', calc, caster, target)
+    return e.combat.apply_daowen_effect('操纵', calc, caster, target)
 
 
 def apply_chizhi(e, caster, target, x=1):
@@ -24,16 +27,27 @@ def apply_chizhi(e, caster, target, x=1):
 
 
 def test_caozuo_predeclared_action_must_be_followed():
-    """预指定【跳过】后，目标的下一次非施法行动只能是跳过。"""
+    """给出【跳过】指令后，目标接下来X次非施法行动只能是跳过。"""
     e, p, a = setup('order')
     apply_caozuo(e, p, a, order={'action': '跳过'})
     assert e.combat.caozuo_status_of(a) is not None
 
     refused = e.combat.caozuo_check(a, '攻击', [{'target_ref': 'player:0', 'damage': 1}])
-    assert refused and '操作' in refused['error'], refused
+    assert refused and '操纵' in refused['error'], refused
 
     assert e.combat.caozuo_check(a, '跳过') is None
-    assert e.combat.caozuo_status_of(a) is None, '按预指定行动后，操作应一次性消耗'
+    assert e.combat.caozuo_status_of(a) is None, 'X=1：执行一次即用完名额'
+
+
+def test_caozuo_uses_scale_with_x_and_each_action_consumes_one():
+    """操纵X：接下来X次非施法行动都由施法者控制，每执行一次扣1次名额。"""
+    e, p, a = setup('uses')
+    apply_caozuo(e, p, a, x=3, order={'action': '跳过'})
+    for remaining in (2, 1):
+        assert e.combat.caozuo_check(a, '跳过') is None
+        assert e.combat.caozuo_status_of(a).effect_data['remaining_uses'] == remaining
+    assert e.combat.caozuo_check(a, '跳过') is None
+    assert e.combat.caozuo_status_of(a) is None, '第X次执行后名额归零、状态移除'
 
 
 def test_caozuo_without_order_voids_and_never_refunds():
@@ -43,8 +57,8 @@ def test_caozuo_without_order_voids_and_never_refunds():
     calc = DaoWenEngine.calculate_caozuo(1, a, None)
     assert calc['caozuo_order'] is None
     # apply 是唯一公开入口：支付与效果同在这一次结算里发生。
-    e.combat.apply_daowen_effect('操作', calc, p, a)
-    assert p.mana_limit == cap_before - 1, '操作要以法限支付'
+    e.combat.apply_daowen_effect('操纵', calc, p, a)
+    assert p.mana_limit == cap_before - 1, '操纵要以法限支付'
     assert e.combat.caozuo_status_of(a) is not None
 
     # 目标照常行动：效果作废（不拒行动），但已支付的法限没有回退路径。

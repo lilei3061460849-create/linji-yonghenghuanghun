@@ -55,11 +55,11 @@ def test_quanli_transform_edge_now_routes_to_quansu():
 
     留空的理由是「不新增道路」，【全速】是既有道纹，接它不新增道路。
     """
-    assert ResonanceEngine.find_transformation("全力", "转换") == "全速"
+    assert ResonanceEngine.find_transformation("全力", "转换") == "强化"
     assert "借力" not in DaoWenEngine._registry
-    # 另两条边必须还在
-    assert ResonanceEngine.find_transformation("全力", "反转") == "弱化"
-    assert ResonanceEngine.find_transformation("全力", "曲解") == "再生"
+    # 2026-11-02 四面体三：另两条边是 反转→全速、曲解→弱化。
+    assert ResonanceEngine.find_transformation("全力", "反转") == "全速"
+    assert ResonanceEngine.find_transformation("全力", "曲解") == "弱化"
 
 
 def test_round_start_phase_no_longer_has_shuaibai():

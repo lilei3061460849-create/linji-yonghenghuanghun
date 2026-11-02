@@ -65,8 +65,8 @@ def test_retirement_and_legacy_name():
     assert "贯穿" not in DaoWenEngine.list_all() and "贯穿" not in SHAFA_LOOP_DAOWEN
     with pytest.raises(ValueError):
         DaoWenEngine.resolve("贯穿", 1)
-    assert any(is_reserved_slot(n) and "贯穿" in n
-               for src, _, dst in ResonanceEngine.CLOSED_LOOPS["杀伐闭环"] for n in (src, dst))
+    # 2026-11-02 四面体大改：占位节点撤销，通用四面体里没有「贯穿」。
+    assert all("贯穿" not in n for n in ResonanceEngine.nodes_of_region("通用"))
     item.name = "穿甲弹"
     item.current_uses = 1
     e._migrate_legacy_daowen_status_order()

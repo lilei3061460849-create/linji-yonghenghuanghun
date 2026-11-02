@@ -17,7 +17,7 @@ def test_three_user_drafts_are_in_dragon_valley_text_and_index():
     assert "3.锻造X：支付待定。发现一个消耗品，给予其X耐久，持续∞。" in dungeon
 
     index = (ROOT / "全道纹索引.md").read_text(encoding="utf-8")
-    assert "当前索引收录道纹（56种）" in index
+    assert "当前索引收录道纹（60种）" in index
     assert "（含3种尚未接入运行时的草案节点）" in index
     for name in NAMES:
         assert f"### {name}\n" in index
@@ -25,12 +25,15 @@ def test_three_user_drafts_are_in_dragon_valley_text_and_index():
 
 def test_drafts_have_no_runtime_registration_or_resonance_edges():
     DaoWenEngine.register_all()
-    assert len(DaoWenEngine._registry) == 53
-    assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == set()
+    # 2026-11-02：新增【淬火】后注册表 57；龙心谷专属池只有已实装的【淬火】。
+    assert len(DaoWenEngine._registry) == 57
+    assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == {"淬火"}
     for name in NAMES:
         assert name not in DaoWenEngine._registry
         assert UNIMPLEMENTED_DAOWEN[name] == "龙心谷"
-        assert ResonanceEngine.get_available_resonance(name) == []
+        # 三纹在龙心谷四面体里作为关系节点存在（不可发动），但残韵出口只连四个节点。
+        outs = {cand["target_daowen"] for cand in ResonanceEngine.get_available_resonance(name)}
+        assert outs <= {"锻造", "熔化", "炽热", "淬火"}, outs
         with pytest.raises(ValueError, match="未知道纹"):
             DaoWenEngine.resolve(name, 1)
         error = learnability_error(

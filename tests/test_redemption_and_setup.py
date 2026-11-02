@@ -111,7 +111,7 @@ def test_resonance_permanently_converts_and_grants():
     _give(engine.state.player, "杀伐")
     monster = Entity(name="慢怪", entity_type="怪物", blood_limit=80, current_hp=80,
                      attack_count=2, attack_power=4)
-    # 使用现役【全力】反转为【弱化】，同时验证怪物其余原始道纹保留。
+    # 使用【全力】反转为【全速】（2026-11-02 四面体三），同时验证怪物其余原始道纹保留。
     _give(monster, "全力")
     _give(monster, "必中")
     monster._had_monster_daowen = True
@@ -120,10 +120,10 @@ def test_resonance_permanently_converts_and_grants():
         "source_daowen": "全力", "resonance_type": "反转", "target_ref": "enemy:0",
     })
     assert r["success"]
-    assert "全力" not in monster.dao_wen and "弱化" in monster.dao_wen
+    assert "全力" not in monster.dao_wen and "全速" in monster.dao_wen
     assert "必中" in monster.dao_wen
-    assert "弱化" in engine.state.player.dao_wen
-    assert "弱化" not in ORIGINAL_MONSTER_DAOWEN
+    assert "全速" in engine.state.player.dao_wen
+    assert "全速" not in ORIGINAL_MONSTER_DAOWEN
     assert not engine.state.pending_redemption
 
 def test_resonance_does_not_duplicate_same_name():
@@ -264,7 +264,7 @@ def test_redemption_fires_at_low_hp_even_with_transform_left():
     engine.state.resonance["反转"] = 1
     monster = Entity(name="脑蜘蛛", entity_type="怪物", blood_limit=204, current_hp=20,
                      attack_count=2, attack_power=11)
-    # 以现役【全力】反转为【弱化】移除最后一种原始道纹，转化道纹保留。
+    # 以【全力】反转为【全速】移除最后一种原始道纹，转化道纹保留。
     _give(monster, "全力")
     _give(monster, "坏死")
     engine.state.enemies[:] = [monster]
@@ -274,7 +274,7 @@ def test_redemption_fires_at_low_hp_even_with_transform_left():
     assert r["success"]
     assert r.get("redemption")
     assert engine.state.pending_redemption
-    assert "弱化" in engine.state.pending_redemption["dao_wen"]
+    assert "全速" in engine.state.pending_redemption["dao_wen"]
     assert "全力" not in engine.state.pending_redemption["dao_wen"]
     assert not monster.is_alive
     accept = engine.execute_action("resolve_redemption", {"option": "接纳", "name": "微光蛛"})

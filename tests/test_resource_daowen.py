@@ -257,11 +257,11 @@ def test_learning_pools_and_resonance_edges_match_new_nodes():
 
     assert any(edge == ("超频", "反转", "萎缩")
                for edges in ResonanceEngine.CLOSED_LOOPS.values() for edge in edges)
-    assert any(edge == ("重演", "反转", "唯一")
+    # 2026-11-02 四面体大改：重演/原初/感染占位撤销；强化↔弱化仍是反转边。
+    assert any(edge == ("强化", "反转", "弱化")
                for edges in ResonanceEngine.CLOSED_LOOPS.values() for edge in edges)
-    assert any(edge == ("弱化", "反转", "强化")
-               for edges in ResonanceEngine.CLOSED_LOOPS.values() for edge in edges)
-    assert not any("尘封" in edge for edges in ResonanceEngine.CLOSED_LOOPS.values() for edge in edges)
+    assert not any("重演" in edge or "尘封" in edge
+                   for edges in ResonanceEngine.CLOSED_LOOPS.values() for edge in edges)
 
 
 def test_upper_limit_payment_clamps_current_value_and_save_defaults():

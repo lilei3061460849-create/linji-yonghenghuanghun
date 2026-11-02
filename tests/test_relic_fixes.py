@@ -145,8 +145,8 @@ def test_tonghunbi_grants_caster_real_daowen_from_second_target():
         "second_target_ref": "enemy:0", "second_source_daowen": "全力",
     })
     assert r["success"] is True
-    assert "弱化" in engine.state.player.dao_wen, "施法者应永久获得全力反转后的弱化"
-    assert "全力" not in enemy.dao_wen and "弱化" in enemy.dao_wen
+    assert "全速" in engine.state.player.dao_wen, "施法者应永久获得全力反转后的全速"
+    assert "全力" not in enemy.dao_wen and "全速" in enemy.dao_wen
 
 
 def test_first_cup_doubles_heal_and_no_longer_blocks_cancer():

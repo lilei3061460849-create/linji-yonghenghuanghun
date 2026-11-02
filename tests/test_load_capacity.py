@@ -135,9 +135,10 @@ def test_resonance_transform_keeps_holder_count_and_stays_within_capacity():
                                            "target_ref": "enemy:0"})
     assert r["success"], r
     assert len(monster.dao_wen) == 1, "持有者一换一，种类数不变"
-    assert "弱化" in monster.dao_wen and "全力" not in monster.dao_wen
+    # 2026-11-02 四面体三：全力 --反转--> 全速（弱化是强化／全速的邻居）。
+    assert "全速" in monster.dao_wen and "全力" not in monster.dao_wen
     # 施法者另获一份【蒙蔽】；血限30 → 额度1，此时刚好等于额度，未超。
-    assert list(p.dao_wen) == ["弱化"], "施法者获得转化后道纹"
+    assert list(p.dao_wen) == ["全速"], "施法者获得转化后道纹"
     assert len(p.dao_wen) <= p.daowen_capacity
 
 
@@ -166,4 +167,4 @@ def test_resonance_grant_beyond_capacity_is_refused():
     assert r["success"], r
     assert not r.get("granted_daowen"), f"超额时不应授予：{r.get('granted_daowen')}"
     assert list(p.dao_wen) == [held], f"施法者道纹不得增加：{list(p.dao_wen)}"
-    assert "弱化" in monster.dao_wen and "全力" not in monster.dao_wen, "持有者的一换一照常"
+    assert "全速" in monster.dao_wen and "全力" not in monster.dao_wen, "持有者的一换一照常"

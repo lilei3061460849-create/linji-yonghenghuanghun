@@ -163,25 +163,30 @@ def test_resonance():
     assert result["target"] == "杀伐"
     print("  ✓ 再生 --反转--> 杀伐（反向）")
     
-    # 再生 → 曲解 → 庇护
-    result = ResonanceEngine.apply_resonance("再生", "曲解", False, True, target_daowen="庇护")
+    # 再生 → 曲解 → 连击（2026-11-02 四面体一：曲解 杀伐⇄庇护、再生⇄连击）
+    result = ResonanceEngine.apply_resonance("再生", "曲解", False, True, target_daowen="连击")
     assert result["success"]
-    assert result["target"] == "庇护"
-    print("  ✓ 再生 --曲解--> 庇护")
-    
-    # 全力 → 反转 → 弱化（现役唯一出边，无需额外指定目标）
+    assert result["target"] == "连击"
+    print("  ✓ 再生 --曲解--> 连击")
+
+    # 全力 → 反转 → 全速（2026-11-02 四面体三：反转 强化⇄弱化、全力⇄全速）
     result = ResonanceEngine.apply_resonance("全力", "反转", False, True)
     assert result["success"]
-    assert result["target"] == "弱化"
-    print("  ✓ 全力 --反转--> 弱化")
+    assert result["target"] == "全速"
+    print("  ✓ 全力 --反转--> 全速")
+
+    # 强化 → 反转 → 弱化（同域翻极性）
+    result = ResonanceEngine.apply_resonance("强化", "反转", False, True)
+    assert result["success"] and result["target"] == "弱化"
+    print("  ✓ 强化 --反转--> 弱化")
     
     # 查看可用残韵
     available = ResonanceEngine.get_available_resonance("杀伐")
     assert len(available) > 0
     print(f"  ✓ 杀伐可用残韵: {[a['resonance_type'] + '→' + a['target_daowen'] for a in available]}")
     
-    # 不存在的路径
-    result = ResonanceEngine.apply_resonance("杀伐", "转换", False, True)
+    # 不存在的路径：杀伐的转换只通向连击，通向再生必须显式指定
+    result = ResonanceEngine.apply_resonance("杀伐", "转换", False, True, target_daowen="再生")
     assert not result["success"]
     print("  ✓ 不存在的路径被正确拒绝")
 

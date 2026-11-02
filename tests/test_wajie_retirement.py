@@ -12,8 +12,8 @@ def test_registration_learning_and_loop_retired():
     assert "瓦解" not in DaoWenEngine.list_all()
     assert "瓦解" not in REGION_EXCLUSIVE_DAOWEN["乱葬岗"]
     with pytest.raises(ValueError): DaoWenEngine.resolve("瓦解", 3)
-    assert any(is_reserved_slot(n) and "瓦解" in n
-               for src, _, dst in ResonanceEngine.CLOSED_LOOPS["乱葬岗闭环"] for n in (src, dst))
+    # 2026-11-02 四面体大改：占位节点撤销，四方体四节点全为真实道纹。
+    assert all("瓦解" not in n for n in ResonanceEngine.nodes_of_region("乱葬岗"))
 
 
 def test_panels_and_legacy_constructor_do_not_grant():

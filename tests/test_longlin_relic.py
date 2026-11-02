@@ -80,9 +80,9 @@ def test_retired_daowen_and_resonance_slot():
     assert "龙鳞" not in REGION_EXCLUSIVE_DAOWEN["龙心谷"]
     with pytest.raises(ValueError, match="未知道纹"):
         DaoWenEngine.resolve("龙鳞", 1)
-    loop = ResonanceEngine.CLOSED_LOOPS["龙心谷闭环"]
+    loop = ResonanceEngine.edges_of_region("龙心谷")
     assert not any("龙鳞" == n for src, _, dst in loop for n in (src, dst))
-    assert any(is_reserved_slot(n) and "龙鳞" in n for src, _, dst in loop for n in (src, dst))
+    assert all("龙鳞" not in n for src, _, dst in loop for n in (src, dst))
 
 
 def test_panel_retypes_longlin_as_relic_and_retains_other_daowen():

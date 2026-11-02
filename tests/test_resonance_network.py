@@ -26,6 +26,28 @@ def rules_text() -> str:
         return f.read()
 
 
+def tetrahedron_spec(text: str | None = None) -> set:
+    """从规则正文的四面体串解析出 (节点, 残韵, 节点) 三元组。
+
+    2026-11-02 用户令：关系表改为四面体，正文写法为
+    「反转 A⇄B、C⇄D ｜ 转换 A⇄C、B⇄D ｜ 曲解 A⇄D、B⇄C」。
+    """
+    txt = text if text is not None else rules_text()
+    spec = set()
+    for line in txt.splitlines():
+        if "⇄" not in line:
+            continue
+        for seg in re.split(r"[｜|]", line):
+            m = re.search(r"(转换|反转|曲解)[：:]?\s+(.*)", seg)
+            if not m:
+                continue
+            rtype = m.group(1)
+            for left, right in re.findall(
+                    r"([\u4e00-\u9fff·]+?)⇄([\u4e00-\u9fff·]+?)(?=[、，,；;]|\s|$)", m.group(2)):
+                spec.add((left, rtype, right))
+    return spec
+
+
 def engine_edges() -> set:
     return {(s, t, d) for edges in R.CLOSED_LOOPS.values() for s, t, d in edges}
 
@@ -43,15 +65,8 @@ def test_all_readme_monster_transforms_registered():
     2026-10-07 用户令：转化途径改为双向，正文用 ⇄（历史写法 → 同样接受）。
     """
     txt = rules_text()
-    spec = set()
-    # 双向写法：全力X⇄（转换）借力X；历史单向写法：全力X→（转换）借力X
-    for arrow in ("⇄", "→"):
-        for m in re.finditer(r"(\w+?)X" + arrow + r"（(转换|反转|曲解)）(\w+?)X", txt):
-            spec.add((m.group(1), m.group(2), m.group(3)))
-        for m in re.finditer(
-                r"(\w+?)X（代价[^）]*）" + arrow + r"（(转换|反转|曲解)）(\w+?)X", txt):
-            spec.add((m.group(1), m.group(2), m.group(3)))
-    assert spec, "未能从规则正文解析出怪物转化关系"
+    spec = tetrahedron_spec(txt)
+    assert spec, "未能从规则正文解析出四面体关系"
     missing = [e for e in spec
                if tuple(sorted([(e[0], e[1]), (e[2], e[1])])) not in engine_undirected_edges()]
     assert not missing, f"引擎缺失规则正文声明的转化：{sorted(missing)}"
@@ -76,53 +91,61 @@ def test_transform_paths_are_bidirectional():
 
 
 def test_monster_transform_branch_is_reversible():
-    """正常路径：原始怪物道纹 ⇄ 转化道纹 可反向（如 弱化→(反转)→全力）。
+    """正常路径：原始怪物道纹与转化道纹同处通用四面体三，路径双向。
 
-    2026-10-11 用户令删除【借力】→【全力】的（转换）出边**留空不补**
-    （用户口径：整体大改前不新增道路）；【全力】仍有（反转）→弱化、（曲解）→再生。
-    2026-10-26 用户令：那条（转换）接给【全速】——攻击力⇄攻击次数。
+    2026-11-02 四面体三：反转 强化⇄弱化、全力⇄全速 ｜ 转换 强化⇄全力、弱化⇄全速 ｜
+    曲解 强化⇄全速、弱化⇄全力。每个节点在每种残韵上只有一个出口，不再需要显式选目标。
     """
-    assert R.find_transformation("弱化", "反转", target_daowen="全力") == "全力"
-    assert R.find_transformation("弱化", "反转", target_daowen="强化") == "强化"
-    assert R.find_transformation("弱化", "反转") is None  # 两个真实出口必须显式选目标
-    assert R.find_transformation("再生", "曲解", target_daowen="全力") == "全力"
+    assert R.find_transformation("弱化", "反转") == "强化"
+    assert R.find_transformation("全力", "反转") == "全速"
+    assert R.find_transformation("强化", "转换") == "全力"
+    assert R.find_transformation("弱化", "转换") == "全速"
+    assert R.find_transformation("弱化", "曲解") == "全力"
+    assert R.find_transformation("强化", "曲解") == "全速"
     assert R.find_transformation("寄生", "曲解") is None  # 自愈删除后不补新路径
     assert R.get_available_resonance("全力") == [
-        {"resonance_type": "转换", "target_daowen": "全速", "direction": "正向", "loop": "怪物原始道纹"},
-        {"resonance_type": "反转", "target_daowen": "弱化", "direction": "正向", "loop": "怪物原始道纹"},
-        {"resonance_type": "曲解", "target_daowen": "再生", "direction": "正向", "loop": "怪物原始道纹"},
+        {"resonance_type": "反转", "target_daowen": "全速", "direction": "正向", "loop": "通用四面体三"},
+        {"resonance_type": "转换", "target_daowen": "强化", "direction": "反向", "loop": "通用四面体三"},
+        {"resonance_type": "曲解", "target_daowen": "弱化", "direction": "反向", "loop": "通用四面体三"},
     ]
 
 
-def test_single_ten_node_core_loop():
-    """正常路径：杀伐闭环为唯一核心闭环。
+def test_generic_core_is_four_tetrahedra():
+    """正常路径：通用核心由四面体一~四构成，16 节点 96 个有向关系。
 
-    2026-08-21：冲击改名波及、删缓慢/慈悲/切割；2026-11-01：【透支】移出闭环改
-    出生自带、新增【操作】【迟滞】入环，边 10 → 11（含两个占位节点）。
+    2026-11-02 用户令：环状链 + 占位节点整体改为四面体；【操纵】由【操作】改名，
+    作用次数改为「下X次」。
     """
-    assert "杀伐闭环" in R.CLOSED_LOOPS
     assert "切割闭环" not in R.CLOSED_LOOPS
-    edges = R.CLOSED_LOOPS["杀伐闭环"]
-    assert len(edges) == 11
-    assert sorted(source for source, _, _ in edges) == sorted(target for _, _, target in edges)
-    assert R.find_transformation("连击", "曲解") == "迟滞"
-    assert is_reserved_slot(R.find_transformation("迟滞", "转换"))
-    assert not any("增殖" in (src, dst) for src, _, dst in edges)
-    assert R.find_transformation("超频", "反转", target_daowen="萎缩") == "萎缩"
-    assert R.find_transformation("超频", "反转", target_daowen="增殖") == "增殖"
-    assert R.find_transformation("超频", "反转") is None
-    assert R.find_transformation("增殖", "转换") == "坏死"
-    assert R.find_transformation("波及", "反转") == "遗忘"
-    assert R.find_transformation("封印", "反转") == "杀伐"
+    generic = R.tetrahedra_of_region("通用")
+    assert set(generic) == {"通用四面体一", "通用四面体二", "通用四面体三", "通用四面体四"}
+    assert len(R.edges_of_region("通用")) == 24  # 4 个四面体 × 6 条无向边
+    assert set(R.nodes_of_region("通用")) == {
+        "杀伐", "再生", "庇护", "连击",
+        "操纵", "束缚", "迟滞", "封印",
+        "强化", "弱化", "全力", "全速",
+        "必中", "飞行", "压迫", "篡改",
+    }
+    assert R.find_transformation("连击", "反转") == "庇护"
+    assert R.find_transformation("操纵", "转换") == "迟滞"
+    assert R.find_transformation("迟滞", "反转") == "封印"
+    assert R.find_transformation("杀伐", "曲解") == "庇护"
+    assert R.find_transformation("束缚", "曲解") == "迟滞"
+    # 扭曲都市的两组节点不再同环：超频在四面体一、增殖在四面体二。
+    assert R.find_transformation("超频", "反转") == "萎缩"
+    assert R.find_transformation("增殖", "反转") == "饥饿"
+    assert R.find_transformation("波及", "反转") == "流动"
+    assert R.find_transformation("封印", "反转") == "迟滞"
     for removed in ("冲击", "慈悲", "切割", "缓慢"):
-        assert not any(src == removed or tgt == removed for src, _, tgt in edges)
+        assert removed not in R.nodes_of_region("通用")
 
 
 def test_sunken_sea_former_draft_nodes_can_be_acquired_by_resonance():
     from engine.gamedata import UNIMPLEMENTED_DAOWEN
     for source, rtype, target in (
-        ("回响", "转换", "流动"),
-        ("波及", "反转", "遗忘"),
+        ("回响", "转换", "波及"),
+        ("波及", "反转", "流动"),
+        ("大梦", "曲解", "冰冻"),
     ):
         assert target not in UNIMPLEMENTED_DAOWEN
         result = R.apply_resonance(source, rtype, caster_has_daowen=True,
@@ -141,18 +164,16 @@ def test_race_exclusive_sunken_sea_nodes_cannot_be_acquired_by_resonance():
         assert "不通向" in result["error"]
 
 
-def test_region_loops_present():
-    """正常路径：所有已登记的副本闭环必须存在"""
-    # 2026-10-03：扭曲都市删【爆裂】、龙心谷删【活血】，这两条闭环 8 → 7 条边。
-    # 2026-10-27：罪孽都市移除【消灾】，闭环压缩为7条边。
-    # 2026-10-11：龙心谷删【嫁祸】（效果与遗物【贪婪契约】重复），由【裂变】直连【背负】，7 → 6 条边。
-    # 2026-10-14：扭曲都市删【搏命】（并入【透支】），该格留成空占位符（镇尸先例），仍 7 条边。
-    # 2026-10-29：沉沦海在遗忘—大梦间接入冰冻，主环5 → 6条边。
-    # 2026-10-31：罪孽都市删【抢劫】【勒索】，重画为八条实纹边，7 → 8 条边。
-    expected = {"扭曲都市闭环": 7, "罪孽都市闭环": 8, "龙心谷闭环": 6, "沉沦海闭环": 6}
-    for loop, n in expected.items():
-        assert loop in R.CLOSED_LOOPS, f"缺少 {loop}"
-        assert len(R.CLOSED_LOOPS[loop]) == n, f"{loop} 应有{n}条边"
+def test_region_tetrahedra_present():
+    """正常路径：每个副本的四面体都在，且各自 4 节点 6 边。"""
+    expected = {"扭曲都市": 2, "罪孽都市": 2, "龙心谷": 1, "乱葬岗": 1,
+                "沉沦海": 2, "荒疫古城": 1, "永夜庭": 1}
+    for region, count in expected.items():
+        tetras = R.tetrahedra_of_region(region)
+        assert len(tetras) == count, f"{region} 应有{count}个四面体，实：{list(tetras)}"
+        for name, edges in tetras.items():
+            assert len(edges) == 6, f"{name} 边数应为6"
+            assert len({n for s, _, d in edges for n in (s, d)}) == 4, f"{name} 节点数应为4"
 
 
 def test_monster_daowen_now_transformable():
@@ -169,21 +190,25 @@ def test_monster_daowen_now_transformable():
 # ---------- 边界条件 ----------
 
 def test_disaster_ward_is_removed_from_sin_city_loop():
-    edges = R.CLOSED_LOOPS["罪孽都市闭环"]
-    assert len(edges) == 8
+    edges = R.edges_of_region("罪孽都市")
+    assert len(edges) == 12  # 两个四面体 × 6 边
     assert not any(src == "消灾" or dst == "消灾" for src, _, dst in edges)
     assert R.get_available_resonance("消灾") == []
-    assert R.find_transformation("假钞", "曲解", target_daowen="交易") == "交易"
-    assert R.find_transformation("交易", "转换", target_daowen="赦免") == "赦免"
+    assert R.find_transformation("假钞", "曲解") == "点金"
+    assert R.find_transformation("交易", "转换") == "赦免"
 
 
-def test_region_loops_are_closed():
-    """边界：副本闭环必须真正合拢（每个节点入度=出度=1）"""
-    for loop in ("扭曲都市闭环", "罪孽都市闭环", "龙心谷闭环", "沉沦海闭环"):
-        edges = R.CLOSED_LOOPS[loop]
-        srcs = [s for s, _, _ in edges]
-        dsts = [d for _, _, d in edges]
-        assert sorted(srcs) == sorted(dsts), f"{loop} 未合拢：{sorted(set(srcs) ^ set(dsts))}"
+def test_region_tetrahedra_are_complete_graphs():
+    """边界：每个四面体内 4 个节点两两相连、恰好各一条边。"""
+    for region in ("扭曲都市", "罪孽都市", "龙心谷", "乱葬岗",
+                   "沉沦海", "荒疫古城", "永夜庭"):
+        for name, edges in R.tetrahedra_of_region(region).items():
+            nodes = sorted({n for s, _, d in edges for n in (s, d)})
+            pairs = {frozenset((s, d)) for s, _, d in edges}
+            assert len(pairs) == 6, f"{name} 有重复的节点对"
+            assert all(frozenset((a, b)) in pairs
+                       for i, a in enumerate(nodes) for b in nodes[i + 1:]), \
+                f"{name} 不是完全图"
 
 
 def test_no_duplicate_declared_edge():
@@ -201,32 +226,20 @@ def test_no_duplicate_declared_edge():
 
 
 
-def test_ambiguous_path_requires_explicit_target():
-    """仅在至少两个真实道纹出口仍存在时要求显式选择，不把占位符当候选。"""
-    ambiguous = {(s, t) for s, t, _ in engine_edges() if R.is_ambiguous_path(s, t)}
-    checked = 0
-    for s, t in sorted(ambiguous):
-        candidates = [c["target_daowen"] for c in R.find_transformations(s, t)
-                      if not c.get("reserved")]
-        if len(candidates) < 2:
-            continue
-        checked += 1
-        assert R.find_transformation(s, t) is None
-        res = R.apply_resonance(s, t, True, True, resonance_stock={t: 1})
-        assert res["success"] is False and res.get("ambiguous") is True, (s, t, res)
-        from engine.gamedata import UNIMPLEMENTED_DAOWEN, RACE_EXCLUSIVE_DAOWEN, BLOODLINE_EXCLUSIVE_DAOWEN
-        exclusive = set(BLOODLINE_EXCLUSIVE_DAOWEN) | set(UNIMPLEMENTED_DAOWEN)
-        exclusive |= {name for pool in RACE_EXCLUSIVE_DAOWEN.values() for name in pool}
-        for dst in candidates:
-            assert R.find_transformation(s, t, dst) == dst
-            ok = R.apply_resonance(s, t, True, True, resonance_stock={t: 1}, target_daowen=dst)
-            if dst in exclusive:
-                assert ok["success"] is False, (s, t, dst, ok)
-            else:
-                assert ok["success"] is True and ok["target"] == dst, (s, t, dst, ok)
-        bad = R.apply_resonance(s, t, True, True, resonance_stock={t: 1}, target_daowen="不存在的道纹")
-        assert bad["success"] is False
-    assert checked > 0, "仍应存在至少一个具有多个真实出口的歧义路径"
+def test_tetrahedra_have_no_ambiguous_single_outlet():
+    """边界：四面体拓扑下每个（源, 残韵）至多一个真实出口，不再需要显式选目标。
+
+    2026-11-02 之前是环状链 + 分叉，同一源同一残韵会有两个出口；改四面体后
+    每条边的两端都唯一，`find_transformation` 不再返回 None，也不该出现歧义。
+    """
+    for s, t, d in engine_edges():
+        assert R.is_ambiguous_path(s, t) is False, f"{s}--{t}-->{d} 仍是歧义路径"
+        assert R.find_transformation(s, t) is not None
+    res = R.apply_resonance("杀伐", "反转", True, True, resonance_stock={"反转": 1})
+    assert res["success"] is True and res["target"] == "再生"
+    bad = R.apply_resonance("杀伐", "反转", True, True, resonance_stock={"反转": 1},
+                            target_daowen="不存在的道纹")
+    assert bad["success"] is False
 
 
 

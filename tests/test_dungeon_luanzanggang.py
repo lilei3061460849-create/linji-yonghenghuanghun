@@ -31,32 +31,27 @@ def test_dungeon_daowen_registered():
         assert isinstance(r, dict) and r["dao_wen"] == name
 
 
-def test_dungeon_resonance_loop_complete():
-    """正常路径：乱葬岗残韵闭环7条路径全部可达。
+def test_dungeon_resonance_tetrahedron_complete():
+    """正常路径：乱葬岗四面体（4 节点 6 边）全部可达。
 
-    遗物化的【缄默】【冥气】各自保留为独立「？？」节点，不与相邻道纹直连。
-    2026-10-29：既有【凋零】补入勾魂与招魂之间，环仍是7条边；
-    其余遗物化空位继续保留且不可获得。
+    2026-11-02 用户令：遗物化占位（缄默／瓦解／冥气）整体撤销，四面体四个节点
+    全是真实道纹；任两节点恰好一条边，三种残韵各两条。
     """
     DaoWenEngine.register_all()
-    slots = RELICIZED_DAOWEN_SLOTS
     expected_edges = [
-        ("分裂", "转换", slots["缄默"]),
-        (slots["缄默"], "曲解", slots["瓦解"]),
-        (slots["瓦解"], "转换", slots["冥气"]),
-        (slots["冥气"], "反转", "勾魂"),
-        ("勾魂", "曲解", "凋零"),
-        ("凋零", "曲解", "招魂"),
-        ("招魂", "转换", "分裂"),
+        ("分裂", "反转", "凋零"), ("招魂", "反转", "勾魂"),
+        ("分裂", "转换", "招魂"), ("凋零", "转换", "勾魂"),
+        ("分裂", "曲解", "勾魂"), ("凋零", "曲解", "招魂"),
     ]
-    edges = ResonanceEngine.CLOSED_LOOPS["乱葬岗闭环"]
-    assert len(edges) == 7
+    edges = ResonanceEngine.CLOSED_LOOPS["乱葬岗四面体"]
+    assert len(edges) == 6
     for edge in expected_edges:
-        assert edge in edges, f"乱葬岗闭环缺少边 {edge}"
-    sources = {src for src, _, _ in edges}
-    targets = {dst for _, _, dst in edges}
-    assert sources == targets, "闭环每个节点都必须恰有前后相邻边"
-    assert all(name not in DaoWenEngine._registry for name in slots.values())
+        assert edge in edges, f"乱葬岗四面体缺少边 {edge}"
+    nodes = {n for src, _, dst in edges for n in (src, dst)}
+    assert nodes == {"分裂", "凋零", "招魂", "勾魂"}
+    assert all(name in DaoWenEngine._registry for name in nodes)
+    # 旧占位名不再出现在关系表里
+    assert all(slot not in nodes for slot in RELICIZED_DAOWEN_SLOTS.values())
 
 
 def test_reserved_slot_not_obtainable():
@@ -66,14 +61,14 @@ def test_reserved_slot_not_obtainable():
     """
     DaoWenEngine.register_all()
     stock = {"转换": 3, "曲解": 3}
+    # 2026-11-02：占位符整批撤销，任何旧占位名都不再是残韵结果。
     r = ResonanceEngine.apply_resonance(
         "分裂", "转换", True, True, dict(stock),
         target_daowen=RELICIZED_DAOWEN_SLOTS["缄默"])
     assert r["success"] is False
-    assert r.get("reserved") is True
-    assert stock["转换"] == 3, "走到空占位符不得消耗残韵"
-    # 旧待补格现在通向真实道纹【凋零】，不再按空位拒绝。
-    r2 = ResonanceEngine.apply_resonance("勾魂", "曲解", True, True, dict(stock),
+    assert stock["转换"] == 3, "非法目标不得消耗残韵"
+    # 真实边照常成立：勾魂 --转换--> 凋零（四面体：转换 分裂⇄招魂、凋零⇄勾魂）。
+    r2 = ResonanceEngine.apply_resonance("勾魂", "转换", True, True, dict(stock),
                                          target_daowen="凋零")
     assert r2["success"] is True and r2["target"] == "凋零"
     assert RESERVED_SLOT not in DaoWenEngine._registry
@@ -81,7 +76,7 @@ def test_reserved_slot_not_obtainable():
     assert RESERVED_SLOT not in REGION_EXCLUSIVE_DAOWEN.get("乱葬岗", set())
     assert RESERVED_SLOT not in MONSTER_TRANSFORM_DAOWEN
     assert all(RESERVED_SLOT not in (src, dst)
-               for src, _, dst in ResonanceEngine.CLOSED_LOOPS["乱葬岗闭环"])
+               for src, _, dst in ResonanceEngine.CLOSED_LOOPS["乱葬岗四面体"])
 
 
 # ---------- 区域与怪物池 ----------

@@ -17,22 +17,22 @@ def test_wave_moves_from_generic_loop_to_sunken_sea():
     assert "蜃景" not in REGION_EXCLUSIVE_DAOWEN["沉沦海"]
     assert RACE_EXCLUSIVE_DAOWEN["鲛族"] == {"唤潮", "蜃景"}
 
-    loops = ResonanceEngine.CLOSED_LOOPS
-    shafa = loops["杀伐闭环"]
-    assert ("迟滞", "转换", RELOCATED_DAOWEN_SLOTS["增殖"]) in shafa
-    assert not any("波及" in (src, dst) for src, _, dst in shafa)
-    assert not any("增殖" in (src, dst) for src, _, dst in shafa)
+    generic = ResonanceEngine.edges_of_region("通用")
+    assert not any("波及" in (src, dst) for src, _, dst in generic)
+    assert not any("增殖" in (src, dst) for src, _, dst in generic)
 
-    sea = loops["沉沦海闭环"]
-    assert sea == [
-        ("流动", "转换", "波及"),
-        ("波及", "反转", "遗忘"),
-        ("遗忘", "曲解", "冰冻"),
-        ("冰冻", "曲解", "大梦"),
-        ("大梦", "曲解", "回响"),
-        ("回响", "转换", "流动"),
-    ]
-    assert loops["沉沦海分叉"] == [("大梦", "反转", "沉溺")]
+    tetra = ResonanceEngine.tetrahedra_of_region("沉沦海")
+    assert set(tetra) == {"沉沦海·四面体一", "沉沦海·四面体二"}
+    assert set(tetra["沉沦海·四面体一"]) == {
+        ("回响", "反转", "遗忘"), ("流动", "反转", "波及"),
+        ("回响", "转换", "波及"), ("遗忘", "转换", "流动"),
+        ("回响", "曲解", "流动"), ("遗忘", "曲解", "波及"),
+    }
+    assert set(tetra["沉沦海·四面体二"]) == {
+        ("大梦", "反转", "沉溺"), ("冰冻", "反转", "涌潮"),
+        ("大梦", "转换", "涌潮"), ("沉溺", "转换", "冰冻"),
+        ("大梦", "曲解", "冰冻"), ("沉溺", "曲解", "涌潮"),
+    }
 
 
 def test_deleted_sunken_sea_daowen_and_panel_tags_are_gone():
@@ -42,13 +42,13 @@ def test_deleted_sunken_sea_daowen_and_panel_tags_are_gone():
     assert "扩散" not in dungeon
     assert "映照" not in index
     assert "扩散" not in index
-    assert "道纹数量7" in dungeon
+    assert "道纹数量8" in dungeon  # 2026-11-02 新增【涌潮】
     indexed_count = len(re.findall(r"^### [\u4e00-\u9fff]{2}$", index, re.M))
     assert f"当前索引收录道纹（{indexed_count}种）" in index
     assert "流动】【遗忘】已接入运行时" in index
-    assert "杀伐闭环（通用核心）8" in index
-    assert "扭曲都市专属（6）" in index
-    assert "沉沦海专属（7）" in index
+    assert "杀伐闭环（通用核心）8" in index  # 通用四面体一·二共 8 节点
+    assert "扭曲都市专属（8）" in index  # 补【饥饿】【扭曲】
+    assert "沉沦海专属（8）" in index  # 补【涌潮】
     assert "鲛族专属（2）" in index
     assert "褪鳞蟹（264/18/3，唤潮，庇护，遗物【减速】）" in dungeon
     assert "珊瑚囚徒（276/20/3，唤潮，蜃景，连击，庇护）" in dungeon

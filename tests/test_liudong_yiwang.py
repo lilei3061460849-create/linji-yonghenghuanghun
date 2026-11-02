@@ -223,9 +223,10 @@ def test_monster_phase_liudong_uses_explicit_destination_and_status():
 
 
 def test_new_sin_city_nodes_fill_existing_loop_slots_without_losing_spur():
-    assert ResonanceEngine.find_transformation("假钞", "曲解", "交易") == "交易"
+    # 2026-11-02 四面体：罪孽一 曲解 点金⇄假钞；乱葬岗 曲解 分裂⇄勾魂、凋零⇄招魂。
+    assert ResonanceEngine.find_transformation("假钞", "曲解", "点金") == "点金"
     assert ResonanceEngine.find_transformation("交易", "转换", "赦免") == "赦免"
     assert ResonanceEngine.find_transformation("点金", "反转", "烁金") == "烁金"
-    assert ResonanceEngine.find_transformation("勾魂", "曲解", "凋零") == "凋零"
+    assert ResonanceEngine.find_transformation("勾魂", "曲解", "分裂") == "分裂"
     assert ResonanceEngine.find_transformation("凋零", "曲解", "招魂") == "招魂"
     assert ResonanceEngine.find_transformation("勾魂", "曲解", "（待补）") is None

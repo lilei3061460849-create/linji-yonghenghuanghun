@@ -183,13 +183,15 @@ def test_resonance_conversion_does_not_clear_active_gouhun():
     e.combat.apply_daowen_effect("勾魂", calc, m, p)
     assert p.has_status("勾魂")
 
-    # 玩家尝试沿已删除的【冥气】分支转化，必须被拒绝
+    # 2026-11-02 四面体：勾魂的反转出口是【招魂】（反转 招魂⇄勾魂），
+    # 旧【冥气】占位已撤销；转化本身成功，但不得清除玩家身上已生效的勾魂。
     e.state.resonance = {"反转": 1}
     r = e.execute_action("use_resonance", {"source_daowen": "勾魂",
                                            "resonance_type": "反转",
                                            "target_ref": "enemy:0"})
-    assert r.get("success") is False, r
-    assert "勾魂" in m.dao_wen and not any(name.startswith("？？") for name in m.dao_wen), "删除的遗物化道纹不可授予"
+    assert r.get("success") is True, r
+    assert "招魂" in m.dao_wen and "勾魂" not in m.dao_wen
+    assert not any(name.startswith("？？") for name in m.dao_wen), "占位符不得进入牌面"
 
     # 裁定要点：玩家身上已生效的勾魂**不**被清除，继续按剩余持续压制
     assert p.has_status("勾魂"), "转化不得清除已生效的 debuff"
@@ -198,17 +200,16 @@ def test_resonance_conversion_does_not_clear_active_gouhun():
     assert p.gain_mana(5) == 0
     assert p.current_mana == 20, "转化后勾魂仍应让玩家无法获得法力"
 
-    assert e.state.resonance["反转"] == 1, "走到已遗物化占位符不消耗残韵"
+    assert e.state.resonance["反转"] == 0, "真实转化照常消耗一次残韵"
 
 
 
 
-def test_resonance_into_reserved_slot_is_refused():
-    """边界（2026-10-08 删【镇尸】；2026-10-29 勾魂—凋零补格）：残韵通向闭环空占位符，不可获得。
+def test_resonance_into_former_placeholder_now_grants_tamper():
+    """边界（2026-11-02 四面体）：原「必中—转换→？？」空位由【篡改】补齐。
 
-    旧行为：勾魂 —(曲解)→ 镇尸，玩家可把怪物的勾魂转成镇尸。
-    现行：勾魂—曲解—凋零已是真边，空位改由【必中】的【转换】承载——
-    走到占位符＝无事发生：失败、不消耗残韵、怪物牌面不变、施法者也不获得任何道纹。
+    篡改由荒疫古城移入通用后不再是占位符：必中—转换—篡改是真边，
+    转化成功、消耗 1 次残韵、双方向都拿到真实道纹。
     """
     import os
     from engine.api import GameEngine
@@ -238,8 +239,8 @@ def test_resonance_into_reserved_slot_is_refused():
     r = e.execute_action("use_resonance", {"source_daowen": "必中",
                                            "resonance_type": "转换",
                                            "target_ref": "enemy:0"})
-    assert r.get("success") is False, f"通向空占位符的残韵应失败，实：{r}"
-    assert e.state.resonance.get("转换") == 1, "失败不应消耗残韵"
-    assert "必中" in m.dao_wen, "怪物牌面不应被改写"
-    assert RESERVED_SLOT not in m.dao_wen, "空占位符不得进入任何人的道纹列表"
-    assert RESERVED_SLOT not in p.dao_wen, "施法者也不得获得空占位符"
+    assert r.get("success") is True, r
+    assert e.state.resonance.get("转换") == 0, "真实转化照常消耗残韵"
+    assert "篡改" in m.dao_wen and "必中" not in m.dao_wen, "怪物牌面应被改写为篡改"
+    assert "篡改" in p.dao_wen, "施法者同时永久获得"
+    assert RESERVED_SLOT not in m.dao_wen and RESERVED_SLOT not in p.dao_wen

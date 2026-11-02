@@ -27,16 +27,17 @@ RELICIZED_DAOWEN_SLOTS = {name: f"？？〔{name}〕" for name in (
 RELOCATED_DAOWEN_SLOTS = {name: f"（待补）〔{name}〕" for name in ("增殖",)}
 
 
-# 【操作】可以被施法者预指定的行动种类（施法本身不在其中）。
+# 【操纵】可以被施法者预指定的行动种类（施法本身不在其中）。
+# 2026-11-02 用户令：【操作】改名【操纵】，作用次数由「下一次」改为「下X次」。
 CAOZUO_ORDER_ACTIONS = ("攻击", "跳过", "使用消耗品")
 
 
 def normalize_caozuo_order(order):
-    """规范化【操作】的预指定行动。None＝未预指定（到点作废、代价不退）。"""
+    """规范化【操纵】的指令。None＝未给指令（到点作废、代价不退）。"""
     if order is None:
         return None
     if not isinstance(order, dict):
-        raise ValueError("操作的预指定行动必须是对象")
+        raise ValueError("操纵的预指定行动必须是对象")
     kind = order.get("action")
     if kind == "跳过":
         return {"action": "跳过"}
@@ -71,7 +72,7 @@ def normalize_caozuo_order(order):
                 })
             hits = normalized
         return {"action": "攻击", "target_ref": target_ref, "hits": hits}
-    raise ValueError(f"操作的预指定行动只能用{'/'.join(CAOZUO_ORDER_ACTIONS)}")
+    raise ValueError(f"操纵的预指定行动只能用{'/'.join(CAOZUO_ORDER_ACTIONS)}")
 
 
 def is_reserved_slot(name) -> bool:
@@ -84,7 +85,7 @@ def is_reserved_slot(name) -> bool:
 
 # 道纹改名别名（旧档/旧面板读入时映射；引擎注册表只收新名，旧名提交照常报未知道纹）。
 # 2026-10-22 用户令：【血债】改名【连击】并扩为多支付道纹，旧名只许在读入边界被映射。
-LEGACY_DAOWEN_ALIASES = {"血债": "连击"}
+LEGACY_DAOWEN_ALIASES = {"血债": "连击", "操作": "操纵"}
 
 
 def normalize_daowen_name(name):
@@ -575,20 +576,95 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_caozuo(x: int, target: Entity = None, order: Optional[dict] = None) -> dict:
-        """操作X：支付：法限X。[目标]除施法外的下一次行动由你决定。
+        """操纵X（2026-11-02 由【操作】改名）：支付：法限X。
 
-        施法者须在发动时预指定那一次行动（`order`）；未指定则效果作废、代价不退。
-        预指定的内容由【操作】状态记录，目标的下一次非施法行动必须照此执行。
+        使[目标]接下来 **X 次**除施法外的行动由你控制（旧版只管「下一次」）。
+        控制的实现方式仍是「施法者在发动/控制时给出指令」：`order` 由【操纵】状态
+        记录，目标每做一次非施法行动都必须照此执行，并消耗 1 次名额；名额用完状态
+        消失。未给出指令时状态作废、代价不退（沿用既有口径）。
         """
         target_name = target.name if target is not None else "未选定目标"
         return {
-            "dao_wen": "操作",
+            "dao_wen": "操纵",
             "x": x,
             "cost_type": CostType.SHRINK.value,
             "cost_mana_cap": x,
             "caozuo_order": order,
-            "summary": (f"支付：法限{x}，{target_name}除施法外的下一次行动由施法者决定"
-                        if order else f"支付：法限{x}，{target_name}除施法外的下一次行动由施法者决定（未预指定，将作废）"),
+            "manipulation_uses": x,
+            "summary": (f"支付：法限{x}，{target_name}接下来{x}次除施法外的行动由施法者控制"
+                        if order else
+                        f"支付：法限{x}，{target_name}接下来{x}次除施法外的行动由施法者控制（未预指定，将作废）"),
+        }
+
+    @staticmethod
+    def calculate_ji_e(x: int, target: Entity = None) -> dict:
+        """饥饿X（2026-11-02 用户令补回漏项）：支付：法力2X。
+
+        使[目标]的[血限]等同其当前生命，持续X；到期恢复施加前的[血限]。
+        """
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        hp = int(getattr(target, "current_hp", 0) or 0) if target is not None else 0
+        return {
+            "dao_wen": "饥饿", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 2 * x,
+            "duration": x,
+            "hunger_blood_limit": True,
+            "summary": f"支付：法力{2 * x}，使{target_name}的血限等同其当前生命"
+                       f"（{hp}），持续{x}",
+        }
+
+    @staticmethod
+    def calculate_niuqu(x: int, target: Entity = None) -> dict:
+        """扭曲X（2026-11-02 用户令新增）：支付：法力3X。
+
+        使[目标]的累积治疗量翻倍X次（×2^X）；翻倍后立即按[癌变]阈值复核一次。
+        """
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "扭曲", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 3 * x,
+            "heal_accumulation_doublings": x,
+            "summary": f"支付：法力{3 * x}，使{target_name}的累积治疗量翻倍{x}次（×{2 ** x}）",
+        }
+
+    @staticmethod
+    def calculate_cuihuo(x: int, target: Entity = None) -> dict:
+        """淬火X（2026-11-02 用户令新增）：支付：法力2X。
+
+        使[目标]所有消耗品的当前耐久 +X（不超过各自的耐久上限）。
+        """
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "淬火", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 2 * x,
+            "consumable_durability_gain": x,
+            "summary": f"支付：法力{2 * x}，使{target_name}所有消耗品当前耐久+{x}",
+        }
+
+    @staticmethod
+    def calculate_yongchao(x: int, target: Entity = None) -> dict:
+        """涌潮X（2026-11-02 用户令新增，源出遗物【苍白之花】）：支付：法限X。
+
+        使[目标]的[法限]变为无限——当前法力可以突破法限，持续X回合；到期把
+        当前法力压回原法限。
+        """
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "涌潮", "x": x,
+            "cost_type": CostType.SHRINK.value,
+            "cost_mana_cap": x,
+            "duration": x,
+            "infinite_mana_limit": True,
+            "summary": f"支付：法限{x}，使{target_name}的法限变为∞（法力可突破法限），"
+                       f"持续{x}回合",
         }
 
     @staticmethod
@@ -1111,7 +1187,12 @@ class DaoWenEngine:
             "增殖": cls.calculate_zengzhi,
             "束缚": cls.calculate_shufu,
             "透支": cls.calculate_touzhi,
-            "操作": cls.calculate_caozuo,
+            "操纵": cls.calculate_caozuo,
+            # 2026-11-02 用户令：四面体补位新增/漏项补回。
+            "饥饿": cls.calculate_ji_e,
+            "扭曲": cls.calculate_niuqu,
+            "淬火": cls.calculate_cuihuo,
+            "涌潮": cls.calculate_yongchao,
             "迟滞": cls.calculate_chizhi,
             "封印": cls.calculate_fengyin,
             "怜悯": cls.calculate_lianmin,
@@ -1259,125 +1340,142 @@ class ResonanceEngine:
     「闭环 N 条边」的口径翻倍。
     """
 
-    # 闭环结构定义
+    # ==================== 道纹关系表（2026-11-02 用户令·四面体大改）====================
+    # 每个「四面体」= 4 个节点、6 条边：3 条反转 + 3 条转换 + 3 条曲解，任两节点恰好
+    # 由一种残韵相连。旧「闭环环状链 + 遗物化？？占位」的写法整体废止——空位（固执／
+    # 贯穿／感染／重演／原初／退化／畸变／缄默／瓦解／冥气／洞察／蒙蔽）不再占位，
+    # 缺的节点由【饥饿】【扭曲】【淬火】【涌潮】【操纵】补齐。
+    #
+    # 边表仍按「无向边」登记（规则正文·残韵作用第6条）：一条边两头互为相邻节点，
+    # 两个方向都走同一种残韵、支付同样一次；反向由 find_transformations 查询时展开。
     CLOSED_LOOPS = {
-        "杀伐闭环": [
-            ("杀伐", "反转", "再生"),
-            ("再生", "曲解", "庇护"),
-            ("庇护", "曲解", RELICIZED_DAOWEN_SLOTS["固执"]),
-            (RELICIZED_DAOWEN_SLOTS["固执"], "反转", "连击"),
-            # 波及迁入沉沦海、增殖迁入扭曲都市后，原位保留待补节点，不直连。
-            # 删除慈悲/切割/缓慢后保留既有空位；贯穿→(曲解)束缚：概念腐化。
-            # 2026-11-01 用户令：【透支】移出闭环，改为任意角色出生自带；两侧直连。
-            (RELOCATED_DAOWEN_SLOTS["增殖"], "曲解", RELICIZED_DAOWEN_SLOTS["贯穿"]),
-            (RELICIZED_DAOWEN_SLOTS["贯穿"], "曲解", "束缚"),
-            # 2026-11-01 用户令：【操作】【迟滞】两条新通用道纹进杀伐闭环。
-            # 操作＝夺取目标的行动，接在束缚之后（曲解：保留「限制行动」核心，改为主语易位）；
-            # 迟滞＝让每次出手更贵，接在连击之后（反转：同域翻极性，多出手↔出手加价）。
-            ("束缚", "曲解", "操作"),
-            ("操作", "曲解", "封印"),
-            ("连击", "曲解", "迟滞"),
-            ("迟滞", "转换", RELOCATED_DAOWEN_SLOTS["增殖"]),
-            ("封印", "反转", "杀伐"),
+        # ---- 通用（四面体一~四）----
+        "通用四面体一": [
+            ("杀伐", "反转", "再生"), ("连击", "反转", "庇护"),
+            ("杀伐", "转换", "连击"), ("再生", "转换", "庇护"),
+            ("杀伐", "曲解", "庇护"), ("再生", "曲解", "连击"),
         ],
-        # ---- 副本专属闭环（规则正文·副本专属道纹网络）----
-        "扭曲都市闭环": [
-            ("变形", "转换", "定型"),
-            ("定型", "反转", RELICIZED_DAOWEN_SLOTS["畸变"]),
-            (RELICIZED_DAOWEN_SLOTS["畸变"], "曲解", "超频"),
-            # 增殖由杀伐闭环迁入扭曲都市，占据超频与坏死之间的原待补位。
-            ("超频", "反转", "增殖"),
-            ("增殖", "转换", "坏死"),
-            # 【退化】已遗物化：该节点保留独立「？？」占位。
-            ("坏死", "曲解", RELICIZED_DAOWEN_SLOTS["退化"]),
-            (RELICIZED_DAOWEN_SLOTS["退化"], "转换", "变形"),
+        "通用四面体二": [
+            ("操纵", "反转", "束缚"), ("迟滞", "反转", "封印"),
+            ("操纵", "转换", "迟滞"), ("束缚", "转换", "封印"),
+            ("操纵", "曲解", "封印"), ("束缚", "曲解", "迟滞"),
         ],
-        "扭曲都市分叉": [
-            ("超频", "反转", "萎缩"),
+        "通用四面体三": [
+            ("强化", "反转", "弱化"), ("全力", "反转", "全速"),
+            ("强化", "转换", "全力"), ("弱化", "转换", "全速"),
+            ("强化", "曲解", "全速"), ("弱化", "曲解", "全力"),
         ],
-        "罪孽都市闭环": [
-            # 2026-10-31 用户令：删【抢劫】【勒索】【清算】占位，主环重画为八节点八边。
-            ("点金", "反转", "烁金"),
-            ("烁金", "转换", "假钞"),
-            ("假钞", "曲解", "交易"),
-            ("交易", "转换", "赦免"),
-            ("赦免", "反转", "贿赂"),
-            ("贿赂", "曲解", "豪夺"),
-            ("豪夺", "转换", "典当"),
-            ("典当", "曲解", "点金"),
+        "通用四面体四": [
+            ("必中", "反转", "飞行"), ("压迫", "反转", "篡改"),
+            ("必中", "转换", "篡改"), ("飞行", "转换", "压迫"),
+            ("必中", "曲解", "压迫"), ("飞行", "曲解", "篡改"),
         ],
-        "龙心谷闭环": [
-            (RELICIZED_DAOWEN_SLOTS["加害"], "反转", RELICIZED_DAOWEN_SLOTS["龙鳞"]),
-            (RELICIZED_DAOWEN_SLOTS["龙鳞"], "曲解", RELICIZED_DAOWEN_SLOTS["逆鳞"]),
-            (RELICIZED_DAOWEN_SLOTS["逆鳞"], "转换", RELICIZED_DAOWEN_SLOTS["裂变"]),
-            # 2026-10-11 用户令（A13）：【嫁祸】整条删除（效果与遗物【贪婪契约】重复）
-            #   → 沿用活血/尸爆的删除先例：断边**重连**为 裂变—转换→背负，环长 7→6。
-            (RELICIZED_DAOWEN_SLOTS["裂变"], "转换", RELICIZED_DAOWEN_SLOTS["背负"]),
-            (RELICIZED_DAOWEN_SLOTS["背负"], "曲解", RELICIZED_DAOWEN_SLOTS["伤痕"]),
-            (RELICIZED_DAOWEN_SLOTS["伤痕"], "转换", RELICIZED_DAOWEN_SLOTS["加害"]),
+        # ---- 罪孽都市（四面体一~二）----
+        "罪孽都市·四面体一": [
+            ("点金", "反转", "烁金"), ("假钞", "反转", "典当"),
+            ("点金", "转换", "典当"), ("烁金", "转换", "假钞"),
+            ("点金", "曲解", "假钞"), ("烁金", "曲解", "典当"),
         ],
-        "荒疫古城闭环": [
-            ("感染", "反转", "净化"),
-            ("净化", "曲解", "出土"),
-            ("出土", "转换", "篡改"),
-            ("篡改", "曲解", "唯一"),
-            ("唯一", "反转", "催化"),
-            ("催化", "转换", "重演"),
-            ("重演", "反转", "原初"),
-            ("原初", "转换", "感染"),
+        "罪孽都市·四面体二": [
+            ("交易", "反转", "豪夺"), ("赦免", "反转", "贿赂"),
+            ("交易", "转换", "赦免"), ("豪夺", "转换", "贿赂"),
+            ("交易", "曲解", "贿赂"), ("豪夺", "曲解", "赦免"),
         ],
-        "荒疫古城分叉": [
-            ("重演", "反转", "唯一"),
+        # ---- 扭曲都市（四面体一~二）----
+        "扭曲都市·四面体一": [
+            ("超频", "反转", "萎缩"), ("变形", "反转", "定型"),
+            ("超频", "转换", "变形"), ("萎缩", "转换", "定型"),
+            ("超频", "曲解", "定型"), ("萎缩", "曲解", "变形"),
         ],
-        "乱葬岗闭环": [
-            # 【缄默】已遗物化：该节点保留独立「？？」占位，不与相邻节点直连。
-            ("分裂", "转换", RELICIZED_DAOWEN_SLOTS["缄默"]),
-            (RELICIZED_DAOWEN_SLOTS["缄默"], "曲解", RELICIZED_DAOWEN_SLOTS["瓦解"]),
-            (RELICIZED_DAOWEN_SLOTS["瓦解"], "转换", RELICIZED_DAOWEN_SLOTS["冥气"]),
-            (RELICIZED_DAOWEN_SLOTS["冥气"], "反转", "勾魂"),
-            # 2026-10-29：既有【凋零】补入勾魂—招魂之间的待补格；环仍为7条边。
-            ("勾魂", "曲解", "凋零"),
-            ("凋零", "曲解", "招魂"),
-            ("招魂", "转换", "分裂"),
+        "扭曲都市·四面体二": [
+            ("增殖", "反转", "饥饿"), ("扭曲", "反转", "坏死"),
+            ("增殖", "转换", "扭曲"), ("饥饿", "转换", "坏死"),
+            ("增殖", "曲解", "坏死"), ("饥饿", "曲解", "扭曲"),
         ],
-        "沉沦海闭环": [
-            ("流动", "转换", "波及"),
-            ("波及", "反转", "遗忘"),
-            ("遗忘", "曲解", "冰冻"),
-            ("冰冻", "曲解", "大梦"),
-            ("大梦", "曲解", "回响"),
-            ("回响", "转换", "流动"),
+        # ---- 乱葬岗（四面体）----
+        "乱葬岗四面体": [
+            ("分裂", "反转", "凋零"), ("招魂", "反转", "勾魂"),
+            ("分裂", "转换", "招魂"), ("凋零", "转换", "勾魂"),
+            ("分裂", "曲解", "勾魂"), ("凋零", "曲解", "招魂"),
         ],
-        # 大梦的反转分支不进六节点主环；双向查询仍由统一边表展开。
-        "沉沦海分叉": [
-            ("大梦", "反转", "沉溺"),
+        # ---- 永夜庭（四面体）----
+        "永夜庭四面体": [
+            ("血契", "反转", "共罪"), ("不死", "反转", "怜悯"),
+            ("血契", "转换", "怜悯"), ("共罪", "转换", "不死"),
+            ("血契", "曲解", "不死"), ("共罪", "曲解", "怜悯"),
         ],
-        # ---- 原始怪物道纹 → 转化道纹（规则正文）----
-        # 非闭环，是以原始道纹为根的分支树；怪物面板上的道纹多属此类，
-        # 残韵边保留独立占位节点；飞行属于原始怪物道纹，压迫属于其转化道纹。
-        "怪物原始道纹": [
-            # 2026-10-03 删除（用户令）：("狂暴", "转换", "愤怒"),
-            # 2026-10-03 删除（用户令）：("狂暴", "曲解", "无神"),
-            # 2026-10-11 删除（用户令 A14）：("全力", "转换", "借力"),
-            #   【借力】整条删除。按用户口径「在没有整体大改之前，增加新道路纯粹
-            #   增加工作量」，这条断边**不补新道路**（与活血/尸爆/嫁祸的重连先例不同）。
-            #   【全力】保留 反转→弱化；曲解原通向【自食】，现并入【再生】。
-            # 2026-10-26 用户令：【全速】与【全力】接上——两者同为「把某项面板顶到上限」
-            # 的化身，攻击力⇄攻击次数，用【转换】相连（此前【减速】遗物化后【全速】无入边）。
-            ("全力", "转换", "全速"),
-            ("全力", "反转", "弱化"),
-            ("弱化", "反转", "强化"),
-            ("全力", "曲解", "再生"),
-            # 2026-10-25 用户令：【疯狂】【减速】遗物化，退出道纹体系，
-            # 各自的残韵边随节点一并撤销。
-            ("必中", "转换", RELICIZED_DAOWEN_SLOTS["洞察"]),
-            ("必中", "反转", RELICIZED_DAOWEN_SLOTS["蒙蔽"]),
-            # 2026-10-03 删除（用户令）：("飞行", "转换", "滑翔")。
-            # 2026-10-29 用户令：飞行恢复为冷却X道纹，反转为目标限制【压迫】。
-            ("飞行", "反转", "压迫"),
+        # ---- 龙心谷（四面体）----
+        "龙心谷四面体": [
+            ("锻造", "反转", "熔化"), ("炽热", "反转", "淬火"),
+            ("锻造", "转换", "淬火"), ("熔化", "转换", "炽热"),
+            ("锻造", "曲解", "炽热"), ("熔化", "曲解", "淬火"),
+        ],
+        # ---- 沉沦海（四面体一~二）----
+        "沉沦海·四面体一": [
+            ("回响", "反转", "遗忘"), ("流动", "反转", "波及"),
+            ("回响", "转换", "波及"), ("遗忘", "转换", "流动"),
+            ("回响", "曲解", "流动"), ("遗忘", "曲解", "波及"),
+        ],
+        "沉沦海·四面体二": [
+            ("大梦", "反转", "沉溺"), ("冰冻", "反转", "涌潮"),
+            ("大梦", "转换", "涌潮"), ("沉溺", "转换", "冰冻"),
+            ("大梦", "曲解", "冰冻"), ("沉溺", "曲解", "涌潮"),
+        ],
+        # ---- 荒疫古城（四面体）----
+        "荒疫古城四面体": [
+            ("出土", "反转", "唯一"), ("催化", "反转", "净化"),
+            ("出土", "转换", "催化"), ("唯一", "转换", "净化"),
+            ("出土", "曲解", "净化"), ("唯一", "曲解", "催化"),
         ],
     }
-    
+
+    # 四面体 → 所属副本（"通用" = 不属于任何副本）。归属与残韵是两张表：
+    # 归属看 gamedata 的 REGION_EXCLUSIVE_DAOWEN，关系看这里。
+    TETRAHEDRON_REGION = {
+        "通用四面体一": "通用", "通用四面体二": "通用",
+        "通用四面体三": "通用", "通用四面体四": "通用",
+        "罪孽都市·四面体一": "罪孽都市", "罪孽都市·四面体二": "罪孽都市",
+        "扭曲都市·四面体一": "扭曲都市", "扭曲都市·四面体二": "扭曲都市",
+        "乱葬岗四面体": "乱葬岗", "永夜庭四面体": "永夜庭",
+        "龙心谷四面体": "龙心谷",
+        "沉沦海·四面体一": "沉沦海", "沉沦海·四面体二": "沉沦海",
+        "荒疫古城四面体": "荒疫古城",
+    }
+
+    @classmethod
+    def tetrahedra_of_region(cls, region: str) -> dict[str, list]:
+        """该副本的全部四面体（"通用" 取通用四面体）。顺序=表内声明序。"""
+        return {name: edges for name, edges in cls.CLOSED_LOOPS.items()
+                if cls.TETRAHEDRON_REGION.get(name) == region}
+
+    @classmethod
+    def edges_of_region(cls, region: str) -> list:
+        """该副本全部四面体的边（扁平表）；供索引生成与门禁查询共用。"""
+        out: list = []
+        for edges in cls.tetrahedra_of_region(region).values():
+            out.extend(edges)
+        return out
+
+    @classmethod
+    def nodes_of_region(cls, region: str) -> list[str]:
+        """该副本四面体里的全部节点（去重、按表内出场序）。"""
+        out: list[str] = []
+        for edges in cls.tetrahedra_of_region(region).values():
+            for src, _rtype, dst in edges:
+                for name in (src, dst):
+                    if name not in out:
+                        out.append(name)
+        return out
+
+    @classmethod
+    def tetrahedron_of(cls, daowen_name: str) -> str:
+        """该道纹所在的四面体名；不在任何四面体里返回空串。"""
+        for name, edges in cls.CLOSED_LOOPS.items():
+            for src, _rtype, dst in edges:
+                if daowen_name in (src, dst):
+                    return name
+        return ""
+
     @classmethod
     def find_transformations(cls, source_daowen: str, resonance_type: str) -> list[dict]:
         """

@@ -25,11 +25,11 @@ from ..models import MONSTER_MANA_RELIC
 
 
 class CostPaymentMixin:
-    # ==================== 【操作】：目标的下一次非施法行动由施法者决定 ====================
+    # ============ 【操纵】：目标接下来X次非施法行动由施法者控制 ============
 
     def caozuo_status_of(self, entity: Entity):
-        """返回该实体身上仍生效的【操作】状态。"""
-        return next((s for s in entity.get_status_effects("操作") if not s.is_expired), None)
+        """返回该实体身上仍生效的【操纵】状态（方法名沿用旧名 caozuo_*）。"""
+        return next((s for s in entity.get_status_effects("操纵") if not s.is_expired), None)
 
     @staticmethod
     def caozuo_attack_matches(order: dict, hits) -> bool:
@@ -52,18 +52,30 @@ class CostPaymentMixin:
                 return False
         return True
 
-    def caozuo_check(self, entity: Entity, kind: str, payload=None):
-        """【操作】生效时，目标的下一次非施法行动必须等于施法者的预指定。
+    def caozuo_consumes_use(self, entity: Entity, status) -> None:
+        """消耗 1 次【操纵】名额；名额归零时移除状态。"""
+        remaining = int(status.effect_data.get("remaining_uses", 1) or 0) - 1
+        if remaining <= 0:
+            if status in entity.status_effects:
+                entity.status_effects.remove(status)
+            return
+        status.effect_data["remaining_uses"] = remaining
+        status.value = remaining
 
+    def caozuo_check(self, entity: Entity, kind: str, payload=None):
+        """【操纵】生效时，目标接下来 X 次非施法行动都必须等于施法者给出的指令。
+
+        （2026-11-02 用户令：【操作】改名【操纵】，作用范围由「下一次」改为「下X次」。）
+        每次通过校验消耗 1 次名额，名额用完状态消失。
         返回 None＝放行（含作废/消费两种情形）；返回 dict＝拒绝本次行动。
-        施法（`cast` 系列）不在【操作】管辖内，调用方不经过本函数。
+        施法（`cast` 系列）不在【操纵】管辖内，调用方不经过本函数。
         """
         status = self.caozuo_status_of(entity)
         if status is None:
             return None
         order = status.effect_data.get("order")
         if order is None:
-            # 施法者没有预指定：效果作废，代价不退，目标照常行动。
+            # 施法者没有给出指令：效果作废，代价不退，目标照常行动。
             entity.status_effects.remove(status)
             return None
         matched = ((kind == "攻击" and self.caozuo_attack_matches(order, payload))
@@ -73,9 +85,10 @@ class CostPaymentMixin:
         if not matched:
             caster = status.effect_data.get("caster_name") or "施法者"
             return {"success": False,
-                    "error": (f"{entity.name}受【操作】影响：下一次行动必须按{caster}预指定的"
-                              f"【{order.get('action')}】执行")}
-        entity.status_effects.remove(status)
+                    "error": (f"{entity.name}受【操纵】影响：接下来"
+                              f"{status.effect_data.get('remaining_uses', 1)}次行动"
+                              f"必须按{caster}指定的【{order.get('action')}】执行")}
+        self.caozuo_consumes_use(entity, status)
         return None
 
     def pay_daowen_numeric_cost(self,name,calc,caster,*,dragon_heart_use=0,cost_share_target_ref=""):
@@ -276,7 +289,8 @@ class CostPaymentMixin:
             "生命": entity.current_hp,
             "血限": entity.effective_blood_limit(),
             "法力": entity.current_mana,
-            "法限": entity.mana_limit,
+            # 【涌潮】期间法限视为∞：能支付的"法限"代价随之无上限。
+            "法限": entity.effective_mana_limit(),
             "速度": entity.current_speed,
             "速限": entity.speed_limit,
             # 2026-11-01 用户令：支付[碎片]的可用额度＝真碎片＋假碎片。

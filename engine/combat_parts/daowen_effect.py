@@ -1734,7 +1734,7 @@ class DaowenEffectMixin:
               # 改账本）。若再走通用状态块就会挂出第二份无 relic_name 的【豪夺】，
               # 两份各自递减、回响也只认其中一份，实为双计。
               and name not in ("勾魂", "冥气", "缄默", "波及", "共罪", "血契", "庇护", "强化", "弱化", "冰冻",
-                               "怜悯", "迟滞", "操作", "豪夺")):
+                               "怜悯", "迟滞", "操纵", "饥饿", "豪夺")):
             duration = calc["duration"]  # 0不生效；只有显式-1表示持续∞。
             effect_target = target if target else caster
             # 自身作用型道纹（变形/超频等）作用于施法者
@@ -1747,7 +1747,13 @@ class DaowenEffectMixin:
             # 故移出"自身作用型"名单，状态随之挂到目标身上（到期还原也落在目标）。
             # 【压迫】挂在本次显式[目标]身上，不再强制挂回施法者。
             self_targeted = name in ("飞行", "必中", "固执", "贯穿")
-            status_name = "无限血限" if calc.get("infinite_blood_limit") else name
+            if calc.get("infinite_blood_limit"):
+                status_name = "无限血限"
+            elif calc.get("infinite_mana_limit"):
+                # 【涌潮】：法限变为∞，到期把当前法力压回原法限（见 combat.py 到期处理）。
+                status_name = "无限法限"
+            else:
+                status_name = name
             if self_targeted:
                 et = caster
                 et.add_status(self._daowen_status(daowen_order=daowen_order, name=status_name,
@@ -1837,20 +1843,92 @@ class DaowenEffectMixin:
             result["effects"].append({"type": "action_cost_penalty", "target": target.name,
                                       "penalty": penalty, "duration": duration})
 
-        if name == "操作":
-            # 【操作】：把目标的下一次非施法行动交给施法者预指定。
-            # 未预指定时 order=None——到目标该行动时作废，代价不退。
+        if name == "操纵":
+            # 【操纵】（2026-11-02 用户令，旧【操作】改名）：把目标接下来 **X 次**
+            # 非施法行动交给施法者控制。指令由状态记录，每执行一次扣 1 次名额。
+            # 未给指令时 order=None——到目标该行动时作废，代价不退。
             if target is None:
-                raise ValueError("操作需要显式目标")
+                raise ValueError("操纵需要显式目标")
             order = calc.get("caozuo_order")
+            uses = max(1, int(calc.get("manipulation_uses") or calc.get("x") or 1))
             target.add_status(self._daowen_status(
-                daowen_order=daowen_order, name="操作", value=1,
+                daowen_order=daowen_order, name="操纵", value=uses,
                 remaining_rounds=-1, source=caster.name,
                 effect_data={"caster_ref": str(caster.runtime_id),
                              "caster_name": caster.name,
-                             "order": order}))
+                             "order": order,
+                             "remaining_uses": uses,
+                             "source_daowen": "操纵"}))
             result["effects"].append({"type": "action_control", "target": target.name,
-                                      "caster": caster.name, "order": order})
+                                      "caster": caster.name, "order": order,
+                                      "uses": uses})
+
+        if name == "饥饿":
+            # 【饥饿】（2026-11-02 用户令，补回漏项）：使[目标]的[血限]等同其当前
+            # 生命，持续X；到期把施加前的[血限]还原。血限下降走统一入口，压到当前
+            # 生命以下才会产生"失去生命"窗口——这里恰好压到当前生命，不会掉血。
+            if target is None:
+                raise ValueError("饥饿需要显式目标")
+            previous_limit = int(target.blood_limit)
+            new_limit = max(0, min(previous_limit, int(target.current_hp)))
+            hunger_ctx = make_context(
+                timing=self._current_context_timing(),
+                source="饥饿", source_type="daowen", actor=caster, target=target,
+                owner=caster, mechanic="blood_limit", subtype="hunger",
+                amount=new_limit - previous_limit, tags={"daowen", "hunger"})
+            self._apply_blood_limit_change(
+                target, new_limit - previous_limit, "饥饿", "down", ctx=hunger_ctx,
+                source_type="daowen", subtype="hunger", actor=caster, owner=caster,
+                tags={"daowen", "hunger"})
+            target._hunger_original_blood_limit = previous_limit
+            duration = calc.get("duration", x)
+            target.add_status(self._daowen_status(
+                daowen_order=daowen_order, name="饥饿", value=x,
+                remaining_rounds=duration, source=caster.name,
+                effect_data={"original_blood_limit": previous_limit,
+                             "source_daowen": "饥饿"}))
+            result["effects"].append({
+                "type": "hunger_blood_limit", "target": target.name,
+                "blood_limit": new_limit, "previous_blood_limit": previous_limit,
+                "duration": duration})
+
+        if name == "扭曲":
+            # 【扭曲】（2026-11-02 用户令新增）：目标累积治疗量翻倍X次（×2^X）。
+            # 累积治疗量就是[癌变]用的 total_healed；翻倍后立即按阈值复核一次，
+            # 否则"把对手推过癌变线"这条唯一意义会被拖到下一次回复才兑现。
+            if target is None:
+                raise ValueError("扭曲需要显式目标")
+            doublings = max(1, int(calc.get("heal_accumulation_doublings") or x))
+            before_healed = int(getattr(target, "total_healed", 0) or 0)
+            target.total_healed = before_healed * (2 ** doublings)
+            result["effects"].append({
+                "type": "heal_accumulation_doubled", "target": target.name,
+                "doublings": doublings, "before": before_healed,
+                "after": int(target.total_healed)})
+            cancer = self.check_cancer(target)
+            if cancer:
+                result["effects"].append({"type": "cancer_check", "result": cancer})
+
+        if name == "淬火":
+            # 【淬火】（2026-11-02 用户令新增）：目标所有消耗品当前耐久 +X。
+            # 满耐久的条目按同样数值抬耐久上限，避免"对完好消耗品毫无收益"。
+            if target is None:
+                raise ValueError("淬火需要显式目标")
+            gain = max(1, int(calc.get("consumable_durability_gain") or x))
+            items = (self.state.consumables if target is self.state.player
+                     else (getattr(target, "consumables", None) or []))
+            touched = []
+            for item in list(items):
+                if getattr(item, "current_uses", None) is None:
+                    continue
+                item.current_uses = int(item.current_uses) + gain
+                item.max_uses = max(int(getattr(item, "max_uses", 0) or 0),
+                                    int(item.current_uses))
+                touched.append({"item": item.name, "durability": item.current_uses,
+                                "max_durability": item.max_uses})
+            result["effects"].append({
+                "type": "consumable_durability_gain", "target": target.name,
+                "gain": gain, "items": touched})
 
         if name == "共罪":
             # X 个非自身目标 + 发动者本身 = X+1 份名额；2026-11-02 用户令：

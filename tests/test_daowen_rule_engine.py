@@ -108,7 +108,8 @@ def test_zaisheng_merges_self_feeding_as_an_alternate_attack_cost():
     assert attack["cost_attack"] == 8
     assert attack["target_heal"] == 8
     assert "自食" not in DaoWenEngine.list_all()
-    assert ("全力", "曲解", "再生") in ResonanceEngine.CLOSED_LOOPS["怪物原始道纹"]
+    # 2026-11-02 四面体三：曲解 强化⇄全速、弱化⇄全力（原「全力→曲解→再生」撤边）。
+    assert ("弱化", "曲解", "全力") in ResonanceEngine.edges_of_region("通用")
 
 
 def test_migration_status_keeps_unmigrated_daowen_on_the_legacy_path():

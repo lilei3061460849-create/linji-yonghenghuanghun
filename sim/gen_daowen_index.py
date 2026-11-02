@@ -160,11 +160,8 @@ def region_daowen_order(region: str) -> list:
         name for name, owner in UNIMPLEMENTED_DAOWEN.items()
         if owner == region and name in DRAFT_DAOWEN
     }
-    chain: list = []
-    for src, _rtype, dst in ResonanceEngine.CLOSED_LOOPS.get(f"{region}闭环", []):
-        for n in (src, dst):
-            if n in ns and n not in chain:
-                chain.append(n)
+    # 2026-11-02 四面体大改：顺序取该副本四面体里的节点出场序（已去重）。
+    chain: list = [n for n in ResonanceEngine.nodes_of_region(region) if n in ns]
     return chain + sorted(ns - set(chain))
 
 
@@ -173,10 +170,11 @@ CATEGORY = {}
 for n in SHAFA_LOOP_DAOWEN:
     CATEGORY[n] = "shaifa"
 CATEGORY["共罪"] = "unimpl"
-CATEGORY["怜悯"] = "other"
-# 2026-11-01：【透支】移出杀伐闭环、改为任意角色出生自带；【操作】【迟滞】新增通用道纹
-# （闭环连接词待定，暂列「其他通用」）。
+CATEGORY["怜悯"] = "unimpl"      # 2026-11-02：怜悯随永夜庭四面体移入永夜庭
+# 2026-11-02：【操纵】【迟滞】随通用四面体二进通用核心；【透支】出生自带、【篡改】
+# 由荒疫古城移入通用，二者不属于杀伐发现池，列「其他通用」。
 CATEGORY["透支"] = "other"
+CATEGORY["篡改"] = "other"
 for n in ORIGINAL_MONSTER_DAOWEN:
     CATEGORY[n] = "original"
 for n in MONSTER_TRANSFORM_DAOWEN:
@@ -195,7 +193,7 @@ for n, region in UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.items():
     CATEGORY[n] = "unimpl"
 
 # 「其他通用」按显式顺序渲染（不属于杀伐闭环、也不属于任何副本闭环的通用道纹）。
-OTHER_DAOWEN = ["怜悯", "透支"]
+OTHER_DAOWEN = ["透支", "篡改"]
 
 assert set(CATEGORY) == (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)), (
     set(CATEGORY) ^ (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)))
@@ -214,22 +212,26 @@ NOTES = {
     "真理": "初拥之夜选项5授予的血族专属道纹。X=陈述句数：提出X句陈述，目标须逐句言明真理，任一句无法言明则无法开口，持续X回合；真伪由DM逐句裁定。冷却2场战斗。",
     "原初": "原初新定义：支付异变5X，借用目标身上自身未拥有的随机X种道纹；旧进化接口的指定借一种尚未同步，不可当作新规则已实现。",
     "透支": "不在任何闭环内：任意角色出生自带，X每次自选。",
-    "操作": "发动时须预指定目标那一次非施法行动（攻击／跳过／使用消耗品）；未预指定的到该行动时作废、代价不退。",
+    "操纵": "2026-11-02 由【操作】改名：目标接下来X次除施法外的行动由施法者控制；每次执行消耗1次名额，名额用完状态消失。施法者须给出指令（攻击／跳过／使用消耗品），未给指令时到该行动作废、代价不退。",
+    "饥饿": "施加时立即把[血限]压到当前生命（不产生失血）；持续X，到期还原施加前的[血限]。",
+    "扭曲": "累积治疗量即[癌变]用的累计回复量：×2^X 后立即按癌变阈值复核一次。",
+    "淬火": "当前耐久+X，并保证耐久上限不低于结果值（对完好消耗品等价于同时抬上限）。",
+    "涌潮": "法限变为∞期间当前法力可突破法限；到期把当前法力压回原法限。与遗物【苍白之花】同域，但可作用于任意目标。",
     "迟滞": "每一次行动所需出手+1，含闪避、招架这类零出手的回合外行动。",
 }
 
-def loop_chain(loop_name):
-    edges = ResonanceEngine.CLOSED_LOOPS[loop_name]
-    # 环：找起点（第一条边的src）并按边串联；遗物化节点在索引里统一显示「？？」
-    first = display_resonance_node(edges[0][0])
-    chain = [first]
-    nxt = {s: (r, d) for s, r, d in edges}
-    cur = edges[0][0]
-    for _ in range(len(edges)):
-        r, d = nxt[cur]
-        chain.append(f"⇄（{r}）{display_resonance_node(d)}")
-        cur = d
-    return " ".join(chain)
+def tetra_chain(region):
+    """把一个副本的四面体关系渲染成「反转/转换/曲解 各一组 ⇄」的文本。"""
+    blocks = []
+    for name, edges in ResonanceEngine.tetrahedra_of_region(region).items():
+        groups = {}
+        for src, rtype, dst in edges:
+            groups.setdefault(rtype, []).append(
+                f"{display_resonance_node(src)}⇄{display_resonance_node(dst)}")
+        rendered = "；".join(f"{rtype}：{'、'.join(pairs)}"
+                             for rtype, pairs in groups.items())
+        blocks.append(f"{name}（{rendered}）")
+    return "　｜　".join(blocks)
 
 # ---------- 渲染 ----------
 L = []
@@ -251,10 +253,11 @@ category_summary += f" ｜ 初拥专属 {len(FIRST_EMBRACE_DAOWEN)} ｜ 已实�
 A(category_summary)
 A("")
 A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余已注册道纹取 `engine/daowen.py` `calculate_*` docstring；纯草案节点才取 `DRAFT_DAOWEN`。")
-A("- **归属与残韵闭环**：`engine/gamedata.py` + `engine/daowen.py`（`CLOSED_LOOPS`）；与规则正文的闭环图一致。\n"
-  "  `CLOSED_LOOPS` 里的每条边为**无向边**（2026-10-07 用户令：残韵路径双向）——登记 `(a,类型,b)` 表示 a、b 互为相邻节点，\n"
+A("- **归属与残韵关系**：`engine/gamedata.py`（归属）+ `engine/daowen.py`（`CLOSED_LOOPS`，四面体关系）；与规则正文一致。\n"
+  "  2026-11-02 用户令：关系表由「环状链 + 遗物化 `？？` 占位」整体改为**四面体**——每个四面体 4 个节点、6 条边，\n"
+  "  任两节点恰好由一种残韵相连（3 条反转 + 3 条转换 + 3 条曲解）。旧占位节点不再保留，缺位由【饥饿】【扭曲】【淬火】【涌潮】【操纵】补齐。\n"
+  "  `CLOSED_LOOPS` 里的每条边仍是**无向边**（2026-10-07 用户令：残韵路径双向）——登记 `(a,类型,b)` 表示 a、b 互为相邻节点，\n"
   "  正反两向都走同一种残韵、同样消耗一次；双向由 `ResonanceEngine.find_transformations` 在查询时展开，边表不重复登记反向边。\n"
-  "  闭环中的 `？？` 专用于道纹遗物化后的旧节点占位，`（待补）` 用于其它待补设计的空位；两类占位均不可作为残韵结果获得。\n"
   "  同一源道纹、同一残韵类型存在多个真实出口时属于显式分叉，必须提交 `target_daowen`，不得由索引或运行时静默任选。\n"
   "  语义审计口径：转换＝同构换维度；反转＝同域翻极性；曲解＝保留核心概念但改变作用关系，曲解不是无法归类时的兜底。")
 A("- **承载怪物**：解析自已实现副本与沉沦海专属网络草案的面板行（怪物池 + 事件/雇佣面板）；格式 `怪物名X`。")
@@ -272,7 +275,7 @@ A("")
 A("## 目录")
 A("")
 A("- [总览表](#总览表)")
-A(f"- [杀伐闭环（通用核心·{len(SHAFA_LOOP_DAOWEN)}）](#杀伐闭环通用核心{len(SHAFA_LOOP_DAOWEN)})")
+A(f"- [通用核心（四面体一·二，{len(SHAFA_LOOP_DAOWEN)}）](#通用核心四面体一二{len(SHAFA_LOOP_DAOWEN)})")
 A(f"- [其他通用道纹（{len(OTHER_DAOWEN)}）](#其他通用道纹{len(OTHER_DAOWEN)})")
 A(f"- [原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）](#原始怪物道纹{len(ORIGINAL_MONSTER_DAOWEN)})")
 A(f"- [怪物转化道纹（{len(MONSTER_TRANSFORM_DAOWEN)}）](#怪物转化道纹{len(MONSTER_TRANSFORM_DAOWEN)})")
@@ -328,7 +331,7 @@ def section(title, names, note_lines=(), loop=None, loop_title=None):
         A(n)
         A("")
     if loop:
-        A(f"闭环路径：{loop_chain(loop)}")
+        A(f"残韵关系（四面体，双向）：{tetra_chain(loop)}")
         A("")
     for name in names:
         A(f"### {name}")
@@ -347,14 +350,15 @@ def section(title, names, note_lines=(), loop=None, loop_title=None):
             A(f"> 注：{NOTES[name]}")
         A("")
 
-section(f"杀伐闭环（通用核心·{len(SHAFA_LOOP_DAOWEN)}）", list(SHAFA_LOOP_DAOWEN),
+section(f"通用核心（四面体一·二，{len(SHAFA_LOOP_DAOWEN)}）", list(SHAFA_LOOP_DAOWEN),
         note_lines=["开局【发现】初始道纹只从本闭环抽（随机列出3种未持有候选，显式选1；杀伐不是默认起手）。",
                     "通用核心道纹为人类侧基础概念，局外可经学习/残韵获得。"],
-        loop="杀伐闭环")
+        loop="通用")
 
 section(f"其他通用道纹（{len(OTHER_DAOWEN)}）", OTHER_DAOWEN,
-        note_lines=["不属于杀伐闭环，也不属于任何副本闭环。",
-                    "【透支】不在任何闭环内：任意角色出生自带，X每次自选。"])
+        note_lines=["不属于通用四面体一·二（发现池），也不属于任何副本专属池。",
+                    "【透支】不在任何四面体内：任意角色出生自带，X每次自选；",
+                    "【篡改】2026-11-02 由荒疫古城移入通用，关系见通用四面体四。"])
 
 section(f"原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）", sorted(ORIGINAL_MONSTER_DAOWEN),
         note_lines=[
@@ -388,10 +392,12 @@ for region in REGION_EXCLUSIVE_DAOWEN:
     if region == "沉沦海":
         notes.append("【唤潮】【蜃景】不属于闭环，由鲛渊陵墓的两个独立选项获得；怪物面板既有配置保留。")
         notes.append("【流动】【遗忘】已接入运行时；流动须另选接收目标，二者均按X选择持续状态，数量不足时拒绝发动。")
+        notes.append("【涌潮】为 2026-11-02 新增（源出遗物【苍白之花】），与【冰冻】互为反转，已接入运行时。")
     if region == "龙心谷":
-        notes.append("【炽热】【熔化】【锻造】为用户确认的支付待定草案，不接入闭环，不可学习、通过残韵获得或发动；【锻造】只发现既有固定规格消耗品，不接受自定义物品效果。")
+        notes.append("【炽热】【熔化】【锻造】为用户确认的支付待定草案，不可学习、通过残韵获得或发动；【锻造】只发现既有固定规格消耗品，不接受自定义物品效果。")
+        notes.append("【淬火】为 2026-11-02 新增并已接入运行时（支付已定），与【炽热】互为反转。")
     section(f"{region}专属（{len(ns)}）", list(ns), note_lines=notes,
-            loop=f"{region}闭环", loop_title=region)
+            loop=region, loop_title=region)
     if region == "龙心谷":
         A("> 原龙心谷专属道纹【加害】已正式转换为消耗品【灼罪钉】，固定使指定目标每次受到伤害+1，持续2回合；详见[物品索引](物品索引.md#灼罪钉)。")
         A("")

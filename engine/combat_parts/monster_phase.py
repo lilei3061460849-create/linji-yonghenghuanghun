@@ -1031,7 +1031,7 @@ class MonsterPhaseMixin:
             dao_choice = choice.get("daowen")
             if choice.get("daowen_2") is not None:
                 raise ValueError(f"{monster.name}每次只能提交1个行动，不接受daowen_2")
-            # 【操作】：这次提交必须等于施法者预指定的那一次非施法行动。
+            # 【操纵】：这次提交必须等于施法者指令（每次消耗1次名额）。
             if isinstance(dao_choice, dict):
                 _cz_kind, _cz_payload = "发动道纹", None
             elif choice.get("attack_actions"):
