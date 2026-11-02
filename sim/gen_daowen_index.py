@@ -310,7 +310,7 @@ def section(title, names, note_lines=(), loop=None, loop_title=None):
         elif out_edges[name]:
             meta.append("残韵路径（双向）：" + "、".join(out_edges[name]))
         c = carriers.get(name, [])
-        meta.append("承载：" + ("、".join(c) if c else "—（无怪物承载）"))
+        meta.append("承载：" + ("、".join(c) if c else "—"))
         A(f"> {' ｜ '.join(meta)}")
         if name in NOTES:
             A(f"> 注：{NOTES[name]}")
