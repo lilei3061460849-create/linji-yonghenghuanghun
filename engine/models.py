@@ -75,10 +75,8 @@ class DaoWenInstance:
     is_frozen: bool = False     # 旧封印冻结标记
     ice_frozen: bool = False    # 【冰冻】冻结；随持续∞状态在本场战终解除
     sha_qi: str = ""            # 旧存档兼容字段；附煞已删除，此字段不再参与运行时结算
-    # 【唯一】代价：规则正文「唯一：使用后，本次轮回中无法再次使用」。
-    # 与冷却同族但作用域更大——冷却按战斗场数递减，唯一是轮回级一次性，
-    # 跨场不恢复，只有开新轮回（状态重置）才清零。
-    spent_unique: bool = False
+    # 旧【唯一】代价字段 spent_unique 已删除：现行【唯一】是道纹效果（挂状态 +
+    # 读 daowen_use_history），没有任何读取点会再看这个字段。
     # 时间的偏爱：将按战斗场数计的冷却改为逐回合递减。
     cooldown_rounds_remaining: int = 0
 
@@ -786,6 +784,26 @@ class Entity:
 
     def has_used_daowen(self, name: str) -> bool:
         return name in getattr(self, "daowen_use_history", set())
+
+    def daowen_locked_by_unique(self, name: str) -> bool:
+        """【唯一】：身上有【唯一】时，本轮回已成功使用过的道纹不可再用。
+
+        判定只读「道纹名 + 使用历史」，与实例、来源无关——直接发动、法术步骤、
+        反应法术、怪物行动、催化调用的历史全部记在同一条 `daowen_use_history` 上。
+        """
+        if not isinstance(name, str) or not name:
+            return False
+        if name not in getattr(self, "daowen_use_history", set()):
+            return False
+        return any(status.name == "唯一" and not status.is_expired
+                   for status in getattr(self, "status_effects", ()) or ())
+
+    def can_use_daowen(self, name: str) -> bool:
+        """道纹此刻能否发动：冷却/封印/冰冻 + 【唯一】。所有枚举与闸门共用。"""
+        instance = (getattr(self, "dao_wen", {}) or {}).get(name)
+        if instance is None or not instance.can_use():
+            return False
+        return not self.daowen_locked_by_unique(name)
 
     def effective_attack_count(self) -> int:
         """攻击次数＝ 当前速度。

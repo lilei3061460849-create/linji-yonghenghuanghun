@@ -768,8 +768,12 @@ class CostPaymentMixin:
                 owner=payer, mechanic="cost", subtype="blood_pact_echo", amount=amount,
                 tags=(set(parent_ctx.tags) if parent_ctx else set()) | {"blood_pact_echo"},
                 parent_event_id=parent_ctx.event_id if parent_ctx else None)
+            # 2026-11-02 修复2：血契回声是"被迫支付"，绝不能再触发目标身上的
+            # 血契回声——否则 A→B→A 互为血契时会无界递归（RecursionError），
+            # 单向链也会按 X 的幂级数层层放大。递归锁落在 trigger_blood_pact。
             payment = self.pay_numeric_cost(
-                target, resource_type, amount, forced=True, ctx=ctx)
+                target, resource_type, amount, forced=True, ctx=ctx,
+                trigger_blood_pact=False)
             effects.append({"type": "blood_pact_echo", "source": payer.name,
                             "target": target.name, "resource": resource_type,
                             "nominal_amount": nominal_amount, "multiplier": status.value,

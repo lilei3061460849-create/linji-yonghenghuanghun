@@ -1181,11 +1181,9 @@ class DamageDeathMixin:
         return [relic.name for relic in tgt_list
                 if relic.name not in sealed_names and relic.name not in already_stolen]
 
-    def _haoduo_status_of(self, holder: Entity, relic_name: str) -> Optional[StatusEffect]:
-        """持有者身上与某件豪夺遗物对应的【豪夺】持续状态（供【回响】结算）。"""
-        return next((status for status in getattr(holder, "status_effects", [])
-                     if status.name == "豪夺"
-                     and status.effect_data.get("relic_name") == relic_name), None)
+    # 旧 `_haoduo_status_of(holder, name)` 已由 `find_haoduo_status(name)` 取代：
+    # 后者全场定位（【流动】可能把镜像搬到别人身上），"只在持有者身上找"正是
+    # 报告 P2-5 的脱节来源。
 
     def _return_stolen_relic(self, holder: Entity, holder_list: list,
                              relic_name: str, info: dict) -> str:
@@ -1209,33 +1207,118 @@ class DamageDeathMixin:
                 break
         return relic_name
 
-    def _tick_stolen_relics(self, holder: Entity) -> list[str]:
-        """持有者身上全部豪夺遗物递减 1 回合，到期归还；同步【豪夺】状态回合数。
-
-        【回终】与【大梦】额外回合都走这里，保证"夺取持续X回合"只有一个计时口径。
-        """
+    def _stolen_ledger(self, holder: Entity) -> dict:
+        """某个实体身上"被夺遗物"的账本（玩家侧账本在 GameState 上）。"""
         if holder is self.state.player:
-            holder_list = self.state.relics
-            ledger = self.state.stolen_relics
-        else:
-            holder_list = getattr(holder, "relics", None) or []
-            ledger = getattr(holder, "stolen_relics", None) or {}
+            return self.state.stolen_relics
+        ledger = getattr(holder, "stolen_relics", None)
+        if ledger is None:
+            holder.stolen_relics = ledger = {}
+        return ledger
+
+    def _stolen_relic_list(self, holder: Entity) -> list:
+        """某个实体实际存放遗物的列表（玩家侧 = GameState.relics）。"""
+        if holder is self.state.player:
+            return self.state.relics
+        if not hasattr(holder, "relics") or holder.relics is None:
+            holder.relics = []
+        return holder.relics
+
+    def find_haoduo_status(self, relic_name: str) -> tuple[Optional[Entity], Optional[StatusEffect]]:
+        """全场定位某件被夺遗物的【豪夺】镜像状态（可能已被【流动】搬到别人身上）。"""
+        if not relic_name:
+            return None, None
+        for entity in self._combat_entity_refs().values():
+            for status in list(getattr(entity, "status_effects", []) or []):
+                if (status.name == "豪夺" and not status.is_expired
+                        and status.effect_data.get("relic_name") == relic_name):
+                    return entity, status
+        return None, None
+
+    def _release_stolen_relic(self, holder: Entity, relic_name: str, *,
+                              reason: str = "manual") -> Optional[dict]:
+        """立即归还一件被夺遗物：清账本 + 摘掉任意持有者身上的镜像状态 + 送回原主。
+
+        2026-11-02 修复3：**状态与账本必须同时对同一件遗物生效**。
+        【遗忘】把【豪夺】状态移除时立刻走这里，不让遗物在账本里"裸奔"到期。
+        """
+        ledger = self._stolen_ledger(holder)
+        info = ledger.pop(relic_name, None)
+        if not isinstance(info, dict):
+            return None
+        _, status = self.find_haoduo_status(relic_name)
+        if status is not None:
+            for entity in self._combat_entity_refs().values():
+                if status in (getattr(entity, "status_effects", []) or []):
+                    entity.status_effects.remove(status)
+        returned = self._return_stolen_relic(
+            holder, self._stolen_relic_list(holder), relic_name, info)
+        return {"type": "haoduo_returned", "relic": relic_name,
+                "returned_to": returned or "",
+                "from": holder.name, "reason": reason,
+                "round": self.state.current_round}
+
+    def _release_stolen_relic_anywhere(self, relic_name: str, *,
+                                       reason: str = "manual") -> Optional[dict]:
+        """按遗物名归还：先看镜像状态所在实体，再扫全场账本。
+
+        【豪夺】的镜像状态可以被【流动】搬到别的角色身上，账本却留在遗物所在的
+        角色身上；两条线都必须能找到对方，才谈得上"真账本"。
+        """
+        status_holder, _status = self.find_haoduo_status(relic_name)
+        candidates: list[Entity] = []
+        if status_holder is not None:
+            candidates.append(status_holder)
+        candidates.append(self.state.player)
+        candidates.extend(e for e in self._combat_entity_refs().values()
+                          if e is not self.state.player)
+        for entity in candidates:
+            if entity is None:
+                continue
+            ledger = (self.state.stolen_relics if entity is self.state.player
+                      else getattr(entity, "stolen_relics", None))
+            if isinstance(ledger, dict) and relic_name in ledger:
+                return self._release_stolen_relic(entity, relic_name, reason=reason)
+        return None
+
+    def _tick_stolen_relics(self, holder: Entity) -> list[str]:
+        """持有者账本里的豪夺遗物递减 1 回合，到期归还。
+
+        2026-11-02 修复3：**`remaining_rounds` 是唯一计时准绳**，账本只记
+        "谁夺了谁的什么东西"。【豪夺】状态可能被【流动】搬到别人身上、被
+        【回响】延长、被【遗忘】抹掉——三种情况都以状态自身的回合数为准：
+          - 状态还在（无论在哪）：递减它，账本同步镜像；
+          - 状态没了（遗忘/剥离）：立即提前归还，不等账本倒计时。
+        【回终】与【大梦】额外回合都走这里，保证只有一处计时。
+        """
+        ledger = (self.state.stolen_relics if holder is self.state.player
+                  else getattr(holder, "stolen_relics", None))
+        if not isinstance(ledger, dict):
+            return []
         returned: list[str] = []
         for relic_name, info in list(ledger.items()):
             if not isinstance(info, dict):
+                ledger.pop(relic_name, None)
                 continue
-            # 账本是唯一事实源；【豪夺】状态只是它的镜像，由 tick_status_effects
-            # 同步递减（【回响】延长时两边一起加），这里不再二次改写状态回合数。
-            info["remaining"] = int(info.get("remaining", 0)) - 1
-            status = self._haoduo_status_of(holder, relic_name)
+            _status_holder, status = self.find_haoduo_status(relic_name)
+            if status is None:
+                # 镜像被移除 → 提前归还（真账本与状态同生共死）
+                released = self._release_stolen_relic(holder, relic_name, reason="status_gone")
+                if released and released.get("returned_to"):
+                    returned.append(relic_name)
+                continue
+            status.remaining_rounds = int(status.remaining_rounds) - 1
+            if status.remaining_rounds < 0:
+                status.remaining_rounds = 0
+            info["remaining"] = int(status.remaining_rounds)
             if info["remaining"] > 0:
-                if status is not None:
-                    status.remaining_rounds = info["remaining"]
                 continue
             ledger.pop(relic_name, None)
-            if status is not None and status in getattr(holder, "status_effects", []):
-                holder.status_effects.remove(status)
-            name = self._return_stolen_relic(holder, holder_list, relic_name, info)
+            for entity in self._combat_entity_refs().values():
+                if status in (getattr(entity, "status_effects", []) or []):
+                    entity.status_effects.remove(status)
+            name = self._return_stolen_relic(
+                holder, self._stolen_relic_list(holder), relic_name, info)
             if name:
                 returned.append(name)
         return returned
@@ -1291,14 +1374,15 @@ class DamageDeathMixin:
             "target_is_player": target is self.state.player,
         }
         # 持续回合的对外可见载体：挂一个同名状态在**夺取方**身上，
-        # 使【回响】能按通用"持续Y"口径选中并延长；真正的计时仍以
-        # stolen_relics[name]["remaining"] 为准，状态只是它的同步镜像。
+        # 使【回响】能按通用"持续Y"口径选中并延长。2026-11-02 修复3：
+        # 状态自身的 remaining_rounds 是唯一计时准绳（`_tick_stolen_relics`
+        # 每回终手动递减它），账本只记"谁夺了谁的什么"，两边一一对应。
         caster.add_status(StatusEffect(
             name="豪夺", remaining_rounds=max(1, int(rounds)),
             value=max(1, int(rounds)), source=caster.name,
             effect_data={"source_daowen": "豪夺", "relic_name": stolen.name,
                          "from_entity_name": target.name,
-                         # 唯一计时源是账本；状态不再被通用回终递减，避免双计。
+                         # 由 _tick_stolen_relics 手动递减，通用回终不再减一次。
                          "manual_round_countdown": True}))
         return stolen.name
 

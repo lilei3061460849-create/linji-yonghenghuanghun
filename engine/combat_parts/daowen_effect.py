@@ -528,10 +528,24 @@ class DaowenEffectMixin:
         for name, instance in entity.dao_wen.items():
             instance.ice_frozen = name in frozen_names
 
-    def _settle_removed_statuses(self, entity: Entity, removed: list[StatusEffect]) -> None:
-        """遗忘/流动使状态离开持有者后的通用收尾；不是重新发动任何道纹。"""
+    def _settle_removed_statuses(self, entity: Entity, removed: list[StatusEffect],
+                                 *, moving: bool = False) -> None:
+        """遗忘/流动使状态离开持有者后的通用收尾；不是重新发动任何道纹。
+
+        moving=True 表示状态只是被【流动】搬去别处（对象还在场上，效果继续生效）；
+        moving=False 表示状态真的被移除（【遗忘】），需要把"状态即事实"的挂靠
+        机制就地结算——目前是【豪夺】：遗物必须立刻归还，不能等账本倒计时。
+        """
         names = {status.name for status in removed}
         self.reconcile_ice(entity)
+        if not moving:
+            for status in removed:
+                if status.name != "豪夺":
+                    continue
+                relic_name = str(status.effect_data.get("relic_name") or "")
+                if not relic_name:
+                    continue
+                self._release_stolen_relic_anywhere(relic_name, reason="遗忘")
         if "必中" in names and not entity.has_status("必中"):
             entity._bizhong_left = 0
         if "无限血限" in names and not entity.has_status("无限血限"):
@@ -580,7 +594,9 @@ class DaowenEffectMixin:
                             and not recipient.has_status("必中"))
             bizhong_left = max(0, int(getattr(recipient, "_bizhong_left", 0) or 0)) \
                 if move_bizhong else 0
-            self._settle_removed_statuses(recipient, selected)
+            # 流动：状态只是搬家（豪夺账本/篡改控制器都跟着对象继续有效）
+            # 遗忘：状态真的消失 → 挂靠机制就地结算（豪夺立即归还）
+            self._settle_removed_statuses(recipient, selected, moving=(name == "流动"))
             if name == "遗忘":
                 result["effects"].append({
                     "type": "statuses_removed", "target": recipient.name,
@@ -1543,13 +1559,9 @@ class DaowenEffectMixin:
                 result["effects"].append({"type": "mingqi", "target": st_target.name,
                                           "speed_loss_speed_limit": calc["speed_loss_speed_limit"],
                                           "duration": calc.get("duration", 1)})
-        if name == "缄默" and calc.get("silence_death_triggers"):
-            for st_target in wave_status_targets:
-                st_target.add_status(self._daowen_status(daowen_order=daowen_order, name="缄默", value=1,
-                                                  remaining_rounds=calc.get("duration", 1),
-                                                  source=caster.name))
-                result["effects"].append({"type": "qianmo", "target": st_target.name,
-                                          "duration": calc.get("duration", 1)})
+        # 【缄默】已遗物化（缄默面具），不再是道纹：这里原有的一段
+        # `if name == "缄默" and calc.get("silence_death_triggers")` 分支永远走不到
+        # （DaoWenEngine.register_all() 里没有"缄默"），2026-11-02 删除。
         if name == "分裂" and calc.get("split_creations"):
             # X只决定独立造物数量；每只固定1/1/1，不读取施法者构筑。
             creations = self._spawn_fenlie_creations(caster, calc["split_creations"])

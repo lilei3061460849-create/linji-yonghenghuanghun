@@ -155,8 +155,7 @@ class SpellReactionMixin:
             flow = self.SPELL_FLOWS.get(spell.name)
             if flow is None:
                 continue
-            if all(d in holder.dao_wen and holder.dao_wen[d].can_use()
-                   for d in spell.required_daowen):
+            if all(holder.can_use_daowen(d) for d in spell.required_daowen):
                 flows[spell.name] = flow
         return flows
 
@@ -169,8 +168,7 @@ class SpellReactionMixin:
         for name, required in self.BUILTIN_SPELL_DAOWEN.items():
             if name in defined or name not in self.SPELL_FLOWS:
                 continue
-            if all(d in holder.dao_wen and holder.dao_wen[d].can_use()
-                   for d in required):
+            if all(holder.can_use_daowen(d) for d in required):
                 out.append(name)
         return sorted(out)
 
@@ -284,8 +282,12 @@ class SpellReactionMixin:
         if self.out_of_turn_blocked(holder):
             return flows
         for name, flow in self._builtin_spell_flows(holder).items():
-            if flow.get("trigger") == trigger:
-                flows[name] = flow
+            if flow.get("trigger") != trigger:
+                continue
+            if not all(holder.can_use_daowen(name) for name in flow.get("required_daowen", ())):
+                # 【唯一】锁死的道纹同样不能作为反应/时点法术的起手
+                continue
+            flows[name] = flow
         spells_by_name = {spell.name: spell for spell in holder.spells}
         for spell_name in self._ordered_spell_names(holder):
             spell = spells_by_name[spell_name]
@@ -298,7 +300,7 @@ class SpellReactionMixin:
                         continue  # 解析失败=违规或格式错，不触发
                     spell._parsed_flow = flow
             if (flow["trigger"] == trigger
-                    and all(name in holder.dao_wen and holder.dao_wen[name].can_use()
+                    and all(holder.can_use_daowen(name)
                             for name in spell.required_daowen)):
                 flows[spell.name] = flow
         return flows
@@ -918,6 +920,18 @@ class SpellReactionMixin:
             x = effective_x
             entry_dict = dict(entry_dict, x=x)
 
+        # --- 【唯一】（2026-11-02 修复1）---
+        # 施法者身上有【唯一】且该道纹已成功使用过 → 正常规则阻断。
+        # 必须与【冰冻】同一条通道：INTERRUPTED / DAOWEN_UNUSABLE，整个法术
+        # 中断但已结算步骤保留，API 仍返回 success=True；绝不进 FAILED 通道。
+        if caster.daowen_locked_by_unique(daowen):
+            return StepResult(
+                status=StepStatus.INTERRUPTED, daowen=daowen, x=x,
+                target_ref=target_ref, target_name=target.name,
+                reason=InterruptReason.DAOWEN_UNUSABLE,
+                detail=f"【唯一】生效中：{caster.name}已经用过【{daowen}】，本步无法发动",
+                iteration=iteration)
+
         # --- 道纹可用性 ---
         dw_inst = caster.dao_wen.get(daowen)
         allowed_by_catalysis=(dw_inst is not None and dw_inst is _cooldown_permission
@@ -1128,7 +1142,19 @@ class SpellReactionMixin:
             flows = self._eligible_spell_flows(holder, trigger)
             subject_of = self._reaction_subject_of(holder, attacker)
             logs = []
-            for spell_name, flow in flows.items():
+            # 2026-11-02 修复5：四个伤害/失血时点的候选顺序，与全局时点统一走
+            # `_ordered_trigger_entries`（completion_order → 发现序），不再按
+            # `_eligible_spell_flows` 的 dict 声明顺序遍历。
+            ordered = [
+                (spell_name, flow) for _ref, _holder, spell_name, flow in
+                self._ordered_trigger_entries(
+                    refs, trigger, include_holder=lambda candidate: candidate is holder)
+            ]
+            if not ordered and flows:
+                # 兜底：refs 里没有该持有者时（外部/测试构造的局部 refs），
+                # 仍按原有声明顺序结算，绝不因为排序口径而漏触发。
+                ordered = list(flows.items())
+            for spell_name, flow in ordered:
                 decision = submitted.get(spell_name)
                 if not decision or not decision.get("use"):
                     logs.append({"spell": spell_name, "used": False})

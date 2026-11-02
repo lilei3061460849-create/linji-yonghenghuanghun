@@ -158,7 +158,8 @@ class MonsterPhaseMixin:
             ]
             if not monster.has_status("干扰"):
                 for name, inst in monster.dao_wen.items():
-                    if (name in round_used or not inst.can_use()
+                    # 【唯一】（2026-11-02 修复1）：锁死的道纹不再公布为可选行动
+                    if (name in round_used or not monster.can_use_daowen(name)
                             or name not in DaoWenEngine.list_all()):
                         continue
                     rewritten_as = (self._resonance_rewrites.get(id(monster)) or {}).get(name)
@@ -507,6 +508,12 @@ class MonsterPhaseMixin:
                 return {"monster": monster.name, "daowen_skipped": name,
                         "resolves_as": effective_name, "reason": "目标没有道纹，冰冻X自动降为0"}
 
+        # 【唯一】（2026-11-02 修复1）：准备阶段之后才被锁上时，本次视为发不动
+        # （不付代价、不占出手），而不是让计算层抛异常。
+        if monster.daowen_locked_by_unique(effective_name):
+            return {"monster": monster.name, "daowen_skipped": name,
+                    "resolves_as": effective_name,
+                    "reason": f"【唯一】生效中：已经用过【{effective_name}】，本次无法发动"}
         # 先完成完整闪避提交的静态校验，再支付任何代价或改变激活状态。
         calc = DaoWenEngine.resolve(effective_name, effective_x, target=target, caster=monster)
         if effective_name == "冰冻":

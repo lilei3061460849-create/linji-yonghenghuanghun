@@ -269,6 +269,8 @@ def test_upper_limit_payment_clamps_current_value_and_save_defaults():
     legacy = Entity("旧档", "轮回者")
     legacy.__setstate__({"name": "旧档", "entity_type": "轮回者"})
     assert legacy.daowen_use_history == set()
-    # 旧唯一代价字段即使存在，也不再充当发动门禁。
-    instance = DaoWenInstance(DaoWen("杀伐", "", "", "", ""), spent_unique=True)
+    # 旧唯一代价字段 spent_unique 已删除（2026-11-02 清理死字段）；
+    # 【唯一】是道纹效果，判定只看 Entity.daowen_use_history + 状态。
+    instance = DaoWenInstance(DaoWen("杀伐", "", "", "", ""))
     assert instance.can_use() is True
+    assert not hasattr(instance, "spent_unique")

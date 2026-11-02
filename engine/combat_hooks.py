@@ -68,21 +68,14 @@ class QianjingjiaHook:
 
 
 class BifenglingHook:
-    """避风铃闪避句：每次闪避后获得3点格挡。归零+15走失速总线。
+    """避风铃（priority 50）：**占位登记**，不含任何实现。
 
-    ⚠️ 双实现登记（P1）：引擎真实分发路径是
-    `CombatEngine._note_dodge()`（闪避 +3）与 `CombatEngine._trigger_bifengling_zero()`（归零 +15）。
-    `CombatHookManager.apply_dodge()` **没有任何引擎调用点**，只有单元测试直接调用它。
-    在把闪避真正迁到 Hook 总线之前，禁止在 combat.py 里接线 apply_dodge()，否则会 +3 两次。
+    避风铃的两个真实触发点都在 CombatEngine：
+    `_note_dodge()`（每次闪避后 +3 格挡）与 `_trigger_bifengling_zero()`（当前速度归零 +15）。
+    旧的 `on_dodge` 是一份从未被引擎调用的重复实现（`apply_dodge()` 无任何调用点），
+    2026-11-02 删除；本类保留只为在 `CombatHookManager.hooks()` 的顺序表里占住 50 这一格。
     """
     priority = 50
-
-    def on_dodge(self, entity: Any, state: Any) -> Dict[str, Any]:
-        checker = getattr(state, "_relic_active", None) or getattr(state, "side_has", None)
-        if not entity or checker is None or not checker(entity, "避风铃"):
-            return {}
-        entity.shield += 3
-        return {"shield_gained": 3, "total_shield": entity.shield}
 
 
 class DamageRedirectionHook:

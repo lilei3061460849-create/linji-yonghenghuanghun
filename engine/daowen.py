@@ -1189,12 +1189,14 @@ class DaoWenEngine:
         if dao_wen_name not in cls._registry:
             raise ValueError(f"未知道纹: {dao_wen_name}。可用道纹: {list(cls._registry.keys())}")
         
-        # 唯一：任何方式已经成功使用过的道纹都受同一历史门禁。
+        # 【唯一】闸门不在这里：计算层只负责算出 calc，不再用异常表达"规则阻断"。
+        # 2026-11-02 修复：过去这里 raise ValueError，法术中途撞上【唯一】会被上层
+        # 的 `except Exception` 判成 FAILED/INVALID_INPUT（契约错误通道）。现在统一由
+        # `Entity.daowen_locked_by_unique()` 判定，各发动入口按自己的语义拒绝：
+        #   法术单步 → INTERRUPTED / DAOWEN_UNUSABLE（保留已结算步骤、success=True）
+        #   直接发动 → success=False + 明确文案
+        #   候选枚举 → 不列入可用反应/可用动作
         caster = kwargs.get("caster")
-        if (caster is not None and hasattr(caster, "has_status")
-                and caster.has_status("唯一")
-                and dao_wen_name in getattr(caster, "daowen_use_history", set())):
-            raise ValueError(f"唯一生效中：{caster.name}已经用过【{dao_wen_name}】，不能再次使用")
 
         # 退化X（扭曲都市专属，持续∞）：使目标每次发动道纹时该次数值-X（最低0）。
         # 在 resolve 统一入口削减（玩家/怪物/同伴所有发动路径都经此），与 sim/balance_sim eff_x 同口径。

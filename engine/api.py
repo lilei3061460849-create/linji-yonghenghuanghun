@@ -823,10 +823,10 @@ class GameEngine:
             if (name == "封印" and player.entity_type == "轮回者"
                     and any(sp.name == "镇魔印" for sp in (getattr(player, "spells", None) or []))):
                 continue
-            if not instance.can_use():
+            if not player.can_use_daowen(name):
                 actions.append({"action_type": "use_daowen", "available": False,
                                 "params_schema": {"daowen_name": name},
-                                "reason": "冷却中或被封印"})
+                                "reason": "冷却中/被封印/【唯一】锁死"})
                 continue
             max_x = self._max_legal_daowen_x(player, name)
             # 【真理】X=陈述句数（2026-10-23 用户裁定）；只需目标与待裁定陈述，
@@ -897,7 +897,7 @@ class GameEngine:
             if actor is player or not self.state.on_player_side(actor):
                 continue
             for name, instance in actor.dao_wen.items():
-                if not instance.can_use():
+                if not actor.can_use_daowen(name):
                     continue
                 fixed_x = instance.x_value if instance.x_value > 0 else 1
                 # 波及X（固定X）：合法目标不足X时该指令永远无法发动——
@@ -926,8 +926,7 @@ class GameEngine:
             spell = known.get(spell_name) or self.combat.spell_definition(player, spell_name)
             if spell is None:
                 continue
-            usable = all(n in player.dao_wen and player.dao_wen[n].can_use()
-                         for n in spell.required_daowen)
+            usable = all(player.can_use_daowen(n) for n in spell.required_daowen)
             actions.append({"action_type": "define_spell",
                             "params_schema": {"spell_name": spell_name},
                             "available": usable,
@@ -5915,6 +5914,10 @@ class GameEngine:
 
         if not dw_instance.can_use():
             return {"success": False, "error": f"道纹{name}不可用（冷却/封印）"}
+        # 【唯一】（2026-11-02 修复1）：规则阻断走明确文案，不再靠计算层抛异常。
+        if actor.daowen_locked_by_unique(name):
+            return {"success": False,
+                    "error": f"【唯一】生效中：{actor.name}已经用过【{name}】，不能再次使用"}
 
         if not isinstance(x, int) or isinstance(x, bool) or x < 1:
             return {"success": False, "error": "X必须≥1且为整数"}
@@ -6321,19 +6324,32 @@ class GameEngine:
         return None
 
     def _permanently_convert_daowen(self, holder: Entity, source: str, dest: str) -> bool:
-        """永久结算原次道纹变化；出土按剩余次数保留原实例，同名不重复。"""
+        """永久结算原次道纹变化；出土按剩余次数保留原实例，同名不重复。
+
+        2026-11-02 修复4：**转换不得洗白任何"正在受限"的实例状态**。
+        新实例一律继承原实例的冷却（按场/按回合两种）、封印与冰冻标记，
+        否则「残韵把冷却中的道纹换成同代价的新名字」＝凭空刷新一次冷却。
+        【出土】只负责"保留原纹不删"，原道纹自身的冷却/冻结状态不受影响
+        （它本来就没被改写），衍生出的新实例同样继承同一份受限状态。
+        """
         if source not in holder.dao_wen or self._conversion_capacity_error(holder, source, dest):
             return False
         if holder.entity_type == "怪物" and source in ORIGINAL_MONSTER_DAOWEN:
             holder._had_monster_daowen = True
         old = holder.dao_wen[source]
         if dest not in holder.dao_wen:
-            holder.dao_wen[dest] = DaoWenInstance(DaoWen(
+            converted = DaoWenInstance(DaoWen(
                 name=dest, formula=f"{dest}X",
                 cost_type=old.dao_wen.cost_type,
                 cost_formula=old.dao_wen.cost_formula,
                 effect_formula=old.dao_wen.effect_formula,
             ), x_value=old.x_value)
+            # 受限状态随实例一起搬：冷却、封印、冰冻、按回合冷却。
+            converted.cooldown_remaining = old.cooldown_remaining
+            converted.cooldown_rounds_remaining = getattr(old, "cooldown_rounds_remaining", 0)
+            converted.is_frozen = old.is_frozen
+            converted.ice_frozen = getattr(old, "ice_frozen", False)
+            holder.dao_wen[dest] = converted
         if dest != source:
             rule = self._excavation_rule(holder)
             if rule is None:
@@ -8123,7 +8139,7 @@ class GameEngine:
             # 背负：自我伤害类，自主角色不得自行发动。
             # 透支：只把资源换成法力、不改变战场，自主角色不为此花掉唯一次出手
             # （2026-11-01 出生自带给每个人之后，不排除会挤掉真正的攻击）。
-            if not inst.can_use() or name in {"背负", "透支"}:
+            if not ally.can_use_daowen(name) or name in {"背负", "透支"}:
                 continue
             daowen_x = self._ally_daowen_x(ally, name, target)
             if daowen_x < 1:
