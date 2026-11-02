@@ -57,7 +57,7 @@ def test_daowen_registry_every_daowen_has_positive_cost_channel():
     """现行道纹 X=1 时必有金额>0 的资源或特殊机制代价通道。"""
     DaoWenEngine.register_all()
     inventory = json.loads((Path(__file__).resolve().parents[1] /
-        "docs/全道纹标准审查清单-2026-10-28.json").read_text(encoding="utf-8"))
+        "内部/审查报告/全道纹标准审查清单-2026-10-28.json").read_text(encoding="utf-8"))
     expected = {row["name"] for row in inventory["rows"] if row["runtime"]}
     assert set(DaoWenEngine._registry) == expected  # 比较确切名称，不以旧数量40冒充覆盖
     # 删除/遗物化边界必须是硬约束，防止后续注册时意外复活旧道纹。

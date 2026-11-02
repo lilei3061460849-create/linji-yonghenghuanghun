@@ -7,7 +7,7 @@ from pathlib import Path
 from engine.daowen import DaoWenEngine
 
 ROOT = Path(__file__).resolve().parents[1]
-AUDIT = ROOT / 'docs/全道纹标准审查清单-2026-10-28.json'
+AUDIT = ROOT / '内部/审查报告/全道纹标准审查清单-2026-10-28.json'
 
 
 class DaoWenAuditInventoryTests(unittest.TestCase):
@@ -60,7 +60,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
         self.assertNotRegex(dungeon, r'馈赠(?:X|\d+)')
         self.assertIn('永夜庭四面体：反转 血契X⇄共罪X、不死X⇄怜悯X', dungeon)
-        scraps = (ROOT / '废稿汇总.md').read_text(encoding='utf-8')
+        scraps = (ROOT / '内部/废稿汇总.md').read_text(encoding='utf-8')
         self.assertIn('| A09 | 馈赠、受击次数供法力', scraps)
         self.assertIn('使目标受击时获得X点法力，持续∞', scraps)
 
@@ -140,7 +140,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         # 2026-10-31：共罪回到永夜庭主环，血契改为环外（不占主环格）。
         self.assertIn('转换 血契X⇄怜悯X、共罪X⇄不死X', dungeon)
         self.assertIn('生命减少视为失血', dungeon)
-        scraps = (ROOT / '废稿汇总.md').read_text(encoding='utf-8')
+        scraps = (ROOT / '内部/废稿汇总.md').read_text(encoding='utf-8')
         self.assertIn('| A10 | 失血道纹、伤害来源自反噬', scraps)
         self.assertIn('法力3X，使目标每次造成伤害时失去等量生命，持续X', scraps)
 
@@ -181,7 +181,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertFalse(row['runtime'])
         self.assertIn('新效果支付待定', row['tags'])
         self.assertIn('| A11 | 感染旧效、主动赋予异变',
-                      (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
+                      (ROOT / '内部/废稿汇总.md').read_text(encoding='utf-8'))
 
     def test_excavation_is_retained_as_transformation_rule(self):
         dungeon = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
@@ -228,7 +228,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertNotRegex(dungeon, r'料敌(?:X|\d)')
         self.assertIn('独断X⇄（转换）？？⇄（反转）？？', dungeon)
         self.assertIn('| A12 | 料敌、预测攻击后施加禁攻',
-                      (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
+                      (ROOT / '内部/废稿汇总.md').read_text(encoding='utf-8'))
 
     def test_retired_dodge_prediction_control_is_archived(self):
         self.assertNotIn('看破', {r['name'] for r in self.rows})
@@ -236,7 +236,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertNotRegex(dungeon, r'看破(?:X|\d)')
         self.assertIn('独断X⇄（转换）？？⇄（反转）？？⇄（转换）？？', dungeon)
         self.assertIn('| A13 | 看破、预测闪避后追加禁闪',
-                      (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
+                      (ROOT / '内部/废稿汇总.md').read_text(encoding='utf-8'))
 
     def test_retired_target_prediction_control_is_archived(self):
         self.assertNotIn('攻心', {r['name'] for r in self.rows})
@@ -244,7 +244,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertNotRegex(dungeon, r'攻心(?:X|\d)')
         self.assertIn('？？⇄（转换）？？⇄（曲解）读心X', dungeon)
         self.assertIn('| A14 | 攻心、预测后接管一次行动目标',
-                      (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
+                      (ROOT / '内部/废稿汇总.md').read_text(encoding='utf-8'))
 
     def test_retired_end_round_lifesteal_is_archived(self):
         self.assertNotIn('嗜血', {r['name'] for r in self.rows})
@@ -253,7 +253,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertNotIn('？？', dungeon.split('道纹定义：')[0].replace(
             '原「？？」占位撤销', ''))
         self.assertIn('| A15 | 嗜血原回终草案、延迟伤害兑换回复',
-                      (ROOT / '废稿汇总.md').read_text(encoding='utf-8'))
+                      (ROOT / '内部/废稿汇总.md').read_text(encoding='utf-8'))
 
     def test_split_index_tracks_implemented_creation_rule(self):
         index = (ROOT / '全道纹索引.md').read_text(encoding='utf-8')

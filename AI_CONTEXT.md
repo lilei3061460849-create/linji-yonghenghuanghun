@@ -29,11 +29,11 @@
 | # | 角色 | 原始文件 | SHA-256 |
 | --- | --- | --- | --- |
 | 1 | 世界观正典（故事文档） | [故事文档.md](故事文档.md) | `2504d352fca6b81d3d03ac08474ef5eaafc185fc4cedecb8e9533fd89bd77661` |
-| 2 | AI 角色扮演约束（节选：职责、性格、扮演要求） | [AI_EXPERIENCE.md](AI_EXPERIENCE.md) | `b4f94eb6444096efaa084f34f43f3b7ad4dce94930b9c237f96ba4e958d1b88b` |
+| 2 | AI 角色扮演约束（节选：职责、性格、扮演要求） | [AI_EXPERIENCE.md](AI_EXPERIENCE.md) | `7eced5dc0005f0cf140f60d8e848fa1aa196332fb80873bcedcbd929b2a0a496` |
 | 3 | 机制速查·行动 | [规则正文.md](规则正文.md) | `386a5d5224b94a8259882b208614a3d477f321d2b9b3b74fd5bac16ac0959e8f` |
 | 4 | 机制速查·道纹 | [全道纹索引.md](全道纹索引.md) | `691a86af828b5da250b5b9dfe1395e5c9ad78feacfe8ffae51738c09f1e5c2bc` |
 | 5 | 机制速查·物品 | [物品索引.md](物品索引.md) | `614450560b5a245a1e69795db06f41ccd0edc29bdc92227af1da0f45839032cc` |
-| 6 | 机制速查·法术 | [法术索引.md](法术索引.md) | `2e890b84dc8f79a15e44edef2cb0521df017228018a44b2371ac0aed45f55fe1` |
+| 6 | 机制速查·法术 | [法术索引.md](法术索引.md) | `f08061830f564b1d33c797b1492b765f1e5a4f3cb2eaa4a345c09bb8dda56948` |
 | 7 | 机制速查·副本 | [副本索引.md](副本索引.md) | `975a32f319ceffb189e77bc3751e550b0eca126b61fa9414205a22fce891f366` |
 | 8 | 角色名单（只列身份，不含记忆） | 角色记忆/（目录） | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
 
@@ -161,7 +161,7 @@
 ### 来源 2：AI 角色扮演约束（节选：职责、性格、扮演要求）
 
 - 路径：`AI_EXPERIENCE.md`
-- SHA-256：`b4f94eb6444096efaa084f34f43f3b7ad4dce94930b9c237f96ba4e958d1b88b`
+- SHA-256：`7eced5dc0005f0cf140f60d8e848fa1aa196332fb80873bcedcbd929b2a0a496`
 
 ```markdown
 ### 职责划分
@@ -395,7 +395,7 @@
 ### 来源 6：机制速查·法术
 
 - 路径：`法术索引.md`
-- SHA-256：`2e890b84dc8f79a15e44edef2cb0521df017228018a44b2371ac0aed45f55fe1`
+- SHA-256：`f08061830f564b1d33c797b1492b765f1e5a4f3cb2eaa4a345c09bb8dda56948`
 
 ```markdown
 （共 10 式）
