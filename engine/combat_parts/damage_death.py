@@ -335,14 +335,24 @@ class DamageDeathMixin:
         if conversion and record is not None:
             record["blood_wing_conversion"] = conversion
 
-    def _execute_diaoling(self, caster: Entity, exempt_target: Entity,
+    def _execute_diaoling(self, caster: Entity, exempt_targets: Entity | list[Entity],
                           threshold: int) -> list[dict]:
-        """一次性【凋零】：按施放当次快照，判死除目标外的低生命角色。
+        """一次性【凋零】：按施放当次快照，判死除[目标]外的低生命角色。
+
+        2026-11-02 用户令：**豁免的是"本次发动的全部[目标]"这一个集合**，不是
+        逐个目标分别结算。波及/多目标提交时 {A, B} 同属一个豁免集合——绝不能
+        写成 `for t in targets:` 分次执行，否则 A 会把 B 判死、B 再把 A 判死，
+        两个本该被豁免的目标互相杀。这里先固定豁免集合，再统一挑出待判死对象，
+        最后一次性进入死亡管线。
 
         先收齐本次所有对象再进入统一死亡管线；不挂状态，也不因后续生命变化、
         死亡连锁或新角色入场追加检查。直接判死而非伤害，故绕过生命下限。
         """
         threshold = max(0, int(threshold))
+        if isinstance(exempt_targets, (list, tuple, set)):
+            exempt = {id(entity) for entity in exempt_targets if entity is not None}
+        else:
+            exempt = {id(exempt_targets)} if exempt_targets is not None else set()
         entities = list({
             entity.runtime_id: entity
             for entity in (self.state.get_all_player_side()
@@ -351,7 +361,7 @@ class DamageDeathMixin:
         }.values())
         pending = [
             entity for entity in entities
-            if (entity is not exempt_target
+            if (id(entity) not in exempt
                 and not getattr(entity, "is_departed", False)
                 and not getattr(entity, "_death_triggers_emitted", False)
                 and entity.current_hp <= threshold)

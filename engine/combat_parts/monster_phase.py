@@ -604,7 +604,10 @@ class MonsterPhaseMixin:
                 if want_dodge and not must_hit_preview and self.state.side_has(entity, "回锋刀"):
                     allowed = {t_opt["ref"] for t_opt in prepared_option["target_options"]
                                if not self.state.on_player_side(refs[t_opt["ref"]])}
-                    if entry.get("dodge_relic_target_ref") not in allowed:
+                    # 唯一候选时引擎自动取缺省目标（2026-11-02），多目标才要求显式提交。
+                    if not entry.get("dodge_relic_target_ref") and len(allowed) == 1:
+                        pass
+                    elif entry.get("dodge_relic_target_ref") not in allowed:
                         raise ValueError("回锋刀触发必须显式提交合法目标")
                 aoe_dodge_choices.append((entity, want_dodge, entry))
             if dodge not in (None, False):
@@ -622,7 +625,9 @@ class MonsterPhaseMixin:
             if dodge and not must_hit_preview and self.state.side_has(target, "回锋刀"):
                 allowed = {entry["ref"] for entry in prepared_option["target_options"]
                            if self.state.on_player_side(refs[entry["ref"]]) != self.state.on_player_side(target)}
-                if choice.get("dodge_relic_target_ref") not in allowed:
+                if not choice.get("dodge_relic_target_ref") and len(allowed) == 1:
+                    pass
+                elif choice.get("dodge_relic_target_ref") not in allowed:
                     raise ValueError("回锋刀触发必须显式提交合法目标")
             if choice.get("dodge_targets") not in (None, []):
                 raise ValueError(f"道纹【{effective_name}】不接受dodge_targets")

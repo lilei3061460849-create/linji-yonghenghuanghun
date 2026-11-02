@@ -161,16 +161,17 @@ def test_gongzui_shares_resources_in_both_directions_but_not_special_mechanisms(
     assert player.get_status_value("共罪") == 1
     assert first.get_status_value("共罪") == second.get_status_value("共罪") == 1
 
+    # 2026-11-02：三个名额各扣 ceil(M/3)，不再随机分配余数。
     before = (player.current_mana, first.current_mana, second.current_mana)
     engine.combat.pay_resource(first, "法力", 5, ctx={"actor": first, "source": "测试"})
     losses = [before[0] - player.current_mana, before[1] - first.current_mana,
               before[2] - second.current_mana]
-    assert sum(losses) == 5 and all(loss > 0 for loss in losses)
+    assert losses == [2, 2, 2]
     before = (player.current_mana, first.current_mana, second.current_mana)
     engine.combat.pay_resource(second, "法力", 4, ctx={"actor": second, "source": "测试"})
     losses = [before[0] - player.current_mana, before[1] - first.current_mana,
               before[2] - second.current_mana]
-    assert sum(losses) == 4 and all(loss > 0 for loss in losses)
+    assert losses == [2, 2, 2]
 
     engine.combat.pay_numeric_cost(first, "枯竭", 4, ctx={"actor": first, "source": "测试"})
     assert first.pending_exhaust_mana == 4
@@ -183,9 +184,10 @@ def test_gongzui_blood_pact_cross_is_observed_without_recursive_exemption():
     _pact(first, second)
     engine.combat.pay_resource(first, "生命", 5, ctx={"actor": first, "source": "测试"})
     total_lost = 120 - first.current_hp - second.current_hp
-    # 首次5与血契额外5之后，额外支付的共罪份额仍会继续触发A的血契。
-    # 余数随机只改变后续1点链的长度，不允许把总额预先写成10。
-    assert total_lost >= 13
+    # 首次5按共罪拆成 3×ceil(5/3)=3×2=6；血契回声5再按共罪拆成 3×2=6。
+    # 回声本身是派生支付（trigger_blood_pact=False），不能让份额继续续链——
+    # 向上取整后每份必≥1，续链就是无界级联（旧随机余数只是碰巧有0才停下）。
+    assert total_lost == 12
     assert first.current_hp < 60 and second.current_hp < 60
 
 

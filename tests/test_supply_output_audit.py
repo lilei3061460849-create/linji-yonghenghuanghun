@@ -45,7 +45,8 @@ class SupplyOutputAuditTests(unittest.TestCase):
             cast_paid(c, '超频', 1)
             cast_paid(c, '透支', 2, cost_channel='疲惫')
         self.assertEqual((p.current_speed, p.current_mana, p.speed_limit, p.current_hp), before)
-        self.assertEqual(t.current_hp, 100000 - 12 * 6)
+        # 2026-11-02：回锋刀双向触发，每轮"超频(加速) + 透支(失速)"各 5 点 → 10 点。
+        self.assertEqual(t.current_hp, 100000 - 12 * 10)
 
     def test_unbounded_hp_regen_overdraft_cup_can_feed_shaifa(self):
         c = arena('承露盏');p = c.state.player;t = c.state.enemies[0]

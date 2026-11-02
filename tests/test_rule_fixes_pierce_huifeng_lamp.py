@@ -1,7 +1,7 @@
 """贯穿 / 回锋刀失速 / 守夜灯敌回 口径修正。
 
 1. 贯穿：你造成的伤害（道纹/遗物/雕塑等）一律无视格挡，不只普攻。
-2. 回锋刀：每失去1点当前速度后对显式[目标]造成3点伤害；折速疲惫必须提交目标。
+2. 回锋刀：当前速度实际变化（增加或减少）即触发，每次固定5点伤害；折速疲惫必须提交目标。
 3. 守夜灯：每经历一个回合，在[回增]加等同于当前世界回合数的法力，不清空。
 
 每条覆盖正常路径 / 边界 / 非法输入。
@@ -158,7 +158,7 @@ def test_round_start_gap_damage_is_separate_from_zhesu(tmp_path):
     m = e.state.enemies[0]
     m.blood_limit = max(m.blood_limit, 200)
     m.current_hp = m.blood_limit
-    # 战中失速5点（不依赖任何战始遗物联动）→ 回锋刀按每点3伤即时结算
+    # 战中失速5点（不依赖任何战始遗物联动）→ 回锋刀按"一次变化=5伤"即时结算
     e.combat._lose_current_speed(p, 5, "enemy:0", require_huifeng=True, ctx={
         "timing": "player_action", "source": "普通攻击", "source_type": "attack",
         "actor": p, "target": p, "mechanic": "speed_change", "subtype": "current_speed",
@@ -166,7 +166,7 @@ def test_round_start_gap_damage_is_separate_from_zhesu(tmp_path):
     })
     after_loss = m.current_hp
     begin_round(e, relic_choices={"回锋刀": {"enemy_index": 0}})
-    assert after_loss == m.blood_limit - 15     # 失速5 × 每点3伤
+    assert after_loss == m.blood_limit - 5      # 一次速度变化固定 5 伤，与幅度无关
     assert m.current_hp == after_loss - 15      # 回始按缺口(速限-当前速度)=5 再打15
 
 

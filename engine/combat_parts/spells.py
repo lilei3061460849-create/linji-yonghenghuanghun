@@ -1019,6 +1019,9 @@ class SpellReactionMixin:
 
         # --- 真正执行道纹效果 ---
         self.pay_daowen_cooldown(daowen,calc,caster)
+        # 【回锋刀】的缺省目标需要知道"当前法术步骤的主目标"（2026-11-02）。
+        previous_spell_target = getattr(self, "_huifeng_spell_target", None)
+        self._huifeng_spell_target = target
         try:
             execution = self.apply_daowen_effect(daowen,calc,caster,target,
                 dragon_heart_use=entry_dict.get("dragon_heart_use",0),
@@ -1031,6 +1034,8 @@ class SpellReactionMixin:
                 reason=InterruptReason.INVALID_INPUT,
                 detail=f"道纹{daowen}执行失败: {exc}",
                 trigger_spell_logs=trigger_logs, iteration=iteration)
+        finally:
+            self._huifeng_spell_target = previous_spell_target
 
         self.consume_tamper(caster, tamper_rule)
         return StepResult(

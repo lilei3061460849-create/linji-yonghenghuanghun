@@ -4386,7 +4386,7 @@ class GameEngine:
         ("叠鳞甲", "你受到的所有伤害-1，最低为0。"),
         ("血誓戒", "[回始]首次主动支付生命时，获得等同于本次实际支付生命的格挡；若支付后生命≤30%，改为获得等量生命"),
         ("同魂笔", "当你对[目标]发动残韵时，可以选择另一个[目标]，使其拥有的一种道纹受到同种残韵影响。"),
-        ("回锋刀", "每失去1点速度后，对[目标]造成3点伤害；[回始]，对[目标]造成3×（你的[速限]-你的当前速度）的伤害。"),
+        ("回锋刀", "每当你的当前速度发生实际变化时（增加或减少均算），对[目标]造成5点伤害；[回始]，对[目标]造成3×（你的[速限]-你的当前速度）的伤害。"),
         ("避风铃", "每次闪避后获得3格挡；当前速度归零时获得15格挡"),
         ("守夜灯", "[回增]，你获得等同于增加后当前回合数的法力。"),
         ("无所求", "每当你在事件中选择「拒绝」类选项，永久获得1点属性点。"),
@@ -6244,11 +6244,17 @@ class GameEngine:
             execution = {"daowen": name, "effects": logs,
                          "custom": True, "x": x}
         else:
-            execution = self._execute_daowen_effect(
-                name, calc, actor, target, dragon_heart_use,
-                cost_share_target_ref=params.get("cost_share_target_ref", ""),
-                aoe_targets_override=aoe_targets_override,
-            )
+            # 【回锋刀】缺省目标的依据之一：本次发动的 [目标]（2026-11-02）。
+            previous_spell_target = getattr(self.combat, "_huifeng_spell_target", None)
+            self.combat._huifeng_spell_target = target
+            try:
+                execution = self._execute_daowen_effect(
+                    name, calc, actor, target, dragon_heart_use,
+                    cost_share_target_ref=params.get("cost_share_target_ref", ""),
+                    aoe_targets_override=aoe_targets_override,
+                )
+            finally:
+                self.combat._huifeng_spell_target = previous_spell_target
         if name == "交易":
             # 【交易】发现X件遗物：逐次 3 选 1，本场战斗内有效（战终清除）。
             self.state.pending_relic_discovery_rounds = max(0, int(x) - 1)
@@ -7015,7 +7021,7 @@ class GameEngine:
                 "target_ref": [o["ref"] for o in target_options],
                 "damage": "非负整数；所有击的总和不得超过damage_budget",
                 "dodge": "boolean", "parry": "boolean", "blood_shadow": "boolean",
-                "dodge_relic_target_ref": "持有回锋刀且闪避时必填",
+                "dodge_relic_target_ref": "持有回锋刀且闪避时：多目标必填，唯一候选可省略（引擎自动取缺省目标）",
                 "spell_choices": "按目标spell_options完整提交",
             } for _ in range(attacker.effective_attack_count())],
         }
@@ -7066,8 +7072,14 @@ class GameEngine:
                 if self.state._relic_active(target, "回锋刀"):
                     rr = hit.get("dodge_relic_target_ref")
                     allowed = {x["ref"] for x in legal[ref]["dodge_relic_target_options"]}
-                    if rr not in allowed:
-                        return {"success": False, "error": "回锋刀触发必须显式提交合法dodge_relic_target_ref"}
+                    # 2026-11-02：1v1 只有一个敌对目标时无需再选，引擎按缺省目标
+                    # 自动结算（见 CombatEngine._default_huifeng_target）；多目标才
+                    # 要求显式提交，避免把 5 点伤害打到错误的对手身上。
+                    if not rr and len(allowed) == 1:
+                        pass
+                    elif rr not in allowed:
+                        return {"success": False,
+                                "error": "回锋刀触发必须显式提交合法dodge_relic_target_ref"}
             if hit["blood_shadow"]:
                 if not legal[ref]["can_blood_shadow"]:
                     return {"success": False, "error": f"{target.name}不能使用血影"}

@@ -242,7 +242,8 @@ class DaowenEffectMixin:
                     token=uuid.uuid4().hex;inst._catalysis_token=token
                 selected.append({"entry":dict(entry),"token":token})
             pools.append({"holder_id":holder.runtime_id,"candidates":selected})
-        parts=self._divide_flat(count,len(pools)) if len(pools)>1 else [count]
+        # 催化步骤是"执行配额"不是"每人一份数值"：按 ceil 分，但总和必须等于X。
+        parts=self._divide_quota(count,len(pools)) if len(pools)>1 else [count]
         calc["catalysis_plan"]=[dict(pool,steps=pool["candidates"][:part])
                                 for pool,part in zip(pools,parts)]
 
@@ -288,7 +289,7 @@ class DaowenEffectMixin:
         policy=self.CAST_STEP_POLICY if calc.get("catalysis_allow_reactions",True) else self.EVENT_STEP_POLICY
         plans=calc.get("catalysis_plan",[])
         if sum(len(pool["steps"]) for pool in plans)!=calc.get("catalysis_count",0):
-            parts=self._divide_flat(calc.get("catalysis_count",0),len(plans))
+            parts=self._divide_quota(calc.get("catalysis_count",0),len(plans))
             plans=[dict(pool,steps=pool["candidates"][:part]) for pool,part in zip(plans,parts)]
         for pool in plans:
             holder=next((entity for entity in refs.values() if entity.runtime_id==pool["holder_id"]),None)
@@ -685,13 +686,40 @@ class DaowenEffectMixin:
                 cost_share_target_ref=cost_share_target_ref,
                 aoe_targets_override=aoe_targets_override)
             if name == "凋零":
-                # 一次性瞬发：只按本次施放快照判死，目标本身除外，不留持续状态。
+                # 一次性瞬发：只按本次施放快照判死；豁免的是**本次全部[目标]**
+                # 构成的集合（主目标 + 波及目标 + 显式AOE快照），不留持续状态。
                 result["effects"].extend(self._execute_diaoling(
-                    caster, target, calc["diaoling_threshold"]))
+                    caster, self._daowen_recipient_set(caster, target, aoe_targets_override),
+                    calc["diaoling_threshold"]))
             self.note_target_lock(caster, target)
             for wave_target in aoe_targets_override or []:
                 self.note_target_lock(caster, wave_target)
             return result
+
+    def _daowen_recipient_set(self, caster: Entity, target: Optional[Entity],
+                              aoe_targets_override: Optional[list[Entity]] = None) -> list[Entity]:
+        """本次发动实际作用到的全部[目标]：主目标 + 显式AOE快照 + 波及目标。
+
+        供"以[目标]为豁免/排除对象"的道纹（【凋零】【压迫】等）把多个目标视为
+        **同一个豁免集合**使用。永远返回列表、顺序稳定。施法者自身可以是[目标]
+        （例如【凋零】以自己为目标），此时它同样属于豁免集合；波及目标的选取
+        本来就不含施法者，无需在这里剔除。
+        """
+        recipients: list[Entity] = []
+
+        def _add(entity: Optional[Entity]) -> None:
+            if entity is None or not getattr(entity, "is_alive", False):
+                return
+            if all(existing is not entity for existing in recipients):
+                recipients.append(entity)
+
+        _add(target)
+        for entity in aoe_targets_override or []:
+            _add(entity)
+        if target is not None:
+            for entity in self._wave_targets(caster):
+                _add(entity)
+        return recipients
 
     def _apply_daowen_effect_impl(
         self, name: str, calc: dict, caster: Entity, target: Entity,
@@ -787,7 +815,8 @@ class DaowenEffectMixin:
 
         # ---- 波及X（2026-08-21）：你发动的道纹同时作用于所有拥有波及效果的目标 ----
         # 数值型效果的总数值在所有目标（本次[目标]+波及目标，均排除施法者自身）间平分，
-        # 余数随机分配；状态类效果对波及目标原样生效。多目标不复制或增加总数值。
+        # 无法整除时每份向上取整（2026-11-02 用户令，ceil）；
+        # 状态类效果对波及目标原样生效。
         # 目标可选的道纹（如【变形】）未指定目标时兜底为施法者，避免 [None]
         # 2026-10-09 用户令：波及 X≥2 下限 repealed——effective 非空即走分路，
         # 不再有「不足 2 个不分」的特判：平分份数=目标数，单目标时 _divide_flat(v,1)=[v]，
@@ -1824,8 +1853,8 @@ class DaowenEffectMixin:
                                       "caster": caster.name, "order": order})
 
         if name == "共罪":
-            # 2026-10-31 用户裁定：X 个非自身目标之外，发动者始终追加一个支付名额；
-            # 同一实体可以因追加而占两份。
+            # X 个非自身目标 + 发动者本身 = X+1 份名额；2026-11-02 用户令：
+            # 每个角色严格只占 1 份，同一 runtime_id 不得重复占位。
             import json
             targets = list(calc.get("targets") or [])
             expected = int(calc.get("x", 0) or 0)
@@ -1837,7 +1866,7 @@ class DaowenEffectMixin:
                     or any(entity is caster for entity in targets)):
                 raise ValueError("共罪需要X个互不相同的存活非自身目标")
             group_slots = targets + [caster]
-            group_ids = [str(entity.runtime_id) for entity in group_slots]
+            group_ids = list(dict.fromkeys(str(entity.runtime_id) for entity in group_slots))
             encoded = json.dumps(group_ids, ensure_ascii=False)
             unique_members = list({str(entity.runtime_id): entity for entity in group_slots}.values())
             for entity in unique_members:

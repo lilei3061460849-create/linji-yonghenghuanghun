@@ -113,6 +113,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         self._resuming_spell_stack = False
         self._priority_passes = 0
         self._ended_turn_sides = set()
+        # 【回锋刀】缺省目标用"当前法术步骤的主目标"（2026-11-02）：单步道纹结算
+        # 期间临时写入，结算完立刻还原；哨兵初值必须是 None，否则预演沙盒的
+        # 全图零污染检查会把它当成新出现的引擎状态。
+        self._huifeng_spell_target = None
         # 把本引擎绑定到已有战斗实体上：之后任何 current_hp 下降都会经
         # Entity._fire_hp_loss → _on_entity_hp_fallen 上报（仅对引擎自有的实体生效）。
         self._bind_existing_hp_hooks()
@@ -354,7 +358,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         entity.current_speed += amount
         self.clamp_immortal_body(entity)
         gained = entity.current_speed - before
-        self._record_speed_change_event(entity, gained, ctx, field="current_speed")
+        speed_ctx = self._record_speed_change_event(entity, gained, ctx, field="current_speed")
+        # 【回锋刀】（2026-11-02 用户令）：当前速度**实际发生变化**就触发——
+        # 获得与失去双向都算，每次固定 5 点伤害。封顶导致没有实际变化时不触发。
+        self._trigger_huifeng_on_speed_change(entity, gained, speed_ctx=speed_ctx)
         return gained
 
     def _relic_active(self, entity: Entity, name: str) -> bool:
@@ -534,6 +541,37 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             holder._huifeng_target_ref = ref
             self.state.event_modifiers["huifeng_target_ref_opponent"] = ref
 
+    def _huifeng_hostile_candidates(self, holder: Entity) -> list[tuple[str, Entity]]:
+        """回锋刀可选伤害目标：全场存活的敌对实体（按稳定的 target_ref 顺序）。"""
+        if holder is None:
+            return []
+        holder_side = self.state.on_player_side(holder)
+        return [(ref, entity) for ref, entity in self._combat_entity_refs().items()
+                if entity is not None and entity.is_alive and entity is not holder
+                and self.state.on_player_side(entity) != holder_side]
+
+    def _default_huifeng_target(self, holder: Entity) -> tuple[str, Optional[Entity]]:
+        """回锋刀缺省目标（2026-11-02 用户令）。
+
+        调用方没显式提交 `dodge_relic_target_ref` 时**不得抛错中断**——法术循环
+        （如【超频】+【透支】）与 1v1 里根本没有"选目标"这一步。取目标的顺序：
+          1. 当前法术步骤的主目标（若敌对且存活）；
+          2. 全场唯一的敌对存活单位（1v1）；
+          3. 仍无唯一解时取顺序最靠前的敌对存活单位（确定性，不做随机）。
+        """
+        spell_target = getattr(self, "_huifeng_spell_target", None)
+        if (spell_target is not None and getattr(spell_target, "is_alive", False)
+                and spell_target is not holder
+                and self.state.on_player_side(spell_target)
+                != self.state.on_player_side(holder)):
+            for ref, entity in self._combat_entity_refs().items():
+                if entity is spell_target:
+                    return ref, spell_target
+        candidates = self._huifeng_hostile_candidates(holder)
+        if not candidates:
+            return "", None
+        return candidates[0]
+
     def _resolve_huifeng_target(self, holder: Entity, explicit_ref: Optional[str] = None):
         refs = self._combat_entity_refs()
         stored = ""
@@ -543,46 +581,66 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             stored = (getattr(holder, "_huifeng_target_ref", "")
                       or self.state.event_modifiers.get("huifeng_target_ref_opponent")
                       or "")
-        for ref in (explicit_ref or "", stored):
+        speed_ref = getattr(self, "_speed_cost_relic_target_ref", None) or ""
+        for ref in (explicit_ref or "", stored, speed_ref):
             if not ref:
                 continue
             target = refs.get(ref)
             if (target is not None and target.is_alive
                     and self.state.on_player_side(target) != self.state.on_player_side(holder)):
                 return ref, target
-        return None, None
+        return self._default_huifeng_target(holder)
+
+    def _trigger_huifeng_on_speed_change(
+        self, holder: Entity, delta: int, explicit_ref: Optional[str] = None,
+        *, require_target: bool = False,
+        speed_ctx: Optional[dict] = None,
+    ) -> Optional[dict]:
+        """【回锋刀】（2026-11-02 用户令版）：当前速度**实际变化**时触发。
+
+        - 触发条件：结算后 `当前速度 != 变化前速度`，**获得与失去都算**，与变化
+          幅度无关（旧版只认失速、并按 `3 × 失去点数` 造伤，已废除）。
+        - 伤害数值：每次固定 **5 点**。
+        - 目标：显式提交 → 已记住的目标 → 当前法术步骤主目标 → 唯一/首个敌方
+          存活单位。缺参数时**绝不抛错**（`require_target` 保留形参只为兼容旧
+          调用点，不再raise）：法术循环与 1v1 里没有"选目标"这一步。
+        """
+        if not delta or not self._huifeng_active(holder):
+            return None
+        ref, target = self._resolve_huifeng_target(holder, explicit_ref)
+        if target is None:
+            return None
+        self._remember_huifeng_target(holder, ref)
+        damage = 5
+        detail = self._apply_hostile_damage(target, damage, source=holder, ctx={
+            "timing": (speed_ctx or {}).get("timing") or self._current_context_timing(),
+            "source": "回锋刀", "source_type": "relic", "actor": holder, "target": target,
+            "owner": holder, "mechanic": "damage", "subtype": "relic", "amount": damage,
+            "tags": {"relic", "speed_change_followup"},
+            "parent_event_id": (speed_ctx or {}).get("event_id"),
+        })
+        if holder is not None and detail.get("actual_damage", 0) > 0:
+            holder.damage_dealt_this_round += detail["actual_damage"]
+        return {"target": target.name, "speed_delta": delta, "damage": damage, **detail}
 
     def _trigger_huifeng_on_speed_loss(
         self, holder: Entity, lost: int, explicit_ref: Optional[str] = None,
         *, require_target: bool = False,
         speed_ctx: Optional[dict] = None,
     ) -> Optional[dict]:
-        """回锋刀：每失去1点当前速度后，对已显式提交的[目标]造成3点伤害。不自动选目标。"""
-        if lost <= 0 or not self._huifeng_active(holder):
+        """兼容入口：失速方向的【回锋刀】触发（固定 5 点，见 speed_change 版本）。"""
+        if lost <= 0:
             return None
-        ref, target = self._resolve_huifeng_target(holder, explicit_ref)
-        if target is None:
-            if require_target:
-                raise ValueError("回锋刀触发必须显式提交合法敌方目标引用")
-            return None
-        self._remember_huifeng_target(holder, ref)
-        detail = self._apply_hostile_damage(target, 3 * lost, source=holder, ctx={
-            "timing": (speed_ctx or {}).get("timing") or self._current_context_timing(),
-            "source": "回锋刀", "source_type": "relic", "actor": holder, "target": target,
-            "owner": holder, "mechanic": "damage", "subtype": "relic", "amount": 3 * lost,
-            "tags": {"relic", "speed_loss_followup"},
-            "parent_event_id": (speed_ctx or {}).get("event_id"),
-        })
-        if holder is not None and detail.get("actual_damage", 0) > 0:
-            holder.damage_dealt_this_round += detail["actual_damage"]
-        return {"target": target.name, "lost_speed": lost, **detail}
+        return self._trigger_huifeng_on_speed_change(
+            holder, -lost, explicit_ref, require_target=require_target,
+            speed_ctx=speed_ctx)
 
     def _lose_current_speed(
         self, entity: Entity, amount: int, relic_target_ref: Optional[str] = None,
         *, require_huifeng: bool = False,
         ctx: Optional[EffectContext | dict] = None,
     ) -> int:
-        """失去当前速度的唯一入口。回锋刀按失去点数造伤；避风铃在归零时+15。"""
+        """失去当前速度的唯一入口。回锋刀固定5点伤害；避风铃在当前速度归零时+15。"""
         if entity is None or amount <= 0:
             return 0
         before = entity.current_speed
@@ -597,8 +655,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             self._battle_delta(entity, "speed_limit", -2, "失速冥灯",
                                EffectPolarity.DEBUFF.value)
             entity.current_speed = min(entity.current_speed, entity.speed_limit)
-        self._trigger_huifeng_on_speed_loss(
-            entity, lost, relic_target_ref, require_target=require_huifeng,
+        self._trigger_huifeng_on_speed_change(
+            entity, -lost, relic_target_ref, require_target=require_huifeng,
             speed_ctx=speed_ctx)
         # 冥气X：[目标]每失去一次速度[速限]-2，持续X。
         # 累计局内后果（同畸变/伤痕），经 BATTLE 账本登记，[战终]逆向清除。
@@ -1892,18 +1950,30 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     def yapo_target_lock_holder(self, attacker: Entity, target: Entity) -> Optional[Entity]:
         """返回限制这次选目标的【压迫】持有者；没有压迫限制则返回None。
 
-        压迫只豁免其[目标]本身：其他角色只能选择自己，不能选择压迫持有者或第三方。
+        压迫只豁免其[目标]：其他角色只能选择自己，不能选择压迫持有者或第三方。
+
+        2026-11-02 用户令：**所有被本次发动选中的[目标]构成同一个豁免集合**。
+        波及/多目标提交时 {A, B} 各持一份【压迫】状态，A 与 B 互为"除目标外"，
+        绝不能让 A 因为 B 身上有压迫就被锁死（那就是两个豁免目标互相压迫）。
+        判定顺序：攻击者本人就在豁免集合内 → 不限制；否则场上任一压迫持有者
+        即为限制来源。
         """
         if attacker is target:
             return None
         entities = (self.state.get_all_player_side() + self.state.get_all_enemy_side())
+        holders: list[Entity] = []
         for holder in entities:
-            if holder is attacker or not holder.is_alive or self.state.is_sealed_away(holder):
+            if not holder.is_alive or self.state.is_sealed_away(holder):
                 continue
             if any(status.name == "压迫" and not status.is_expired
                    for status in holder.status_effects):
-                return holder
-        return None
+                holders.append(holder)
+        if not holders:
+            return None
+        if any(holder is attacker for holder in holders):
+            # 攻击者本身是被豁免的[目标]：它可以正常选目标。
+            return None
+        return holders[0]
 
     def is_targetable(self, attacker: Entity, target: Entity) -> bool:
         """目标是否可被选中：统一结算飞行与压迫的目标限制。"""

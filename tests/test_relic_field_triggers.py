@@ -125,9 +125,10 @@ def test_xijie_steals_from_huifeng_damage(tmp_path):
     hp = m.current_hp
     e.combat._remember_huifeng_target(p, "enemy:0")
     e.combat._lose_current_speed(p, 2)
-    assert m.current_hp == hp - 6
-    assert e.state.shards == 6
-    assert m.shards == 14
+    # 2026-11-02：回锋刀每次速度变化固定 5 伤（旧版 3×失去点数=6）。
+    assert m.current_hp == hp - 5
+    assert e.state.shards == 5
+    assert m.shards == 15
 
 
 def test_xijie_absent_does_not_steal_from_huifeng(tmp_path):

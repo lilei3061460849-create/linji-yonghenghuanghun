@@ -369,13 +369,14 @@ def test_r11_r17_aoe_dodge_does_not_leak_into_next_resolution(tmp_path):
     # 三次结算互相独立：本回合各行动不残留旧闪避状态
     assert "_skip_aoe_names" not in vars(engine.combat)
     _end_round()
-    # 杀伐打乙怪：甲怪有波及标记 → 数值平分（杀伐1X → 1点，甲0乙1）
+    # 杀伐打乙怪：甲怪有波及标记 → 数值平分（杀伐1X → 1点，每份向上取整 → 甲1乙1）
     three = engine.execute_action("use_daowen", {
         "daowen_name": "杀伐", "x": 1, "target_ref": "enemy:1",
         "dodge": False, "blood_shadow": False,
     })
     assert three["success"], three
-    assert first.current_hp + second.current_hp == 100 + 99   # 合计承受1点（杀伐1→X²=1）
+    # 杀伐1X 总伤1点在甲/乙间平分，每份 ceil(1/2)=1 → 各承受1点（合计2）。
+    assert first.current_hp + second.current_hp == 100 + 100 - 2
 
 
 def test_r11_r17_targets_must_come_from_prepare_and_fail_atomically(tmp_path):
