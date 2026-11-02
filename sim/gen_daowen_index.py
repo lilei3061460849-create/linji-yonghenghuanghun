@@ -188,7 +188,7 @@ assert set(CATEGORY) == (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)), (
 NOTES = {
     "血契": "按你的名义支付量让目标额外支付X倍同种资源，不是代付；目标资源不足扣至0，生命不足正常命零。血契不能局外生效。",
     "萎缩": "只禁止获得速度，不削减速限，也不阻止失去或支付速度；与超频是同域反转，既有增殖边保留为显式分叉。",
-    "唯一": "任何方式成功使用过的道纹都进入历史；持续X内不能再次使用。唯一替换原尘封草案。",
+    "唯一": "任何方式成功使用过的道纹都进入历史；持续X内不能再次使用。",
     "封印": "玩家支付异变X，使一个显式选定的目标怪物延后X回合再入场；暂离仍阻塞战终，回场当回合沿用增援白板，最终命零正常进入死亡与碎片结算。",
     "分裂": "每次发动创造X个独立造物；三项依次为1血限/当前生命、1速限/当前速度、1法限/当前法力，按通用规则得到1击数与1攻击力；与所有角色共用基础1次出手及通用修正，不另设专用上限，无道纹、不继承施法者构筑，[战终]消散。",
     "凋零": "一次性瞬发效果，只在施放当次按场上快照判定；不挂持续状态，后续生命变化及新单位入场不会再次触发。只判定除[目标]外其他在场角色的当前生命，施法者并非目标时同样参与判定；直接判死而非伤害。已补入勾魂—招魂之间的主环格。",
@@ -196,9 +196,9 @@ NOTES = {
     "沉溺": "目标即将进入普通回合或大梦产生的额外回合时消耗1次阻断并跳过该次完整回合；降至0的本次仍跳过。被跳过者不执行回始/回终、主动出手、凡庸计数或状态递减，其他角色与世界回合照常。",
     "招魂": "唤回者为[造物]，[战终]消失。",
     "真理": "初拥之夜选项5授予的血族专属道纹。X=陈述句数：提出X句陈述，目标须逐句言明真理，任一句无法言明则无法开口，持续X回合；真伪由DM逐句裁定。冷却2场战斗。",
-    "原初": "原初新定义：支付异变5X，借用目标身上自身未拥有的随机X种道纹；旧进化接口的指定借一种尚未同步，不可当作新规则已实现。",
+    "原初": "支付异变5X，借用目标身上自身未拥有的随机X种道纹。",
     "透支": "不在任何闭环内：任意角色出生自带，X每次自选。",
-    "操纵": "2026-11-02 由【操作】改名：目标接下来X次除施法外的行动由施法者控制；每次执行消耗1次名额，名额用完状态消失。施法者须给出指令（攻击／跳过／使用消耗品），未给指令时到该行动作废、代价不退。",
+    "操纵": "目标接下来X次除施法外的行动由施法者控制；每次执行消耗1次名额，名额用完状态消失。施法者须给出指令（攻击／跳过／使用消耗品），未给指令时到该行动作废、代价不退。",
     "饥饿": "施加时立即把[血限]压到当前生命（不产生失血）；持续X，到期还原施加前的[血限]。",
     "扭曲": "累积治疗量即[癌变]用的累计回复量：×2^X 后立即按癌变阈值复核一次。",
     "淬火": "当前耐久+X，并保证耐久上限不低于结果值（对完好消耗品等价于同时抬上限）。",
@@ -223,40 +223,18 @@ def tetra_chain(region):
 L = []
 A = L.append
 A("# 全道纹索引")
-A("\n> 当前命名：大梦＝额外经历X回合；沉溺＝支付法力10X，使目标无法经历X个回合（已接入）。旧存档同名记录的迁移尚未验证。")
 A("")
-draft_summary = (f"（含{len(DRAFT_DAOWEN)}种尚未接入运行时的草案节点）" if DRAFT_DAOWEN else "")
-A(f"本文件是**当前索引收录道纹（{len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)}种）的完整索引**{draft_summary}。道纹条目按归属分类：")
-category_summary = (
-    f"通用核心（四面体一·二）{len(SHAFA_LOOP_DAOWEN)} ｜ 其他通用道纹 {len(OTHER_DAOWEN)} ｜ 原始怪物道纹 {len(ORIGINAL_MONSTER_DAOWEN)} ｜ "
-    f"怪物转化道纹 {len(MONSTER_TRANSFORM_DAOWEN)} ｜ 副本专属 "
-    f"{'/'.join(str(len(region_daowen_order(r))) for r in REGION_EXCLUSIVE_DAOWEN)} ｜ "
-    f"鲛族专属 {sum(len(pool) for pool in RACE_EXCLUSIVE_DAOWEN.values())}"
-)
-if BLOODLINE_EXCLUSIVE_DAOWEN:
-    category_summary += f" ｜ 血族专属 {len(BLOODLINE_EXCLUSIVE_DAOWEN)}"
-category_summary += f" ｜ 初拥专属 {len(FIRST_EMBRACE_DAOWEN)} ｜ 已实现但副本未开放 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。"
-A(category_summary)
+A("查道纹用这份。每条写清：怎么支付、效果是什么、作用在谁身上、和哪些道纹互为残韵、哪些怪物会带。")
+A("规则的完整叙述以[规则正文](规则正文.md)为准，这里只做速查。")
 A("")
-A("- **效果正文/支付方式**：已迁移道纹从 `engine/rule_engine.py` 统一定义生成；其余已注册道纹取 `engine/daowen.py` `calculate_*` docstring；纯草案节点才取 `DRAFT_DAOWEN`。")
-A("- **归属与残韵关系**：`engine/gamedata.py`（归属）+ `engine/daowen.py`（`CLOSED_LOOPS`，四面体关系）；与规则正文一致。\n"
-  "  2026-11-02 用户令：关系表由「环状链 + 遗物化 `？？` 占位」整体改为**四面体**——每个四面体 4 个节点、6 条边，\n"
-  "  任两节点恰好由一种残韵相连（3 条反转 + 3 条转换 + 3 条曲解）。旧占位节点不再保留，缺位由【饥饿】【扭曲】【淬火】【涌潮】【操纵】补齐。\n"
-  "  `CLOSED_LOOPS` 里的每条边仍是**无向边**（2026-10-07 用户令：残韵路径双向）——登记 `(a,类型,b)` 表示 a、b 互为相邻节点，\n"
-  "  正反两向都走同一种残韵、同样消耗一次；双向由 `ResonanceEngine.find_transformations` 在查询时展开，边表不重复登记反向边。\n"
-  "  同一源道纹、同一残韵类型存在多个真实出口时属于显式分叉，必须提交 `target_daowen`，不得由索引或运行时静默任选。\n"
-  "  语义审计口径：转换＝同构换维度；反转＝同域翻极性；曲解＝保留核心概念但改变作用关系，曲解不是无法归类时的兜底。")
-A("- **承载怪物**：解析自已实现副本与沉沦海专属网络草案的面板行（怪物池 + 事件/雇佣面板）；格式 `怪物名X`。")
-A("- 冲突时：已确认用户裁定及其规则正文优先；引擎与裁定冲突属于实现欠账，不以旧代码反推玩法。规则叙述见 [规则正文](规则正文.md#第四宇宙规则正文) 为准，本索引为派生索引（与两者冲突时应重新生成本文件）。")
-A("- 通用规则（自由规则里的自由控X、[目标]与闪避、代价结算、平分、声明、怪物冷却道纹X≤1等）见 [规则正文](规则正文.md#第四宇宙规则正文)，本文件不重复。")
+A(f"本索引收录 {len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)} 条道纹："
+  f"通用核心（四面体一·二）{len(SHAFA_LOOP_DAOWEN)}、原始怪物 {len(ORIGINAL_MONSTER_DAOWEN)}、怪物转化 {len(MONSTER_TRANSFORM_DAOWEN)}、"
+  f"副本专属 {sum(len(region_daowen_order(r)) for r in REGION_EXCLUSIVE_DAOWEN)}、"
+  f"鲛族 {sum(len(pool) for pool in RACE_EXCLUSIVE_DAOWEN.values())}、"
+  f"初拥 {len(FIRST_EMBRACE_DAOWEN)}、"
+  f"其他通用 {len(OTHER_DAOWEN)}、副本未开放 {len(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)}。")
 A("")
-A("## 数值规则迁移状态")
-A("")
-migrated_names = [name for name in DAOWEN_RULES if name in DaoWenEngine._registry]
-legacy_names = sorted(set(DaoWenEngine._registry) - set(migrated_names))
-legacy_display = ["波及（旧结算路径仍保留）" if n == "波及" else n for n in legacy_names]
-A(f"- **统一数值规则执行器**：{ '、'.join(migrated_names) }。这些道纹的数值、触发条件、当前值传递与摘要共用 `engine/rule_engine.py`。")
-A(f"- **保留旧路径（未迁移）**：{ '、'.join(legacy_display) }。{UNMIGRATED_REASON}")
+A("> 通用规则（自由控X、[目标]与闪避、代价结算、平分、声明、怪物冷却道纹X≤1 等）见[规则正文](规则正文.md)，本文件不重复。")
 A("")
 A("## 目录")
 A("")
@@ -305,7 +283,7 @@ for name in order:
     cstr = "、".join(c[:6]) + (f"…+{len(c)-6}" if len(c) > 6 else "") or "—"
     A(f"| {name} | {CAT_LABEL[CATEGORY[name]]} | {costs[name]} | {target_label(name)} | {out} | {cstr} |")
 A("")
-A("> 承载怪物列按副本文档面板解析；「…」表示超过6种，逐条见下方分类小节。")
+A("> 「…」表示承载怪物超过 6 种，逐条见下方分类小节。")
 A("")
 A("---")
 A("")
@@ -321,7 +299,9 @@ def section(title, names, note_lines=(), loop=None, loop_title=None):
         A("")
     for name in names:
         A(f"### {name}")
-        A(f"X：{costs[name]}。{effects[name]}" if effects[name] else f"X：{costs[name]}。")
+        # 条目正文必须以道纹名开头：旧模板漏了名字，只渲染成「X：支付：…」。
+        A(f"{name}X：{costs[name]}。{effects[name]}" if effects[name]
+          else f"{name}X：{costs[name]}。")
         meta = [f"[目标]：{target_label(name)}"]
         if name in DRAFT_DAOWEN:
             meta.append("执行状态：当前定义尚未实现")
@@ -330,7 +310,7 @@ def section(title, names, note_lines=(), loop=None, loop_title=None):
         elif out_edges[name]:
             meta.append("残韵路径（双向）：" + "、".join(out_edges[name]))
         c = carriers.get(name, [])
-        meta.append("承载：" + ("、".join(c) if c else "—（无怪物承载）"))
+        meta.append("承载：" + ("、".join(c) if c else "—"))
         A(f"> {' ｜ '.join(meta)}")
         if name in NOTES:
             A(f"> 注：{NOTES[name]}")
@@ -344,7 +324,7 @@ section(f"通用核心（四面体一·二，{len(SHAFA_LOOP_DAOWEN)}）", list(
 section(f"其他通用道纹（{len(OTHER_DAOWEN)}）", OTHER_DAOWEN,
         note_lines=["不属于通用四面体一·二（发现池），也不属于任何副本专属池。",
                     "【透支】不在任何四面体内：任意角色出生自带，X每次自选；",
-                    "【篡改】2026-11-02 由荒疫古城移入通用，关系见通用四面体四。"])
+                    "【篡改】属通用，关系见通用四面体四。"])
 
 section(f"原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）", sorted(ORIGINAL_MONSTER_DAOWEN),
         note_lines=[
@@ -352,7 +332,7 @@ section(f"原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）", sorted(ORIGIN
             "（全力为【异变5X】，必中为【异变X】；减速／疯狂已改为遗物）；"
             "与转化道纹互为残韵双向路径（转化道纹可反向变回原始道纹），"
             "人类与怪物均可经残韵永久获得；"
-            "【原初X】新定义为随机借用目标身上自身未拥有的X种道纹，不限原始怪物道纹池；旧进化接口尚未同步新规则。",
+            "【原初X】随机借用目标身上自身未拥有的X种道纹，不限原始怪物道纹池。",
             "怪物重复发动同一道纹按同一X计费，不存在「发动越多X越大」的递增。"
             "怪物使用冷却代价类的道纹（束缚、全速）"
             "X 值只能≤1，一律按 X=1 结算（规则正文·怪物准则·共用面板）。",
@@ -377,10 +357,10 @@ for region in REGION_EXCLUSIVE_DAOWEN:
     notes = [f"副本阶级：{'一二三四'[tier-1]}阶。学习门禁：先经残韵从本副本怪物处转化获得至少一种本副本道纹，此后才可学习本副本其它专属道纹；其它副本专属道纹不可学习。"]
     if region == "沉沦海":
         notes.append("【唤潮】【蜃景】不属于闭环，由鲛渊陵墓的两个独立选项获得；怪物面板既有配置保留。")
-        notes.append("【流动】【遗忘】已接入运行时；流动须另选接收目标，二者均按X选择持续状态，数量不足时拒绝发动。")
-        notes.append("【涌潮】为 2026-11-02 新增（源出遗物【苍白之花】），与【冰冻】互为反转，已接入运行时。")
+        notes.append("【流动】【遗忘】须按X选择持续状态，流动还要另选接收目标；可选状态数量不足时拒绝发动。")
+        notes.append("【涌潮】与【冰冻】互为反转，效果与遗物【苍白之花】同域。")
     if region == "龙心谷":
-        notes.append("龙心谷四面体四节点【锻造】【熔化】【炽热】【淬火】均已接入运行时（2026-11-02 用户令：三纹由草案直接实装）。")
+        notes.append("【锻造】【熔化】【炽热】【淬火】四纹构成龙心谷四面体，两两之间各有一种残韵。")
         notes.append("【锻造】只发现既有固定规格消耗品，不接受自定义物品名称或效果；领取时耐久按本次 X 覆盖。")
     section(f"{region}专属（{len(ns)}）", list(ns), note_lines=notes,
             loop=region, loop_title=region)
@@ -397,7 +377,7 @@ if BLOODLINE_EXCLUSIVE_DAOWEN:
             note_lines=["仅通过血族专属机制获得；不计入任何副本专属学习池。",
                         "血族专属获取机制尚未接入；当前不可通过局外学习、【典当】发现或残韵获得。"])
 else:
-    A("> 原血族专属道纹【消灾】已转换为消耗品【逆命筹】，详见[物品索引](物品索引.md#逆命筹)。血族专属获取机制尚未接入。")
+    A("> 原血族专属道纹【消灾】已改为消耗品【逆命筹】，详见[物品索引](物品索引.md#逆命筹)。")
 
 section(f"初拥专属（{len(FIRST_EMBRACE_DAOWEN)}）", sorted(FIRST_EMBRACE_DAOWEN),
         note_lines=["初拥之夜专属道纹：仅由对应初拥选项授予，不可通过局外学习、【典当】发现或残韵获得。"])
@@ -405,8 +385,7 @@ section(f"初拥专属（{len(FIRST_EMBRACE_DAOWEN)}）", sorted(FIRST_EMBRACE_D
 for owner in sorted(set(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.values())):
     names = [name for name, region in UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.items() if region == owner]
     section(f"{owner}专属道纹（{len(names)}）", names,
-            note_lines=["这些道纹计算/效果已接入，但所属副本尚未接入运行时，局外学习仍按所属副本门禁拒绝。"
-                        "草案中其余感染/原初等节点是否实现，分别查当前裁定落地核查，不能据此批量视为已实现。"])
+            note_lines=["所属副本尚未开放：这些道纹的条文已定，但暂时无法学习或获得。"])
 
 A("---")
 A("")
@@ -415,7 +394,7 @@ A("")
 A("1. **通用核心（四面体一·二）**：开局发现初始道纹的来源；人类侧基础概念。")
 A("2. **副本专属**：学习门槛=先经残韵从本副本怪物转化获得至少一种；其它副本专属不可学。")
 A("3. **怪物转化**：只能由自身已持有道纹经残韵变化获得（施法者同时获得）；原始⇄转化双向，反向可把转化道纹变回原始道纹。")
-A("4. **原始怪物**：可经残韵（含转化道纹反向）永久获得，局外【学习】亦可习得；怪物发动按条目支付代价（全力异变5X、必中异变X；减速／疯狂已是遗物，冷却类X≤1）；可作为【原初X】的借用对象，但原初不再仅限原始怪物道纹池；旧进化接口尚未同步随机X种规则。")
+A("4. **原始怪物**：可经残韵（含转化道纹反向）永久获得，局外【学习】亦可习得；怪物发动按条目支付代价（全力异变5X、必中异变X；减速／疯狂已是遗物，冷却类X≤1）；可作为【原初X】的借用对象，但原初不再仅限原始怪物道纹池。")
 A("5. **血族专属转换消耗品**：【逆命筹】当前尚无专属获取机制。")
 A("6. **初拥专属**：【真理】仅由初拥之夜选项5授予，不可通过局外学习、【典当】发现或残韵获得。")
 A("7. **角色道纹唯一**：同名道纹不重复存在；通过残韵获得的道纹X按自由规则（自由控X）自定义。")

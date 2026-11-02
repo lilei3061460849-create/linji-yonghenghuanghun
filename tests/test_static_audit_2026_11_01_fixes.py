@@ -1,6 +1,6 @@
 """2026-11-01 静态排查报告 6 项缺陷的验收回归。
 
-对应 docs/静态排查报告-2026-11-01-状态分类与上限.md：
+对应 内部/审查报告/静态排查报告-2026-11-01-状态分类与上限.md：
 修复1 沉溺阻断下回终不再崩；修复5a 庇护纯次数型；修复6 招魂无尸体不吞代价。
 修复2/3/4 分别见 test_debt_overdraft / test_dianjin_cost+test_escape_and_diandang /
 test_haoduo_duration。
