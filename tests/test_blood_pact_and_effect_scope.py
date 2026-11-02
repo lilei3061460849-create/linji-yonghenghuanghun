@@ -236,7 +236,7 @@ def test_gongzui_daowen_binds_two_targets_who_share_resource_payments(tmp_path):
 
 
 def test_gongzui_targets_must_be_non_self_and_caster_still_adds_a_slot(tmp_path):
-    """2026-10-31：共罪改选 X 个非自身目标；发动者仍额外占一个支付名额。"""
+    """2026-10-31：共罪改选 X 个非自身目标；2026-11-02：组内每人严格 1 份，去重后 ceil 均摊。"""
     state, combat, player, ally = _state_with_blood_pact()
     state.relics.clear()
     player.dao_wen["共罪"] = DaoWenInstance(DaoWen(

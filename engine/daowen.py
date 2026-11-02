@@ -291,7 +291,7 @@ class DaoWenEngine:
     
     @staticmethod
     def calculate_gongzui(x: int, targets: Optional[list] = None) -> dict:
-        """共罪X：支付：生命5X。选择X个非自身目标，与发动者共同组成共罪组，持续∞；发动者始终额外占一个支付名额。
+        """共罪X：支付：生命5X。选择X个非自身目标，与发动者共同组成共罪组，持续∞；共罪组内每个角色（含发动者）严格各占 1 份名额，去重后按人数均摊。
 
         分摊口径、余数分配、特殊机制代价不分摊见《规则正文》通用条文，此处不复述。
         """
@@ -311,10 +311,11 @@ class DaoWenEngine:
             # 流血（生命）5X：统一代价总线按 cost_hp 结算（与透支/连击的流血通道同口径）。
             "cost_type": CostType.BLEED.value, "cost": 5 * x, "cost_hp": 5 * x,
             "duration": -1,
-            # 支付名额 = X 个非自身目标 + 发动者追加的一份；随 X 变化。
+            # 支付名额 = X 个非自身目标 + 发动者本人，每人严格 1 份、去重后共 X+1 人；
+            # 均摊一律 ceil，不给发动者额外名额。
             "share_slots": x + 1,
-            "summary": (f"支付：生命{5 * x}，{names}与发动者组成共罪支付名额，"
-                        f"平分资源支付，持续∞"),
+            "summary": (f"支付：生命{5 * x}，{names}与发动者组成共罪组（每人 1 份），"
+                        f"按人数向上取整均摊资源支付，持续∞"),
         }
 
     @staticmethod
