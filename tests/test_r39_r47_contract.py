@@ -11,6 +11,7 @@ import pytest
 from tests.setup_support import finish_initial_daowen
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from engine.action_registry import ACTION_REGISTRY
 from engine.api import GameEngine
 from engine.combat import CombatEngine
 from engine.daowen import DaoWenEngine
@@ -182,7 +183,10 @@ def test_r41_illegal_legacy_action_names_not_advertised(tmp_path):
     assert None not in names
     assert not ({"daowen", "spell", "consumable", "attack", "dodge_decision"} & names)
     dispatcher = (Path(__file__).resolve().parents[1] / "engine" / "api.py").read_text(encoding="utf-8")
-    assert all(f'action_type == "{name}"' in dispatcher for name in names - {"skip"})
+    # 2026-11-03：路由分两条路——已迁到 engine/handlers/ 的组由 ACTION_REGISTRY 查表，
+    # 未迁的仍在 api.py 的旧 if/elif 里。两条任一命中即算"已接线"。
+    assert all(name in ACTION_REGISTRY or f'action_type == "{name}"' in dispatcher
+               for name in names - {"skip"})
     # skip 与旧别名 rest 共用同一分发分支，不是未接线动作。
     assert "skip" in names and 'action_type in {"skip", "rest"}' in dispatcher
 
