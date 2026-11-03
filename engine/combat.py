@@ -465,7 +465,20 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         return None
 
     def _note_dodge(self, entity: Entity, relic_target_ref: Optional[str] = None) -> dict:
-        """闪避专属句：正文写「每次闪避后」的效果。失速/归零不在这里。"""
+        """闪避专属句：正文写「每次闪避后」的效果。失速/归零不在这里。
+
+        【避风铃】与【守夜灯】很像（都是"被动白拿资源"），但**只对比、不合并**
+        （2026-11-03 体检记录，避免后来者顺手抽公共函数）：
+
+        | | 避风铃 | 守夜灯 |
+        | --- | --- | --- |
+        | 触发 | 每次**闪避**后（本函数）+ 当前速度**归零**时（`_on_speed_zero` 分支） | [回增]／[回终]相位，回合序号增加后统一结算 |
+        | 资源 | 格挡（3 / 15） | 法力（= 增加后当前回合数） |
+        | 结算层 | 战斗闪避管线 | 机制声明层（`engine/mechanisms/`） |
+
+        三处都不同（触发点、资源、结算层），合成一条"被动给资源"的抽象反而要把
+        闪避管线与相位管线焊在一起，改任一边都会牵动另一边。
+        """
         extra = {}
         if self._relic_active(entity, "避风铃"):
             entity.gain_shield(3)
