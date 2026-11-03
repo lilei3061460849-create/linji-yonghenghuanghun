@@ -19,20 +19,12 @@ from engine import battle_report as BR
 from sim.optional_actions import battle_start_relic_choices, round_start_relic_choices
 
 
-def best_cultivate_tier(shards):
-    if shards >= 150:
-        return 6, 150, 6
-    if shards >= 100:
-        return 5, 100, 5
-    if shards >= 65:
-        return 4, 65, 4
-    if shards >= 35:
-        return 3, 35, 3
-    if shards >= 15:
-        return 2, 15, 2
-    return 1, 0, 1
+from sim.common import best_cultivate_tier  # 2026-11-03：6 份逐字相同的副本统一到 sim/common.py
 
 
+    # 2026-11-03 体检：本函数与 sim/common.py 的同名实现**已分叉**（闪避阈值 14/7 vs 12/6，
+    # 且无"变形""减速"分支）。合并会改变批量跑局里的闪避率、进而改变产出的统计，
+    # 属策略裁定而非纯重构，故保留原样；要统一请先改 sim/common.py 再删这里。
 def _resolve_monster_turn_smart(engine):
     prepared = engine.execute_action("prepare_monster_phase", {})
     if not prepared.get("success"):

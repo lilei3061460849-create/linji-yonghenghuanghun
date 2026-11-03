@@ -31,88 +31,10 @@ from engine import battle_report as BR
 from sim.optional_actions import battle_start_relic_choices, round_start_relic_choices
 
 
-def best_cultivate_tier(shards):
-    if shards >= 150:
-        return 6, 150, 6
-    if shards >= 100:
-        return 5, 100, 5
-    if shards >= 65:
-        return 4, 65, 4
-    if shards >= 35:
-        return 3, 35, 3
-    if shards >= 15:
-        return 2, 15, 2
-    return 1, 0, 1
+from sim.common import best_cultivate_tier  # 2026-11-03：6 份逐字相同的副本统一到 sim/common.py
 
 
-def _resolve_monster_turn_smart(engine):
-    prepared = engine.execute_action("prepare_monster_phase", {})
-    if not prepared.get("success"):
-        return prepared
-    choices = []
-    p = engine.state.player
-    max_d = p.current_speed if p else 2
-    dodge_budget = 0
-    sim_shield = p.shield if p else 0
-    for actor in prepared["result"]["actors"]:
-        dao = None
-        action_count = actor["base_attack_actions"]
-        hit_count = actor["base_hits_per_attack"]
-        from sim.duel_common import _pick_monster_daowen
-        has_guanchuan = False
-        will_activate_nilin = False
-        refs = engine.combat._combat_entity_refs()
-        monster = refs.get(actor["actor_ref"])
-        per_hit = monster.attack_power if monster is not None else 0
-        option = _pick_monster_daowen(engine, actor) if actor["daowen_options"] else None
-        if option is not None:
-            if option.get("name") == "贯穿":
-                has_guanchuan = True
-            elif option.get("name") == "逆鳞":
-                will_activate_nilin = True
-            elif option.get("name") == "变形" and monster is not None:
-                hit_count = monster.attack_power
-                per_hit = monster.attack_count
-            elif option.get("name") == "减速":
-                max_d = max(0, max_d - option.get("x_value", option.get("x", 5)))
-            dao = {"name": option["name"], "dodge": False, "blood_shadow": False,
-                   "trigger_spell_choices": {holder: {sp["spell_name"]: {"use": False} for sp in spells}
-                                             for holder, spells in option.get("trigger_spell_options", {}).items()}}
-            if option["requires_target"]:
-                dao["target_ref"] = option["target_options"][0]["ref"]
-            if option["dodge_submission"] == "per_target":
-                from sim.monster_targets import pick_wave_dodge_targets
-                dao["dodge_targets"] = pick_wave_dodge_targets(option)
-        if monster is not None and (monster.has_status("贯穿") or has_guanchuan):
-            has_guanchuan = True
-        nilin_bonus = (monster.get_status_value("逆鳞") or 0) if (monster is not None and monster.has_status("逆鳞")) else 0
-        from engine.ai_tactics import choose_attack_target
-        target_ref = choose_attack_target(actor["attack_target_options"], refs)
-        target_option = next((o for o in actor["attack_target_options"] if o["ref"] == target_ref), None)   # 无合法攻击目标时为None（引擎prepare已置base_attack_actions=0）
-        attacks = []
-        for _ in range(action_count):
-            hits = []
-            for _ in range(hit_count):
-                should_dodge = False
-                if target_ref == "player:0":
-                    if dodge_budget < max_d and (has_guanchuan or nilin_bonus > 0 or per_hit >= 12 or (action_count * hit_count >= 3 and sim_shield < per_hit)):
-                        should_dodge = True
-                        dodge_budget += 1
-                    elif sim_shield >= per_hit:
-                        sim_shield -= per_hit
-                        should_dodge = False
-                    elif dodge_budget < max_d and per_hit >= 6:
-                        should_dodge = True
-                        dodge_budget += 1
-                from sim.build_learner import _decline_spells
-                hits.append({"target_ref": target_ref, "dodge": should_dodge, "blood_shadow": False,
-                             "spell_choices": _decline_spells(target_option)})
-            attacks.append({"hits": hits})
-        choices.append({"actor_ref": actor["actor_ref"], "daowen": dao, "attack_actions": attacks})
-    return engine.execute_action("resolve_monster_phase", {
-        "token": prepared["result"]["token"],
-        "choices": choices,
-    })
+from sim.common import _resolve_monster_turn_smart  # 2026-11-03：4 份逐字相同的副本统一到 sim/common.py
 
 
 def run_full_reincarnation_with_duel(seed=42):

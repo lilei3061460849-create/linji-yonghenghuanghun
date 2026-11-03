@@ -44,28 +44,9 @@ def _give_daowen(entity, name, x=0):
         x_value=x)
 
 
-def _learn(e, definition):
-    return _learn(e, definition)
 
 
-def _learn(e, definition):
-    """探针专用：直接写入玩家法术列表（跳过 define_spell 的 1 次出手消耗）。
-
-    局外【学习】自定义法术入口已于 2026-09-16 取消（法术一律在战斗中用
-    define_spell 自创）；探针只关心触发管线是否接线，故此捷径保留"学习"语义：
-    仍然走同一个 _build_custom_spell/parse_spell_definition 校验与 wired 标注。
-    """
-    built = e._build_custom_spell(e.state.player, definition)
-    if "error" in built:
-        return {"success": False, "error": built["error"]}
-    e.state.player.spells.append(built["spell"])
-    parsed = built["parsed"]
-    wired = parsed.trigger in e.combat._WIRED_TRIGGERS
-    result = {"spell": built["spell"].to_dict(), "wired": wired, "cost": "0（探针捷径）"}
-    if not wired:
-        result["warning"] = (f"触发时机【{parsed.trigger}】已通过句式校验，"
-                             "但该时机暂未接入战斗结算管线，本法术目前不会实际触发")
-    return {"success": True, "action": "自定义法术(探针)", "result": result}
+from sim.common import learn_spell_probe_shortcut as _learn  # 2026-11-03：4 份逐字相同 + 删掉一份自递归死代码
 
 
 def _decline_all_spell_choices(target_option):
