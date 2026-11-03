@@ -196,9 +196,16 @@ def main() -> int:
     registry = collect_registry(ROOT / "engine")
     spans = method_spans(ROOT / "engine")
 
+    # 迁移期两条路径并存：旧 if/elif 里的路由 + 注册表里已登记的 action。
+    # 已登记的 action 以注册表为准（它们已从 api.py 的链里删掉）。
+    for name, (group, _where) in registry.items():
+        routes.setdefault(name, "")
+
     rows = []
     for name in sorted(routes):
         method = routes[name]
+        if not method:
+            method = f"（注册表：{registry[name][1]}）"
         location, start, length, body = spans.get(method, ("（未找到）", 0, 0, ""))
         fields = sorted(set(STATE_RE.findall(body)))
         touches_global = any(token in body for token in GLOBAL_TOKENS)
@@ -207,6 +214,7 @@ def main() -> int:
             "file": location, "start": start, "length": length,
             "fields": fields, "global": touches_global,
             "registered": name in registry,
+            "registry_file": registry[name][1] if name in registry else "",
         })
 
     lines = [
@@ -235,7 +243,12 @@ def main() -> int:
         lines.append("| action | 处理器 | 文件:起始行 | 行数 | 改全局状态 | 已注册 | 读写 state 字段 |")
         lines.append("| --- | --- | --- | ---: | --- | --- | --- |")
         for row in members:
-            where = f"`{row['file']}:{row['start']}`" if row["file"] != "（未找到）" else "（未找到）"
+            if row["registered"]:
+                where = f"`{row['registry_file']}`"
+            elif row["file"] != "（未找到）":
+                where = f"`{row['file']}:{row['start']}`"
+            else:
+                where = "（未找到）"
             fields = "、".join(f"`{f}`" for f in row["fields"][:10]) or "—"
             if len(row["fields"]) > 10:
                 fields += " …"
