@@ -1,0 +1,16 @@
+[project]
+name = "linji-disiyuzhou"
+version = "0.0.0"
+description = "灵记·第四宇宙 —— 规则引擎、DM 裁定与开放世界运行时（纯标准库实现）"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+# 运行时零第三方依赖：引擎只使用 Python 标准库（sqlite3 / tomllib / http.server / pickle / urllib）。
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0,<10"]
+
+[tool.pytest.ini_options]
+# 只收集 tests/。根目录的 sim/ 是一次性探针与实验脚本，不参与回归。
+testpaths = ["tests"]

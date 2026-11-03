@@ -270,9 +270,10 @@ python main.py
 # API演示
 python main.py --api
 
-# 回归锁（不是对局本身）
-python tests/test_engine.py
+# 回归锁（不是对局本身）。全部由 pytest 收集，不再维护第二份"该跑哪些测试"的手工清单。
 python -m pytest tests -q
+# 单个文件也支持直跑（内部同样转交 pytest）：
+python tests/test_engine.py
 ```
 
 用户说「测试」时，默认由 AI 通过 `GameEngine.execute_action` 逐步点选手操并按 README《六、战斗推演格式》写战报。禁止把 `TacticalAI`（已被隔离的实验工具）、`sim/pick_best_report.py`、sim 批量通关当作默认测试。`pytest` 只锁定回归。`报告.md` 只保留最新一次轮回记录。
