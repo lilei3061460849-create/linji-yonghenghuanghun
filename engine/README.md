@@ -163,7 +163,10 @@ def _action_my_action(self, params: dict) -> dict:
 机制：经 `TriggerBus` 订阅 `ENTITY_DIED`，`_emit` 显式传实体对象；【帮派令】（priority=10）
 ——经 `_dispatch_phase(Phase.BATTLE_START)` 战始原位分发，条件复用通用
 `relic_active("帮派令")`。旧类/旧 if 均已删除。护栏：`validator.check_migrated_mechanism_guards()` 禁止已迁移机制
-在核心管线重新出现同名硬编码分支。批量迁移见审计报告《机制系统化可扩展性审计》。
+在核心管线重新出现同名硬编码分支；扫描范围 = `engine/combat.py` + 全部 `combat_parts/*.py`
++ `engine/combat_hooks.py` + `engine/api.py` + 全部 `engine/handlers/*.py`（新文件自动纳入），
+由 `tests/test_mechanism_guard_ci.py` 兜底：既断言当前零违规，也用"造一条违规"的禁令测试
+证明护栏真的会报，并断言 `combat_parts/`、`handlers/` 下的每个文件都在扫描范围内。`批量迁移见审计报告《机制系统化可扩展性审计》。
 
 2026-10-13 六项挂起迁移：血族血脉/赤族诅咒在凡庸之后的独立逐实体相位；皮衣在回始最前段和回终追踪清理前；防弹插板在战始选择处理之后；龙族血脉乘区经原 Hook 桥且不在 incoming 重复执行；三相残韵盘战终复用已序列化的战斗运行态。原数值、封存口径、死亡/回复上下文和选择协议不变。映射与验证见 `../内部/archive/mechanism_migration_2026-10-13.md`。
 

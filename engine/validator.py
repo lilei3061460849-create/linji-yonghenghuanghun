@@ -36,7 +36,14 @@ def _combat_guard_files() -> tuple:
         str(p.relative_to(_COMBAT_GUARD_ROOT.parent))
         for p in (_COMBAT_GUARD_ROOT / "combat_parts").glob("*.py")
     ))
-    return ("engine/combat.py",) + shards + ("engine/combat_hooks.py", "engine/api.py")
+    # 2026-11-03：action 处理器按组搬到 engine/handlers/*.py。这些文件里现在装着
+    # 曾经的 api.py 方法体，护栏不跟着扩张就会**静默失效**（新分片必须自动纳入）。
+    handlers = tuple(sorted(
+        str(p.relative_to(_COMBAT_GUARD_ROOT.parent))
+        for p in (_COMBAT_GUARD_ROOT / "handlers").glob("*.py")
+    ))
+    return (("engine/combat.py",) + shards
+            + ("engine/combat_hooks.py", "engine/api.py") + handlers)
 
 
 _MIGRATION_GUARD_PROTECTED_FILES = _combat_guard_files()
