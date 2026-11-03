@@ -14,3 +14,14 @@ dev = ["pytest>=8.0,<10"]
 [tool.pytest.ini_options]
 # 只收集 tests/。根目录的 sim/ 是一次性探针与实验脚本，不参与回归。
 testpaths = ["tests"]
+
+[tool.ruff]
+# 只开"真 bug 类"规则（见下）——本仓库历史代码量大，全量 E9,F 有 600+ 条历史噪声
+# （未使用导入/变量），那类问题不影响正确性，开成 CI 门禁只会逼人写 # noqa 糊过去。
+# 这里只拦"会真的炸"的四类：语法错误(E9)、无效比较(F63)、未定义名(F82)、
+# 以及 f-string 相关致命错误(F63/F7)。2026-11-03 起全库为 0。
+line-length = 120
+exclude = [".venv", "data", "内部", "saves"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]

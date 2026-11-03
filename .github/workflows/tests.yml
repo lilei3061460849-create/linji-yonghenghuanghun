@@ -14,6 +14,27 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Ruff（真 bug 类规则）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: python -m pip install --upgrade pip ruff
+
+      - name: Ruff check（E9 语法错误 / F63 无效比较 / F7 / F82 未定义名）
+        # 规则集在 pyproject.toml 的 [tool.ruff.lint] 里收窄过：
+        # 全量 E9,F 有 600+ 条历史噪声（未使用导入/变量），不适合当门禁。
+        run: ruff check .
+
   pytest:
     name: Python tests (${{ matrix.python-version }})
     runs-on: ubuntu-latest
