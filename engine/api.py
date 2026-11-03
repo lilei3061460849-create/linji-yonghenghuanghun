@@ -10595,6 +10595,11 @@ class GameEngine:
                 save_data = json.load(handle)
             if save_data.get("format") != "linji-save" or save_data.get("version") != self.SAVE_FORMAT_VERSION:
                 return {"success": False, "error": "不支持的存档格式或版本"}
+            # ⚠ 安全边界：pickle 反序列化等于执行任意代码。
+            # 这里只允许读取**本机自己生成**的存档（save_dir 下、由 save_game 写出的
+            # save_<slot>.json）。不得把外部上传、网络下载、他人提供的存档交给本函数；
+            # 若将来要支持导入存档，必须先换成不含可执行对象的安全格式（纯 JSON），
+            # 不能只靠下面的 isinstance 类型检查——类型检查发生在反序列化之后，已经晚了。
             restored = pickle.loads(base64.b64decode(save_data["payload"].encode("ascii")))
             if not isinstance(restored.get("state"), GameState) or not isinstance(restored.get("dice"), DiceEngine):
                 return {"success": False, "error": "存档内容类型无效"}
