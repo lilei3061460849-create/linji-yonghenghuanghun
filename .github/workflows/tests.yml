@@ -35,6 +35,32 @@ jobs:
         # 全量 E9,F 有 600+ 条历史噪声（未使用导入/变量），不适合当门禁。
         run: ruff check .
 
+  coverage:
+    name: 覆盖率排行（不设门槛，允许失败）
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # 故意不阻塞：仓库没有覆盖率门槛，这个 job 只负责把"哪些模块没被测到"贴进日志。
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        run: python -m pytest -q --cov=engine --cov=webapp
+
+      - name: 覆盖率排行（最需要补测试的模块）
+        run: python3 tools/coverage_ranking.py --top 25
+
   pytest:
     name: Python tests (${{ matrix.python-version }})
     runs-on: ubuntu-latest

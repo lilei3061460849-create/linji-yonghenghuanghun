@@ -25,3 +25,16 @@ exclude = [".venv", "data", "内部", "saves"]
 
 [tool.ruff.lint]
 select = ["E9", "F63", "F7", "F82"]
+
+[tool.coverage.run]
+# 覆盖率是**排序参考**，不是门禁：仓库不设阈值（见 tools/coverage_ranking.py）。
+source = ["engine", "webapp"]
+branch = false
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true
+exclude_also = [
+    'if __name__ == "__main__":',
+    'raise NotImplementedError',
+]
