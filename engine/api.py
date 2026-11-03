@@ -85,6 +85,8 @@ from .handlers.duel import (
     handle_resolve_final_duel,
 )
 from .handlers.daowen import DaowenHandlersMixin
+from .handlers.items import ItemHandlersMixin
+from .handlers.opening import OpeningHandlersMixin
 from .handlers.resources import ResourceHandlersMixin
 from .handlers.world import WorldHandlersMixin
 from .action_registry import ACTION_REGISTRY
@@ -103,7 +105,8 @@ FREE_CRYSTAL_COST_AMOUNT = 10
 OUT_OF_COMBAT_DAOWEN = frozenset({"真理", "唤潮", "蜃景"})
 
 
-class GameEngine(WorldHandlersMixin, ResourceHandlersMixin, DaowenHandlersMixin):
+class GameEngine(WorldHandlersMixin, ResourceHandlersMixin, DaowenHandlersMixin,
+                 ItemHandlersMixin, OpeningHandlersMixin):
     """
     游戏引擎主类
     AI通过此接口与游戏交互，所有数值计算必须经过本引擎
@@ -1859,20 +1862,6 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin, DaowenHandlersMixin)
         spec = ACTION_REGISTRY.get(action_type)
         if spec is not None:
             return getattr(self, spec.handler)(params)
-        elif action_type == "setup_attributes":
-            return self._action_setup_attributes(params)
-        elif action_type == "setup_choose_region":
-            return self._action_setup_choose_region(params)
-        elif action_type == "setup_choose_resonance":
-            return self._action_setup_choose_resonance(params)
-        elif action_type == "setup_choose_initial_daowen":
-            return self._action_setup_choose_initial_daowen(params)
-        elif action_type == "resolve_redemption":
-            return self._action_resolve_redemption(params)
-        elif action_type == "pre_battle_action":
-            return self._action_pre_battle(params)
-        elif action_type == "upgrade_doctor":
-            return self._action_upgrade_doctor(params)
         # 2026-09-28 用户令：回合动作重构
         #   attack  → 普攻（等价 prepare_attack+resolve_attack 单步封装；或走prepare/resolve两步）
         #   cast    → 施法（=发动道纹或瞬发自定义施法）
@@ -1882,8 +1871,6 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin, DaowenHandlersMixin)
             return self._action_focus(params)
         elif action_type in {"skip", "rest"}:
             return self._action_rest(params)
-        elif action_type == "redeem_attribute_points":
-            return self._action_redeem_attribute_points(params)
         elif action_type == "declare_parry":
             return self._action_declare_parry(params)
         elif action_type == "prepare_attack":
@@ -1892,8 +1879,6 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin, DaowenHandlersMixin)
             return self._action_resolve_attack(params)
         elif action_type == "attack":
             return {"success": False, "error": "旧attack已移除；请使用prepare_attack/resolve_attack"}
-        elif action_type == "consume_item":
-            return self._action_consume_item(params)
         elif action_type == "declare_wish":
             return self._action_declare_wish(params)
         elif action_type == "declare_escape":
@@ -1948,18 +1933,6 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin, DaowenHandlersMixin)
             return self._action_resolve_monster_phase(params)
         elif action_type == "monster_phase":
             return self._action_monster_phase(params)
-        elif action_type == "set_active_relics":
-            return self._action_set_active_relics(params)
-        elif action_type == "toggle_relic":
-            return self._action_toggle_relic(params)
-        elif action_type == "choose_discovered_relic":
-            return self._action_choose_discovered_relic(params)
-        elif action_type == "discard_discovered_relic":
-            return self._action_discard_discovered_relic(params)
-        elif action_type == "discard_discovered_item":
-            return self._action_discard_discovered_item(params)
-        elif action_type == "choose_discovered_item":
-            return self._action_choose_discovered_item(params)
         elif action_type == "repay_debt_employee":
             return self._action_repay_debt_employee(params)
         elif action_type == "round_start":
@@ -1980,18 +1953,6 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin, DaowenHandlersMixin)
             return {"success": False, "error": f"未知行动类型: {action_type}"}
 
     # ==================== 开局行动 ====================
-
-    def _action_setup_attributes(self, params: dict) -> dict:
-        return handle_setup_attributes(self, params)
-
-    def _action_setup_choose_region(self, params: dict) -> dict:
-        return handle_setup_choose_region(self, params)
-
-    def _action_setup_choose_resonance(self, params: dict) -> dict:
-        return handle_setup_choose_resonance(self, params)
-
-    def _action_setup_choose_initial_daowen(self, params: dict) -> dict:
-        return handle_setup_choose_initial_daowen(self, params)
 
     def _offer_initial_daowen_discovery(self, source: str) -> dict:
         """从杀伐闭环不重复随机列出至多3种；只列候选，不替AI作选择。"""
@@ -2020,112 +1981,6 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin, DaowenHandlersMixin)
         entity.dao_wen[name] = DaoWenInstance(DaoWen(
             name=name, formula=f"{name}X", cost_type="消耗",
             cost_formula="X", effect_formula=""))
-
-    def _action_resolve_redemption(self, params: dict) -> dict:
-        """救赎：接纳昏迷微光者为员工（待命，需派遣+战终工资；夺书对他们同样开放），或当场【终结】。
-
-        【终结】：救赎不是免费收获——把昏迷
-        的微光者当场终结，效果等同击杀：它被还原为一次正常[命零]，[战终]按与普通击杀
-        完全相同的公式（⌈战始血限×2%⌉ + 道纹数×5）产出[碎片]，不再落入
-        「永久离场不产碎片」的分类。
-        """
-        pending = self.state.pending_redemption
-        if not pending:
-            return {"success": False, "error": "当前没有待结算的救赎"}
-        option = params.get("option")
-        if option in (1, "1", "接纳"):
-            name = params.get("name", "")
-            if not isinstance(name, str) or not name.strip():
-                return {"success": False, "error": "接纳时必须自定义员工名字"}
-            name = name.strip()
-            existing = set()
-            if self.state.player:
-                existing.add(self.state.player.name)
-            for group in (self.state.friends, self.state.employees, self.state.temp_friends):
-                existing.update(entity.name for entity in group)
-            existing.update(entity.name for entity in self.state.enemies if entity.is_alive)
-            if name in existing:
-                return {"success": False, "error": f"名字【{name}】已被占用，请换一个"}
-            employee = Entity(
-                name=name,
-                entity_type="员工",
-                blood_limit=math.ceil(pending["blood_limit"] / 2),
-                current_hp=math.ceil(pending["blood_limit"] / 2),
-                attack_count=math.ceil(pending["attack_count"] / 2),
-                attack_power=math.ceil(pending["attack_power"] / 2),
-                is_deployed=False,
-            )
-            self.state.employees.append(employee)
-            self.state.pending_redemption = {}
-            return {
-                "success": True,
-                "action": "救赎·接纳",
-                "result": {"employee": employee.to_dict(), "from": pending["name"]},
-            }
-        if option in (2, "2", "终结"):
-            self.state.pending_redemption = {}
-            monster = next((m for m in self.state.enemies
-                            if m.name == pending.get("name")), None)
-            if monster is None:
-                # 实体已不在敌方列表（异常/旧档）：保守起见仍按快照给出击杀口径奖励，
-                # 保证「等同击杀」不被静默降级成无事发生。
-                blood_limit = pending.get("blood_limit", 0)
-                dao_wen = pending.get("dao_wen") or {}
-                reward = math.ceil(blood_limit * 0.02) + len(dao_wen) * 5
-                self.state.shards += reward
-                return {"success": True, "action": "救赎·终结",
-                        "result": {"monster": pending.get("name"), "shard_reward": reward,
-                                   "total_shards": self.state.shards,
-                                   "note": "等同击杀，碎片已结算"}}
-            # 还原为一次正常命零：清掉【离场】标记，让[战终]走普通击杀的奖励管线
-            # （奖励公式与结算时点都由 battle_end 统一负责，引擎内只有一处口径）。
-            monster.is_alive = False
-            monster.is_departed = False
-            monster.departure_reason = ""
-            monster.removed_without_kill = False
-            monster._redeemed = False
-            monster._leave_ctx = None
-            monster._death_ctx = make_context(
-                timing=self.state.combat_subphase or self.state.phase,
-                source="终结", source_type="system", target=monster,
-                mechanic="death", subtype="redemption_finish",
-                tags={"death", "redemption"},
-            ).to_dict()
-            return {"success": True, "action": "救赎·终结",
-                    "result": {"monster": monster.name,
-                               "note": "昏迷的微光者被当场终结，等同击杀，碎片于[战终]按命零奖励结算",
-                               "battle_start_blood_limit": monster.battle_start_blood_limit,
-                               "dao_wen_count": len(monster.dao_wen)}}
-        return {"success": False, "error": "option必须是1/接纳或2/终结"}
-
-    # ==================== 局外行动 ====================
-
-    def _action_upgrade_doctor(self, params: dict) -> dict:
-        """医生事件的后续服务：每支付5碎片，显式选择+1攻击次数或+2攻击力。"""
-        doctor = next((entity for entity in self.state.employees
-                       if entity.name == "医生" and entity.is_alive), None)
-        if doctor is None:
-            return {"success": False, "error": "当前没有存活医生"}
-        mode = params.get("mode")
-        if mode not in ("attack_count", "attack_power"):
-            return {"success": False, "error": "mode必须是attack_count或attack_power"}
-        if self.state.shards < 5:
-            return {"success": False, "error": "医生升级需要5碎片"}
-        self.state.shards -= 5
-        if mode == "attack_count":
-            doctor.attack_count += 1
-        else:
-            doctor.attack_power += 2
-        return {"success": True, "action": "医生升级",
-                "result": {"mode": mode, "paid": 5,
-                           "attack_count": doctor.attack_count,
-                           "attack_power": doctor.attack_power}}
-
-    def _action_pre_battle(self, params: dict) -> dict:
-        """局外行动入口。开放世界中，耗时行动先推进世界，再结算收益。"""
-        if getattr(self.state, "world_state", {}):
-            return self._action_timed_world_pre_battle(params)
-        return self._execute_pre_battle_immediate(params, world_mode=False)
 
     def _action_timed_world_pre_battle(self, params: dict) -> dict:
         action = params.get("sub_action", "")
@@ -2714,128 +2569,6 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin, DaowenHandlersMixin)
             self.state.relics.remove(relic)
         return [r.name for r in battle_only]
 
-    def _action_discard_discovered_relic(self, params: dict) -> dict:
-        """放弃本次遗物发现（2026-10-12 用户裁定③）。
-
-        【承载上限】之后，「必须先选1件」的强制发现可能撞上额度已满：选择被拒、
-        其他动作又被门禁拦住，形成无法推进的死局。本动作清空待选列表、不取任何遗物，
-        是那条门禁下唯一的脱困出口（另一条是选择时带 replace 换掉一件）。
-        """
-        choices = list(self.state.pending_relic_choices)
-        if not choices:
-            return {"success": False, "error": "当前没有待选择的遗物发现"}
-        source = self.state.pending_relic_source
-        self.state.pending_relic_choices = []
-        self.state.pending_relic_source = ""
-        next_round: dict = {}
-        # 旧档没有该字段：一律按 0 读。
-        rounds_left = int(getattr(self.state, "pending_relic_discovery_rounds", 0) or 0)
-        if rounds_left > 0:
-            # 【交易】放弃本次候选也占一轮：剩余轮数照常推进。
-            self.state.pending_relic_discovery_rounds = rounds_left - 1
-            offer = self._offer_relic_discovery(source or "交易")
-            if offer.get("success"):
-                next_round = {"choices": offer["choices"],
-                              "remaining": self.state.pending_relic_discovery_rounds}
-        return {"success": True, "action": "放弃发现遗物",
-                "result": {"discarded_choices": choices, "source": source,
-                           "note": "本次发现不取任何遗物，待选列表已清空"}}
-
-    def _action_set_active_relics(self, params: dict) -> dict:
-        """自定义启用已持有的遗物：页数限制持有，不另限制生效数。
-
-        局外整理用；战斗中不开放——生效集合在[战始]锁定，也可在
-        battle_start 时以 active_relics 参数一次提交。
-        """
-        names = params.get("relic_names", params.get("active_relics"))
-        ok, error = self.state.set_active_relics(names)
-        if not ok:
-            return {"success": False, "error": error}
-        player = self.state.player
-        return {"success": True, "action": "自定义启用遗物",
-                "result": {"enabled": sorted(self.state.enabled_relic_names()),
-                           "disabled": sorted({r.name for r in self.state.relics}
-                                              - self.state.enabled_relic_names()),
-                           "capacity": player.load_capacity if player else 0,
-                           "death_pages": player.load_capacity if player else 0}}
-
-    def _action_toggle_relic(self, params: dict) -> dict:
-        """切换单件遗物启用/停用（2026-10-22 用户令）。
-
-        局外行动；与 set_active_relics（整组改选）互补：本行动只翻一件。
-        停用不释放页，启用不另限生效数量。
-        """
-        name = params.get("relic_name", params.get("name"))
-        ok, result = self.state.toggle_relic(name)
-        if not ok:
-            return {"success": False, "error": result}
-        player = self.state.player
-        return {"success": True, "action": "切换遗物启用",
-                "result": {"relic": name, "enabled": result,
-                           "enabled_relics": sorted(self.state.enabled_relic_names()),
-                           "capacity": player.load_capacity if player else 0}}
-
-    def _action_choose_discovered_relic(self, params: dict) -> dict:
-        choice = params.get("relic_name", "")
-        choices = self.state.pending_relic_choices
-        if not choices:
-            return {"success": False, "error": "当前没有待选择的遗物发现"}
-        if choice not in choices:
-            return {"success": False, "error": "只能选择本次发现列出的遗物", "choices": list(choices)}
-        relic = next((r for r in self.state.relics_pool if r.name == choice), None)
-        if relic is None:
-            return {"success": False, "error": f"遗物池中不存在【{choice}】"}
-        # 2026-10-27：四类资源共用死者之页；替换保留，获得由事务层统一校验。
-        player = self.state.player
-        replace_name = (params.get("replace") or "").strip()
-        replaced = None
-        if replace_name:
-            replaced = next((r for r in self.state.relics if r.name == replace_name), None)
-            if replaced is None:
-                return {"success": False,
-                        "error": f"未持有【{replace_name}】，无法用它替换",
-                        "owned": sorted({r.name for r in self.state.relics})}
-        if replaced is not None:
-            self.state.relics.remove(replaced)
-        self.state.relics_pool.remove(relic)
-        self.state.relics.append(relic)
-        self.state.note_relic_gained(relic)
-        source = self.state.pending_relic_source
-        self.state.pending_relic_choices = []
-        self.state.pending_relic_source = ""
-        next_round: dict = {}
-        if source == "交易":
-            # 【交易】发现的遗物只在本场战斗内有效：打标，战终统一移除。
-            if "本场" not in relic.tags:
-                relic.tags.append("本场")
-            rounds_left = int(getattr(self.state, "pending_relic_discovery_rounds", 0) or 0)
-            if rounds_left > 0:
-                self.state.pending_relic_discovery_rounds = rounds_left - 1
-                offer = self._offer_relic_discovery("交易")
-                if offer.get("success"):
-                    next_round = {"choices": offer["choices"],
-                                  "remaining": self.state.pending_relic_discovery_rounds}
-        result: dict = {
-            "success": True,
-            "action": "选择发现遗物",
-            "result": {"relic": choice, "source": source, "enabled": relic.enabled,
-                       **({"replaced": replaced.name} if replaced is not None else {})},
-        }
-        if next_round:
-            result["result"].update(next_round)
-            result["note"] = "交易仍在发现中：继续从当前候选里选择。"
-        # 开局流程：先发现遗物，再发现初始道纹。
-        if (source == "开局发现" and self.state.player is not None
-                and not any(n != "透支" for n in self.state.player.dao_wen)
-                and not self.state.pending_initial_daowen_choices):
-            discovery = self._offer_initial_daowen_discovery("开局发现")
-            if not discovery.get("success"):
-                return discovery
-            result["result"]["daowen_choices"] = discovery["choices"]
-            result["next_actions"] = ["setup_choose_initial_daowen"]
-            result["note"] = "开局遗物已选择；请从杀伐闭环的3个发现候选中显式选择1种作为初始道纹。"
-        return result
-
     def _offer_item_discovery(self, pool: list[str], source: str) -> dict:
         if self.state.pending_item_choices:
             return {"success": False, "error": "已有待选择的消耗品发现"}
@@ -2852,55 +2585,6 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin, DaowenHandlersMixin)
         self.state.pending_item_choices = choices
         self.state.pending_item_source = source
         return {"success": True, "choices": choices, "source": source}
-
-    def _action_choose_discovered_item(self, params: dict) -> dict:
-        choice = params.get("item_name", "")
-        if not self.state.pending_item_choices:
-            return {"success": False, "error": "当前没有待选择的消耗品发现"}
-        if choice not in self.state.pending_item_choices:
-            return {"success": False, "error": "只能选择本次发现列出的消耗品",
-                    "choices": list(self.state.pending_item_choices)}
-        # 2026-11-02【锻造】实装：候选池扩到全部固定规格消耗品
-        # （扭曲都市工具库 + 事件消耗品），两者规格都是既有登记，不接受自定义物品。
-        from .events import EVENT_CONSUMABLES
-        spec_pool = {**TWISTED_TOOL_LIBRARY, **EVENT_CONSUMABLES}
-        if choice not in spec_pool:
-            return {"success": False, "error": f"未知工具: {choice}"}
-        durability, effect = spec_pool[choice]
-        # 【锻造】发现：耐久按本次 X 覆盖（上限取 max(基准上限, X)），其余发现走原规格。
-        forge_uses = int(getattr(self.state, "pending_item_bonus_uses", 0) or 0)
-        if forge_uses:
-            current_uses = forge_uses
-            max_uses = max(int(durability), forge_uses)
-        else:
-            current_uses = max_uses = int(durability)
-        self.state.consumables.append(Consumable(
-            name=choice, effect=effect, current_uses=current_uses, max_uses=max_uses,
-        ))
-        source = self.state.pending_item_source
-        self.state.pending_item_choices = []
-        self.state.pending_item_source = ""
-        self.state.pending_item_bonus_uses = 0
-        return {"success": True, "action": "选择发现消耗品",
-                "result": {"item": choice, "durability": current_uses,
-                           "max_durability": max_uses, "source": source}}
-
-    def _action_discard_discovered_item(self, params: dict) -> dict:
-        """放弃本次消耗品发现（与 discard_discovered_relic 对称的出口）。
-
-        死者之页承载不足时「选择」会被事务拒掉，而「必须先选 1 件」的门禁又拦住
-        其他一切动作——没有这个出口就是死局。发现不等于必须拿走。
-        """
-        choices = list(self.state.pending_item_choices)
-        if not choices:
-            return {"success": False, "error": "当前没有待选择的消耗品发现"}
-        source = self.state.pending_item_source
-        self.state.pending_item_choices = []
-        self.state.pending_item_source = ""
-        self.state.pending_item_bonus_uses = 0
-        return {"success": True, "action": "放弃发现消耗品",
-                "result": {"discarded_choices": choices, "source": source,
-                           "note": "本次发现不取任何消耗品，待选列表已清空"}}
 
     def _build_custom_spell(self, actor: Entity, definition: dict, *, allow_predefined: bool = False) -> dict:
         """自创法术的唯一构建入口（三大法则校验 + 组装 Spell）。
@@ -4152,23 +3836,6 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin, DaowenHandlersMixin)
                            "speed_limit": target_entity.speed_limit,
                            "mana_limit": target_entity.mana_limit}}
 
-    def _action_redeem_attribute_points(self, params: dict) -> dict:
-        """自由动作：把存下的属性点兑成面板（不耗精力、不耗碎片）。
-
-        限局外：兑换会把当前速度/当前法力一并补到新的上限，战斗内兑换等于免费重置
-        法力一池，所以战斗中拒绝。
-        """
-        if self.state.phase != "pre_battle":
-            return {"success": False,
-                    "error": "属性点只能在局外兑换（战斗内兑换会连带补满当前速度/法力，等于重置一池）"}
-        allocations = params.get("allocations")
-        if not isinstance(allocations, dict):
-            return {"success": False,
-                    "error": "请用 allocations 指定兑换："
-                             "{'blood_points': 非负整数, 'speed_points': 偶数, 'mana_points': 偶数}",
-                    "attribute_points": self.state.attribute_points}
-        return self._redeem_attribute_points(allocations, target=params.get("target", "player"))
-
     def _action_declare_parry(self, params: dict) -> dict:
         """兼容旧调用；招架现已改为每一击在 resolve_attack 中提交。"""
         return {"success": False,
@@ -4844,32 +4511,6 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin, DaowenHandlersMixin)
             return {"payer": target.name, "cost_type": cost_type,
                     "paid": amount, "cooled_daowen": cooled}
         return self.combat.pay_numeric_cost(target, cost_type, amount, forced=True, ctx=ctx)
-
-    def _action_consume_item(self, params: dict) -> dict:
-        """使用消耗品（雕塑/普通/扭曲工具库8件，遵守现有消耗品规则，使用不消耗出手）"""
-        item_name = params.get("name", "")
-        item = None
-        for c in self.state.consumables:
-            if c.name == item_name and not c.is_depleted:
-                item = c
-                break
-        if item is None:
-            return {"success": False, "error": f"找不到可用消耗品: {item_name}"}
-
-        # 【操纵】：使用者（玩家/朋友/员工）的这一次行动必须等于施法者指令。
-        item_user = self.state.player
-        caozuo_error = self.combat.caozuo_check(item_user, "使用消耗品", item_name)
-        if caozuo_error:
-            return caozuo_error
-
-        if item.name == "万钧印":
-            return {"success": False, "error": "万钧印在受到攻击时自动触发，不可主动使用"}
-
-        # 【改造】合成的条目：逐条结算被并入的原始效果，最后只扣它自己的1点耐久。
-        if item.merged_sources:
-            return self._consume_merged_item(item, params)
-
-        return self._consume_item_effect(item, params)
 
     def _consume_merged_item(self, item: Consumable, params: dict) -> dict:
         """使用【改造】合成条目：按原顺序逐条结算全部来源效果。
