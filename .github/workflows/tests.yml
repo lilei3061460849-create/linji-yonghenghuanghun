@@ -35,6 +35,28 @@ jobs:
         # 全量 E9,F 有 600+ 条历史噪声（未使用导入/变量），不适合当门禁。
         run: ruff check .
 
+  typecheck:
+    name: mypy（不阻塞，只报趋势）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # 刻意允许失败：engine/ 有 1784 条历史类型错误（大量早期代码无注解）。
+    # 这里只把数字贴进日志，避免"一开就永远红"。
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install mypy
+        run: python -m pip install --upgrade pip mypy
+
+      - name: mypy engine/
+        run: mypy engine/ || true
+
   coverage:
     name: 覆盖率排行（不设门槛，允许失败）
     runs-on: ubuntu-latest

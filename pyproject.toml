@@ -38,3 +38,13 @@ exclude_also = [
     'if __name__ == "__main__":',
     'raise NotImplementedError',
 ]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_ignores = false
+warn_return_any = false
+# 基线（2026-11-03 实测）：engine/ 78 个文件、1784 条错误。CI 里该 job 是
+# continue-on-error，只用于**看趋势**，不阻塞合并；要让类型检查变成门禁，
+# 需要先把基线清到 0（历史代码大量无注解，短期不现实）。
