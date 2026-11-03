@@ -84,6 +84,7 @@ from .handlers.duel import (
     handle_activate_duel_relic,
     handle_resolve_final_duel,
 )
+from .action_registry import ACTION_REGISTRY
 
 
 
@@ -1859,7 +1860,18 @@ class GameEngine:
             queued.clear()
 
     def _dispatch_action(self, action_type: str, params: dict) -> dict:
-        """action 名 → 处理器：唯一的 action 路由表（执行实现见各 _action_*）。"""
+        """action 名 → 处理器：唯一的 action 路由入口。
+
+        路由顺序（迁移期并存，2026-11-03 起）：
+
+        1. **注册表优先**：`ACTION_REGISTRY` 里登记过的 action 直接查表取方法调用。
+           已迁到 `engine/handlers/*.py` 的组都走这条路。
+        2. **回落旧长链**：未注册的 action 继续走下面的 `if/elif`。两组路径调用的
+           都是 `self` 上的同一个方法，命中哪条都不改变行为。
+        """
+        spec = ACTION_REGISTRY.get(action_type)
+        if spec is not None:
+            return getattr(self, spec.handler)(params)
         if action_type == "world_initialize":
             return self._action_world_initialize(params)
         elif action_type == "world_move":
