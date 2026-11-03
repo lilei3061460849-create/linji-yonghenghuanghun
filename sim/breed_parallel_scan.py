@@ -69,7 +69,6 @@ def _worker(job):
 
 def main() -> None:
     jobs = [(b, s) for b in BUILDS for s in range(SEED_START, SEED_END + 1)]
-    random.shuffle if False else None  # noqa: 保持与顺序无关
     t0 = time.time()
     wins: list[dict] = []
     best = {}

@@ -39,6 +39,9 @@ except Exception:  # 兜底：对白渲染失败不阻塞死斗
     render_line = lambda actor, event, personality=None, rng=None: f"{getattr(actor,'name','??')}: …"
     peek_personality = lambda engine, entity: None
 
+from engine.ai_tactics import TacticalAI   # 仅 sim 工具可用（engine/ 生产路径禁止引用）
+
+
 def _default_ai_cls():
     """死斗默认战术 AI（用户裁定 2026-09-10：胜负唯一计分）。延迟导入防循环。
     LJ_WIN_ONLY=0 退回启发式 TacticalAI（千局级扫描用）。"""
