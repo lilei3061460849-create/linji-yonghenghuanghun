@@ -8,7 +8,8 @@
 * 迷雾：只把 ``world_status`` 已公开的已知地形/可见单位发给浏览器，
   不把全地图数据提前泄漏给前端。
 
-启动：``python3 webapp/server.py``（默认 0.0.0.0:8000，可用 PORT 覆盖）。
+启动：``python3 webapp/server.py``（默认 127.0.0.1:8000，可用 HOST/PORT 覆盖；
+默认只监听本机，因为界面无鉴权且单进程只有一个会话）。
 """
 from __future__ import annotations
 
@@ -33,7 +34,10 @@ from sim.monster_phase_submit import (  # noqa: E402
     decline_reaction_spell_choices,
 )
 
-HOST = os.environ.get("HOST", "0.0.0.0")
+# 默认只监听本机回环地址。界面没有鉴权、单进程只有一个会话（SESSION），
+# 绑到 0.0.0.0 等于把"任何人都能覆盖并操作这一局"暴露给整个局域网/公网。
+# 需要手机等同网设备访问时，显式设置 HOST=0.0.0.0，并自行承担风险（见 webapp/README.md）。
+HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8000"))
 INDEX_PATH = Path(__file__).resolve().parent / "index.html"
 
