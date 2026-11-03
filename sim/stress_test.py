@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from engine.ai_preview import ActionPreview
 from engine.ai_tactics import TacticalAI
 from engine.api import GameEngine
-import test_real_playthrough as rt
+from sim import real_playthrough as rt   # 2026-11-03：原根目录 test_real_playthrough.py
 
 rt.current_seed = 0
 

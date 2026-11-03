@@ -13,7 +13,9 @@ Every round is logged for AI-decision observation (actions chosen, resources,
 enemy state, dodge decisions, daowen used, death cause).
 """
 import sys, os, json, tempfile, math
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 2026-11-03：本文件从仓库根搬到 sim/（根目录放一个 test_ 开头、pytest 又不收集
+# 的脚本最容易误导）。所在目录变成 sim/，所以要上溯两级拿仓库根再入 path。
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from engine.api import GameEngine
 from engine.ai_tactics import TacticalAI
 from sim.alt_path_test import resolve_monster_turn
