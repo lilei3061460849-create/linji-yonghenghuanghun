@@ -87,6 +87,7 @@ from .handlers.duel import (
 from .handlers.resources import ResourceHandlersMixin
 from .handlers.world import WorldHandlersMixin
 from .action_registry import ACTION_REGISTRY
+from .rollback import EngineSnapshot
 
 
 
@@ -1694,15 +1695,10 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin):
 
         from .death_pages import usage, growth_error
         page_usage_before = usage(self.state)
-        state_before = None
-        if transaction:
-            # 所有行动按“校验失败不改变游戏状态”的原子契约执行。
-            # 随机数请求必须在各处理器完成静态校验后才发起，避免失败消耗随机源。
-            state_before = copy.deepcopy(self.state)
-            combat_runtime_before = self._snapshot_combat_runtime()
-            event_pool_before = (set(self.event_pool.triggered), self.event_pool.current)
-            dice_before = copy.deepcopy(self.dice)
-            interrupts_before = copy.deepcopy(self._pending_interrupts)
+        # 所有行动按“校验失败不改变游戏状态”的原子契约执行。
+        # 需要回滚的状态清单集中在 engine/rollback.py::EngineSnapshot（唯一真相）。
+        # 随机数请求必须在各处理器完成静态校验后才发起，避免失败消耗随机源。
+        snapshot = EngineSnapshot.capture(self) if transaction else None
         # 结算生命周期：一次顶层行动 = 一次 resolution。
         # 只做计数清零与（可选的）链记录，不参与任何规则判定——见 engine/resolution.py。
         # 预演内部也走本函数，但它是沙盒执行：context 状态由 engine/sandbox.py
@@ -1758,13 +1754,7 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin):
                     result = {"success": False, "error": page_error}
 
             if not result.get("success", False) and transaction:
-                self._restore_state_in_place(state_before)
-                self.combat.state = self.state
-                self._restore_combat_runtime(combat_runtime_before)
-                self.event_pool.triggered, self.event_pool.current = event_pool_before
-                self.dice = dice_before
-                self.combat.dice = self.dice
-                self._pending_interrupts = interrupts_before
+                snapshot.restore(self)
                 # 两阶段提交失败：状态已整体回滚，pending保持有效——
                 # 失败提交不得把战斗锁死。
                 if action_type == "resolve_monster_phase" and self.state.pending_monster_phase:
@@ -1829,13 +1819,7 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin):
         except Exception as e:
             self.combat.resolution.end_action()
             if transaction:
-                self._restore_state_in_place(state_before)
-                self.combat.state = self.state
-                self._restore_combat_runtime(combat_runtime_before)
-                self.event_pool.triggered, self.event_pool.current = event_pool_before
-                self.dice = dice_before
-                self.combat.dice = self.dice
-                self._pending_interrupts = interrupts_before
+                snapshot.restore(self)
             # 引擎异常：状态已整体回滚，pending保持有效（与success=False路径一致），
             # 失败提交不得把战斗锁死——保留token供修正后重交。
             error_result = {
@@ -2306,21 +2290,11 @@ class GameEngine(WorldHandlersMixin, ResourceHandlersMixin):
                     "instruction": "遗物已投放到地图，发动者知道准确位置但未获得；进入该格才会拾取，其他单位也可抢先取得"}
 
         # 在隔离快照里先执行一次旧结算器作参数/资源预检；回滚状态与随机源，不产生真实收益。
-        state_before = copy.deepcopy(self.state)
-        combat_runtime_before = self._snapshot_combat_runtime()
-        dice_before = copy.deepcopy(self.dice)
-        event_pool_before = (set(self.event_pool.triggered), self.event_pool.current)
-        interrupts_before = copy.deepcopy(self._pending_interrupts)
+        preview_snapshot = EngineSnapshot.capture(self)
         try:
             preview = self._execute_pre_battle_immediate(dict(params), world_mode=True)
         finally:
-            self._restore_state_in_place(state_before)
-            self.combat.state = self.state
-            self._restore_combat_runtime(combat_runtime_before)
-            self.dice = dice_before
-            self.combat.dice = self.dice
-            self.event_pool.triggered, self.event_pool.current = event_pool_before
-            self._pending_interrupts = interrupts_before
+            preview_snapshot.restore(self)
         if not preview.get("success", False):
             return preview
 
