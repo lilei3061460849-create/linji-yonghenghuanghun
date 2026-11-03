@@ -116,8 +116,6 @@ ROUTE_RE = re.compile(
     r'if action_type == "(?P<name>[A-Za-z0-9_]+)":\s*\n\s*return self\.(?P<method>[A-Za-z0-9_]+)\(',
     re.MULTILINE,
 )
-REGISTRY_RE = re.compile(r'@ACTION_REGISTRY\.action\(\s*"(?P<name>[A-Za-z0-9_]+)"[^)]*?\bgroup="(?P<group>[^"]+)"',
-                         re.DOTALL)
 STATE_RE = re.compile(r"\bstate\.([A-Za-z_][A-Za-z0-9_]*)")
 GLOBAL_TOKENS = ("save_game", "self.dice", "self.event_pool", "self._action_history",
                  "self._pending_interrupts", "self.combat.", "self._last_result")
@@ -155,12 +153,36 @@ def collect_routes(api_source: str) -> dict[str, str]:
     return routes
 
 
-def collect_registry(engine_dir: Path) -> dict[str, tuple[str, str]]:
-    found: dict[str, tuple[str, str]] = {}
+def collect_registry(engine_dir: Path) -> dict[str, tuple[str, str, str]]:
+    """action → (group, 声明所在文件, 处理器方法名)。
+
+    逐行解析，不用单条大正则：装饰器可能跨行，参数里还带元组括号。
+    """
+    found: dict[str, tuple[str, str, str]] = {}
+    name_re = re.compile(r'"([A-Za-z0-9_]+)"')
+    group_re = re.compile(r'group="([^"]+)"')
+    def_re = re.compile(r"def ([A-Za-z0-9_]+)\(")
     for path in engine_dir.rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        for match in REGISTRY_RE.finditer(text):
-            found[match.group("name")] = (match.group("group"), str(path.relative_to(ROOT)))
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            if "@ACTION_REGISTRY.action(" not in line:
+                continue
+            # 收集装饰器文本：从本行到出现 def 为止（最多 5 行）
+            chunk: list[str] = []
+            method = ""
+            for follow in lines[index:index + 5]:
+                chunk.append(follow)
+                hit = def_re.search(follow)
+                if hit:
+                    method = hit.group(1)
+                    break
+            text = "\n".join(chunk)
+            name = name_re.search(text)
+            group = group_re.search(text)
+            if name and group and method:
+                found[name.group(1)] = (group.group(1),
+                                        str(path.relative_to(ROOT)),
+                                        method)
     return found
 
 
@@ -198,14 +220,12 @@ def main() -> int:
 
     # 迁移期两条路径并存：旧 if/elif 里的路由 + 注册表里已登记的 action。
     # 已登记的 action 以注册表为准（它们已从 api.py 的链里删掉）。
-    for name, (group, _where) in registry.items():
-        routes.setdefault(name, "")
+    for name, (_group, _where, method) in registry.items():
+        routes.setdefault(name, method)
 
     rows = []
     for name in sorted(routes):
         method = routes[name]
-        if not method:
-            method = f"（注册表：{registry[name][1]}）"
         location, start, length, body = spans.get(method, ("（未找到）", 0, 0, ""))
         fields = sorted(set(STATE_RE.findall(body)))
         touches_global = any(token in body for token in GLOBAL_TOKENS)
