@@ -29,7 +29,9 @@ sys.path.insert(0, str(ROOT))
 from engine.api import GameEngine  # noqa: E402
 from engine.models import Entity  # noqa: E402
 from engine.world import WorldState  # noqa: E402
-from sim.monster_phase_submit import (  # noqa: E402
+# 2026-11-03：这两个纯函数从 sim/ 搬到 engine/。webapp 是生产入口，不该依赖
+# sim（一次性探针/实验脚本目录），否则"跑网页"就要带着整个模拟工具链。
+from engine.monster_phase_submit import (  # noqa: E402
     daowen_submission,
     decline_reaction_spell_choices,
 )
