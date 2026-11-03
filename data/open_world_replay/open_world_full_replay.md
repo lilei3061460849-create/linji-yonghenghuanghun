@@ -10,7 +10,7 @@
 - 游戏完成：False
 - 胜者：None
 - 结束原因：crown lost
-- 玩家最终状态：{'name': '测试轮回者', 'runtime_id': 'cd9a5c77568244f4b60d90b679e6f460', 'alive': False, 'hp': 0, 'blood_limit': 78}
+- 玩家最终状态：{'name': '测试轮回者', 'runtime_id': 'f569bc5a687e4a798fdd3021d7d05462', 'alive': False, 'hp': 0, 'blood_limit': 78}
 
 ## 最终地图
 P=玩家位置（若仍在场），R=其他轮回者，M=怪物，$=中立单位；#=墙，:=废墟。
