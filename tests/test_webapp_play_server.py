@@ -1,7 +1,7 @@
 """可玩网页界面的服务端回归测试。
 
 界面层只做显示与转发，这里验证三件事：
-1. 开局快照不提前泄漏迷雾外地形，并把同伴列为可建议对象；
+1. 开局快照不提前泄漏迷雾外地形、不再凭空送同伴；同伴进世界后可建议；
 2. 玩家提交的建议走真实引擎接口，采纳/拒绝都留下结果；
 3. 战斗面板用的两个便捷入口（逐击攻击、敌方阶段）能产生合法提交。
 """
@@ -56,15 +56,42 @@ def _battle_engine(tmp_path):
     return engine, player_id, target_id
 
 
-def test_snapshot_keeps_fog_and_lists_allies():
+def test_new_game_keeps_fog_and_no_longer_spawns_a_demo_ally():
+    """开局快照：只下发已知地形；且不再凭空送同伴。
+
+    2026-11-04 用户裁定删掉"开局送演示同伴"——旧实现硬塞一个
+    `entity_type="朋友"`、攻次/攻力用 speed//3、mana//2 的实体，等于给网页版
+    另开一套数值。这里把"不再出现幽灵同伴"钉成回归断言。
+    """
     snapshot = web._start({"name": "界面测试", "region": "罪孽都市",
                            "blood_points": 11, "speed_points": 8, "mana_points": 6,
-                           "width": 21, "height": 21, "demo_friend": True, "seed": 21})
+                           "width": 21, "height": 21, "seed": 21})
     world = snapshot["world"]
     assert snapshot["phase"] == "pre_battle"
     assert world["self"]["position"] == [1, 1]
     # 迷雾：只下发已知格，绝不把 21×21 全地形交给前端。
     assert 0 < len(world["known_terrain"]) < 21 * 21
+    assert world["allies"] == [], "开局不该再凭空多出同伴"
+
+
+def test_snapshot_lists_allies_and_suggestion_works(tmp_path):
+    """同伴建议链路：朋友进世界后必须列为可建议对象，提建议走真实引擎接口。"""
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "webapp-ally.db"),
+                        save_dir=str(tmp_path), rng_seed=21, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=66, current_hp=66,
+                                 speed_limit=4, current_speed=4,
+                                 mana_limit=3, current_mana=3,
+                                 attack_count=4, attack_power=3)
+    engine.state.friends = [Entity("随行朋友", "朋友", blood_limit=22, current_hp=22,
+                                   attack_count=2, attack_power=3)]
+    engine.state.phase = "pre_battle"
+    assert engine.execute_action("world_initialize", {"width": 21, "height": 21})["success"]
+    web.SESSION["engine"] = engine
+
+    world = web._snapshot(engine)["world"]
     assert len(world["allies"]) == 1
     ally = world["allies"][0]
     assert ally["behavior"] == "follow"
@@ -78,7 +105,7 @@ def test_snapshot_keeps_fog_and_lists_allies():
     assert 5 <= result["chance_percent"] <= 95
     assert result["behavior"] in {"follow", "guard", "explore"}
     assert any(entry["type"].startswith("ally_suggestion")
-               for entry in web._snapshot(web.SESSION["engine"])["world"]["facts"])
+               for entry in web._snapshot(engine)["world"]["facts"])
 
 
 def test_battle_panel_attack_and_monster_phase_use_real_engine_rules(tmp_path):

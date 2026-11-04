@@ -42,7 +42,7 @@ HOST=0.0.0.0 python3 webapp/server.py # 对外开放（风险见下）
 |---|---|
 | `GET /` | 单页界面 |
 | `GET /api/snapshot` | 当前快照（玩家、迷雾地图、同伴、战斗、事件、日志） |
-| `POST /api/new` | 开局：属性/副本/地图尺寸、可选演示同伴 |
+| `POST /api/new` | 开局：属性/副本/地图尺寸（不再送演示同伴，2026-11-04） |
 | `POST /api/action` | `{action, params}` 直接调用引擎 |
 | `POST /api/ui_attack` | 用当前 `prepare_attack` 快照提交逐击伤害 |
 | `POST /api/ui_monster_phase` | 生成合法怪物阶段提交并结算（可带 `dodge_refs`） |

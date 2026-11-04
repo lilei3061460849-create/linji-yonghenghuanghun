@@ -86,13 +86,10 @@ def _new_engine(payload: dict[str, Any]) -> GameEngine:
         call("setup_choose_resonance", {"resonance_type": payload.get("resonance") or "转换"})
     call("setup_choose_region", {"region": region})
 
-    if payload.get("demo_friend", True):
-        # 演示用同伴：正式的朋友/员工走事件与雇佣流程；这里只为了让新玩家
-        # 立刻能看到「它可以自己走，而玩家只能建议」。
-        friend = Entity(name="随行朋友", entity_type="朋友",
-                        blood_limit=max(12, blood * 2), current_hp=max(12, blood * 2),
-                        attack_count=max(1, speed // 3), attack_power=max(1, mana // 2))
-        engine.state.friends.append(friend)
+    # 2026-11-04 用户裁定：删掉"开局送演示同伴"。旧实现会凭空塞一个
+    # entity_type="朋友" 的实体，并自己定攻次/攻力（speed//3、mana//2），
+    # 与玩家口径（攻次=速、攻力=法）不一致，等于给网页版另开一套数值。
+    # 正式的朋友/员工一律走事件、雇佣与地图流程。
 
     width = int(payload.get("width", 21))
     height = int(payload.get("height", 21))
