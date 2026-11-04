@@ -14,7 +14,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 _spec = importlib.util.spec_from_file_location(
-    "audit_dungeons", os.path.join(ROOT, "sim", "audit_dungeons.py"))
+    "audit_dungeons", os.path.join(ROOT, "sim", "audits", "audit_dungeons.py"))
 ad = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ad)
 

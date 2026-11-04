@@ -11,7 +11,7 @@ from engine.models import Relic
 ROOT = Path(__file__).resolve().parents[1]
 FILTERS = [
     ("sim/alt_win_paths_probe.py", "INTERACTIVE_RELICS"),
-    ("sim/combo_loop_audit.py", "INTERACTIVE"),
+    ("sim/audits/combo_loop_audit.py", "INTERACTIVE"),
 ]
 
 

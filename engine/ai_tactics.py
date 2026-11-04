@@ -17,7 +17,7 @@ AI 不复制任何引擎公式；新增/修改道纹零维护（预演即事实�
 不是强制规则——同一性格在不同局面可以打出不同牌。
 
 兼容层：旧 try_* 策略名保留为「类别策略」薄封装（类别由预演 diff 归纳，
-非历史经验表），供 tests 与 archive 实验（sim/victory_path_tournament 等
+非历史经验表），供 tests 与 archive 实验（sim/duels/victory_path_tournament 等
 子类化 TacticalAI 的脚本）继续运行；基类 STRATEGIES=None，主入口
 take_action 走实时评估，不再有固定顺序。
 

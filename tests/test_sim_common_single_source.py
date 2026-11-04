@@ -43,6 +43,13 @@ DELIBERATE_FORKS = {
 }
 
 
+def _find(filename: str) -> Path:
+    """脚本可能已被分到 sim/ 的子目录（2026-11-04 目录拆分），按文件名全目录找。"""
+    matches = sorted(p for p in SIM.rglob(filename) if "__pycache__" not in str(p))
+    assert len(matches) == 1, f"{filename} 在 sim/ 下应恰好一个，实际 {matches}"
+    return matches[0]
+
+
 def _top_level_defs(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     return {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
@@ -66,7 +73,7 @@ def test_unified_helpers_are_no_longer_defined_locally(name, filenames):
     for filename in filenames:
         if filename in allowed:
             continue
-        path = SIM / filename
+        path = _find(filename)
         if name in _top_level_defs(path):
             offenders.append(filename)
     assert not offenders, (
@@ -76,7 +83,7 @@ def test_unified_helpers_are_no_longer_defined_locally(name, filenames):
 def test_deliberate_forks_stay_and_are_documented():
     """两份分叉实现必须还在，且带着"已分叉"标注（防止被当成漏网之鱼合并掉）。"""
     for filename in DELIBERATE_FORKS["_resolve_monster_turn_smart"]:
-        text = (SIM / filename).read_text(encoding="utf-8")
+        text = _find(filename).read_text(encoding="utf-8")
         assert "def _resolve_monster_turn_smart(" in text, (
             f"{filename} 的本地实现没了？若是有意统一，请同时删掉 tests 里的分叉白名单")
         assert "已分叉" in text, f"{filename} 缺少'已分叉'标注，后来者会误以为是漏网重复"
@@ -85,5 +92,5 @@ def test_deliberate_forks_stay_and_are_documented():
 def test_no_recursive_stub_left():
     """历史遗留：3 个探针里有 `def _learn(...): return _learn(...)` 的死代码。"""
     for filename in UNIFIED["_learn"]:
-        text = (SIM / filename).read_text(encoding="utf-8")
+        text = _find(filename).read_text(encoding="utf-8")
         assert "def _learn(e, definition):\n    return _learn(e, definition)" not in text

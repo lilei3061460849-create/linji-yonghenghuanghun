@@ -53,7 +53,7 @@ def test_error_invalid_huoli_mode_rejected():
 def test_static_no_dead_code():
     """静态：源码层不再出现死代码分支关键字"""
     bs_text = pathlib.Path("sim/balance_sim.py").read_text(encoding="utf-8")
-    rs_text = pathlib.Path("sim/run_sim.py").read_text(encoding="utf-8")
+    rs_text = pathlib.Path("sim/audits/run_sim.py").read_text(encoding="utf-8")
     # 允许在注释归档中出现 charges/flat/burst/half 字样，但不允许出现可执行的 HUOLI_MODE 分支
     assert "HUOLI_MODE" not in bs_text, "balance_sim.py 不应再含 HUOLI_MODE"
     assert "HUOLI_MODE" not in rs_text, "run_sim.py 不应再含 HUOLI_MODE"
