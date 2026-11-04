@@ -76,8 +76,13 @@ validation       = tests/                # 文档、数据、引擎三方一致�
 ## 可玩网页界面
 
 ```bash
-python3 webapp/server.py      # 默认 http://0.0.0.0:8000/
+python3 webapp/server.py      # 默认 http://127.0.0.1:8000/（只监听本机）
 ```
+
+> **安全提醒**：网页界面没有鉴权，且一个进程只有一个会话（`POST /api/new` 会覆盖当前局）。
+> 因此默认只监听 `127.0.0.1`。需要手机/其它设备访问时才用 `HOST=0.0.0.0 python3 webapp/server.py`
+> 显式开放，并自行限制网络来源；详见 [webapp/README.md](webapp/README.md)。
+> 存档是 pickle 格式，只读本机自己生成的存档，不要接受外部上传。
 
 单页地图界面：点相邻格或用 WASD/方向键移动，等待回合，与相邻单位交涉，
 向朋友/员工**建议**行为（采纳与否由对方自己按引擎判定），并在遭遇时打完一场战斗。
@@ -86,9 +91,23 @@ python3 webapp/server.py      # 默认 http://0.0.0.0:8000/
 ## 本地验证
 
 ```bash
-python3 sim/gen_rules.py --check
-python3 -m pytest tests/ -q --tb=short
+python3 sim/gen_rules.py --check                 # 规则正文 ↔ 引擎常量一致性
+python3 -m pytest tests/ -q --tb=short           # 全量回归（约 2~3 分钟）
+python3 tools/gen_action_inventory.py            # 重新生成 内部/行动分组清单-<日期>.md
 ```
+
+开发者命令（CI 里对应同名 job；前两项是门禁，后两项只报告不阻塞）：
+
+```bash
+ruff check .                                     # 门禁：E9/F63/F7/F82 四类真 bug
+python3 -m pytest tests/ -q                      # 门禁：全量测试
+python3 -m pytest tests/ -q --cov=engine --cov=webapp && python3 tools/coverage_ranking.py --top 25
+mypy engine/                                     # 只作趋势观察（基线 1784 条，不阻塞）
+```
+
+> `ruff` 的规则集在 `pyproject.toml` 的 `[tool.ruff.lint]` 里收窄过：全量 `E9,F`
+> 有 600+ 条历史噪声（未使用导入/变量），开成门禁只会逼人写 `# noqa`。
+> 覆盖率同理——没有阈值，`tools/coverage_ranking.py` 只负责排出"最该补测试的模块"。
 
 规则正文迁移说明：README 不再承载精确中文条文。引擎事件解析、通用道纹同步与
 结构化规则的一致性测试均已改读 `规则正文.md`；不得把正文搬回 README 作为第二份

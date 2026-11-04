@@ -291,9 +291,6 @@ def _roll_record(picked: dict, token: str) -> dict:
 
 
 
-    if actor is None or not hasattr(state, "on_player_side"):
-        return True
-    return bool(state.on_player_side(actor))
 
 
 def _verb_spec(effect: dict, *, target, actor, amount: int, source: str) -> dict:

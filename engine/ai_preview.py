@@ -11,6 +11,10 @@
 
 回滚基于 CombatEngine 既有事务/快照体系（P0 同款：deepcopy state +
 原地恢复 state 内容 + 恢复引擎侧怪物状态/dice/中断/历史），保证预演零副作用。
+
+**目录定位（2026-11-03 补注，纯注释）**：本模块是 `ai_tactics` 的预演层，同属
+**实验/模拟工具**；生产路径不 import 它（`tests/test_production_isolation.py`
+守着这条线）。它只做"快照 → 真实执行 → 记录差异 → 回滚"，不复制任何结算规则。
 """
 from __future__ import annotations
 

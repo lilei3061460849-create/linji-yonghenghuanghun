@@ -17,9 +17,15 @@ AI 不复制任何引擎公式；新增/修改道纹零维护（预演即事实�
 不是强制规则——同一性格在不同局面可以打出不同牌。
 
 兼容层：旧 try_* 策略名保留为「类别策略」薄封装（类别由预演 diff 归纳，
-非历史经验表），供 tests 与 archive 实验（sim/victory_path_tournament 等
+非历史经验表），供 tests 与 archive 实验（sim/duels/victory_path_tournament 等
 子类化 TacticalAI 的脚本）继续运行；基类 STRATEGIES=None，主入口
 take_action 走实时评估，不再有固定顺序。
+
+**目录定位（2026-11-03 补注，纯注释）**：本模块是**实验/模拟工具**，生产路径
+（`engine/api.py`、`engine/ai_player.py`）**不 import 它**；只有 sim/ 探针与
+测试直接实例化。原因见 `engine/README.md`：它是规则型 AI，而正式对局的决策
+一律由 LLM backend 给出。typing/改动时别顺手把它接回生产路径——
+`tests/test_production_isolation.py` 会拦。
 """
 from __future__ import annotations
 

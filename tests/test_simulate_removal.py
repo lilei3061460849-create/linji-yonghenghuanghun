@@ -13,7 +13,7 @@ def test_normal_simulate_deleted():
     assert not pathlib.Path("simulate.py").exists(), "simulate.py 应已删除"
     # sim/ 仍为事实源
     assert pathlib.Path("sim/balance_sim.py").exists()
-    assert pathlib.Path("sim/run_sim.py").exists()
+    assert pathlib.Path("sim/audits/run_sim.py").exists()
     # 新战报生成器仍在
     assert pathlib.Path("sim/pick_best_report.py").exists()
 

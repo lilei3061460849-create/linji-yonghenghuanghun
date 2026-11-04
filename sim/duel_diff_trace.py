@@ -81,7 +81,7 @@ def traced_duel(challenger_path: str, defender_path: str, seed: int,
     from tests.setup_support import finish_initial_daowen
     from sim.handplay_dungeon_with_winner import load_winner
     from sim.optional_actions import start_battle
-    from sim.wage_settlement import settle_wages
+    from sim.duels.wage_settlement import settle_wages
 
     tmp = tempfile.mktemp(suffix=".json")
     shutil.copy(defender_path, tmp)

@@ -17,6 +17,22 @@ data/dbg*
 data/demo_*
 data/batch_*
 
+# 大文件 / 会话备份（历史上误提交过 5.4MB 的 linji_session.bundle，见 98d8abd0）
+*.bundle
+*.patch
+
+# Secrets / local environment
+# .env.example 是模板，必须提交；真正的 .env 一律不提交。
+.env
+.env.*
+!.env.example
+
+# Tool caches (ruff / mypy / coverage)
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+
 # IDE
 .vscode/
 .idea/

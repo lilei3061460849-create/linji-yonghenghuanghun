@@ -414,7 +414,7 @@ class DeepSeekBackend(AIBackend):
 # ---------------------------------------------------------------------------
 # 2026-09-13：此前 setup_choose_region 硬编码返回"罪孽都市"，不读任何状态——
 # 实测 29 个"开局拿到回锋刀/避风铃"的样本选扭曲都市 0 次（见
-# sim/probe_region_choice_synergy.py）。遗物在选区之前就已确定（见
+# sim/probes/probe_region_choice_synergy.py）。遗物在选区之前就已确定（见
 # engine/handlers/setup.py::handle_setup_choose_region 的前置校验），
 # 因此这个协同在时序上完全可判。
 #

@@ -546,16 +546,33 @@ def write_replay(payload: dict[str, Any], out_dir: Path = OUT) -> tuple[Path, Pa
     return json_path, markdown_path
 
 
+LEGAL_TERMINAL_REASONS = frozenset({"crown carried out", "crown lost"})
+
+
 def validate_complete_playthrough(payload: dict[str, Any]) -> None:
-    """Reject a replay that merely ran for a while instead of reaching a legal world ending."""
+    """Reject a replay that merely ran for a while instead of reaching a legal world ending.
+
+    终止原因只有两个合法值（与 `_crown_stop_reason` 一致）：
+
+    * `crown carried out` —— 玩家自己带冠冕离场（玩家胜局，`game_complete=True`）；
+    * `crown lost` —— 冠冕被其他单位带出副本，留在里边的轮回者被困死
+      （用户 2026-10-31 裁定"谁抢到谁带走，剩下人都死里边"）。这是**合法的世界终局**，
+      不是"跑了一半"。
+
+    2026-11-03 修正：旧实现先断言 `game_complete is True` 再允许 `crown lost`，
+    而 `game_complete` 只在玩家带走冠冕时为真——两句互斥，`crown lost` 永远过不去，
+    CI 的 open-world-full-playthrough-replay 因此长期必红（种子 1 实测：过路商人
+    在世界回合 16 带出冠冕、玩家 `player_trapped`）。现在只按"是否为合法终局"判定；
+    "玩家是否获胜"不再是本校验的通过条件。
+    """
     final = payload.get("final_state") or {}
     population = payload.get("initial_population") or {}
     battles = payload.get("battles") or []
-    if final.get("game_complete") is not True:
-        raise RuntimeError(f"open-world run is incomplete: {final.get('stop_reason', 'unknown stop')}")
     terminal_reason = final.get("stop_reason")
-    if terminal_reason not in {"crown carried out", "crown lost"}:
-        raise RuntimeError(f"unexpected terminal reason: {terminal_reason}")
+    if terminal_reason not in LEGAL_TERMINAL_REASONS:
+        raise RuntimeError(f"open-world run is incomplete: {terminal_reason or 'unknown stop'}")
+    if terminal_reason == "crown carried out" and final.get("game_complete") is not True:
+        raise RuntimeError("crown carried out was recorded but game_complete is not true")
     if int(population.get("monsters", 0)) < 1:
         raise RuntimeError("open-world run spawned no monsters")
     if int(population.get("other_reincarnators", 0)) < 2:
@@ -591,6 +608,11 @@ def validate_complete_playthrough(payload: dict[str, Any]) -> None:
             raise RuntimeError("crown exit reason is not the final crown")
     if len(final.get("living_reincarnators_at_end", [])) > 1:
         raise RuntimeError("terminal world state still contains multiple living reincarnators")
+    if terminal_reason == "crown lost":
+        # 合法终局，但不是玩家胜局：把"冠冕被谁带走"明确打进 CI 日志，
+        # 免得一条 lose 的回放被当成"通关"。
+        print(f"note: 冠冕被 {final.get('crown_taken_by')} 带出副本，"
+              f"玩家被困死（合法世界终局，非玩家胜局）", flush=True)
 
 
 def main() -> None:

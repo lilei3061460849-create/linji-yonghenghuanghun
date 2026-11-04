@@ -5,12 +5,6 @@ on:
     branches: [main, feat/open-world-core]
   pull_request:
   workflow_dispatch:
-    inputs:
-      full_suite:
-        description: "Run every legacy test, including unrelated known failures"
-        type: boolean
-        required: false
-        default: false
 
 concurrency:
   group: open-world-tests-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -20,10 +14,55 @@ permissions:
   contents: read
 
 jobs:
-  pytest:
-    name: Python tests
+  lint:
+    name: Ruff（真 bug 类规则）
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: python -m pip install --upgrade pip ruff
+
+      - name: Ruff check（E9 语法错误 / F63 无效比较 / F7 / F82 未定义名）
+        # 规则集在 pyproject.toml 的 [tool.ruff.lint] 里收窄过：
+        # 全量 E9,F 有 600+ 条历史噪声（未使用导入/变量），不适合当门禁。
+        run: ruff check .
+
+  typecheck:
+    name: mypy（不阻塞，只报趋势）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # 刻意允许失败：engine/ 有 1784 条历史类型错误（大量早期代码无注解）。
+    # 这里只把数字贴进日志，避免"一开就永远红"。
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install mypy
+        run: python -m pip install --upgrade pip mypy
+
+      - name: mypy engine/
+        run: mypy engine/ || true
+
+  coverage:
+    name: 覆盖率排行（不设门槛，允许失败）
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # 故意不阻塞：仓库没有覆盖率门槛，这个 job 只负责把"哪些模块没被测到"贴进日志。
+    continue-on-error: true
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -38,10 +77,37 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
 
-      - name: Run targeted, open-world, and preference regressions
-        if: github.event_name != 'workflow_dispatch' || inputs.full_suite != 'true'
-        run: python -m pytest -q tests/test_open_world.py tests/test_monster_preferences.py tests/test_altar.py tests/test_relicization_behavior_boundaries.py tests/test_real_winner_generator.py tests/test_ai_basic_attack_candidate.py tests/test_replay.py tests/test_open_world_winner_generator.py tests/test_resonance_network.py tests/test_region_daowen_gate.py tests/test_sunken_sea_daowen_dedupe.py tests/test_region_exclusive_naming_sync.py tests/test_daowen_index_guard.py tests/test_daowen_wiring.py
+      - name: Run tests with coverage
+        run: python -m pytest -q --cov=engine --cov=webapp
 
-      - name: Run full repository suite on demand
-        if: github.event_name == 'workflow_dispatch' && inputs.full_suite == 'true'
+      - name: 覆盖率排行（最需要补测试的模块）
+        run: python3 tools/coverage_ranking.py --top 25
+
+  pytest:
+    name: Python tests (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 是主版本；3.11 是 pyproject.toml 声明的最低支持版本（最低版本检查）。
+        # 只要 pyproject 的 requires-python 上调，这里的最低版本也必须同步上调。
+        python-version: ["3.12", "3.11"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+
+      - name: Run the full test suite
+        # 全量约 2~3 分钟。历史上这里只跑 14 个文件，导致"CI 绿但仓库红"，
+        # 已改为默认全量；不再需要 workflow_dispatch 的 full_suite 开关。
         run: python -m pytest -q

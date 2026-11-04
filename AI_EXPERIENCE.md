@@ -785,7 +785,7 @@ python sim/audit_monsters.py
 - 已清理已失去当前价值的旧版实战战报、旧实验结论和过期阶段报告；其余近期裁定、迁移记录与仍可检索的设计依据继续保留在 `内部/archive/`。
 - **知识库治理**：2026-10-17 已清空依赖旧规则版本的构筑评分、旧最优构筑、组合得分、行为遥测与派生策略。跨版本的方法论提示独立存放于 `methodology`，不当作当前游戏胜率或构筑证据；`lessons` 仅允许写入经现行规则验证、且有同种子配对等合格证据支持的具体游戏结论。继续采用**失败驱动增量**，禁止为了堆积数量而添加经验。
 - `data/experiments/`：新实验批次数据与恢复清单（*MANIFEST.json）的存放约定；旧批次结果已清理，不得作为当前规则事实源。
-- KB lessons（`data/build_knowledge.json`）：技巧/心得/陷阱级经验，须带同种子配对证据，治理走 `sim/reapply_lessons_after_reset.py`（禁止手改 JSON 裸删）。
+- KB lessons（`data/build_knowledge.json`）：技巧/心得/陷阱级经验，须带同种子配对证据，治理走 `sim/audits/reapply_lessons_after_reset.py`（禁止手改 JSON 裸删）。
 
 ## 实验灾备协议
 1. **沙箱不是持久化介质**：/tmp、临时脚本/JSON/日志、未提交工作区、未推送commit 一律视为临时空间；重要结果不得只存在于上述位置。

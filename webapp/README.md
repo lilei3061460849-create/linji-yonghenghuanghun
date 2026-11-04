@@ -6,9 +6,19 @@
 ## 启动
 
 ```bash
-python3 webapp/server.py       # 0.0.0.0:8000
-PORT=9000 python3 webapp/server.py
+python3 webapp/server.py              # 默认 127.0.0.1:8000，只监听本机
+PORT=9000 python3 webapp/server.py    # 换端口，仍然只监听本机
+HOST=0.0.0.0 python3 webapp/server.py # 对外开放（风险见下）
 ```
+
+### 安全说明：默认只监听本机
+
+- 本界面**没有任何鉴权**：没有登录、没有会话 ID、没有 CSRF 防护；
+- 进程里只有**一个全局会话**（`SESSION`），`POST /api/new` 会直接覆盖当前这一局；
+- 因此默认 `HOST=127.0.0.1`。设成 `0.0.0.0` 后，同一网络内的任何人都能开局、
+  操作你的角色、读你的存档视图。只在可信局域网、且明确知道风险时使用，
+  并建议用防火墙限制来源。
+- 存档使用 pickle 反序列化，**只读自己本机生成的存档**，不要接收外部上传的存档文件。
 
 只依赖 Python 标准库，不需要 `pip install`。
 
@@ -32,7 +42,7 @@ PORT=9000 python3 webapp/server.py
 |---|---|
 | `GET /` | 单页界面 |
 | `GET /api/snapshot` | 当前快照（玩家、迷雾地图、同伴、战斗、事件、日志） |
-| `POST /api/new` | 开局：属性/副本/地图尺寸、可选演示同伴 |
+| `POST /api/new` | 开局：属性/副本/地图尺寸（不再送演示同伴，2026-11-04） |
 | `POST /api/action` | `{action, params}` 直接调用引擎 |
 | `POST /api/ui_attack` | 用当前 `prepare_attack` 快照提交逐击伤害 |
 | `POST /api/ui_monster_phase` | 生成合法怪物阶段提交并结算（可带 `dodge_refs`） |

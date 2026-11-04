@@ -40,6 +40,8 @@ from tests.setup_support import choose_discovered_initial_daowen
 from engine.api import GameEngine
 from engine.ai_tactics import TacticalAI
 from engine.daowen import DaoWenEngine
+from engine.gamedata import (REGION_EXCLUSIVE_DAOWEN, ORIGINAL_MONSTER_DAOWEN,
+                             MONSTER_TRANSFORM_DAOWEN, SHAFA_LOOP_DAOWEN)
 
 KNOWLEDGE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                          "data", "build_knowledge.json")
@@ -56,9 +58,6 @@ CANDIDATES = sorted(n for n, fn in DaoWenEngine._registry.items()
 #   - 副本专属道纹：须先经残韵从本副本怪物身上转化获得一种，才能学其余（规则正文）
 # 若仍按全池组 build，绝大多数 build 会因"学不上"而退化成同一套，数据失真。
 # 故按副本给出"实际可通过学习获得"的候选池。
-from engine.gamedata import (REGION_EXCLUSIVE_DAOWEN, ORIGINAL_MONSTER_DAOWEN,
-                             MONSTER_TRANSFORM_DAOWEN, SHAFA_LOOP_DAOWEN)
-
 _ALL_EXCLUSIVE = {d for v in REGION_EXCLUSIVE_DAOWEN.values() for d in v}
 
 

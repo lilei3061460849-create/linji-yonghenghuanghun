@@ -65,10 +65,77 @@ engine/
 ├── validator.py         # 规则校验器（20 条内置检查，违规入库 + 已迁移机制护栏）
 ├── mechanisms/          # 最小可行机制系统（MVP）：Verb/Mechanism/Trigger/Condition/Target
 │                        #   已声明机制：加害（原 JiahaiHook）、龙鳞（原 LonglinHook）、固执（伤害规则见 rule_engine.py）；洞察·结算/畸变·标记（原 round_start 内嵌块，回始循环已全部声明化；自愈 2026-10-11、衰败 2026-10-11、狂暴·标记 2026-10-03 随道纹删除）、畸变·结算（原 round_end 内嵌块）、焦黑发丝（原 _on_entity_death 内嵌块）、洗劫·夺碎片（原伤害管线内嵌块）、帮派令/缄默面具（原 process_relics 战始 if）。新机制优先写声明层，勿回核心管线加 if。
-└── api.py               # GameEngine 主类 — AI 唯一交互入口（含 TWISTED_TOOL_LIBRARY、TERMINAL_ARTIFACTS、FIRST_EMBRACE_OPTIONS 等）
+├── action_registry.py   # 行动注册表：action 名 → 处理器方法 + 分组/阶段元信息（唯一查表入口）
+├── rollback.py          # EngineSnapshot：一次行动失败/抛异常要回滚哪些状态的唯一清单
+├── handlers/            # 按组搬出的 action 处理器（mixin 挂回 GameEngine，方法体只搬位置不改逻辑）
+│   ├── world.py         # 开放世界地图（移动/等待/视野/交涉/建议/造物指令）
+│   ├── combat.py        # 战斗回合（战始/战终、两阶段攻击、怪物阶段、回合、重开）
+│   ├── daowen.py        # 道纹与法术（发动/施法/定义法术/残韵/点档/炼心）
+│   ├── items.py         # 遗物与消耗品（使用/启用/发现与放弃）
+│   ├── opening.py       # 开局与局外（属性/残韵/副本/初始道纹/赎罪/医生/属性点赎回）
+│   ├── endgame.py       # 终音法器与龙族（死斗遗物/初拥/龙征/吞食/断尾…）
+│   ├── companions.py    # 同伴与雇佣（部署/遣散/发薪/雇佣道纹/还债）
+│   ├── rulings.py       # 事件与裁定（事件结算/读死者之书）
+│   ├── resources.py     # 自定义资源（声明/激活/列出）
+│   ├── available_actions.py # AI 可见行动清单构建器（只读，不注册 action）
+│   ├── setup.py / economy.py / duel.py # 更早的函数式 handle_* 处理器（新代码优先用上面的 mixin 范式）
+└── api.py               # GameEngine 主类 — AI 唯一交互入口；现只留状态/事务/存档/裁定与未迁出的私有辅助
 ```
 
 > **2026-08-11 F7 订正**：五章「全程自动触发」已与「特殊事件（全局触发）」14 项对齐（补 凡庸/癌变/迷失/还债/雕塑/救赎）；「增生」全量更名为「癌变」（旧名 增生 保留为兼容字段 `is_proliferated`/`PROLIFERATION_THRESHOLD`/`proliferation`），「增殖」为独立道纹（血限+2X）二者无关。
+
+## 行动注册表与 handlers 分层（2026-11-03）
+
+`engine/api.py` 曾是一万行的单文件，`_dispatch_action` 是 93 条 `elif` 的字符串路由。
+现在分成两层，**行为完全不变**（只搬方法位置、不重写逻辑）：
+
+| 层 | 位置 | 职责 |
+| --- | --- | --- |
+| 路由 | `engine/action_registry.py` | `ACTION_REGISTRY` 记录 action → 处理器方法名 + 分组/允许阶段元信息 |
+| 处理器 | `engine/handlers/*.py` | 每个模块一个 `XxxHandlersMixin`，用 `@ACTION_REGISTRY.action(...)` 声明归属 |
+| 宿主 | `engine/api.py::GameEngine` | 多继承这些 mixin，主类上仍只有**一个** `self._action_*` 属性 |
+
+`_dispatch_action` 的路由顺序：**注册表优先**，未注册的继续走旧 `if/elif`（迁移期并存，随时可回退）。
+`allowed_phases` 只是**声明式元信息**（供文档/清单/测试核对），真正的阶段门禁仍在 `_phase_error`。
+
+新增一个 action：
+
+```python
+# engine/handlers/<组>.py
+@ACTION_REGISTRY.action("my_action", group="world")
+def _action_my_action(self, params: dict) -> dict:
+    ...
+```
+
+然后在 `_dispatch_action` 里**不再需要**加分支；清单用 `python3 tools/gen_action_inventory.py` 重新生成
+（输出 `内部/行动分组清单-<日期>.md`，含"未注册/未归类"检查）。
+
+搬迁约定（踩过的坑）：
+
+1. 方法体原样剪切，**保留 4 空格类体缩进**拼进 mixin，不要反缩进再重新缩进；
+2. 方法体里的 `from .xxx import` 搬到 `engine/handlers/` 后必须升一级为 `from ..xxx import`；
+3. `@staticmethod` / `@property` 必须与 `def` 一起搬走——只搬 `def` 会让装饰器残留在 `api.py`
+   并贴到下一个方法上（真发生过：`_restore_state_in_place` 被 `@staticmethod` 误伤，全量测试 1041 例红）；
+4. 搬完先跑 `ruff check --select F821 engine/`：漏掉的顶层 import 靠它兜；
+5. 类体里 `DRAFT_ARTIFACTS = (...)` 这类**类级常量**会引用模块级名字（如 `BANNER_NAME`），
+   跟着搬时要一起补 import，否则 `import engine.api` 直接 `NameError`。
+
+源码级护栏测试若要断言"某个共享口径被调用"，请扫 `engine/api.py` + `engine/handlers/*.py`
+（例如 `tests/test_settlement_single_source.py::_read_action_handlers`），不要再只看 `api.py`。
+
+### 事务回滚契约
+
+一次 `execute_action` 是原子的：失败或抛异常都不得留下半截状态。
+"哪些状态要回滚"集中写在 `engine/rollback.py::EngineSnapshot`（唯一清单），
+`capture` / `restore` 成对使用，**不要再在 handler 里手写 deepcopy**。
+
+清单：`state`（GameState 深拷贝）、`combat_runtime`、`event_pool`（triggered 集合 + current）、
+`dice`、`pending_interrupts`。刻意不回滚：`_last_result`（失败按设计改写）、
+`_action_history`（只在成功后追加）、`combat.resolution`（`begin_action/end_action` 自配对）。
+
+已知偏离：`shards_peak` 只升不降（`__setattr__` 夹回旧值），失败行动中途抬高的峰值回滚后仍保留，
+由 `tests/test_engine_rollback.py::test_rollback_never_lowers_monotonic_shards_peak` 固定。
+新增引擎级可变状态时，先判断它是否"行动中途会变、失败必须回退"，是就加进清单并补测试。
 
 ## 机制系统
 
@@ -96,7 +163,10 @@ engine/
 机制：经 `TriggerBus` 订阅 `ENTITY_DIED`，`_emit` 显式传实体对象；【帮派令】（priority=10）
 ——经 `_dispatch_phase(Phase.BATTLE_START)` 战始原位分发，条件复用通用
 `relic_active("帮派令")`。旧类/旧 if 均已删除。护栏：`validator.check_migrated_mechanism_guards()` 禁止已迁移机制
-在核心管线重新出现同名硬编码分支。批量迁移见审计报告《机制系统化可扩展性审计》。
+在核心管线重新出现同名硬编码分支；扫描范围 = `engine/combat.py` + 全部 `combat_parts/*.py`
++ `engine/combat_hooks.py` + `engine/api.py` + 全部 `engine/handlers/*.py`（新文件自动纳入），
+由 `tests/test_mechanism_guard_ci.py` 兜底：既断言当前零违规，也用"造一条违规"的禁令测试
+证明护栏真的会报，并断言 `combat_parts/`、`handlers/` 下的每个文件都在扫描范围内。`批量迁移见审计报告《机制系统化可扩展性审计》。
 
 2026-10-13 六项挂起迁移：血族血脉/赤族诅咒在凡庸之后的独立逐实体相位；皮衣在回始最前段和回终追踪清理前；防弹插板在战始选择处理之后；龙族血脉乘区经原 Hook 桥且不在 incoming 重复执行；三相残韵盘战终复用已序列化的战斗运行态。原数值、封存口径、死亡/回复上下文和选择协议不变。映射与验证见 `../内部/archive/mechanism_migration_2026-10-13.md`。
 
@@ -270,9 +340,10 @@ python main.py
 # API演示
 python main.py --api
 
-# 回归锁（不是对局本身）
-python tests/test_engine.py
+# 回归锁（不是对局本身）。全部由 pytest 收集，不再维护第二份"该跑哪些测试"的手工清单。
 python -m pytest tests -q
+# 单个文件也支持直跑（内部同样转交 pytest）：
+python tests/test_engine.py
 ```
 
 用户说「测试」时，默认由 AI 通过 `GameEngine.execute_action` 逐步点选手操并按 README《六、战斗推演格式》写战报。禁止把 `TacticalAI`（已被隔离的实验工具）、`sim/pick_best_report.py`、sim 批量通关当作默认测试。`pytest` 只锁定回归。`报告.md` 只保留最新一次轮回记录。

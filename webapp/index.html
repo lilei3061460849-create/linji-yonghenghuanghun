@@ -224,9 +224,6 @@
         <option value="13">13 × 13（小地图，只有怪物）</option>
       </select>
     </div>
-    <div class="field"><label>同伴</label>
-      <label style="width:auto;color:var(--text)"><input id="fFriend" type="checkbox" checked /> 开局带一名随行朋友（可体验建议系统）</label>
-    </div>
     <div class="row" style="margin-top:12px;justify-content:flex-end">
       <button id="cancelBtn">取消</button>
       <button id="startBtn" class="primary">进入副本</button>
@@ -839,11 +836,11 @@ async function startGame(){
     const res = await fetch("/api/new", {method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({name:$("fName").value || "轮回者", region:$("fRegion").value,
         blood_points:blood, speed_points:speed, mana_points:mana,
-        demo_friend:$("fFriend").checked, width:size, height:size})});
+        width:size, height:size})});
     const data = await res.json();
     if (!data.success){ toast("开局失败：" + (data.error || "未知错误")); return; }
     S = data.snapshot; $("newModal").classList.add("hidden"); render();
-    toast("世界已生成：先走走看，同伴会自己跟着你。");
+    toast("世界已生成：先走走看，遇到的人可以交涉。");
   } catch(e){ toast("开局请求失败：" + e.message); }
   finally { $("startBtn").disabled = false; }
 }

@@ -509,13 +509,25 @@ def _read(rel_path: str) -> str:
     return (ROOT / rel_path).read_text(encoding="utf-8")
 
 
+def _read_action_handlers() -> str:
+    """api.py + engine/handlers/*.py 的源码合集。
+
+    2026-11-03 起 action 处理器按组搬到 `engine/handlers/`，源码级护栏不能再只看
+    api.py——否则"搬迁"会被误判成"删掉了共享口径"。
+    """
+    parts = [_read("engine/api.py")]
+    parts += [p.read_text(encoding="utf-8")
+              for p in sorted((ROOT / "engine" / "handlers").glob("*.py"))]
+    return "\n".join(parts)
+
+
 def test_daowen_mana_payment_is_not_written_twice():
     """护栏：use_daowen 与法术单步共用 CombatEngine.pay_daowen_mana。
 
     历史 bug：api.py 内联了一份多带 `cost_mutation` 兜底的副本，与法术单步口径
     表面相同、实则不同（只是碰巧没有消耗类道纹缺 cost 键才没分叉）。
     """
-    api_src = _read("engine/api.py")
+    api_src = _read_action_handlers()
     assert "pay_daowen_mana(" in api_src, "use_daowen 必须调用共享的法力支付口径"
     assert "calc.get(\"cost\", calc.get(\"cost_mutation\", 0))" not in api_src, (
         "use_daowen 不得再内联一份法力支付")
@@ -523,7 +535,7 @@ def test_daowen_mana_payment_is_not_written_twice():
 
 def test_shared_daowen_entry_points_are_actually_shared():
     """护栏：道纹效果结算只有一个公开入口，且两条路径都走它。"""
-    api_src = _read("engine/api.py")
+    api_src = _read_action_handlers()
     spells_src = _read("engine/combat_parts/spells.py")
     assert api_src.count("apply_daowen_effect(") >= 1
     assert spells_src.count("apply_daowen_effect(") >= 1

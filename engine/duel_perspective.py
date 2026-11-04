@@ -4,7 +4,7 @@
 背景（先检查架构再修改的结论，写在这里备查）：
   * 现有战报生成是纯"排版层"：engine/battle_report.py 的 format_* 函数只把
     execute_action() 已经返回的结果字典转成文字，不产生任何新数值、不做
-    任何规则判定。sim/*.py 里的多个死斗驱动脚本（generate_duel_report.py /
+    任何规则判定。sim/*.py 里的多个死斗驱动脚本（sim/duels/generate_duel_report.py /
     duel_pvp.py / duel_common.py 等）负责手操调用引擎、拼装最终 报告.md。
   * 引擎（combat.py/api.py/models.py）里没有"信息隐藏"层：execute_action
     返回的是完整的上帝视角事实（双方真实HP/法力/道纹……），这是刻意的

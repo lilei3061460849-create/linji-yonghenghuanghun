@@ -8,7 +8,8 @@
 * 迷雾：只把 ``world_status`` 已公开的已知地形/可见单位发给浏览器，
   不把全地图数据提前泄漏给前端。
 
-启动：``python3 webapp/server.py``（默认 0.0.0.0:8000，可用 PORT 覆盖）。
+启动：``python3 webapp/server.py``（默认 127.0.0.1:8000，可用 HOST/PORT 覆盖；
+默认只监听本机，因为界面无鉴权且单进程只有一个会话）。
 """
 from __future__ import annotations
 
@@ -28,12 +29,17 @@ sys.path.insert(0, str(ROOT))
 from engine.api import GameEngine  # noqa: E402
 from engine.models import Entity  # noqa: E402
 from engine.world import WorldState  # noqa: E402
-from sim.monster_phase_submit import (  # noqa: E402
+# 2026-11-03：这两个纯函数从 sim/ 搬到 engine/。webapp 是生产入口，不该依赖
+# sim（一次性探针/实验脚本目录），否则"跑网页"就要带着整个模拟工具链。
+from engine.monster_phase_submit import (  # noqa: E402
     daowen_submission,
     decline_reaction_spell_choices,
 )
 
-HOST = os.environ.get("HOST", "0.0.0.0")
+# 默认只监听本机回环地址。界面没有鉴权、单进程只有一个会话（SESSION），
+# 绑到 0.0.0.0 等于把"任何人都能覆盖并操作这一局"暴露给整个局域网/公网。
+# 需要手机等同网设备访问时，显式设置 HOST=0.0.0.0，并自行承担风险（见 webapp/README.md）。
+HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8000"))
 INDEX_PATH = Path(__file__).resolve().parent / "index.html"
 
@@ -80,13 +86,10 @@ def _new_engine(payload: dict[str, Any]) -> GameEngine:
         call("setup_choose_resonance", {"resonance_type": payload.get("resonance") or "转换"})
     call("setup_choose_region", {"region": region})
 
-    if payload.get("demo_friend", True):
-        # 演示用同伴：正式的朋友/员工走事件与雇佣流程；这里只为了让新玩家
-        # 立刻能看到「它可以自己走，而玩家只能建议」。
-        friend = Entity(name="随行朋友", entity_type="朋友",
-                        blood_limit=max(12, blood * 2), current_hp=max(12, blood * 2),
-                        attack_count=max(1, speed // 3), attack_power=max(1, mana // 2))
-        engine.state.friends.append(friend)
+    # 2026-11-04 用户裁定：删掉"开局送演示同伴"。旧实现会凭空塞一个
+    # entity_type="朋友" 的实体，并自己定攻次/攻力（speed//3、mana//2），
+    # 与玩家口径（攻次=速、攻力=法）不一致，等于给网页版另开一套数值。
+    # 正式的朋友/员工一律走事件、雇佣与地图流程。
 
     width = int(payload.get("width", 21))
     height = int(payload.get("height", 21))

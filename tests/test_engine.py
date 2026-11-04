@@ -1321,67 +1321,6 @@ def test_twisted_tool_library():
     print("  ✓ 扭曲工具库附赠发现测试通过")
 
 
-def run_all_tests():
-    """运行所有测试"""
-    print("=" * 60)
-    print("第四宇宙游戏引擎 - 测试套件")
-    print("=" * 60)
-    
-    os.makedirs("data", exist_ok=True)
-    
-    tests = [
-        test_setup,
-        test_daowen_calculations,
-        test_resonance,
-        test_combat,
-        test_dice,
-        test_dm_rulings,
-        test_full_flow,
-        test_sculpture_and_proliferation,
-        test_daowen_effects_wired,
-        test_out_of_combat_actions,
-        test_relic_effects,
-        test_monster_phase_engine,
-        test_spells_trigger,
-        test_flying_and_split,
-        test_huoxue,
-        test_events_system,
-        test_death_page_legacy,
-        test_relics_five_more,
-        test_evolution_yuanchu,
-        test_evolution_plight_listing,
-        test_original_daowen_only_charges_mutation_on_activation,
-        test_consumable_mutation_wiring,
-        test_twisted_tool_library,
-    ]
-    
-    passed = 0
-    failed = 0
-    
-    for test in tests:
-        try:
-            test()
-            passed += 1
-        except Exception as e:
-            print(f"\n  ✗ 失败: {test.__name__}")
-            print(f"    错误: {e}")
-            import traceback
-            traceback.print_exc()
-            failed += 1
-    
-    print("\n" + "=" * 60)
-    print(f"测试结果: {passed} 通过, {failed} 失败")
-    print("=" * 60)
-    
-    return failed == 0
-
-
-if __name__ == "__main__":
-    success = run_all_tests()
-    sys.exit(0 if success else 1)
-
-
-
 def test_shuwu_codex_grants_20_shards():
     """回归：遗忘书屋禁忌法典opt2（失忆1+自选遗物与20碎片）必须到账20碎片（r7实测漏发bug）。"""
     engine = GameEngine(db_path="/tmp/linji_tests/test_shuwu.db", rng_seed=7)
@@ -1400,3 +1339,9 @@ def test_shuwu_codex_grants_20_shards():
     assert engine.state.shards == before + 20, f"应+20碎片，实{engine.state.shards - before}"
     assert held[0] not in engine.state.player.dao_wen, "失忆道纹应被移除"
     assert any(x.name == pool_name for x in engine.state.relics), "自选遗物应到账"
+if __name__ == "__main__":
+    # 手工维护的测试清单容易与文件内容脱节（曾经引用已删除的 test_flying_and_split，
+    # 直跑直接 NameError）。统一交给 pytest 收集，避免第二份"该跑哪些测试"的真相。
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))
