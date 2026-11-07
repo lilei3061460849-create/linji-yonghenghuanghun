@@ -360,16 +360,18 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_zengzhi(x: int, target: Entity = None) -> dict:
-        """增殖X：支付：血限X。使[目标]的[血限]变为∞，持续X回合（战终清除）。"""
+        """增殖X：支付：冷却X。使[目标]的[血限]变为∞，持续X回合（战终清除）。"""
+        # 2026-11-07 用户令：代价由血限X 改为冷却X（原 cost_blood_limit 账本撤销，
+        # 与【迟滞】【飞行】同走 COOLDOWN 支付通道）；效果（无限血限）不变。
         target_name = target.name if target is not None else "未选定目标"
         return {
             "dao_wen": "增殖",
             "x": x,
-            "cost_type": CostType.AGING.value,
-            "cost_blood_limit": x,
+            "cost_type": CostType.COOLDOWN.value,
+            "cost": x,
             "duration": x,
             "infinite_blood_limit": True,
-            "summary": f"血限{x}，使{target_name}的血限变为∞，持续{x}回合"
+            "summary": f"支付：冷却{x}，使{target_name}的血限变为∞，持续{x}回合"
         }
     
     @staticmethod

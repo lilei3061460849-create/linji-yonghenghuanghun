@@ -337,17 +337,21 @@ def test_flight_rule_line_matches_the_engine():
 
 
 def test_zengzhi_grants_temporary_infinite_blood_limit_and_bypasses_cancer():
-    """增殖X：支付衰老X，目标血限暂时视为无限；有限回复不触发癌变。"""
+    """增殖X：支付冷却X，目标血限暂时视为无限；有限回复不触发癌变。"""
     engine = _engine("zengzhi_infinite_blood")
     p = engine.state.player
     _give(p, "增殖")
     target = _monster(engine, "增殖靶怪", hp=100)
     engine.execute_action("round_start", {})
 
+    blood_limit_before = p.blood_limit
     result = engine.execute_action("use_daowen", {
         "daowen_name": "增殖", "x": 1, "target": target.name,
     })
     assert result["success"], result
+    # 2026-11-07：代价由血限X改冷却X——施法者血限不扣，【增殖】进冷却。
+    assert p.blood_limit == blood_limit_before
+    assert p.dao_wen["增殖"].cooldown_remaining == 1
     assert target.has_status("无限血限")
     assert target.to_dict()["blood_limit"] == "∞"
     assert engine.combat.cancer_threshold_of(target) == 0

@@ -1,10 +1,10 @@
-"""2026-10-27 最新裁定：单项净化不凭空增加属性，增殖支付血限。"""
+"""2026-10-27 最新裁定：单项净化不凭空增加属性；增殖代价 2026-11-07 改冷却。"""
 import pytest
 from engine.daowen import DaoWenEngine
 from tests.test_daowen_wiring import _engine, _give, _monster
 
 
-def test_zengzhi_aging_and_infinite_limit():
+def test_zengzhi_cooldown_and_infinite_limit():
     e = _engine("latest_zengzhi")
     p = e.state.player
     _give(p, "增殖")
@@ -12,8 +12,10 @@ def test_zengzhi_aging_and_infinite_limit():
     before = p.blood_limit
     r = e.execute_action("use_daowen", {"daowen_name": "增殖", "x": 2, "target": m.name})
     assert r["success"], r
-    assert p.blood_limit == before - 2
-    assert p.reversible_cost_layers["血限"] == 2
+    # 2026-11-07：代价由血限X改冷却X——血限不扣、不记可净化层数，进冷却2场。
+    assert p.blood_limit == before
+    assert p.reversible_cost_layers.get("血限", 0) == 0
+    assert p.dao_wen["增殖"].cooldown_remaining == 2
     assert m.has_status("无限血限")
     assert m.to_dict()["blood_limit"] == "∞"
     assert DaoWenEngine.resolve("增殖", 2)["duration"] == 2
