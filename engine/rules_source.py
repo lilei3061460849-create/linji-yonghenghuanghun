@@ -203,6 +203,15 @@ class _SpecialEvents:
         """雕塑：每消耗1点耐久，自身获得的格挡。"""
         return int(self.by_id(event_id)["shield_per_durability"])
 
+    # ---- 引擎消费的字段（最终的冠冕世界事件）----
+    def spawn_world_turns(self, event_id: str) -> int:
+        """冠冕：排期后延迟 N 个世界回合在地图随机刷新。"""
+        return int(self.by_id(event_id)["spawn_world_turns"])
+
+    def hold_world_turns(self, event_id: str) -> int:
+        """冠冕：持有者连续存活 N 个世界回合后自动脱离副本。"""
+        return int(self.by_id(event_id)["hold_world_turns"])
+
 
 special_events = _SpecialEvents()
 

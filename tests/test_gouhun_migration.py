@@ -205,11 +205,11 @@ def test_resonance_conversion_does_not_clear_active_gouhun():
 
 
 
-def test_resonance_into_former_placeholder_now_grants_tamper():
-    """边界（2026-11-02 四面体）：原「必中—转换→？？」空位由【篡改】补齐。
+def test_resonance_into_former_placeholder_now_grants_seal():
+    """边界（四面体）：原「必中—转换→？？」空位是真边，不是占位符。
 
-    篡改由荒疫古城移入通用后不再是占位符：必中—转换—篡改是真边，
-    转化成功、消耗 1 次残韵、双方向都拿到真实道纹。
+    2026-11-02 该边由【篡改】补齐；2026-11-07【封印】与【篡改】互换位置后，
+    必中—转换—封印是真边：转化成功、消耗 1 次残韵、双方都拿到真实道纹。
     """
     import os
     from engine.api import GameEngine
@@ -241,6 +241,6 @@ def test_resonance_into_former_placeholder_now_grants_tamper():
                                            "target_ref": "enemy:0"})
     assert r.get("success") is True, r
     assert e.state.resonance.get("转换") == 0, "真实转化照常消耗残韵"
-    assert "篡改" in m.dao_wen and "必中" not in m.dao_wen, "怪物牌面应被改写为篡改"
-    assert "篡改" in p.dao_wen, "施法者同时永久获得"
+    assert "封印" in m.dao_wen and "必中" not in m.dao_wen, "怪物牌面应被改写为封印"
+    assert "封印" in p.dao_wen, "施法者同时永久获得"
     assert RESERVED_SLOT not in m.dao_wen and RESERVED_SLOT not in p.dao_wen
