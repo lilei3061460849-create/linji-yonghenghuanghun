@@ -54,7 +54,7 @@ def test_sculpture_constants_come_from_the_toml():
 
 
 def test_sculpture_durability_follows_the_toml():
-    """耐久 = max(durability_min, ceil([血限]×durability_ratio))，真的读 toml。
+    """耐久 = max(durability_min, ceil(初始[血限]×durability_ratio))，真的读 toml。
 
     用临时改值验证「确实读的是 toml」而不是「恰好长得一样」（血限 234 → 12）。
     """
@@ -99,7 +99,7 @@ def test_every_special_event_has_a_signed_page_in_the_book():
         assert heading in text, f"死者之书缺少规则页：{heading}"
         page = text.split(heading, 1)[1].split("\n### ", 1)[0]
         if "durability_ratio" in entry:
-            assert f"耐久上限 ⌈[血限]×{entry['durability_ratio']}⌉" in page, \
+            assert f"耐久上限 ⌈初始[血限]×{entry['durability_ratio']}⌉" in page, \
                 f"{entry['name']} 页缺少结构化耐久：{page[:120]}"
             assert (f"伤害 {entry['damage_per_durability']} / 格挡 "
                     f"{entry['shield_per_durability']}") in page, \

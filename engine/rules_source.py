@@ -188,7 +188,7 @@ class _SpecialEvents:
 
     # ---- 引擎消费的字段（雕塑）----
     def durability_ratio(self, event_id: str) -> float:
-        """雕塑消耗品耐久上限 = ceil([血限] × 本系数)。"""
+        """雕塑消耗品耐久上限 = ceil(初始[血限] × 本系数)，初始取[战始]快照。"""
         return float(self.by_id(event_id)["durability_ratio"])
 
     def durability_min(self, event_id: str) -> int:

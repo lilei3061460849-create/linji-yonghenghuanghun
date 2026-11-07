@@ -376,11 +376,12 @@ def test_sculpture_includes_chizu_and_reincarnator():
     assert names == {"赤仆雕塑", "贾凡雕塑", "敌对轮回者雕塑"}
 
 
-def test_sculpture_on_infinite_blood_limit_monster_uses_base_blood_limit():
-    """增殖（无限血限）中的怪物攻次/攻力双零，照常触发雕塑，耐久按基础血限算。
+def test_sculpture_on_infinite_blood_limit_monster_uses_initial_blood_limit():
+    """增殖（无限血限）中的怪物攻次/攻力双零，照常触发雕塑，耐久按初始血限算。
 
-    2026-11-07 核对：∞ 只是状态「无限血限」，`blood_limit` 账本仍保留有限原值；
-    雕塑耐久公式读账本值（ceil(血限×5%)），不会产出无限耐久雕塑。
+    2026-11-07 用户确认：雕塑耐久 = 初始[血限]×5%，初始取[战始]快照
+    （battle_start_blood_limit）。∞ 只是状态「无限血限」，账本仍是有限原值；
+    中途把 blood_limit 压低也不追溯改耐久，不会出现无限耐久雕塑。
     雕塑先于癌变检查，且增殖期间癌变阈值视为无限，不抢先。
     """
     import math
@@ -393,7 +394,8 @@ def test_sculpture_on_infinite_blood_limit_monster_uses_base_blood_limit():
     monster.add_status(StatusEffect("无限血限", -1, 1, "增殖"))
     state.enemies.append(monster)
     assert monster.effective_blood_limit() == math.inf
-    assert monster.blood_limit == 200
+    assert monster.battle_start_blood_limit == 200
+    monster.blood_limit = 100  # 中途压低当前血限：耐久仍按初始快照，不追溯
 
     paths = CombatEngine(state, DiceEngine()).settle_victory_paths()
     sculptures = [p for p in paths if p["type"] == "sculpture"]

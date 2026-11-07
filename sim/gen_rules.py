@@ -95,7 +95,7 @@ def render_section() -> str:
             # 非致死类：数值字段随事件自身（雕塑：耐久与每耐久伤害/格挡）
             if "durability_ratio" in entry:
                 lines.append(
-                    f"- 耐久上限 ⌈[血限]×{entry['durability_ratio']}⌉（至少 {entry['durability_min']}）；"
+                    f"- 耐久上限 ⌈初始[血限]×{entry['durability_ratio']}⌉（至少 {entry['durability_min']}）；"
                     f"每点耐久 伤害 {entry['damage_per_durability']} / 格挡 {entry['shield_per_durability']}")
             if entry.get("trigger"):
                 lines.append(f"- 触发条件：{entry['trigger']}")
