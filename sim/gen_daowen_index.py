@@ -159,8 +159,10 @@ CATEGORY["共罪"] = "unimpl"
 CATEGORY["怜悯"] = "unimpl"      # 2026-11-02：怜悯随永夜庭四面体移入永夜庭
 # 2026-11-02：【操纵】【迟滞】随通用四面体二进通用核心；【透支】出生自带、【篡改】
 # 由荒疫古城移入通用，二者不属于杀伐发现池，列「其他通用」。
+# 2026-11-07：【封印】与【篡改】互换四面体位置——【篡改】随四面体二进入发现池
+# （上方 SHAFA_LOOP_DAOWEN 循环已标 shaifa），【封印】转入四面体四，列「其他通用」。
 CATEGORY["透支"] = "other"
-CATEGORY["篡改"] = "other"
+CATEGORY["封印"] = "other"
 for n in ORIGINAL_MONSTER_DAOWEN:
     CATEGORY[n] = "original"
 for n in MONSTER_TRANSFORM_DAOWEN:
@@ -179,7 +181,7 @@ for n, region in UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.items():
     CATEGORY[n] = "unimpl"
 
 # 「其他通用」按显式顺序渲染（不属于通用四面体、也不属于任何副本四面体的通用道纹）。
-OTHER_DAOWEN = ["透支", "篡改"]
+OTHER_DAOWEN = ["透支", "封印"]
 
 assert set(CATEGORY) == (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)), (
     set(CATEGORY) ^ (set(DaoWenEngine._registry) | set(DRAFT_DAOWEN)))
@@ -324,7 +326,7 @@ section(f"通用核心（四面体一·二，{len(SHAFA_LOOP_DAOWEN)}）", list(
 section(f"其他通用道纹（{len(OTHER_DAOWEN)}）", OTHER_DAOWEN,
         note_lines=["不属于通用四面体一·二（发现池），也不属于任何副本专属池。",
                     "【透支】不在任何四面体内：任意角色出生自带，X每次自选；",
-                    "【篡改】属通用，关系见通用四面体四。"])
+                    "【封印】属通用，关系见通用四面体四。"])
 
 section(f"原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）", sorted(ORIGINAL_MONSTER_DAOWEN),
         note_lines=[

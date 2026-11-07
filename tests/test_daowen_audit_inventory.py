@@ -195,9 +195,9 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         dungeon = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
         self.assertNotIn('篡改X：支付', dungeon)
         rules = (ROOT / '规则正文.md').read_text(encoding='utf-8')
-        self.assertIn('篡改X（2026-11-02 由荒疫古城移入通用，关系见通用四面体四）：'
+        self.assertIn('篡改X（2026-11-02 由荒疫古城移入通用，2026-11-07 与【封印】互换位置，关系见通用四面体二）：'
                       '支付：生命3X。使[目标]接下来X次发动道纹时的目标由你选择。', rules)
-        self.assertIn('**通用·四面体四**：反转 必中⇄飞行、压迫⇄篡改', rules)
+        self.assertIn('**通用·四面体四**：反转 必中⇄飞行、压迫⇄封印', rules)
         row = next(r for r in self.rows if r['name'] == '篡改')
         self.assertEqual(row['review'], '暂未发现结构违规')
         self.assertTrue(row['runtime'])

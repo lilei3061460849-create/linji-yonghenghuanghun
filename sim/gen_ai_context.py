@@ -100,7 +100,7 @@ def context_sources() -> list[ContextSource]:
         ContextSource(
             "AI 角色扮演约束（节选：职责、性格、扮演要求）",
             ROOT / "AI_EXPERIENCE.md",
-            keep_headings=("职责划分", "角色性格塑造", "角色扮演要求", "外部推演守则"),
+            keep_headings=("职责划分", "副本默认入口与终局", "角色性格塑造", "角色扮演要求", "外部推演守则"),
             drop_phrases=("引擎", "行为画像"),
         ),
     ]

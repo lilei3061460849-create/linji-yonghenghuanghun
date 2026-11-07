@@ -122,20 +122,21 @@ def test_generic_core_is_four_tetrahedra():
     assert len(R.edges_of_region("通用")) == 24  # 4 个四面体 × 6 条无向边
     assert set(R.nodes_of_region("通用")) == {
         "杀伐", "再生", "庇护", "连击",
-        "操纵", "束缚", "迟滞", "封印",
+        "操纵", "束缚", "迟滞", "篡改",
         "强化", "弱化", "全力", "全速",
-        "必中", "飞行", "压迫", "篡改",
+        "必中", "飞行", "压迫", "封印",
     }
     assert R.find_transformation("连击", "反转") == "庇护"
     assert R.find_transformation("操纵", "转换") == "迟滞"
-    assert R.find_transformation("迟滞", "反转") == "封印"
+    # 2026-11-07 用户令：【封印】与【篡改】互换四面体位置。
+    assert R.find_transformation("迟滞", "反转") == "篡改"
     assert R.find_transformation("杀伐", "曲解") == "庇护"
     assert R.find_transformation("束缚", "曲解") == "迟滞"
     # 扭曲都市的两组节点不再同环：超频在四面体一、增殖在四面体二。
     assert R.find_transformation("超频", "反转") == "萎缩"
     assert R.find_transformation("增殖", "反转") == "饥饿"
     assert R.find_transformation("波及", "反转") == "流动"
-    assert R.find_transformation("封印", "反转") == "迟滞"
+    assert R.find_transformation("封印", "反转") == "压迫"
     for removed in ("冲击", "慈悲", "切割", "缓慢"):
         assert removed not in R.nodes_of_region("通用")
 

@@ -27,6 +27,7 @@ from engine.combat_parts.monster_life import MonsterLifeMixin  # noqa: E402
 from engine.dice import DiceEngine  # noqa: E402
 from engine.models import Entity, GameState  # noqa: E402
 from engine.rules_source import game_rules, lethal_events, special_events  # noqa: E402
+from engine.world import CROWN_HOLD_WORLD_TURNS, CROWN_SPAWN_WORLD_TURNS  # noqa: E402
 
 BOOK = ROOT / "死者之书.md"
 RULES_TEXT = ROOT / "规则正文.md"
@@ -180,3 +181,46 @@ def test_all_rule_sources_share_signature_and_event_chapter():
     assert (game_rules.signature == lethal_events.signature
             == special_events.signature == "？？？")
     assert lethal_events.chapter == special_events.chapter == "特殊事件"
+
+
+# ============================================================================
+# 四、最终的冠冕：开放地图世界事件，不是第8场死斗（2026-10-31 裁定）
+# ============================================================================
+
+def test_crown_constants_come_from_the_toml():
+    """冠冕刷新延迟/持有计时必须等于 toml，不再是引擎里写死的数字。"""
+    assert CROWN_SPAWN_WORLD_TURNS == special_events.spawn_world_turns("zui_zhong_guanmian")
+    assert CROWN_HOLD_WORLD_TURNS == special_events.hold_world_turns("zui_zhong_guanmian")
+    # 钉住当前数值，防止有人悄悄改了 toml 却没跑回归
+    assert CROWN_SPAWN_WORLD_TURNS == 5
+    assert CROWN_HOLD_WORLD_TURNS == 5
+
+
+def test_crown_accessors_follow_the_toml():
+    """改 toml 的 spawn/hold，读取器立刻跟着变（临时改值验证，不是恰好相等）。"""
+    entry = special_events.by_id("zui_zhong_guanmian")
+    original = entry["spawn_world_turns"], entry["hold_world_turns"]
+    try:
+        entry["spawn_world_turns"], entry["hold_world_turns"] = 9, 7
+        assert special_events.spawn_world_turns("zui_zhong_guanmian") == 9
+        assert special_events.hold_world_turns("zui_zhong_guanmian") == 7
+    finally:
+        entry["spawn_world_turns"], entry["hold_world_turns"] = original
+
+
+def test_crown_rule_lines_describe_the_open_map_world_event():
+    """冠冕正文必须写开放地图世界事件，且数字与结构化字段互相咬住。
+
+    这条专治「引擎已迁开放地图、AI 读到的正文还是固定八场」：旧死斗口径
+    （第7场后触发、第8场死斗、先手流程）只要回流进 rule_lines 就挂。
+    """
+    entry = special_events.by_id("zui_zhong_guanmian")
+    joined = "".join(entry["rule_lines"])
+    assert "开放地图世界事件" in joined
+    assert f"延迟{entry['spawn_world_turns']}个世界回合" in joined
+    assert f"连续存活{entry['hold_world_turns']}个世界回合" in joined
+    assert "与战斗场数无关" in joined
+    # 旧线性死斗正文一律不许回来
+    for stale in ("作为第8场战斗的最终死斗", "死斗先手与流程", "死斗命零归因",
+                  "轮回者完成第7场战斗后触发"):
+        assert stale not in joined, f"冠冕正文回流了旧死斗口径：{stale}"
