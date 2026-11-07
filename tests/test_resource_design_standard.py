@@ -42,7 +42,13 @@ X_DOES_NOT_SCALE: set[str] = set()
 RELIC_X_DEBT: set[tuple[str, str]] = set()
 
 # 遗物条文没有可识别触发时机的已知违例。同日重做后 13 件均补齐触发时机，清空同上。
-RELIC_TRIGGER_DEBT: set[tuple[str, str]] = set()
+# 2026-11-07 用户新版条目登记两件常驻例外：【不离】（所有角色无法离场）与
+# 【孤独的王】（按场上其他角色数缩放三限）均为持续生效的 standing 效果，
+# 没有离散触发时点，故条文不含时机词；若日后改写出时机表述，从此集合移除。
+RELIC_TRIGGER_DEBT: set[tuple[str, str]] = {
+    ("尚未开放的副本遗物", "不离"),
+    ("尚未开放的副本遗物", "孤独的王"),
+}
 
 TRIGGER_TOKENS = (
     "战始", "战终", "回始", "回终", "敌回始", "敌回终", "回合结束", "每回合",
