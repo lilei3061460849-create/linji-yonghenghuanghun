@@ -26,7 +26,7 @@ def test_three_daowen_are_written_into_dragon_valley_text_and_index():
     assert "支付待定" not in dungeon
 
     index = (ROOT / "全道纹索引.md").read_text(encoding="utf-8")
-    assert "本索引收录 60 条道纹" in index
+    assert "本索引收录 76 条道纹" in index
     assert "尚未接入运行时的草案节点" not in index
     for name in NAMES:
         assert f"### {name}\n" in index
@@ -35,8 +35,8 @@ def test_three_daowen_are_written_into_dragon_valley_text_and_index():
 
 def test_three_daowen_are_registered_runtime_and_learnable_in_region():
     DaoWenEngine.register_all()
-    assert len(DaoWenEngine._registry) == 60
-    assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == {"锻造", "熔化", "炽热", "淬火"}
+    assert len(DaoWenEngine._registry) == 76  # 2026-11-08 四副本各补4纹
+    assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == {"锻造", "熔化", "炽热", "淬火", "百炼", "锈蚀", "重铸", "回炉"}
     for name in NAMES:
         assert name in DaoWenEngine._registry
         assert name not in UNIMPLEMENTED_DAOWEN
@@ -44,10 +44,11 @@ def test_three_daowen_are_registered_runtime_and_learnable_in_region():
         assert calc["dao_wen"] == name
         assert calc["cost_type"] == "消耗"  # CostType.MANA 的展示名
 
-        # 四纹同处龙心谷四面体，残韵出口只能是这四个节点。
+        # 2026-11-08 最终结构：每纹与本组四面体的另外三个节点相邻。
+        group = ({"淬火", "炽热", "百炼", "锈蚀"} if name in ("炽热", "淬火")
+                 else {"锻造", "熔化", "回炉", "重铸"})
         outs = {cand["target_daowen"] for cand in ResonanceEngine.get_available_resonance(name)}
-        assert outs <= {"锻造", "熔化", "炽热", "淬火"}, outs
-        assert len(outs) == 3
+        assert outs == group - {name}, outs
     # 学习门禁：先经残韵拿到本副本一种专属道纹，之后可在龙心谷学习。
     known = DaoWenEngine.list_all()
     error = learnability_error("炽热", owned=set(), region="龙心谷", known=known)

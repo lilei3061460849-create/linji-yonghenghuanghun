@@ -28,7 +28,7 @@ def test_project_rules_are_extracted_from_their_authoritative_documents():
     # 同日罪孽都市删【抢劫】【勒索】、补【烁金】【交易】【赦免】【贿赂】→ 45 → 47。
     # 2026-11-02 四面体大改：罪孽补【典当】【假钞】定义、扭曲补【饥饿】【扭曲】、
     # 沉沦海补【涌潮】→ 47 → 50。
-    assert len(facts["dungeon_daowen"]) == 50
+    assert len(facts["dungeon_daowen"]) == 62  # 2026-11-08 四副本补纹后文档条目增加
     assert len(facts["spells"]) == 10  # 2026-09-16：删「血溅五步」（无引擎流程的空名字）
     assert len(facts["dungeons"]) == 8
     assert len(facts["monsters"]) == 48  # 36 + 乱葬岗12(已实现)

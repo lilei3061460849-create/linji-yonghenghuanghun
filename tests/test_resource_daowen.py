@@ -260,7 +260,10 @@ def test_learning_pools_and_resonance_edges_match_new_nodes():
     # 2026-11-02 四面体大改：重演/原初/感染占位撤销；强化↔弱化仍是反转边。
     assert any(edge == ("强化", "反转", "弱化")
                for edges in ResonanceEngine.CLOSED_LOOPS.values() for edge in edges)
-    assert not any("重演" in edge or "尘封" in edge
+    # 2026-11-08：【重演】转正为荒疫古城·四面体二的真实节点；「尘封」仍不存在。
+    assert any("重演" in edge
+               for edges in ResonanceEngine.CLOSED_LOOPS.values() for edge in edges)
+    assert not any("尘封" in edge
                    for edges in ResonanceEngine.CLOSED_LOOPS.values() for edge in edges)
 
 

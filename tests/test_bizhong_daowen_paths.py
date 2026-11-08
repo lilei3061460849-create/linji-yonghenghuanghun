@@ -8,7 +8,7 @@ DM 口径（`规则正文.md` 杀伐闭环）：必中X = 自身下X次**选择[
   - 玩家道纹路径：api._resolve_daowen_dodge
   - 怪物道纹路径：combat._resolve_monster_daowen_choice（含 **debuff 类道纹**）
 
-硬伤2-B 的实测结论：怪物 debuff 类道纹（勾魂/镇尸/减速/封印/衰弱）**同样**走
+硬伤2-B 的实测结论：怪物 debuff 类道纹（勾魂/减速/封印/衰弱）**同样**走
 闪避判定；怪物持必中层时消耗 1 层即可让该 debuff 无法被抵抗，否则玩家照常闪避。
 """
 import os
@@ -72,6 +72,14 @@ def _monster_cast(e, name, dodge):
     return res
 
 
+
+
+def _enemy_creation(e):
+    """2026-11-08【勾魂】重做后：转移需要一个接收方[造物]（敌方阵营）。"""
+    c = Entity(name="尸傀", entity_type="造物", blood_limit=50, current_hp=50)
+    e.state.enemies.append(c)
+    return c
+
 # ==================== B. 怪物 debuff 道纹 与 必中 ====================
 
 def test_debuff_daowen_is_dodgeable_without_bizhong():
@@ -80,7 +88,9 @@ def test_debuff_daowen_is_dodgeable_without_bizhong():
     p = e.state.player
     p.current_speed = 6
     m = _monster({"勾魂": 4})
+    m.mana_limit = m.current_mana = 100
     e.state.enemies.append(m)
+    _enemy_creation(e)
     # 玩家提交 dodge 由 resolve 侧决定：这里直接走引擎的 dodge 分支
     prepared = e.combat.prepare_monster_phase()
     actor = next(a for a in prepared["actors"] if a["actor_ref"] == "enemy:0")
@@ -96,7 +106,8 @@ def test_debuff_daowen_is_dodgeable_without_bizhong():
         prepared=prepared)
     entry = next(d for d in res if "daowen_activated" in d)
     assert entry.get("dodged") is True, entry
-    assert not p.has_status("勾魂"), "闪避成功后不得挂上勾魂"
+    # 2026-11-08【勾魂】重做：闪避成功 → 不发生道纹转移（旧为挂「勾魂」状态）。
+    assert "杀伐" in p.dao_wen, "闪避成功后不得转移玩家的道纹"
 
 
 def test_bizhong_makes_debuff_unresistable_and_consumes_layer():
@@ -105,7 +116,9 @@ def test_bizhong_makes_debuff_unresistable_and_consumes_layer():
     p = e.state.player
     p.current_speed = 6
     m = _monster({"勾魂": 4})
+    m.mana_limit = m.current_mana = 100
     e.state.enemies.append(m)
+    creation = _enemy_creation(e)
     e.combat.grant_bizhong(m, 2)
     prepared = e.combat.prepare_monster_phase()
     actor = next(a for a in prepared["actors"] if a["actor_ref"] == "enemy:0")
@@ -119,7 +132,8 @@ def test_bizhong_makes_debuff_unresistable_and_consumes_layer():
         prepared=prepared)
     entry = next(d for d in res if "daowen_activated" in d)
     assert not entry.get("dodged"), entry
-    assert p.has_status("勾魂"), "必中压下 debuff 必须生效"
+    # 2026-11-08【勾魂】重做：命中 → 玩家道纹被转移到敌方[造物]身上。
+    assert "杀伐" not in p.dao_wen and "杀伐" in creation.dao_wen, "必中压下勾魂必须转移生效"
     # 一次提交只有道纹一个行动：道纹判定吃 1 层（2 → 1）。
     # 「攻击判定也吃同一份层数」由 test_attack_and_daowen_share_one_pool 覆盖。
     assert e.combat.bizhong_remaining(m) == 1, e.combat.bizhong_remaining(m)
@@ -216,6 +230,7 @@ def test_monster_cast_bizhong_self_then_forces_debuff():
     # 本用例只验证必中姿态、勾魂与残韵出路；避免无关普攻把玩家打入死者之页中断。
     p.blood_limit = p.current_hp = 1000
     m = _monster({"必中": 3, "勾魂": 4}, name="勾魂使者")
+    m.mana_limit = m.current_mana = 100
     e.state.enemies.append(m)
     e.combat.reset_monster_activation()
 
@@ -228,6 +243,7 @@ def test_monster_cast_bizhong_self_then_forces_debuff():
     assert not p.has_status("必中"), "必中不再给目标挂 debuff"
 
     # 下一回合：怪物放勾魂 → 怪物处于必中姿态 → 玩家无法闪避/抵抗 → 勾魂生效
+    creation = _enemy_creation(e)
     e.state.current_round = 3
     m.actions_used_this_round = 0   # 手工推进回合：同步重置通用出手预算
     e.combat.reset_monster_activation()
@@ -243,9 +259,10 @@ def test_monster_cast_bizhong_self_then_forces_debuff():
     e.combat.resolve_monster_phase(
         [{"actor_ref": "enemy:0", "daowen": dao, "attack_actions": []}],
         prepared=prepared)
-    assert p.has_status("勾魂"), "怪物处于必中姿态，勾魂必须命中生效"
+    # 2026-11-08【勾魂】重做：命中 → 玩家道纹被转移到敌方[造物]身上。
+    assert "杀伐" not in p.dao_wen and "杀伐" in creation.dao_wen, "怪物处于必中姿态，勾魂必须命中生效"
 
-    # 2026-11-02 乱葬岗四面体：勾魂 反转⇄招魂，是真实可达的边；
+    # 2026-11-08 乱葬岗四面体最终结构：勾魂∈四面体一（反转⇄化尸）；
     # 真正无效的是被撤销的遗物化节点【冥气】——残韵不得凭空获得它，
     # 也不得因此在失败时扣掉残韵或清掉已生效的 debuff。
     e.state.resonance = {"反转": 1}
@@ -256,4 +273,4 @@ def test_monster_cast_bizhong_self_then_forces_debuff():
     assert r.get("success") is False, r.get("error")
     assert "勾魂" in m.dao_wen and "冥气" not in m.dao_wen
     assert e.state.resonance.get("反转", 0) == 1
-    assert p.has_status("勾魂"), "失败路径不得清除已生效 debuff"
+    assert "杀伐" in creation.dao_wen, "失败路径不得回滚已生效的转移"

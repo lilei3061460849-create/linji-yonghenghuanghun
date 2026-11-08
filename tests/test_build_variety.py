@@ -103,6 +103,12 @@ def test_ai_uses_region_specific_daowen(dw, monkeypatch):
                cost_formula="X", effect_formula=""))
     # 法力需满足：单次出手预算(总法力÷出手次数) 足以让该 debuff 达到 X≥2，
     # 同时怪物血量要高到不会被一击收割（否则 AI 直接击杀，debuff 轮不到）。
+    if dw == "勾魂":
+        # 2026-11-08 重做：勾魂把[目标]道纹转移至1个[造物]，无造物时发动不成立，
+        # AI 预演会被拒。故场景须先给我方一个造物作为接收方。
+        from engine.models import Entity as _Entity
+        e.state.temp_friends.append(
+            _Entity(name="尸傀", entity_type="造物", blood_limit=30, current_hp=30))
     _ai0 = TacticalAI(e)
     _probe = _ai0._probe(dw)
     _cost = (_probe or {}).get("cost_per_x", 1)

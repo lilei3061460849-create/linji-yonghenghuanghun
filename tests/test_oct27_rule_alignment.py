@@ -21,7 +21,7 @@ def test_necrosis_is_five_x():
 def test_old_gouhun_drain_description_is_removed():
     text = Path("副本/乱葬岗.md").read_text()
     assert "失去2X点当前法力" not in text
-    assert "勾魂X：支付：法力X。使[目标]无法获得[法力]，持续X。" in text
+    assert "勾魂X：支付：法力5X。将［目标］的X种道纹转移至1个［造物］身上，持续∞。" in text  # 2026-11-08 重做
 
 
 def test_liudong_yiwang_are_runtime_implementations():

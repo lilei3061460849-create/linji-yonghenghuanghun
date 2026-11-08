@@ -1473,7 +1473,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 if why:
                     effects.extend(self._apply_mediocrity(target, why))
 
+                # 【初拥】：额外回合结算前先与施法者对齐生命/血限（同回终口径）。
+                self._sync_chuyong(target)
                 expired = target.tick_status_effects()
+                effects.extend(self._settle_daowen_status_expiry(target, expired))
                 if expired:
                     if "无限法限" in expired and not self.state.mana_overflow_exempt(target):
                         before_mana = target.current_mana
@@ -1618,7 +1621,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
             if self.chenni_round_blocked(entity):
                 continue
+            # 【初拥】：持续期间每逢回终结算先与施法者对齐生命/血限，再递减。
+            self._sync_chuyong(entity)
             expired = entity.tick_status_effects()
+            effects.extend(self._settle_daowen_status_expiry(entity, expired))
             if expired:
                 # 【涌潮】到期：当前法力压回原法限（无限法限只是"持续X回合"的豁免）。
                 if "无限法限" in expired and not self.state.mana_overflow_exempt(entity):

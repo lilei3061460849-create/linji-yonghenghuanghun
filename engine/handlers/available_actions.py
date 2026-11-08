@@ -15,7 +15,7 @@ from .. import custom_resources
 from ..action_registry import ACTION_REGISTRY
 from ..consumables import WING_MODES
 from ..daowen import DaoWenEngine, PURIFIABLE_COST_KINDS, purifiable_cost_layers
-from ..enums import CombatSubphase, GamePhase, TriggerTiming
+from ..enums import CombatSubphase, GamePhase, RESOURCE_TYPES, TriggerTiming
 from ..models import Consumable, Entity
 from ..world import ALLY_SUGGESTIONS, WorldState
 from ..yaoguai import has_banner as has_yaoguai_banner, owned_yaoguai
@@ -549,6 +549,24 @@ class AvailableActionsMixin:
                        if name == "怜悯" else {}),
                     **({"relic_name": "目标可夺取的遗物或消耗品名；目标有多件时必须显式指定，同名跨种类时另加item_kind=relic/consumable，无可夺对象则本次发动被拒绝且不支付代价"}
                        if name == "豪夺" else {}),
+                    **({"item_name": "目标要重铸/销毁的那件消耗品名；目标有多件时必须显式指定，无消耗品则本次发动被拒绝且不支付代价"}
+                       if name in ("重铸", "回炉") else {}),
+                    **({"corpse_name": "场上尸体名；多具时可显式指定，缺省取最近一具；无尸体则本次发动被拒绝且不支付代价"}
+                       if name == "借尸" else {}),
+                    **({"resource_type": sorted(RESOURCE_TYPES),
+                        "note_suoqu": "索取：目标被迫支付X点该资源，实际支付量由你获得"}
+                       if name == "索取" else {}),
+                    **({"daowen_names": "要变为感染的道纹名列表（恰好X种）；目标道纹多于X种时必须显式指定"}
+                       if name == "感染" else {}),
+                    **({"daowen_names": "要转移的道纹名列表（恰好X种）；目标道纹多于X种时必须显式指定",
+                        "creation_ref": "接收道纹的那个[造物]的引用；缺省取己方第一个造物；场上无造物则本次发动被拒绝且不支付代价"}
+                       if name == "勾魂" else {}),
+                    **({"replay_daowen": "目标本场已发动过的道纹名；有多种时必须显式指定，重演以本次X发动且不再另付其代价"}
+                       if name == "重演" else {}),
+                    **({"from_kind": ["血限", "枯竭", "法限", "速度", "异变"],
+                        "to_kind": ["血限", "枯竭", "法限", "速度", "异变"],
+                        "note_bingbian": "病变：将目标至多X层from_kind数值类代价转化为to_kind"}
+                       if name == "病变" else {}),
                     **({"cost_choices": "净化：支付法力20X；显式选择目标拥有的数值类代价及层数，格式为[{type: 血限/枯竭/法限/速度/异变, layers: 正整数}]；可混选多种，所有layers之和不得超过X；单选项省略layers时默认吃满X；不能选择失忆或冷却"} if name == "净化" else {}),
                     "cost_share_target_ref": (
                         [{"ref": ref, "name": entity.name}

@@ -563,6 +563,10 @@ class DamageDeathMixin:
         对target造成外部/敌对伤害的统一入口（通过 HookManager 全生命周期调度）。
         ctx 为兼容层来源上下文，不改变既有伤害结算顺序和返回核心字段。
         """
+        # 【百炼】窗口标记：使用消耗品期间伤害数值翻倍（同步窗口内设置）。
+        _bailian_mult = int(getattr(self.state, "_consumable_effect_multiplier", 1) or 1)
+        if _bailian_mult > 1 and amount > 0:
+            amount = amount * _bailian_mult
         amount = validate_damage_amount(amount, "CombatEngine._apply_hostile_damage.amount")
         damage_ctx, legacy_ctx = self._damage_context(target, amount, damage_type, source, ctx)
         if amount < 0:
@@ -570,6 +574,14 @@ class DamageDeathMixin:
                 target, amount, damage_type, damage_ctx, legacy_ctx,
                 reason="negative_damage_input",
             )
+        # 【永生】（2026-11-08 用户令）：受到的伤害改为回复等量生命。
+        # 只改「伤害」通道：直接失血（_raw_hp_loss）与代价不是伤害，不在此转换；
+        # 回复照常过统一回复口（【坏死】等回复封锁照旧生效）。
+        if amount > 0 and damage_type != "代价" and target.has_status("永生"):
+            healed = self.state.apply_heal(target, amount, ctx=damage_ctx)
+            return {"raw_damage": amount, "actual_damage": 0, "shield_absorbed": 0,
+                    "hp_after": target.current_hp, "died": False,
+                    "converted_to_heal": True, "heal": healed}
         # 结算生命周期：深度/预算保险丝与可追踪性统一由 ResolutionContext 记账
         # （见 engine/resolution.py）。阈值 64 与既有 MAX_EFFECT_CHAIN_DEPTH 同义，
         # 实测合法峰值 5，故行为不变——只在真出现 A→B→A 循环时截断成可诊断异常。
