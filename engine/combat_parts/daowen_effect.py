@@ -397,6 +397,108 @@ class DaowenEffectMixin:
             "type": "consumable_forged", "holder": caster.name, "item": pick,
             "uses": uses, "max_uses": item.max_uses})
 
+    def _gain_resource_amount(self, entity, kind: str, amount: int) -> int:
+        """【索取】的获得口：把等量资源真正落到获得者账上，返回实际获得量。
+
+        法力走 gain_mana（受[法限]与【勾魂】约束）、生命走回复结算、
+        碎片/假碎片走双池账本、血限走血限变更口、三限直接抬升。
+        """
+        amount = max(0, int(amount or 0))
+        if amount <= 0 or entity is None:
+            return 0
+        if kind == "法力":
+            return int(entity.gain_mana(amount))
+        if kind == "生命":
+            healed = self.state.apply_heal(entity, amount)
+            return int(healed.get("actual_heal", healed.get("healed", 0)) or 0) \
+                if isinstance(healed, dict) else amount
+        if kind == "碎片":
+            if entity is self.state.player:
+                self.state.shards += amount
+            else:
+                entity.shards = int(getattr(entity, "shards", 0) or 0) + amount
+            return amount
+        if kind == "假碎片":
+            if entity is self.state.player:
+                self.state.fake_shards += amount
+            else:
+                entity.fake_shards = int(getattr(entity, "fake_shards", 0) or 0) + amount
+            return amount
+        if kind == "血限":
+            return int(self._apply_blood_limit_change(
+                entity, amount, "索取", "up", source_type="daowen",
+                subtype="suoqu_gain")["applied"])
+        if kind == "法限":
+            entity.mana_limit = int(entity.mana_limit) + amount
+            return amount
+        if kind == "速限":
+            entity.speed_limit = int(entity.speed_limit) + amount
+            return amount
+        if kind == "速度":
+            return int(self._gain_speed(entity, amount))
+        return 0
+
+    def _sync_chuyong(self, entity) -> bool:
+        """【初拥】：把目标的当前生命与[血限]同步为施法者的当前值。
+
+        关系规则而非回复/失血：直接对齐数值，不触发禁疗、癌变累计或失血记录。
+        施法者已离场/命零时不再同步（状态随到期自行消失）。
+        """
+        status = next((s for s in entity.status_effects
+                       if s.name == "初拥" and not s.is_expired), None)
+        if status is None or not entity.is_alive:
+            return False
+        caster_id = str(status.effect_data.get("caster_id") or "")
+        refs = self._combat_entity_refs()
+        caster = next((e for e in refs.values() if str(e.runtime_id) == caster_id), None)
+        if caster is None or caster is entity or not caster.is_alive:
+            return False
+        if int(entity.blood_limit) != int(caster.blood_limit):
+            self._apply_blood_limit_change(
+                entity, int(caster.blood_limit) - int(entity.blood_limit),
+                "初拥", "up", source_type="daowen", subtype="chuyong_sync",
+                clamp_hp=False, lethal=False)
+        entity.current_hp = max(0, int(caster.current_hp))
+        return True
+
+    def _settle_daowen_status_expiry(self, entity, expired: list) -> list:
+        """持续型道纹到期还原（逆血/借尸/初拥）：供两处状态递减点共用。
+
+        - 【逆血】到期：恢复至互换发生前记录的当前生命（增减按回复/失血结算）；
+        - 【借尸】到期：三限与攻击面板恢复借用前快照，当前值按新上限钳制；
+        - 【初拥】到期：关系解除，当前数值保留最后一次同步结果，不还原。
+        """
+        effects: list = []
+        if not expired:
+            return effects
+        if "逆血" in expired:
+            record = getattr(entity, "_nixue_pre_swap_hp", None)
+            if record is not None:
+                del entity._nixue_pre_swap_hp
+                target_hp = max(1, int(record))
+                if entity.is_alive and int(entity.current_hp) != target_hp:
+                    if target_hp > entity.current_hp:
+                        self.state.apply_heal(entity, target_hp - int(entity.current_hp))
+                    else:
+                        self._raw_hp_loss(entity, int(entity.current_hp) - target_hp)
+                    effects.append({"type": "nixue_expired", "entity": entity.name,
+                                    "hp_after": entity.current_hp})
+        if "借尸" in expired:
+            snapshot = getattr(entity, "_jieshi_snapshot", None)
+            if snapshot is not None:
+                del entity._jieshi_snapshot
+                entity.blood_limit = int(snapshot["blood_limit"])
+                entity.mana_limit = int(snapshot["mana_limit"])
+                entity.speed_limit = int(snapshot["speed_limit"])
+                entity.attack_count = int(snapshot["attack_count"])
+                entity.attack_power = int(snapshot["attack_power"])
+                entity.current_hp = max(0, min(int(entity.current_hp), int(entity.blood_limit)))
+                entity.current_mana = max(0, min(int(entity.current_mana), int(entity.mana_limit)))
+                entity.current_speed = max(0, min(int(entity.current_speed), int(entity.speed_limit)))
+                effects.append({"type": "jieshi_expired", "entity": entity.name,
+                                "blood_limit": entity.blood_limit})
+        return effects
+
     @staticmethod
     def consume_tamper(actor, rule):
         if rule is not None and any(s is rule for s in actor.status_effects) and rule.value > 0:
@@ -785,20 +887,35 @@ class DaowenEffectMixin:
             # 2026-11-01 用户令：夺取对象必须确定，且**在任何代价支付之前**判定。
             # 无可夺遗物 → 报错中止（不扣碎片、不消耗出手）；目标有多件可夺遗物
             # 时玩家侧必须显式指定 relic_name，只有唯一候选才允许省略。
-            pool = self._relic_steal_candidates(target)
+            # 2026-11-07 加强：候选扩为遗物/消耗品（_item_steal_candidates）。
+            pool = self._item_steal_candidates(target)
+            names = [n for _k, n in pool]
             if not pool:
                 raise ValueError(
-                    f"【豪夺】{getattr(target, 'name', '目标')}没有可夺取的遗物"
+                    f"【豪夺】{getattr(target, 'name', '目标')}没有可夺取的遗物或消耗品"
                     f"（已封印/已被夺走的不算），本次发动不成立，不支付代价")
             wanted = str(calc.get("haoduo_relic_name") or "").strip()
-            if wanted and wanted not in pool:
-                raise ValueError(f"【豪夺】目标没有可夺取的遗物「{wanted}」，可选 {pool}")
+            wanted_kind = str(calc.get("haoduo_item_kind") or "").strip()
+            if wanted and wanted not in names:
+                raise ValueError(f"【豪夺】目标没有可夺取的遗物或消耗品「{wanted}」，可选 {names}")
             if not wanted:
                 if len(pool) > 1 and caster is self.state.player:
                     raise ValueError(
-                        f"【豪夺】{target.name}有多件可夺遗物{pool}，必须显式指定relic_name")
-                wanted = pool[0]      # 唯一候选：无需选择；非玩家由引擎代选
+                        f"【豪夺】{target.name}有多件可夺遗物或消耗品{names}，必须显式指定relic_name")
+                wanted_kind, wanted = pool[0]  # 唯一候选：无需选择；非玩家由引擎代选
+            else:
+                kinds = [k for k, n in pool if n == wanted]
+                if wanted_kind and wanted_kind in kinds:
+                    pass
+                elif len(kinds) > 1:
+                    if caster is self.state.player:
+                        raise ValueError(
+                            f"【豪夺】目标同时有遗物与消耗品「{wanted}」，必须用item_kind指定种类")
+                    wanted_kind = kinds[0]
+                else:
+                    wanted_kind = kinds[0]
             calc["haoduo_relic_name"] = wanted
+            calc["haoduo_item_kind"] = wanted_kind
         if name == "净化":
             reductions = calc.get("cost_reductions", {})
             kinds = set(reductions)
@@ -814,6 +931,117 @@ class DaowenEffectMixin:
             self.prepare_huixiang(calc, caster, target)
         if name in {"流动", "遗忘"} and "status_transfer_selected" not in calc:
             self.prepare_liudong_yiwang(name, calc, caster, target)
+        # ---- 2026-11-08 四副本补齐道纹：发动前校验（全部在支付之前） ----
+        if name in ("重铸", "回炉"):
+            if target is None:
+                raise ValueError(f"{name}需要显式目标")
+            item_names = [i.name for i in self._consumable_holder_list(target)
+                          if getattr(i, "current_uses", None) is not None]
+            if not item_names:
+                raise ValueError(f"【{name}】{target.name}没有消耗品，本次发动不成立，不支付代价")
+            key = "recast_item_name" if name == "重铸" else "reforge_destroy_item_name"
+            wanted = str(calc.get(key) or "").strip()
+            if wanted and wanted not in item_names:
+                raise ValueError(f"【{name}】目标没有消耗品「{wanted}」，可选 {item_names}")
+            if not wanted:
+                if len(item_names) > 1 and caster is self.state.player:
+                    raise ValueError(f"【{name}】{target.name}有多件消耗品{item_names}，必须显式指定item_name")
+                wanted = item_names[0]
+            calc[key] = wanted
+        if name == "勾魂":
+            if target is None:
+                raise ValueError("勾魂需要显式目标")
+            candidates = list(target.dao_wen)
+            if not candidates:
+                raise ValueError(f"【勾魂】{target.name}没有可转移的道纹，本次发动不成立，不支付代价")
+            wanted = [str(n) for n in (calc.get("transfer_daowen_names") or []) if n]
+            missing = [n for n in wanted if n not in candidates]
+            if missing:
+                raise ValueError(f"【勾魂】目标未持有道纹{missing}，持有 {candidates}")
+            if not wanted:
+                if len(candidates) > int(calc.get("transfer_daowen_count") or calc.get("x", 1)) \
+                        and caster is self.state.player:
+                    raise ValueError(
+                        f"【勾魂】{target.name}持有{len(candidates)}种道纹{candidates}，"
+                        "必须显式指定要转移的道纹")
+                wanted = candidates[:int(calc.get("transfer_daowen_count") or calc.get("x", 1))]
+            calc["transfer_daowen_names"] = wanted[:int(calc.get("transfer_daowen_count") or calc.get("x", 1))]
+            everyone = self.state.get_all_player_side() + self.state.get_all_enemy_side()
+            if not any(e is not target and e.treated_as_creation() for e in everyone):
+                raise ValueError("【勾魂】场上没有可接收道纹的[造物]，本次发动不成立，不支付代价")
+        if name == "借尸":
+            corpses = [e for e in getattr(self.state, "dead_monsters", []) or []]
+            if not corpses:
+                raise ValueError("【借尸】场上没有尸体，本次发动不成立，不支付代价")
+            wanted = str(calc.get("borrow_corpse_name") or "").strip()
+            names = [e.name for e in corpses]
+            if wanted and wanted not in names:
+                raise ValueError(f"【借尸】场上没有名为「{wanted}」的尸体，可选 {names}")
+            calc["borrow_corpse_name"] = wanted or names[-1]
+        if name == "立冢" and target is None:
+            raise ValueError("立冢需要显式目标作为模板")
+        if name == "合体":
+            side = (self.state.get_all_player_side()
+                    if not self.state.on_enemy_side(caster)
+                    else self.state.get_all_enemy_side())
+            creations = [e for e in side if e is not caster and e.treated_as_creation()]
+            if len(creations) < int(calc.get("merge_creations") or calc.get("x", 1)):
+                raise ValueError(
+                    f"【合体】己方只有{len(creations)}个造物，不足{calc.get('merge_creations') or calc.get('x', 1)}个，"
+                    "本次发动不成立，不支付代价")
+            calc["merge_creation_ids"] = [str(e.runtime_id) for e in creations]
+        if name == "感染":
+            if target is None:
+                raise ValueError("感染需要显式目标")
+            candidates = [n for n in target.dao_wen if n != "感染"]
+            if not candidates:
+                raise ValueError(f"【感染】{target.name}没有可变为感染的道纹，本次发动不成立，不支付代价")
+            wanted = [str(n) for n in (calc.get("infect_daowen_names") or []) if n]
+            missing = [n for n in wanted if n not in candidates]
+            if missing:
+                raise ValueError(f"【感染】目标未持有可感染的道纹{missing}，持有 {candidates}")
+            if not wanted:
+                if len(candidates) > int(calc.get("infect_daowen_count") or calc.get("x", 1)) \
+                        and caster is self.state.player:
+                    raise ValueError(
+                        f"【感染】{target.name}持有{len(candidates)}种道纹{candidates}，"
+                        "必须显式指定要变为感染的道纹")
+                wanted = candidates[:int(calc.get("infect_daowen_count") or calc.get("x", 1))]
+            calc["infect_daowen_names"] = wanted[:int(calc.get("infect_daowen_count") or calc.get("x", 1))] or candidates
+        if name == "病变":
+            if target is None:
+                raise ValueError("病变需要显式目标")
+            src, dst = calc.get("convert_cost_from", ""), calc.get("convert_cost_to", "")
+            if not src or not dst:
+                raise ValueError("病变必须显式指定源代价与目标代价（from_kind/to_kind）")
+            if purifiable_cost_layers(target, src) <= 0:
+                raise ValueError(f"【病变】{target.name}未持有可转化的【{src}】层数，本次发动不成立，不支付代价")
+        if name == "重演":
+            if target is None:
+                raise ValueError("重演需要显式目标")
+            history = sorted(n for n in getattr(target, "daowen_use_history", set())
+                             if n in DaoWenEngine.list_all() and n != "重演")
+            if not history:
+                raise ValueError(f"【重演】{target.name}本场尚未发动过任何道纹，本次发动不成立，不支付代价")
+            wanted = str(calc.get("replay_daowen_name") or "").strip()
+            if wanted and wanted not in history:
+                raise ValueError(f"【重演】{target.name}本场未发动过【{wanted}】，已发动 {history}")
+            if not wanted:
+                if len(history) > 1 and caster is self.state.player:
+                    raise ValueError(f"【重演】{target.name}本场已发动过{history}，必须显式指定replay_daowen")
+                wanted = history[-1]
+            if wanted in ("净化", "催化", "冰冻", "流动", "遗忘", "真理", "共罪", "波及"):
+                raise ValueError(f"【重演】{wanted}需要额外选择，不能被重演")
+            calc["replay_daowen_name"] = wanted
+            replay_calc = DaoWenEngine.resolve(wanted, int(calc.get("replay_numeric") or calc.get("x", 1)),
+                                               target=target, caster=caster)
+            for cost_key in ("cost_hp", "cost_blood_limit", "cost_mana_limit",
+                             "cost_mana_cap", "cost_speed_limit", "cost_speed",
+                             "cost_mutation", "cost_shards", "cost_real_shards",
+                             "cost_fake_shards", "forget_daowen"):
+                replay_calc.pop(cost_key, None)
+            replay_calc["cost_type"] = "重演"
+            calc["replay_calc"] = replay_calc
         result = {"daowen": name, "effects": []}
         # 永恒的偏爱只延长该持有者本次发动后新增/刷新的持续状态，
         # 不会把其他角色施加给他的负面状态错误地永久化。
@@ -1590,6 +1818,16 @@ class DaowenEffectMixin:
         result["used_recorded"] = True
         if name == "催化":
             result["effects"].extend(self.execute_catalysis(calc,caster))
+        if name == "重演" and calc.get("replay_calc") is not None:
+            # 【重演】：以数值X真正发动被选中的道纹（不再另付其代价，
+            # 代价字段已在发动前校验时剥离）；发动记录照常写入使用历史。
+            replay_name = calc["replay_daowen_name"]
+            replayed = self.apply_daowen_effect(
+                replay_name, calc["replay_calc"], caster, target)
+            result["effects"].append({
+                "type": "daowen_replayed", "source_target": target.name,
+                "replayed": replay_name, "x": calc.get("replay_numeric", x),
+                "effects": replayed.get("effects", [])})
         if calc.get("tamper_activations", 0) > 0:
             amounts = wave_pieces.get("tamper_activations", [calc["tamper_activations"]])
             for recipient, amount in zip(wave_status_targets, amounts):
@@ -1622,18 +1860,54 @@ class DaowenEffectMixin:
         # ---- 乱葬岗（二阶）专属道纹效果 ----
         # 2026-10-08 用户令删除【镇尸】：与【坏死】是同一效果的两套实现，
         # 保留【坏死】为「无法获得[回复]」的唯一入口。
-        if name == "勾魂" and calc.get("no_mana_gain"):
-            # 勾魂X：持续X回合**无法获得[法力]**（不扣已有法力）。
-            # 2026-10-08 用户令：撤销 2026-09-09 的「法力消耗翻倍」，恢复原效果。
-            # 判定只有一处：Entity.can_gain_mana() —— 所有法力增益来源都过 gain_mana()。
-            for st_target in wave_status_targets:
-                st_target.add_status(self._daowen_status(daowen_order=daowen_order, name="勾魂", value=1,
-                                                  remaining_rounds=calc.get("duration", x),
-                                                  source=caster.name))
-                result["effects"].append({
-                    "type": "gouhun", "target": st_target.name,
-                    "no_mana_gain": True,
-                    "duration": calc.get("duration", x)})
+        if name == "勾魂" and calc.get("transfer_daowen_count"):
+            # 【勾魂】（2026-11-08 用户令重做）：把[目标]的 X 种道纹整只转移
+            # 到 1 个[造物]身上，持续∞（本场内不自动返回）。旧「无法获得
+            # [法力]」效果整条撤销。造物已持有同名时该种不转移、留在目标身上；
+            # [目标]有【出土】余次时按次保留原纹、改为复制。
+            refs_now = self._combat_entity_refs()
+            creation = refs_now.get(str(calc.get("gouhun_creation_ref") or ""))
+            if creation is None or creation is target or not creation.treated_as_creation():
+                side = (self.state.get_all_player_side()
+                        if not self.state.on_enemy_side(caster)
+                        else self.state.get_all_enemy_side())
+                creation = next((e for e in side
+                                 if e is not target and e.treated_as_creation()), None)
+            if creation is None:
+                # 条文只说「1个[造物]」不限阵营：施法者方没有时取全场任意造物。
+                everyone = self.state.get_all_player_side() + self.state.get_all_enemy_side()
+                creation = next((e for e in everyone
+                                 if e is not target and e.treated_as_creation()), None)
+            if creation is None:
+                raise ValueError("【勾魂】场上没有可接收道纹的[造物]，本次发动不成立")
+            moved, copied, skipped = [], [], []
+            for dw_name in calc.get("transfer_daowen_names", []):
+                inst = target.dao_wen.get(dw_name)
+                if inst is None:
+                    continue
+                if dw_name in creation.dao_wen:
+                    skipped.append(dw_name)
+                    continue
+                excavation = next((s for s in target.status_effects
+                                   if s.name == "出土" and not s.is_expired and s.value > 0), None)
+                if excavation is not None:
+                    excavation.value -= 1
+                    if excavation.value <= 0:
+                        target.status_effects.remove(excavation)
+                    creation.dao_wen[dw_name] = DaoWenInstance(DaoWen(
+                        name=dw_name, formula=f"{dw_name}X",
+                        cost_type=inst.dao_wen.cost_type,
+                        cost_formula=inst.dao_wen.cost_formula,
+                        effect_formula=inst.dao_wen.effect_formula))
+                    copied.append(dw_name)
+                else:
+                    creation.dao_wen[dw_name] = inst
+                    del target.dao_wen[dw_name]
+                    moved.append(dw_name)
+            result["effects"].append({
+                "type": "daowen_transferred", "target": target.name,
+                "creation": creation.name, "transferred": moved,
+                "copied_by_chutu": copied, "skipped_owned": skipped})
         if name == "冥气" and calc.get("speed_loss_speed_limit"):
             for st_target in wave_status_targets:
                 st_target.add_status(self._daowen_status(daowen_order=daowen_order, name="冥气", value=calc["speed_loss_speed_limit"],
@@ -1671,7 +1945,6 @@ class DaowenEffectMixin:
             else:
                 corpse = dead[-1]      # 非玩家调用方（怪物/旧接口）沿用兼容口径
             if corpse is not None:
-                from ..models import Entity
                 revived = Entity(name=f"{corpse.name}（魂）", entity_type="造物",
                                  blood_limit=calc["temp_hp"], current_hp=calc["temp_hp"],
                                  attack_count=corpse.attack_count, attack_power=corpse.attack_power)
@@ -1788,7 +2061,10 @@ class DaowenEffectMixin:
               # 改账本）。若再走通用状态块就会挂出第二份无 relic_name 的【豪夺】，
               # 两份各自递减、回响也只认其中一份，实为双计。
               and name not in ("勾魂", "冥气", "缄默", "波及", "共罪", "血契", "庇护", "强化", "弱化", "冰冻",
-                               "怜悯", "迟滞", "操纵", "饥饿", "豪夺")):
+                               "怜悯", "迟滞", "操纵", "饥饿", "豪夺",
+                               # 2026-11-08：逆血/借尸/初拥需在状态上记快照（见下方专用段），
+                               # 原初是借纹而非挂状态，均不走通用状态块。
+                               "逆血", "借尸", "初拥", "原初")):
             duration = calc["duration"]  # 0不生效；只有显式-1表示持续∞。
             effect_target = target if target else caster
             # 自身作用型道纹（变形/超频等）作用于施法者
@@ -2024,6 +2300,295 @@ class DaowenEffectMixin:
             uses = max(1, int(calc.get("consumable_forge_uses") or x))
             self._offer_forge_discovery(caster, uses, result)
 
+        # ---- 2026-11-08 四副本补齐道纹结算 ----
+        if name == "重铸":
+            # 【重铸】：选中条目的当前耐久与耐久上限同取 X～2X 的随机整数。
+            items = self._consumable_holder_list(target)
+            item = next((i for i in items if i.name == calc.get("recast_item_name")), None)
+            if item is None:
+                raise ValueError("【重铸】选中的消耗品已不存在")
+            lo, hi = int(calc["recast_min"]), int(calc["recast_max"])
+            roll = self.dice.auto_roll(
+                f"chongzhu_{caster.runtime_id}_{item.name}",
+                list(range(lo, hi + 1)),
+                context=f"【重铸】{item.name}的新耐久（{lo}～{hi}）")
+            rolled = int(roll["record"]["selected_value"])
+            item.current_uses = rolled
+            item.max_uses = rolled
+            result["effects"].append({
+                "type": "consumable_recast", "target": target.name, "item": item.name,
+                "durability": rolled, "max_durability": rolled})
+
+        if name == "回炉":
+            # 【回炉】：销毁选中条目，再为[目标]发现 1 个耐久为 X 的消耗品（锻造同池）。
+            items = self._consumable_holder_list(target)
+            item = next((i for i in items if i.name == calc.get("reforge_destroy_item_name")), None)
+            if item is None:
+                raise ValueError("【回炉】选中的消耗品已不存在")
+            items.remove(item)
+            result["effects"].append({
+                "type": "consumable_destroyed", "target": target.name,
+                "item": item.name, "via": "回炉"})
+            before = len(result["effects"])
+            self._offer_forge_discovery(target, int(calc.get("reforge_discovery_uses") or x), result)
+            for effect in result["effects"][before:]:
+                effect["source"] = "回炉"
+
+        if name == "合体":
+            # 【合体】：己方 X 个造物（含【化尸】视为造物者）并入第一个：
+            # 三限、当前值、攻击面板、格挡与状态全部取总和，其余造物离场（非击杀）。
+            side = (self.state.get_all_player_side()
+                    if not self.state.on_enemy_side(caster)
+                    else self.state.get_all_enemy_side())
+            wanted_ids = set(calc.get("merge_creation_ids") or [])
+            creations = [e for e in side if str(e.runtime_id) in wanted_ids
+                         and e.treated_as_creation()][:int(calc.get("merge_creations") or calc.get("x", 1))]
+            if len(creations) < 2:
+                raise ValueError("【合体】可合并的造物不足")
+            survivor, merged_away = creations[0], creations[1:]
+            for other in merged_away:
+                survivor.blood_limit += int(other.blood_limit)
+                survivor.mana_limit += int(other.mana_limit)
+                survivor.speed_limit += int(other.speed_limit)
+                survivor.current_hp += int(other.current_hp)
+                survivor.current_mana += int(other.current_mana)
+                survivor.current_speed += int(other.current_speed)
+                survivor.attack_count += int(other.attack_count)
+                survivor.attack_power += int(other.attack_power)
+                survivor.shield = int(getattr(survivor, "shield", 0)) + int(getattr(other, "shield", 0))
+                for status in list(other.status_effects):
+                    import copy as _copy
+                    survivor.add_status(_copy.deepcopy(status))
+            survivor.current_hp = min(survivor.current_hp, survivor.blood_limit) \
+                if not self.state.hp_overflow_exempt(survivor) else survivor.current_hp
+            for other in merged_away:
+                for container in (self.state.temp_friends, self.state.friends,
+                                  self.state.employees, self.state.enemies):
+                    if other in container:
+                        container.remove(other)
+                other.depart_battle("合体")
+            result["effects"].append({
+                "type": "creations_merged", "survivor": survivor.name,
+                "merged": [e.name for e in merged_away],
+                "blood_limit": survivor.blood_limit, "current_hp": survivor.current_hp,
+                "attack_power": survivor.attack_power, "attack_count": survivor.attack_count})
+
+        if name == "立冢":
+            # 【立冢】：以[目标]为模板生成 X 具已击灭的尸体（写入尸体账本，
+            # 供【招魂】【借尸】使用；不触发任何死亡结算）。
+            if not getattr(self.state, "dead_monsters", None):
+                self.state.dead_monsters = []
+            made = []
+            for _ in range(int(calc.get("corpse_copies", x))):
+                corpse = Entity(
+                    name=target.name, entity_type=target.entity_type,
+                    blood_limit=target.blood_limit, current_hp=0,
+                    mana_limit=target.mana_limit, current_mana=0,
+                    speed_limit=target.speed_limit, current_speed=0,
+                    attack_count=target.attack_count, attack_power=target.attack_power)
+                for dw_name, dw_inst in target.dao_wen.items():
+                    corpse.dao_wen[dw_name] = dw_inst
+                corpse.is_alive = False
+                self.state.dead_monsters.append(corpse)
+                made.append(corpse.name)
+            result["effects"].append({"type": "corpses_raised", "template": target.name,
+                                      "corpses": made})
+
+        if name == "借尸":
+            # 【借尸】：快照[目标]当前面板 → 换上尸体的三限与生前攻击面板，
+            # 当前生命/法力/速度按新生前上限回满；到期由 _settle_daowen_status_expiry 还原。
+            corpses = [e for e in getattr(self.state, "dead_monsters", []) or []]
+            corpse = next((e for e in reversed(corpses)
+                           if e.name == calc.get("borrow_corpse_name")), None)
+            if corpse is None:
+                raise ValueError("【借尸】选中的尸体已不存在")
+            for recipient in wave_status_targets:
+                if not recipient.is_alive:
+                    continue
+                if not hasattr(recipient, "_jieshi_snapshot"):
+                    recipient._jieshi_snapshot = {
+                        "blood_limit": int(recipient.blood_limit),
+                        "mana_limit": int(recipient.mana_limit),
+                        "speed_limit": int(recipient.speed_limit),
+                        "attack_count": int(recipient.attack_count),
+                        "attack_power": int(recipient.attack_power),
+                    }
+                recipient.blood_limit = int(corpse.blood_limit)
+                recipient.mana_limit = int(corpse.mana_limit)
+                recipient.speed_limit = int(corpse.speed_limit)
+                recipient.attack_count = int(corpse.attack_count)
+                recipient.attack_power = int(corpse.attack_power)
+                recipient.current_hp = int(corpse.blood_limit)
+                recipient.current_mana = int(corpse.mana_limit)
+                recipient.current_speed = int(corpse.speed_limit)
+                recipient.add_status(self._daowen_status(
+                    daowen_order=daowen_order, name="借尸", value=x,
+                    remaining_rounds=calc.get("duration", x), source=caster.name,
+                    effect_data={"corpse_name": corpse.name, "source_daowen": "借尸"}))
+                result["effects"].append({
+                    "type": "corpse_borrowed", "target": recipient.name,
+                    "corpse": corpse.name, "blood_limit": recipient.blood_limit,
+                    "duration": calc.get("duration", x)})
+
+        if name == "逆血":
+            # 【逆血】（承原【永生】草案互换口径）：当前生命与已损生命互换，
+            # 最低保留 1；增加按回复、减少按失血结算；到期恢复互换前记录值。
+            for recipient in wave_status_targets:
+                if not recipient.is_alive:
+                    continue
+                pre_swap = int(recipient.current_hp)
+                if not hasattr(recipient, "_nixue_pre_swap_hp"):
+                    recipient._nixue_pre_swap_hp = pre_swap
+                lost = max(0, int(recipient.blood_limit) - pre_swap)
+                new_hp = max(1, lost)
+                if not self.state.hp_overflow_exempt(recipient):
+                    new_hp = min(new_hp, max(1, int(recipient.blood_limit)))
+                if new_hp > pre_swap:
+                    self.state.apply_heal(recipient, new_hp - pre_swap)
+                elif new_hp < pre_swap:
+                    self._raw_hp_loss(recipient, pre_swap - new_hp)
+                recipient.add_status(self._daowen_status(
+                    daowen_order=daowen_order, name="逆血", value=x,
+                    remaining_rounds=calc.get("duration", x), source=caster.name,
+                    effect_data={"pre_swap_hp": pre_swap, "source_daowen": "逆血"}))
+                result["effects"].append({
+                    "type": "hp_swapped_with_lost", "target": recipient.name,
+                    "hp_before": pre_swap, "hp_after": recipient.current_hp,
+                    "duration": calc.get("duration", x)})
+
+        if name == "初拥":
+            # 【初拥】：与施法者建立生命/血限同步关系（立即对齐一次，
+            # 持续期间每逢回合结算再对齐，见 _sync_chuyong 调用点）。
+            for recipient in wave_status_targets:
+                if not recipient.is_alive or recipient is caster:
+                    continue
+                recipient.add_status(self._daowen_status(
+                    daowen_order=daowen_order, name="初拥", value=x,
+                    remaining_rounds=calc.get("duration", x), source=caster.name,
+                    effect_data={"caster_id": str(caster.runtime_id),
+                                 "source_daowen": "初拥"}))
+                self._sync_chuyong(recipient)
+                result["effects"].append({
+                    "type": "chuyong_linked", "target": recipient.name,
+                    "caster": caster.name, "blood_limit": recipient.blood_limit,
+                    "current_hp": recipient.current_hp,
+                    "duration": calc.get("duration", x)})
+
+        if name == "索取":
+            # 【索取】：[目标]被迫支付 X 点所选资源，施法者获得其实际支付量。
+            kind = calc.get("demand_resource_type", "法力")
+            payment = self.pay_resource(
+                target, kind, int(calc.get("demand_amount", x)), forced=True,
+                trigger_blood_pact=False,
+                ctx={"timing": "player_action" if caster is self.state.player else "monster_action",
+                     "source": name, "source_type": "daowen", "actor": caster,
+                     "target": target, "tags": {"active_payment", "suoqu"}})
+            paid = int(payment.get("actual_paid", 0) or 0)
+            gained = self._gain_resource_amount(caster, kind, paid)
+            result["effects"].append({
+                "type": "resource_demanded", "target": target.name,
+                "resource": kind, "demanded": int(calc.get("demand_amount", x)),
+                "paid": paid, "gained": gained, "gainer": caster.name})
+
+        if name == "感染":
+            # 【感染】：把选中的道纹替换为【感染】并保留原实例（供尘封图书馆
+            # 恢复）；目标身上有【出土】余次时按次保留原道纹、只追加【感染】。
+            originals = target.__dict__.setdefault("infected_daowen_originals", {})
+            infected, preserved = [], []
+            for dw_name in calc.get("infect_daowen_names", []):
+                inst = target.dao_wen.get(dw_name)
+                if inst is None or dw_name == "感染":
+                    continue
+                originals.setdefault(dw_name, inst)
+                excavation = next((s for s in target.status_effects
+                                   if s.name == "出土" and not s.is_expired and s.value > 0), None)
+                if excavation is not None:
+                    excavation.value -= 1
+                    if excavation.value <= 0:
+                        target.status_effects.remove(excavation)
+                    preserved.append(dw_name)
+                else:
+                    del target.dao_wen[dw_name]
+                    infected.append(dw_name)
+                if "感染" not in target.dao_wen:
+                    target.dao_wen["感染"] = DaoWenInstance(DaoWen(
+                        name="感染", formula="感染X", cost_type="异变",
+                        cost_formula="2X", effect_formula=""))
+            result["effects"].append({
+                "type": "daowen_infected", "target": target.name,
+                "infected": infected, "preserved_by_chutu": preserved})
+
+        if name == "原初":
+            # 【原初】：从[目标]未被自身拥有的道纹中随机借走 X 种（借用期间
+            # 真正持有可发动；不占承载页，与【豪夺】夺取同口径）。
+            candidates = [n for n in target.dao_wen if n not in caster.dao_wen]
+            borrowed = []
+            pool = list(candidates)
+            seq = int(getattr(self.state, "yuanchu_roll_count", 0) or 0)
+            for slot in range(min(int(calc.get("borrow_daowen_count", x)), len(pool))):
+                seq += 1
+                roll = self.dice.auto_roll(
+                    f"yuanchu_{seq}", pool,
+                    context=f"【原初】{caster.name}借用第{slot + 1}种道纹")
+                pick = pool.pop(roll["record"]["selected_index"])
+                src_inst = target.dao_wen[pick]
+                caster.dao_wen[pick] = DaoWenInstance(DaoWen(
+                    name=pick, formula=f"{pick}X",
+                    cost_type=src_inst.dao_wen.cost_type,
+                    cost_formula=src_inst.dao_wen.cost_formula,
+                    effect_formula=src_inst.dao_wen.effect_formula))
+                borrowed.append(pick)
+            self.state.yuanchu_roll_count = seq
+            result["effects"].append({
+                "type": "daowen_borrowed", "target": target.name,
+                "borrower": caster.name, "borrowed": borrowed})
+
+        if name == "病变":
+            # 【病变】：先按【净化】同口径退掉源代价层数，再把等量层数
+            # 作为目标代价真正压到[目标]身上（两侧都走可逆代价账本）。
+            src, dst = calc["convert_cost_from"], calc["convert_cost_to"]
+            layers = min(int(calc.get("convert_cost_layers", x)),
+                         purifiable_cost_layers(target, src))
+            ledger = getattr(target, "reversible_cost_layers", None)
+            if not isinstance(ledger, dict):
+                ledger = {}
+                target.reversible_cost_layers = ledger
+            if src == "异变":
+                target.add_mutation(-layers)
+            elif src == "枯竭":
+                target.pending_exhaust_mana = max(
+                    0, int(getattr(target, "pending_exhaust_mana", 0) or 0) - layers)
+                ledger["枯竭"] = max(0, int(ledger.get("枯竭", 0) or 0) - layers)
+            elif src == "血限":
+                self._apply_blood_limit_change(target, layers, name, "up",
+                                               source_type="daowen", subtype="bingbian_relief")
+                ledger["血限"] = max(0, int(ledger.get("血限", 0) or 0) - layers)
+            elif src == "法限":
+                target.mana_limit = int(target.mana_limit) + layers
+                ledger["法限"] = max(0, int(ledger.get("法限", 0) or 0) - layers)
+            elif src == "速度":
+                self._gain_speed(target, layers, ctx=daowen_ctx)
+                ledger["速度"] = max(0, int(ledger.get("速度", 0) or 0) - layers)
+            if dst == "异变":
+                target.add_mutation(layers)
+            elif dst == "枯竭":
+                target.pending_exhaust_mana = int(getattr(target, "pending_exhaust_mana", 0) or 0) + layers
+                ledger["枯竭"] = int(ledger.get("枯竭", 0) or 0) + layers
+            elif dst == "血限":
+                self._apply_blood_limit_change(target, -layers, name, "down",
+                                               source_type="daowen", subtype="bingbian_convert")
+                ledger["血限"] = int(ledger.get("血限", 0) or 0) + layers
+            elif dst == "法限":
+                target.mana_limit = max(0, int(target.mana_limit) - layers)
+                target.current_mana = min(target.current_mana, target.mana_limit)
+                ledger["法限"] = int(ledger.get("法限", 0) or 0) + layers
+            elif dst == "速度":
+                target.current_speed = max(0, int(target.current_speed) - layers)
+                ledger["速度"] = int(ledger.get("速度", 0) or 0) + layers
+            result["effects"].append({
+                "type": "cost_converted", "target": target.name,
+                "from": src, "to": dst, "layers": layers})
+
         if name == "共罪":
             # X 个非自身目标 + 发动者本身 = X+1 份名额；2026-11-02 用户令：
             # 每个角色严格只占 1 份，同一 runtime_id 不得重复占位。
@@ -2083,20 +2648,28 @@ class DaowenEffectMixin:
                 result["effects"].append({"type": "dikou", "target": st_target.name,
                                           "sealed": sealed or None, "rounds": x})
         # 豪夺X（2026-09-28）：消耗5X碎片，夺取[目标]1件遗物持续X回合（夺取者持有并享受被动）
+        # 2026-11-07 加强：可夺对象扩为遗物/消耗品，按发前校验定下的种类分派。
         elif name == "豪夺":
             # 显式选定的那一件只对**真正持有它的**目标生效；波及波及其他目标时
             # 不会改投别的遗物、也不会重复夺同一件。
             wanted = str(calc.get("haoduo_relic_name") or "")
+            wanted_kind = str(calc.get("haoduo_item_kind") or "relic")
             for st_target in wave_status_targets:
-                candidates = self._relic_steal_candidates(st_target)
-                if not candidates or st_target is not target:
+                pool = self._item_steal_candidates(st_target)
+                names = [n for _k, n in pool]
+                if not pool or st_target is not target:
                     stolen = ""
+                elif wanted_kind == "consumable":
+                    stolen = self._steal_one_consumable(
+                        caster, st_target, x,
+                        wanted if wanted in names else "")
                 else:
                     stolen = self._steal_one_relic(
                         caster, st_target, x,
-                        wanted if wanted in candidates else "")
+                        wanted if wanted in names else "")
                 result["effects"].append({"type": "haoduo", "target": st_target.name,
-                                          "stolen": stolen or None, "rounds": x})
+                                          "stolen": stolen or None, "rounds": x,
+                                          "kind": wanted_kind})
 
         # 波及X：目标标记由 use_daowen 的逐目标提交建立/解除；此处只记结果。
         if name == "波及":

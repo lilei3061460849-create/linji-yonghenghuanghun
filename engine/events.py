@@ -486,7 +486,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
                         "actor": player, "target": player, "mechanic": "cost",
                         "subtype": "mutation", "amount": 3, "tags": {"event"}}, subtype="collapse"))
                 applied.append("异变达阈值，触发【迷失】：身边无可战之敌，异变为怪物的你独自命零")
-            _grant_item("冥婚契约", "[战始]选择一名[目标]，自身与其共享受到的伤害")
+            _grant_item("冥婚契约", "[战始]指定一名[目标]，当任意一方触发特殊事件时，改为由另一方承受该次死亡")
             return {"applied": applied, "instructions": instructions}
         if text.startswith("抢撒殡钱"):
             _pay_numeric("法限", 2)
@@ -550,8 +550,11 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         if text.startswith("上前续香"):
             _pay_numeric("血限", 6)
             applied.append("血限6")
-            _grant_item("三香通冥",
-                        "每场战斗前三回合开始[回始]，所有敌方[目标]受到12点伤害；第3回合后熄灭")
+            # 2026-11-07 用户令：【三香通冥】由遗物改消耗品（耐久3/3）。
+            engine.state.consumables.append(Consumable(
+                name="三香通冥", effect="当你处于负数生命时不会死亡，[回终]耐久-1",
+                current_uses=3, max_uses=3))
+            applied.append("获得消耗品三香通冥（耐久3/3）")
             return {"applied": applied, "instructions": instructions}
         if text.startswith("踢翻香炉"):
             _pay_numeric("法限", 2)
@@ -602,18 +605,16 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             ally = next((a for a in engine.state.friends + engine.state.employees if a.is_alive), None)
             if ally is not None:
                 from .models import Relic
-                ally.relics.append(Relic(name="重甲兵躯", effect="[血限]+15，受到≥20的伤害前将其减半"))
-                ally.blood_limit += 15
-                ally.current_hp = min(ally.current_hp + 15, ally.blood_limit)
-                applied.append(f"{ally.name}获得重甲兵躯（血限+15）")
+                # 2026-11-07 用户令：【重甲兵躯】新版为「无法闪避，招架不再消耗速度」，
+                # 不再附带[血限]+15，故此处只发放遗物本体，不改面板。
+                ally.relics.append(Relic(name="重甲兵躯", effect="你无法闪避，招架不再消耗速度"))
+                applied.append(f"{ally.name}获得重甲兵躯")
             else:
-                player.blood_limit += 15
-                # 2026-10-14：【猩红果实】持有者当前生命可超血限，不削溢出部分。
-                if engine.state.hp_overflow_exempt(player):
-                    player.current_hp = player.current_hp + 15
-                else:
-                    player.current_hp = min(player.current_hp + 15, player.blood_limit)
-                applied.append("无队友，自身血限+15并获得重甲兵躯")
+                from .models import Relic
+                gained = Relic(name="重甲兵躯", effect="你无法闪避，招架不再消耗速度")
+                engine.state.relics.append(gained)
+                engine.state.note_relic_gained(gained)
+                applied.append("无队友，自身获得重甲兵躯")
             return {"applied": applied, "instructions": instructions}
         # 选项3拜祭退避：无事发生
 

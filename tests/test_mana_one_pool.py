@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine  # noqa: E402
-from engine.models import Entity, Relic, StatusEffect  # noqa: E402
+from engine.models import DaoWen, DaoWenInstance, Entity, Relic, StatusEffect  # noqa: E402
 from tests.setup_support import begin_battle, begin_round, finish_initial_daowen  # noqa: E402
 
 
@@ -169,16 +169,16 @@ def test_battle_end_does_not_grant_mana_to_non_reincarnator():
     assert friend.current_mana == 2, f"非轮回者不享受战终复原，实{friend.current_mana}"
 
 
-# ============ 4. 连带裁定：勾魂 = 无法获得[法力]（2026-10-08 用户令）============
+# ============ 4. 连带裁定：勾魂重做（2026-11-08 用户令）============
 #
 # 版本史：旧版「[回始]失去2X法力，持续∞」→ 2026-08-30「持续X回合无法获得法力」
 #       → 2026-09-09 因法力改一池制、[回始]不再回填而一度改为「消耗翻倍」
-#       → 2026-10-08 用户令：恢复「无法获得[法力]」原意。此时战斗内已有多个
-#         法力来源（聚能／储能电池／守夜灯／承露盏／共罪／透支／
-#         法术），效果重新有对象。判定位唯一：Entity.can_gain_mana()/gain_mana()。
+#       → 2026-10-08 恢复「无法获得[法力]」
+#       → 2026-11-08 重做为「法力5X，转移目标X种道纹至1个[造物]，持续∞」，
+#         「无法获得[法力]」整条撤销，can_gain_mana() 不再读【勾魂】。
 
-def test_gouhun_blocks_every_mana_gain_until_it_expires():
-    """正常路径：勾魂期间**任何来源**的法力增益都不生效；持续X 走完后恢复。"""
+def test_gouhun_no_longer_blocks_mana_gain():
+    """正常路径（2026-11-08）：即使身上挂着同名状态，法力增益与消耗都不受勾魂影响。"""
     e = _engine("gouhun", blood_points=1, speed_points=0, mana_points=24)
     p = e.state.player
     begin_battle(e)
@@ -186,57 +186,52 @@ def test_gouhun_blocks_every_mana_gain_until_it_expires():
     p.current_mana = 4
     p.add_status(StatusEffect(name="勾魂", value=1, remaining_rounds=2, source="寄骨蝇"))
 
-    # 增益被压死：gain_mana 是唯一入口，勾魂期间恒返回 0
-    assert p.can_gain_mana() is False
-    assert p.gain_mana(5) == 0
-    assert p.current_mana == 4, f"勾魂期间不得获得法力，实{p.current_mana}"
-    # 已持有的法力一分不扣，消耗也不翻倍
-    assert p.spend_mana(3) is True
-    assert p.current_mana == 1, f"勾魂不改消耗倍率，3 点就是 3 点，实剩 {p.current_mana}"
-
-    _finish_round(e)
-    _finish_round(e)
-    assert not p.has_status("勾魂"), "持续X=2 走完应自然到期"
     assert p.can_gain_mana() is True
     assert p.gain_mana(5) == 5
-    assert p.current_mana == 6, f"到期后恢复获得法力，实{p.current_mana}"
+    assert p.current_mana == 9, f"勾魂已不再压制法力增益，实{p.current_mana}"
+    assert p.spend_mana(3) is True
+    assert p.current_mana == 6, f"勾魂不改消耗倍率，3 点就是 3 点，实剩 {p.current_mana}"
 
 
-def test_gouhun_does_not_touch_mana_on_apply():
-    """边界：勾魂只压制增益，挂上/到期都不动当前法力。"""
+def test_gouhun_transfer_does_not_touch_mana_on_apply():
+    """边界：勾魂结算只转移道纹，结算本身不动施法者当前法力。"""
     e = _engine("gouhun_apply", blood_points=7, speed_points=8, mana_points=10)
     p = e.state.player
     foe = Entity(name="寄骨蝇", entity_type="怪物", blood_limit=40, current_hp=40,
                  attack_count=1, attack_power=1)
-    e.state.enemies.append(foe)
+    foe.dao_wen["杀伐"] = DaoWenInstance(
+        DaoWen(name="杀伐", formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
     begin_battle(e)
+    e.state.enemies.append(foe)
+    creation = Entity(name="尸傀", entity_type="造物", blood_limit=30, current_hp=30)
+    e.state.enemies.append(creation)
     from engine.daowen import DaoWenEngine
-    calc = DaoWenEngine.resolve("勾魂", 3, target=p, caster=foe)
-    assert calc.get("no_mana_gain") is True
+    calc = DaoWenEngine.resolve("勾魂", 1, target=foe, caster=p, daowen_names=["杀伐"])
+    assert "no_mana_gain" not in calc
     assert "mana_cost_multiplier" not in calc, "消耗翻倍已撤销，不该再产出该字段"
-    res = e.combat.apply_daowen_effect("勾魂", calc, foe, p)
-    entry = next(x for x in res["effects"] if x.get("type") == "gouhun")
-    assert entry["no_mana_gain"] is True and entry["duration"] == 3, entry
-    assert p.current_mana == p.mana_limit, "挂状态不得动当前法力"
+    assert calc["cost"] == 5, "法力5X"
+    res = e.combat.apply_daowen_effect("勾魂", calc, p, foe)
+    assert any(x.get("type") == "daowen_transferred" for x in res["effects"])
+    assert "杀伐" not in foe.dao_wen and "杀伐" in creation.dao_wen
+    assert p.current_mana == p.mana_limit, "勾魂结算不得动施法者当前法力"
 
 
-def test_gouhun_blocks_relic_and_action_mana_sources():
-    """正常路径：守夜灯/承露盏/聚能/储能电池这些来源同样被压死。
+def test_mana_gain_sources_unaffected_by_gouhun_status():
+    """正常路径（2026-11-08）：守夜灯/承露盏/聚能/储能电池等来源不再被勾魂压制。
 
-    判定位只有 Entity.gain_mana() 一处，所以新增来源天然受管；本用例锁住
-    「任何来源都过这一处」这条契约，防止将来有人直接写 current_mana += n 绕过。
+    判定位 Entity.gain_mana() 保持唯一入口，但勾魂已不是封锁来源；
+    本用例锁住「任何来源照常获得且封顶」这条新契约。
     """
     e = _engine("gouhun_sources", blood_points=7, speed_points=8, mana_points=10)
     p = e.state.player
     begin_battle(e)
     p.current_mana = 0
     cap = p.mana_limit          # 增益按[法限]封顶
-    assert p.gain_mana(cap + 9) == cap and p.current_mana == cap, "未中勾魂：正常获得且封顶"
+    assert p.gain_mana(cap + 9) == cap and p.current_mana == cap, "正常获得且封顶"
 
     p.current_mana = 0
     p.add_status(StatusEffect(name="勾魂", value=1, remaining_rounds=3, source="寄骨蝇"))
     for source, amount in (("守夜灯", 3), ("承露盏", 2), ("聚能", 5),
                            ("储能电池", 12), ("共罪", 1), ("透支", 4), ("法术", 7)):
         before = p.current_mana
-        assert p.gain_mana(amount) == 0, f"{source} 的法力应被勾魂压死"
-        assert p.current_mana == before, f"{source} 不得改变当前法力"
+        assert p.gain_mana(amount) == min(amount, cap - before), f"{source} 应照常获得法力"

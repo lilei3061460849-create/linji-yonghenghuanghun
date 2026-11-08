@@ -32,26 +32,32 @@ def test_dungeon_daowen_registered():
 
 
 def test_dungeon_resonance_tetrahedron_complete():
-    """正常路径：乱葬岗四面体（4 节点 6 边）全部可达。
+    """正常路径：乱葬岗两组四面体（各 4 节点 6 边）全部可达。
 
-    2026-11-02 用户令：遗物化占位（缄默／瓦解／冥气）整体撤销，四面体四个节点
-    全是真实道纹；任两节点恰好一条边，三种残韵各两条。
+    2026-11-08 用户最终结构：四面体一=分裂/合体/化尸/勾魂，
+    四面体二=招魂/凋零/立冢/借尸；任两节点恰好一条边，三种残韵各两条。
     """
     DaoWenEngine.register_all()
-    expected_edges = [
-        ("分裂", "反转", "凋零"), ("招魂", "反转", "勾魂"),
-        ("分裂", "转换", "招魂"), ("凋零", "转换", "勾魂"),
-        ("分裂", "曲解", "勾魂"), ("凋零", "曲解", "招魂"),
-    ]
-    edges = ResonanceEngine.CLOSED_LOOPS["乱葬岗四面体"]
-    assert len(edges) == 6
-    for edge in expected_edges:
-        assert edge in edges, f"乱葬岗四面体缺少边 {edge}"
-    nodes = {n for src, _, dst in edges for n in (src, dst)}
-    assert nodes == {"分裂", "凋零", "招魂", "勾魂"}
-    assert all(name in DaoWenEngine._registry for name in nodes)
-    # 旧占位名不再出现在关系表里
-    assert all(slot not in nodes for slot in RELICIZED_DAOWEN_SLOTS.values())
+    expected = {
+        "乱葬岗·四面体一": [
+            ("分裂", "反转", "合体"), ("化尸", "反转", "勾魂"),
+            ("分裂", "转换", "化尸"), ("合体", "转换", "勾魂"),
+            ("分裂", "曲解", "勾魂"), ("合体", "曲解", "化尸"),
+        ],
+        "乱葬岗·四面体二": [
+            ("招魂", "反转", "凋零"), ("立冢", "反转", "借尸"),
+            ("招魂", "转换", "立冢"), ("凋零", "转换", "借尸"),
+            ("招魂", "曲解", "借尸"), ("凋零", "曲解", "立冢"),
+        ],
+    }
+    for loop_name, expected_edges in expected.items():
+        edges = ResonanceEngine.CLOSED_LOOPS[loop_name]
+        assert len(edges) == 6
+        for edge in expected_edges:
+            assert edge in edges, f"{loop_name}缺少边 {edge}"
+        nodes = {n for src, _, dst in edges for n in (src, dst)}
+        assert all(name in DaoWenEngine._registry for name in nodes)
+        assert all(slot not in nodes for slot in RELICIZED_DAOWEN_SLOTS.values())
 
 
 def test_reserved_slot_not_obtainable():
@@ -67,16 +73,17 @@ def test_reserved_slot_not_obtainable():
         target_daowen=RELICIZED_DAOWEN_SLOTS["缄默"])
     assert r["success"] is False
     assert stock["转换"] == 3, "非法目标不得消耗残韵"
-    # 真实边照常成立：勾魂 --转换--> 凋零（四面体：转换 分裂⇄招魂、凋零⇄勾魂）。
+    # 真实边照常成立：勾魂 --转换--> 合体（2026-11-08 四面体一：转换 分裂⇄化尸、合体⇄勾魂）。
     r2 = ResonanceEngine.apply_resonance("勾魂", "转换", True, True, dict(stock),
-                                         target_daowen="凋零")
-    assert r2["success"] is True and r2["target"] == "凋零"
+                                         target_daowen="合体")
+    assert r2["success"] is True and r2["target"] == "合体"
     assert RESERVED_SLOT not in DaoWenEngine._registry
     from engine.gamedata import REGION_EXCLUSIVE_DAOWEN, MONSTER_TRANSFORM_DAOWEN
     assert RESERVED_SLOT not in REGION_EXCLUSIVE_DAOWEN.get("乱葬岗", set())
     assert RESERVED_SLOT not in MONSTER_TRANSFORM_DAOWEN
     assert all(RESERVED_SLOT not in (src, dst)
-               for src, _, dst in ResonanceEngine.CLOSED_LOOPS["乱葬岗四面体"])
+               for loop in ("乱葬岗·四面体一", "乱葬岗·四面体二")
+               for src, _, dst in ResonanceEngine.CLOSED_LOOPS[loop])
 
 
 # ---------- 区域与怪物池 ----------
@@ -152,54 +159,31 @@ def test_huaisi_is_the_only_heal_block():
     assert c._heal_blocked(target) is True
 
 
-def test_gouhun_blocks_mana_gain_for_x_rounds():
-    """正常路径（2026-10-08 用户令）：勾魂X挂到目标身上，持续X回合**无法获得法力**。
-
-    旧版为「[回始]失去2X法力，持续∞」，已废止；现行版**不扣已有法力**，
-    只压制一切法力增益（判定位：Entity.gain_mana()）。
-    2026-09-09 曾因法力改一池制而改为「消耗翻倍」，2026-10-08 撤销。
-    """
+def test_gouhun_transfers_daowen_to_creation():
+    """正常路径（2026-11-08 用户令重做）：勾魂X=法力5X，把[目标]X种道纹
+    转移至1个[造物]身上，持续∞。旧「无法获得[法力]」整条撤销：
+    不挂状态、不压制法力增益。"""
     st = GameState()
-    # DM裁定 2026-09-09：轮回者普攻面板初始 1×1，且雕塑不再排除轮回者；
-    # 夹具不给面板会在回终被雕塑化，勾魂的持续X就走不到期。
     st.player = Entity("P", "轮回者", blood_limit=60, current_hp=60,
                        mana_limit=20, current_mana=20, attack_count=1, attack_power=1)
     foe = Entity("敌法", "轮回者", blood_limit=60, current_hp=60,
                  mana_limit=20, current_mana=20, attack_count=1, attack_power=1)
+    from engine.models import DaoWen, DaoWenInstance
+    for dw in ("杀伐", "再生"):
+        foe.dao_wen[dw] = DaoWenInstance(
+            DaoWen(name=dw, formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
     st.enemies.append(foe)
+    creation = Entity("尸傀", "造物", blood_limit=30, current_hp=30)
+    st.temp_friends.append(creation)
     c = CombatEngine(st, DiceEngine(seed=1))
     c.reset_monster_activation()
-    calc = DaoWenEngine.resolve("勾魂", 2, target=foe, caster=st.player)
+    calc = DaoWenEngine.resolve("勾魂", 1, target=foe, caster=st.player,
+                                daowen_names=["杀伐"])
+    assert calc["cost"] == 5  # 法力5X
     c.apply_daowen_effect("勾魂", calc, st.player, foe)
-    assert foe.has_status("勾魂"), "勾魂应挂在目标身上"
-    # 持续回合 = X = 2（不是永久）
-    dur = next(s.remaining_rounds for s in foe.status_effects if s.name == "勾魂")
-    assert dur == 2, f"勾魂X=2 应持续2回合，实{dur}"
-
-    # 2026-10-08：勾魂 = 「无法获得[法力]」（消耗不翻倍）
-    foe.current_mana = 20
-    assert foe.can_gain_mana() is False, "勾魂期间不得获得法力"
-    assert foe.gain_mana(9) == 0
-    assert foe.current_mana == 20, f"增益应被压死，实{foe.current_mana}"
-    assert foe.spend_mana(4) is True
-    assert foe.current_mana == 16, f"勾魂不改消耗倍率，实剩 {foe.current_mana}"
-
-    # 第2回合仍在持续期内（持续X=2，[回终]才递减）
-    c.round_start({"relic_choices": {}})
-    assert foe.has_status("勾魂")
-    assert foe.can_gain_mana() is False, "持续期内仍无法获得法力"
-    assert foe.spend_mana(2) is True
-    assert foe.current_mana == 14, f"仍不翻倍，实剩 {foe.current_mana}"
-
-    # 持续走完后恢复正常消耗
-    from engine.enums import CombatSubphase
-    st.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
-    c.round_end()
-    st.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
-    c.round_end()
-    assert not foe.has_status("勾魂"), "持续X走完后勾魂应自然到期"
-    assert foe.can_gain_mana() is True, "到期后恢复获得法力的能力"
-    before = foe.current_mana
-    assert foe.gain_mana(3) == 3
-    assert foe.current_mana == before + 3, "到期后增益恢复生效"
-    assert foe.spend_mana(4) is True
+    assert "杀伐" not in foe.dao_wen and "再生" in foe.dao_wen
+    assert "杀伐" in creation.dao_wen
+    assert not foe.has_status("勾魂"), "新勾魂不挂持续状态"
+    foe.current_mana = 10
+    assert foe.can_gain_mana() is True
+    assert foe.gain_mana(5) == 5 and foe.current_mana == 15

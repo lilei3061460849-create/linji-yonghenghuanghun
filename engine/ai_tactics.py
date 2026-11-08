@@ -604,6 +604,12 @@ class TacticalAI:
             target_entity = self.engine.combat._combat_entity_refs().get(p.get("target_ref"))
             if target_entity is not None:
                 p["freeze_daowen"] = list(target_entity.dao_wen)[:min(x, len(target_entity.dao_wen))]
+        if name == "勾魂":
+            # 2026-11-08 重做：转移须显式指定道纹（取目标前 X 种）；
+            # 接收方[造物]缺省由 handler 取己方第一个。
+            target_entity = self.engine.combat._combat_entity_refs().get(p.get("target_ref"))
+            if target_entity is not None:
+                p["daowen_names"] = list(target_entity.dao_wen)[:min(x, len(target_entity.dao_wen))]
         if name in {"流动", "遗忘"}:
             refs = self.engine.combat._combat_entity_refs()
             target_entity = refs.get(p.get("target_ref"))

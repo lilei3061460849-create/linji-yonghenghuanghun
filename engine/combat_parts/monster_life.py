@@ -449,14 +449,18 @@ class MonsterLifeMixin:
         }
 
     def _sculpture_monster(self, monster: Entity) -> dict:
-        """雕塑：任一角色攻击次数和攻击力同时归0→化为雕塑消耗品（耐久=血限5%）"""
+        """雕塑：任一角色攻击次数和攻击力同时归0→化为雕塑消耗品（耐久=初始血限5%）"""
         if self.state.suppresses_special_events(monster):
             # 【烬翼·熄事】：本回合不触发特殊事件；雕塑不成立，角色留在场上。
             return {"type": "sculpture", "monster": monster.name, "suppressed": True,
                     "note": f"{monster.name}受到【熄事】保护，本次不触发【雕塑】"}
-        # 耐久 = ceil([血限] × durability_ratio)，至少 durability_min（事实源见 toml）
+        # 耐久 = ceil(初始[血限] × durability_ratio)，至少 durability_min（事实源见 toml）。
+        # 初始血限取[战始]快照 battle_start_blood_limit（与碎片奖励同一口径）：
+        # 中途支付血限等不追溯改耐久；【增殖】的∞只是状态标记、账本仍是有限原值，
+        # 同样按快照算，不会出现无限耐久（2026-11-07 用户确认）。
+        base = monster.battle_start_blood_limit or monster.blood_limit
         durability = max(special_events.durability_min("diaosu"),
-                         math.ceil(monster.blood_limit * special_events.durability_ratio("diaosu")))
+                         math.ceil(base * special_events.durability_ratio("diaosu")))
         count_zero = monster.effective_attack_count() <= 0
         power_zero = monster.effective_attack_power() <= 0
         if count_zero and power_zero:

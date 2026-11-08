@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from engine.api import GameEngine
 from engine.combat import CombatEngine
 from engine.dice import DiceEngine
-from engine.models import DaoWen, DaoWenInstance, Entity, GameState
+from engine.models import DaoWen, DaoWenInstance, Entity, GameState, StatusEffect
 from tests.monster_phase_support import resolve_monster_phase
 
 
@@ -374,6 +374,41 @@ def test_sculpture_includes_chizu_and_reincarnator():
     assert foe.is_sculptured and not foe.is_alive
     names = {c.name for c in state.consumables if c.kind == "sculpture"}
     assert names == {"赤仆雕塑", "贾凡雕塑", "敌对轮回者雕塑"}
+
+
+def test_sculpture_on_infinite_blood_limit_monster_uses_initial_blood_limit():
+    """增殖（无限血限）中的怪物攻次/攻力双零，照常触发雕塑，耐久按初始血限算。
+
+    2026-11-07 用户确认：雕塑耐久 = 初始[血限]×5%，初始取[战始]快照
+    （battle_start_blood_limit）。∞ 只是状态「无限血限」，账本仍是有限原值；
+    中途把 blood_limit 压低也不追溯改耐久，不会出现无限耐久雕塑。
+    雕塑先于癌变检查，且增殖期间癌变阈值视为无限，不抢先。
+    """
+    import math
+
+    state = GameState()
+    state.player = Entity(name="贾凡", entity_type="轮回者", blood_limit=60, current_hp=60,
+                          speed_limit=1, current_speed=1, mana_limit=1, current_mana=1)
+    monster = Entity(name="血肉巨囊", entity_type="怪物", blood_limit=200, current_hp=200,
+                     attack_count=0, attack_power=0)
+    monster.add_status(StatusEffect("无限血限", -1, 1, "增殖"))
+    state.enemies.append(monster)
+    assert monster.effective_blood_limit() == math.inf
+    assert monster.battle_start_blood_limit == 200
+    monster.blood_limit = 100  # 中途压低当前血限：耐久仍按初始快照，不追溯
+
+    paths = CombatEngine(state, DiceEngine()).settle_victory_paths()
+    sculptures = [p for p in paths if p["type"] == "sculpture"]
+    assert len(sculptures) == 1, paths
+    assert monster.is_sculptured and not monster.is_alive
+    # 离场不是击杀：depart_battle 只打标记，从 enemies 摘除由战终统一收口。
+    assert monster.is_departed and monster.departure_reason == "雕塑"
+    assert monster.removed_without_kill
+    # 这里只钉耐久数值。
+    assert sculptures[0]["durability"] == 10  # ceil(200×5%)
+    consumable = next(c for c in state.consumables if c.kind == "sculpture")
+    assert consumable.name == "血肉巨囊雕塑"
+    assert consumable.current_uses == consumable.max_uses == 10
 
 
 def test_sculpture_now_includes_zero_attack_reincarnator():

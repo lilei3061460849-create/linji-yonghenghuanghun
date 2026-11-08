@@ -37,16 +37,17 @@ def test_jiahuo_is_not_registered():
     from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
 
     assert "嫁祸" not in REGION_EXCLUSIVE_DAOWEN["龙心谷"]
-    # 2026-11-02：龙心谷四面体四节点（锻造/熔化/炽热/淬火）全部实装。
-    assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == {"锻造", "熔化", "炽热", "淬火"}
+    # 2026-11-08：龙心谷满 8 纹、两组四面体全部实装。
+    assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == {
+        "锻造", "熔化", "炽热", "淬火", "百炼", "锈蚀", "重铸", "回炉"}
 
 
 def test_longji_tetrahedron_holds_no_retired_names():
     """旧道纹退出后，龙心谷四面体只由真实道纹构成，不复活任何旧名。"""
     loop = ResonanceEngine.edges_of_region("龙心谷")
-    assert len(loop) == 6, "四面体 4 节点 6 边"
+    assert len(loop) == 12, "两组四面体 × 6 边（2026-11-08）"
     nodes = {n for src, _, dst in loop for n in (src, dst)}
-    assert nodes == {"锻造", "熔化", "炽热", "淬火"}
+    assert nodes == {"锻造", "熔化", "炽热", "淬火", "百炼", "锈蚀", "重铸", "回炉"}
     retired = {"加害", "龙鳞", "逆鳞", "裂变", "背负", "伤痕", "嫁祸"}
     assert not (nodes & retired), f"龙心谷四面体复活了已退役道纹：{nodes & retired}"
 

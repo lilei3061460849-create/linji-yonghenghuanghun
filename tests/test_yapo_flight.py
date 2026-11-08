@@ -57,9 +57,9 @@ def test_flight_yapo_registry_cost_and_bidirectional_reversal():
     assert "死亡" not in yapo["summary"]
     assert "飞行" in ORIGINAL_MONSTER_DAOWEN
     assert "压迫" in MONSTER_TRANSFORM_DAOWEN
-    # 2026-11-02 四面体四：反转 必中⇄飞行、压迫⇄篡改；飞行与压迫之间是（转换）。
+    # 四面体四（2026-11-08 最终）：反转 必中⇄飞行、压迫⇄篡改；飞行与压迫之间是（曲解）。
     assert ResonanceEngine.find_transformation("飞行", "反转") == "必中"
-    assert ResonanceEngine.find_transformation("飞行", "转换") == "压迫"
+    assert ResonanceEngine.find_transformation("飞行", "曲解") == "压迫"
     assert ResonanceEngine.find_transformation("压迫", "反转") == "篡改"
 
 

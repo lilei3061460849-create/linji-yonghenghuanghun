@@ -360,16 +360,18 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_zengzhi(x: int, target: Entity = None) -> dict:
-        """增殖X：支付：血限X。使[目标]的[血限]变为∞，持续X回合（战终清除）。"""
+        """增殖X：支付：冷却X。使[目标]的[血限]变为∞，持续X回合（战终清除）。"""
+        # 2026-11-07 用户令：代价由血限X 改为冷却X（原 cost_blood_limit 账本撤销，
+        # 与【迟滞】【飞行】同走 COOLDOWN 支付通道）；效果（无限血限）不变。
         target_name = target.name if target is not None else "未选定目标"
         return {
             "dao_wen": "增殖",
             "x": x,
-            "cost_type": CostType.AGING.value,
-            "cost_blood_limit": x,
+            "cost_type": CostType.COOLDOWN.value,
+            "cost": x,
             "duration": x,
             "infinite_blood_limit": True,
-            "summary": f"血限{x}，使{target_name}的血限变为∞，持续{x}回合"
+            "summary": f"支付：冷却{x}，使{target_name}的血限变为∞，持续{x}回合"
         }
     
     @staticmethod
@@ -902,11 +904,13 @@ class DaoWenEngine:
     # 2026-09-28 用户令：原【抵扣】改名【豪夺】。
     @staticmethod
     def calculate_haoduo(x: int, target: Entity = None) -> dict:
-        """豪夺X：支付：5X碎片，夺取[目标]1件遗物持续X回合。
+        """豪夺X：支付：5X碎片，夺取[目标]1件遗物或消耗品持续X回合。
 
-        夺取=把目标的一件遗物转移到己方（施法者）临时持有，持续X回合，到期归还。
+        夺取=把目标的一件遗物或消耗品转移到己方（施法者）临时持有，持续X回合，到期归还。
         与旧【抵扣】（只封印）的区别：夺取期间施法者**真正持有**该遗物并能触发其被动，
         目标在这段时间里不能触发该遗物。
+        2026-11-07 用户令加强：可夺对象由遗物扩为遗物/消耗品；消耗品夺取期间可使用，
+        到期按归还时剩余耐久还回（已用完的只剩空壳，一并归还）。
         """
         target_name = target.name if target is not None else "未选定目标"
         return {
@@ -914,8 +918,8 @@ class DaoWenEngine:
             # 2026-09-28 用户令：支付：5X碎片（沿用现有 cost_shards 付费通道；
             # 不写 cost_type=MANA，避免被当成法力支付）。
             "cost_type": "代价", "cost_shards": 5 * x,
-            "relic_steal": 1, "duration": x,
-            "summary": f"支付：{5*x}碎片，夺取{target_name}一件遗物，持续{x}回合"
+            "relic_steal": 1, "item_steal": 1, "duration": x,
+            "summary": f"支付：{5*x}碎片，夺取{target_name}一件遗物或消耗品，持续{x}回合"
         }
 
     # 2026-10-31 用户令：【抢劫】【勒索】删除，补入主环四纹。
@@ -1147,30 +1151,23 @@ class DaoWenEngine:
         }
 
     @staticmethod
-    def calculate_gouhun(x: int, target: Entity = None) -> dict:
-        """勾魂X：支付：法力X。使[目标]无法获得[法力]，持续X。
+    def calculate_gouhun(x: int, target: Entity = None, daowen_names: list = None) -> dict:
+        """勾魂X：支付：法力5X。将［目标］的X种道纹转移至1个［造物］身上，持续∞。
 
-        改版（2026-08-30，DM 裁定见 报告.md 硬伤2-C）：
-        旧版为「[回始]使[目标]失去2X点当前法力，持续∞」——永久扣法力对输出决策
-        是单向碾压，且玩家只能靠残韵改掉怪物道纹来止损。新版改为**持续X回合
-        无法获得法力**：[回始]法力回填被压制（不扣已有法力），X 回合后自然恢复。
-        这样威胁是"暂时断蓝"而非"永久死刑"，且期限明确（与【坏死】禁回复同构）。
-
-        修复（2026-08-21）：补上 target 参数使该道纹正确声明需要[目标]，
-        否则 requires_target=False 导致怪物只能自施（寄骨蝇勾魂自吸无法力=空放）。
-
-        2026-09-09 DM裁定：法力改一池制后一度改为「支付：法力翻倍」；
-        2026-10-08 用户令：恢复「无法获得[法力]」原意，翻倍逻辑撤销。
-        此时战斗内已有多个法力来源（聚能／储能电池／守夜灯／承露盏／
-        透支／法术），效果重新有对象。判定位统一在
-        `Entity.can_gain_mana()` / `Entity.gain_mana()`，所有法力增益都必须过它。
+        2026-11-08 用户令重做：旧「无法获得[法力]」效果整条撤销（can_gain_mana
+        不再读【勾魂】）。转移是把道纹实例从[目标]身上整只搬到指定的一个
+        [造物]身上（造物已持有同名时该种不转移）；[目标]有【出土】余次时
+        按次保留原道纹、改为复制。持续∞＝转移在本场内不自动返回。
         """
+        if x < 1:
+            raise ValueError("X必须为正整数")
         target_name = target.name if target is not None else "未选定目标"
+        names = [str(n) for n in (daowen_names or []) if n]
         return {
             "dao_wen": "勾魂", "x": x,
-            "cost_type": CostType.MANA.value, "cost": x,
-            "no_mana_gain": True, "duration": x,
-            "summary": f"支付：{x}法力，{target_name}无法获得法力，持续{x}回合"
+            "cost_type": CostType.MANA.value, "cost": 5 * x,
+            "transfer_daowen_count": x, "transfer_daowen_names": names,
+            "summary": f"支付：法力{5 * x}，将{target_name}的{x}种道纹转移至1个[造物]身上",
         }
 
     # 2026-10-08 用户令删除【镇尸】（支付：法力2X。使一个[目标]无法获得[回复]，持续X）。
@@ -1220,6 +1217,242 @@ class DaoWenEngine:
             "dao_wen": "唯一", "x": x, "cost_type": CostType.MANA.value,
             "cost": 5 * x, "used_daowen_lock": True, "duration": x,
             "summary": f"支付：法力{5*x}，使{target_name}无法使用用过的道纹，持续{x}",
+        }
+
+    # ========== 2026-11-08 用户令：四副本补齐（每副本 8 纹，第二四面体） ==========
+
+    @staticmethod
+    def calculate_bailian(x: int, target: Entity = None) -> dict:
+        """百炼X：支付：法力5X。使[目标]使用消耗品的效果数值翻倍，持续X。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "百炼", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 5 * x,
+            "consumable_effect_multiplier": 2, "duration": x,
+            "summary": f"支付：法力{5 * x}，使{target_name}使用消耗品的效果数值翻倍，持续{x}",
+        }
+
+    @staticmethod
+    def calculate_xiushi(x: int, target: Entity = None) -> dict:
+        """锈蚀X：支付：法力5X。使[目标]无法使用消耗品，持续X。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "锈蚀", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 5 * x,
+            "consumable_use_blocked": True, "duration": x,
+            "summary": f"支付：法力{5 * x}，使{target_name}无法使用消耗品，持续{x}",
+        }
+
+    @staticmethod
+    def calculate_chongzhu(x: int, target: Entity = None, item_name: str = "") -> dict:
+        """重铸X：支付：法力3X。选择[目标]1个消耗品，从X～2X中随机抽取整数作为其当前耐久与耐久上限。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "重铸", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 3 * x,
+            "recast_item_name": str(item_name or ""),
+            "recast_min": x, "recast_max": 2 * x,
+            "summary": f"支付：法力{3 * x}，重铸{target_name}的1个消耗品，耐久在{x}～{2 * x}间随机",
+        }
+
+    @staticmethod
+    def calculate_huilu_item(x: int, target: Entity = None, item_name: str = "") -> dict:
+        """回炉X：支付：法力3X。销毁[目标]的1个消耗品，为其发现1个耐久为X的消耗品。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "回炉", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 3 * x,
+            "reforge_destroy_item_name": str(item_name or ""),
+            "reforge_discovery_uses": x,
+            "summary": f"支付：法力{3 * x}，销毁{target_name}的1个消耗品并为其发现1个耐久{x}的消耗品",
+        }
+
+    @staticmethod
+    def calculate_heti(x: int) -> dict:
+        """合体X：支付：法力5X。将X个[造物]合并为1个[造物]，其所有属性与状态取被合并[造物]之和。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        return {
+            "dao_wen": "合体", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 5 * x,
+            "merge_creations": x,
+            "summary": f"支付：法力{5 * x}，将{x}个造物合并为1个（属性与状态取总和）",
+        }
+
+    @staticmethod
+    def calculate_huashi(x: int, target: Entity = None) -> dict:
+        """化尸X：支付：法力5X。使[目标]视为[造物]，持续X。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "化尸", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 5 * x,
+            "treated_as_creation": True, "duration": x,
+            "summary": f"支付：法力{5 * x}，使{target_name}视为[造物]，持续{x}",
+        }
+
+    @staticmethod
+    def calculate_lizhong(x: int, target: Entity = None) -> dict:
+        """立冢X：支付：法力3X。以[目标]为模板在场上生成X具已击灭的尸体。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "立冢", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 3 * x,
+            "corpse_copies": x,
+            "summary": f"支付：法力{3 * x}，以{target_name}为模板生成{x}具已击灭的尸体",
+        }
+
+    @staticmethod
+    def calculate_jieshi(x: int, target: Entity = None, corpse_name: str = "") -> dict:
+        """借尸X：支付：法力5X。使[目标]的三限与当前属性变为场上1具尸体的三限与生前属性，持续X。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "借尸", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 5 * x,
+            "borrow_corpse_name": str(corpse_name or ""), "duration": x,
+            "summary": f"支付：法力{5 * x}，使{target_name}的三限与当前属性变为一具尸体的生前数值，持续{x}",
+        }
+
+    @staticmethod
+    def calculate_suoqu(x: int, target: Entity = None, resource_type: str = "法力") -> dict:
+        """索取X：支付：法力5X。选择一种资源类支付途径，使[目标]强制支付X并由你获得等量该资源。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        kind = normalize_payment_type(resource_type)
+        if kind not in RESOURCE_TYPES:
+            raise ValueError(f"索取的资源类支付途径非法：{resource_type}；可选{'/'.join(sorted(RESOURCE_TYPES))}")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "索取", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 5 * x,
+            "demand_resource_type": kind, "demand_amount": x,
+            "summary": f"支付：法力{5 * x}，使{target_name}强制支付{x}点{kind}并由你获得等量{kind}",
+        }
+
+    @staticmethod
+    def calculate_nixue(x: int, target: Entity = None) -> dict:
+        """逆血X：支付：血限5X。使[目标]的当前生命与已损生命互换（最低保留1点生命），持续X。
+
+        承接原【永生】草案的互换口径：互换造成的生命增加视为回复、减少视为
+        失血，均按既有规则结算；持续结束时恢复至本次互换发生前记录的当前
+        生命，而不是按届时数值再次互换；不回退期间的累计回复量、失血记录
+        或已支付代价。
+        """
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "逆血", "x": x,
+            "cost_type": CostType.AGING.value, "cost_blood_limit": 5 * x,
+            "swap_hp_with_lost": True, "duration": x,
+            "summary": f"支付：血限{5 * x}，使{target_name}的当前生命与已损生命互换（最低保留1），持续{x}",
+        }
+
+    @staticmethod
+    def calculate_yongsheng(x: int, target: Entity = None) -> dict:
+        """永生X：支付：冷却X。使[目标]受到的伤害改为回复等量生命，持续X。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "永生", "x": x,
+            "cost_type": CostType.COOLDOWN.value, "cost": x,
+            "damage_converted_to_heal": True, "duration": x,
+            "summary": f"支付：冷却{x}，使{target_name}受到的伤害改为回复等量生命，持续{x}",
+        }
+
+    @staticmethod
+    def calculate_chuyong(x: int, target: Entity = None) -> dict:
+        """初拥X：支付：生命5X。使[目标]的当前生命与[血限]同你保持一致，持续X。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "初拥", "x": x,
+            "cost_type": CostType.BLEED.value, "cost_hp": 5 * x,
+            "mirror_caster_vitals": True, "duration": x,
+            "summary": f"支付：生命{5 * x}，使{target_name}的当前生命与[血限]同你保持一致，持续{x}",
+        }
+
+    @staticmethod
+    def calculate_ganran(x: int, target: Entity = None, daowen_names: list = None) -> dict:
+        """感染X：支付：异变2X。使[目标]的X种道纹变为【感染】，持续∞。
+
+        替换时保留原道纹信息，供尘封图书馆恢复；后续感染仍须主动发动并
+        支付代价，不会自动传播。被替换的道纹不再可用，原位置改记【感染】。
+        """
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        names = [str(n) for n in (daowen_names or []) if n]
+        return {
+            "dao_wen": "感染", "x": x,
+            "cost_type": CostType.MUTATION.value, "cost_mutation": 2 * x,
+            "infect_daowen_count": x, "infect_daowen_names": names,
+            "summary": f"支付：异变{2 * x}，使{target_name}的{x}种道纹变为【感染】",
+        }
+
+    @staticmethod
+    def calculate_chongyan(x: int, target: Entity = None, replay_name: str = "") -> dict:
+        """重演X：支付：法力10X。选择[目标]本场已发动过的一种道纹，以数值X发动。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "重演", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 10 * x,
+            "replay_numeric": x, "replay_daowen_name": str(replay_name or ""),
+            "replay_source_name": target_name,
+            "summary": f"支付：法力{10 * x}，重演{target_name}本场已发动过的一种道纹（数值{x}）",
+        }
+
+    @staticmethod
+    def calculate_yuanchu(x: int, target: Entity = None) -> dict:
+        """原初X：支付：异变5X。借用[目标]身上自身未拥有的随机X种道纹，持续∞。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "原初", "x": x,
+            "cost_type": CostType.MUTATION.value, "cost_mutation": 5 * x,
+            "borrow_daowen_count": x, "duration": -1,
+            "summary": f"支付：异变{5 * x}，借用{target_name}身上自身未拥有的随机{x}种道纹",
+        }
+
+    @staticmethod
+    def calculate_bingbian(x: int, target: Entity = None,
+                           from_kind: str = "", to_kind: str = "") -> dict:
+        """病变X：支付：法力5X。将[目标]拥有的至多X层数值类代价转化为另一种数值类代价。"""
+        if x < 1:
+            raise ValueError("X必须为正整数")
+        src = normalize_payment_type(from_kind) if from_kind else ""
+        dst = normalize_payment_type(to_kind) if to_kind else ""
+        if src and src not in PURIFIABLE_COST_KINDS:
+            raise ValueError(f"病变源代价仅支持数值类代价：{'/'.join(PURIFIABLE_COST_KINDS)}")
+        if dst and dst not in PURIFIABLE_COST_KINDS:
+            raise ValueError(f"病变目标代价仅支持数值类代价：{'/'.join(PURIFIABLE_COST_KINDS)}")
+        if src and dst and src == dst:
+            raise ValueError("病变不能把代价转化为同一种代价")
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "病变", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 5 * x,
+            "convert_cost_from": src, "convert_cost_to": dst,
+            "convert_cost_layers": x,
+            "summary": f"支付：法力{5 * x}，将{target_name}至多{x}层数值类代价转化为另一种数值类代价",
         }
 
     # ========== 统一调度入口 ==========
@@ -1301,6 +1534,23 @@ class DaoWenEngine:
             "招魂": cls.calculate_zhaohun,
             # 初拥之夜专属道纹；只允许事件授予，不进入常规学习/残韵池。
             "真理": cls.calculate_zhenli,
+            # 2026-11-08 用户令：四副本补齐第二四面体（每副本 8 纹）。
+            "百炼": cls.calculate_bailian,
+            "锈蚀": cls.calculate_xiushi,
+            "重铸": cls.calculate_chongzhu,
+            "回炉": cls.calculate_huilu_item,
+            "合体": cls.calculate_heti,
+            "化尸": cls.calculate_huashi,
+            "立冢": cls.calculate_lizhong,
+            "借尸": cls.calculate_jieshi,
+            "索取": cls.calculate_suoqu,
+            "逆血": cls.calculate_nixue,
+            "永生": cls.calculate_yongsheng,
+            "初拥": cls.calculate_chuyong,
+            "感染": cls.calculate_ganran,
+            "重演": cls.calculate_chongyan,
+            "原初": cls.calculate_yuanchu,
+            "病变": cls.calculate_bingbian,
         }
     
     @staticmethod
@@ -1411,6 +1661,8 @@ class ResonanceEngine:
             ("杀伐", "转换", "连击"), ("再生", "转换", "庇护"),
             ("杀伐", "曲解", "庇护"), ("再生", "曲解", "连击"),
         ],
+        # 2026-11-08 用户令：【篡改】与【封印】再次调换（继 2026-11-07 互换后
+        # 改回）——四面体二含【封印】、四面体四含【篡改】，效果条文不变。
         "通用四面体二": [
             ("操纵", "反转", "束缚"), ("迟滞", "反转", "封印"),
             ("操纵", "转换", "迟滞"), ("束缚", "转换", "封印"),
@@ -1423,8 +1675,8 @@ class ResonanceEngine:
         ],
         "通用四面体四": [
             ("必中", "反转", "飞行"), ("压迫", "反转", "篡改"),
-            ("必中", "转换", "篡改"), ("飞行", "转换", "压迫"),
-            ("必中", "曲解", "压迫"), ("飞行", "曲解", "篡改"),
+            ("必中", "转换", "压迫"), ("飞行", "转换", "篡改"),
+            ("必中", "曲解", "篡改"), ("飞行", "曲解", "压迫"),
         ],
         # ---- 罪孽都市（四面体一~二）----
         "罪孽都市·四面体一": [
@@ -1448,23 +1700,38 @@ class ResonanceEngine:
             ("增殖", "转换", "扭曲"), ("饥饿", "转换", "坏死"),
             ("增殖", "曲解", "坏死"), ("饥饿", "曲解", "扭曲"),
         ],
-        # ---- 乱葬岗（四面体）----
-        "乱葬岗四面体": [
-            ("分裂", "反转", "凋零"), ("招魂", "反转", "勾魂"),
-            ("分裂", "转换", "招魂"), ("凋零", "转换", "勾魂"),
-            ("分裂", "曲解", "勾魂"), ("凋零", "曲解", "招魂"),
+        # ---- 乱葬岗（四面体一~二，2026-11-08 最终结构）----
+        "乱葬岗·四面体一": [
+            ("分裂", "反转", "合体"), ("化尸", "反转", "勾魂"),
+            ("分裂", "转换", "化尸"), ("合体", "转换", "勾魂"),
+            ("分裂", "曲解", "勾魂"), ("合体", "曲解", "化尸"),
         ],
-        # ---- 永夜庭（四面体）----
-        "永夜庭四面体": [
-            ("血契", "反转", "共罪"), ("不死", "反转", "怜悯"),
-            ("血契", "转换", "怜悯"), ("共罪", "转换", "不死"),
-            ("血契", "曲解", "不死"), ("共罪", "曲解", "怜悯"),
+        "乱葬岗·四面体二": [
+            ("招魂", "反转", "凋零"), ("立冢", "反转", "借尸"),
+            ("招魂", "转换", "立冢"), ("凋零", "转换", "借尸"),
+            ("招魂", "曲解", "借尸"), ("凋零", "曲解", "立冢"),
         ],
-        # ---- 龙心谷（四面体）----
-        "龙心谷四面体": [
-            ("锻造", "反转", "熔化"), ("炽热", "反转", "淬火"),
-            ("锻造", "转换", "淬火"), ("熔化", "转换", "炽热"),
-            ("锻造", "曲解", "炽热"), ("熔化", "曲解", "淬火"),
+        # ---- 永夜庭（四面体一~二，2026-11-08 最终结构）----
+        "永夜庭·四面体一": [
+            ("血契", "反转", "索取"), ("共罪", "反转", "怜悯"),
+            ("血契", "转换", "共罪"), ("索取", "转换", "怜悯"),
+            ("血契", "曲解", "怜悯"), ("共罪", "曲解", "索取"),
+        ],
+        "永夜庭·四面体二": [
+            ("不死", "反转", "永生"), ("逆血", "反转", "初拥"),
+            ("不死", "转换", "逆血"), ("永生", "转换", "初拥"),
+            ("不死", "曲解", "初拥"), ("永生", "曲解", "逆血"),
+        ],
+        # ---- 龙心谷（四面体一~二，2026-11-08 最终结构）----
+        "龙心谷·四面体一": [
+            ("淬火", "反转", "炽热"), ("百炼", "反转", "锈蚀"),
+            ("淬火", "转换", "百炼"), ("炽热", "转换", "锈蚀"),
+            ("淬火", "曲解", "锈蚀"), ("炽热", "曲解", "百炼"),
+        ],
+        "龙心谷·四面体二": [
+            ("锻造", "反转", "熔化"), ("回炉", "反转", "重铸"),
+            ("锻造", "转换", "重铸"), ("熔化", "转换", "回炉"),
+            ("锻造", "曲解", "回炉"), ("熔化", "曲解", "重铸"),
         ],
         # ---- 沉沦海（四面体一~二）----
         "沉沦海·四面体一": [
@@ -1477,11 +1744,16 @@ class ResonanceEngine:
             ("大梦", "转换", "涌潮"), ("沉溺", "转换", "冰冻"),
             ("大梦", "曲解", "冰冻"), ("沉溺", "曲解", "涌潮"),
         ],
-        # ---- 荒疫古城（四面体）----
-        "荒疫古城四面体": [
-            ("出土", "反转", "唯一"), ("催化", "反转", "净化"),
-            ("出土", "转换", "催化"), ("唯一", "转换", "净化"),
-            ("出土", "曲解", "净化"), ("唯一", "曲解", "催化"),
+        # ---- 荒疫古城（四面体一~二，2026-11-08 最终结构）----
+        "荒疫古城·四面体一": [
+            ("出土", "反转", "感染"), ("原初", "反转", "唯一"),
+            ("出土", "转换", "唯一"), ("感染", "转换", "原初"),
+            ("出土", "曲解", "原初"), ("感染", "曲解", "唯一"),
+        ],
+        "荒疫古城·四面体二": [
+            ("净化", "反转", "病变"), ("催化", "反转", "重演"),
+            ("净化", "转换", "重演"), ("病变", "转换", "催化"),
+            ("净化", "曲解", "催化"), ("病变", "曲解", "重演"),
         ],
     }
 
@@ -1492,10 +1764,11 @@ class ResonanceEngine:
         "通用四面体三": "通用", "通用四面体四": "通用",
         "罪孽都市·四面体一": "罪孽都市", "罪孽都市·四面体二": "罪孽都市",
         "扭曲都市·四面体一": "扭曲都市", "扭曲都市·四面体二": "扭曲都市",
-        "乱葬岗四面体": "乱葬岗", "永夜庭四面体": "永夜庭",
-        "龙心谷四面体": "龙心谷",
+        "乱葬岗·四面体一": "乱葬岗", "乱葬岗·四面体二": "乱葬岗",
+        "永夜庭·四面体一": "永夜庭", "永夜庭·四面体二": "永夜庭",
+        "龙心谷·四面体一": "龙心谷", "龙心谷·四面体二": "龙心谷",
         "沉沦海·四面体一": "沉沦海", "沉沦海·四面体二": "沉沦海",
-        "荒疫古城四面体": "荒疫古城",
+        "荒疫古城·四面体一": "荒疫古城", "荒疫古城·四面体二": "荒疫古城",
     }
 
     @classmethod

@@ -98,6 +98,40 @@ def test_monster_holder_also_returns_relic_to_player_on_expiry():
     assert haoduo_statuses(m) == []
 
 
+def test_steal_consumable_moves_and_returns_with_remaining_uses():
+    """2026-11-07 加强：豪夺可夺消耗品；到期按归还时剩余耐久还回。"""
+    from engine.models import Consumable
+    e, p, m = setup('consumable')
+    pill = Consumable(name='定命丸', effect='', current_uses=2, max_uses=2)
+    m.consumables = [pill]
+    # 目标同时有遗物与消耗品，玩家必须显式指定；夺走消耗品。
+    r = e.execute_action('use_daowen', {
+        'daowen_name': '豪夺', 'x': 2, 'target': m.name, 'dodge': False,
+        'relic_name': '定命丸'})
+    assert r['success'], r
+    assert pill in e.state.consumables and pill not in m.consumables
+    assert e.state.stolen_relics['定命丸']['kind'] == 'consumable'
+    statuses = haoduo_statuses(p)
+    assert len(statuses) == 1 and statuses[0].effect_data.get('item_kind') == 'consumable'
+    # 夺取期间用掉1点耐久；到期归还时按剩余1点还回原主。
+    pill.current_uses = 1
+    e.combat._tick_sealed_and_stolen_relics()
+    ticked = e.combat._tick_sealed_and_stolen_relics()
+    assert ticked['returned_steals'] == ['定命丸']
+    assert '定命丸' not in e.state.stolen_relics
+    assert pill in m.consumables and pill.current_uses == 1
+    assert haoduo_statuses(p) == []
+
+
+def test_steal_nothing_reports_relic_or_consumable():
+    """目标无任何可夺对象：扣费前拒绝，文案覆盖遗物或消耗品。"""
+    e, p, m = setup('empty')
+    m.relics = []
+    r = e.execute_action('use_daowen', {
+        'daowen_name': '豪夺', 'x': 1, 'target': m.name, 'dodge': False})
+    assert r['success'] is False and '没有可夺取的遗物或消耗品' in r['error'], r
+
+
 def test_dream_advancing_target_rounds_also_returns_stolen_relic():
     """大梦让目标额外经历回合时，目标身上的豪夺计时同样递减到期。"""
     e, p, m = setup('dream')

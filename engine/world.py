@@ -14,12 +14,15 @@ from typing import Any
 Coord = tuple[int, int]
 DIRECTIONS: tuple[Coord, ...] = ((0, -1), (0, 1), (-1, 0), (1, 0))
 
+from .rules_source import special_events
+
 # 【最终的冠冕】：世界事件，不是第8场强制死斗。
 # 到点后在地图随机可通行格刷新；任何角色踩中即持有；
 # 持有者连续存活 CROWN_HOLD_WORLD_TURNS 个世界回合后自动脱离副本。
+# 数值唯一事实源：data/rules/special_events.toml（id=zui_zhong_guanmian）。
 CROWN_NAME = "最终的冠冕"
-CROWN_SPAWN_WORLD_TURNS = 5
-CROWN_HOLD_WORLD_TURNS = 5
+CROWN_SPAWN_WORLD_TURNS = special_events.spawn_world_turns("zui_zhong_guanmian")
+CROWN_HOLD_WORLD_TURNS = special_events.hold_world_turns("zui_zhong_guanmian")
 
 # 地图上会自主行动的友方单位类别（2026-10-24）。玩家对它们只能提"建议"。
 ALLY_KINDS: frozenset[str] = frozenset({"friend", "employee", "temp_friend"})

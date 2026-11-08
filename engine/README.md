@@ -268,15 +268,22 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 已实现，详见 README.md 与 AI_EXPERIENCE.md。要点：所有角色的 `action_count` 均为**基础1次**再叠加通用修正（【疯狂】+X/【无力】-X/【蓄锐·增】+X），造物不另设专用上限；普攻占用一次主动出手但不消耗速度。双方每次只提交一个行动并交替出手；【跳过】结束当前方回合但不消耗出手。施法按效果步骤逐次支付1手，步骤间留敌方行动空档；已定义的自动触发法术【镇魔印】不额外占主动出手。
 消耗/不消耗出手的动作清单见下表备注。
 
-## 最终的冠冕 / 第8场死斗
+## 最终的冠冕（开放地图世界事件）
 
-已实现，详见 README.md 与 AI_EXPERIENCE.md。要点：`GameEngine(sealed_candidate_path=...)`指定跨实例共享的
-封存候选人JSON路径；[战终]第7场自动判定"封存"或"进入死斗"，无需额外调用。
+已实现，详见 README.md 与 AI_EXPERIENCE.md。要点：默认流程是开放地图，冠冕是世界事件而非第8场死斗。
+数值唯一事实源为 `data/rules/special_events.toml`（`zui_zhong_guanmian` 的 `spawn_world_turns` /
+`hold_world_turns`），`engine/world.py` 的 `CROWN_SPAWN_WORLD_TURNS` / `CROWN_HOLD_WORLD_TURNS`
+由此读取。冠冕在世界回合推进时排期，延迟若干世界回合后在随机可通行非水格刷新；任何存活单位
+踩中即持有，持有者连续存活满持有回合（期间不在遭遇战中）即带冠冕脱离副本，死亡或离场时
+冠冕掉回地图且计时清零。玩家带冠冕脱离＝通关：领终音法器后封存，不产生阶级推进；
+非玩家单位带冠冕脱离＝冠冕被夺，副本关闭，留置玩家困死（`crown_lost`）。`battle_end`
+不再自动触发封存或死斗；旧死斗链（`_trigger_final_crown`、`resolve_final_duel`）仅作显式
+兼容路径保留，普通对局不得调用。
 
 ## 三副本终音法器 / 初拥之夜 / 真龙之心
 
-已实现，详见 README.md 与 AI_EXPERIENCE.md。要点：死斗胜利后按`current_region`从`GameEngine.TERMINAL_ARTIFACTS`
-对应列表中选1件（`choose_terminal_artifact`），选到"猩红尖牙"会先强制触发初拥之夜
+已实现，详见 README.md 与 AI_EXPERIENCE.md。要点：玩家带冠冕脱离后按`current_region`从`GameEngine.TERMINAL_ARTIFACTS`
+对应列表中选1件（`choose_terminal_artifact`；旧死斗胜利时亦可达），选到"猩红尖牙"会先强制触发初拥之夜
 （`GameEngine.FIRST_EMBRACE_OPTIONS`9选1，`choose_first_embrace`）完成后才真正封存；
 "真龙之心"解锁后进入龙族项目系统：`GameEngine.DRAGON_TRAITS` 7 件遗物 + `DRAGON_CONSUMABLE_TRAITS` 的消耗品【烬翼】。2026-10-23 起废除「龙性」货币：玩家实际支付的数值型【代价】自动记入 `state.dragon_cost_points`（只作兑换门槛，不可花用），满 12 点换 1 件。
 
@@ -302,9 +309,9 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `dismiss_employee` | 解雇[员工]（自由行动，无代价） |
 | `pay_employee_wage` | 战终对某[员工]的工资做出pay/refuse决策 |
 | `choose_hired_daowen` | 雇佣diy后，从3个发现的转化道纹候选中选择1个 |
-| `resolve_final_duel` | 第8场死斗结算；失败时触发【死者之页】中断，可选带`death_book_entry`作草稿 |
+| `resolve_final_duel` | （兼容路径）第8场死斗结算；失败时触发【死者之页】中断，可选带`death_book_entry`作草稿。默认开放地图流程不调用 |
 | `submit_ruling`（死者之页） | 轮回者命零后审核其页：`action=approve/edit/reject`；生平由引擎自动总结（`summarize_life`），玩家只自定义`text`（≤20字），通过或修改后写入`死者之书.md`的「## 死者之页」节 |
-| `choose_terminal_artifact` | 死斗胜利后按副本领取终音法器(choice=序号) |
+| `choose_terminal_artifact` | 带冠冕脱离后按副本领取终音法器并封存(choice=序号)；旧死斗胜利时亦可达 |
 | `choose_first_embrace` | 初拥之夜9选1(choice=1~9，1~8限选1次，9可重复)；选项3 发放消耗品【血翼】3/3，不占遗物位 |
 | `define_resource` | 声明一条自定义资源（道纹/遗物/法器/消耗品）；`spec` 或 `specs`，默认就地授予。这是「当场设计」的唯一入口，不占出手 |
 | `activate_resource` | 主动激活自定义法器（默认不占出手；`costs_action=true` 才占） |

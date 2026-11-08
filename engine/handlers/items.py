@@ -36,6 +36,22 @@ class ItemHandlersMixin:
         if item.name == "万钧印":
             return {"success": False, "error": "万钧印在受到攻击时自动触发，不可主动使用"}
 
+        # 【锈蚀】（2026-11-08）：生效中无法使用消耗品；拒绝在扣耐久之前。
+        if item_user.has_status("锈蚀"):
+            return {"success": False, "error": "【锈蚀】生效中：无法使用消耗品"}
+
+        # 【百炼】（2026-11-08）：本次使用消耗品的效果数值翻倍——在真实
+        # 结算窗口内挂倍率标记，回复/伤害的统一入口据此放大（窗口同步执行，
+        # 不会串到道纹等其他结算）。
+        if item_user.has_status("百炼"):
+            self.state._consumable_effect_multiplier = 2
+            try:
+                if item.merged_sources:
+                    return self._consume_merged_item(item, params)
+                return self._consume_item_effect(item, params)
+            finally:
+                self.state._consumable_effect_multiplier = 1
+
         # 【改造】合成的条目：逐条结算被并入的原始效果，最后只扣它自己的1点耐久。
         if item.merged_sources:
             return self._consume_merged_item(item, params)

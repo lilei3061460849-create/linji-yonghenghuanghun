@@ -785,6 +785,17 @@ class Entity:
     def has_used_daowen(self, name: str) -> bool:
         return name in getattr(self, "daowen_use_history", set())
 
+    def treated_as_creation(self) -> bool:
+        """是否按[造物]论：本体造物，或【化尸】生效中被视为造物。
+
+        【合体】的可合并对象、以及一切「是否造物」的身份判定统一读这里，
+        不再散落判断 entity_type；【化尸】到期后自动恢复原身份。
+        """
+        if self.entity_type == "造物":
+            return True
+        return any(s.name == "化尸" and not s.is_expired
+                   for s in getattr(self, "status_effects", ()) or ())
+
     def daowen_locked_by_unique(self, name: str) -> bool:
         """【唯一】：身上有【唯一】时，本轮回已成功使用过的道纹不可再用。
 
@@ -1193,16 +1204,15 @@ class Entity:
     def can_gain_mana(self) -> bool:
         """当前是否允许获得[法力]。
 
-        【勾魂】期间恒为 False——「无法获得[回复]」的姊妹判定：
-        只压制**增益**，已持有的法力一分不扣（【勾魂】不减少当前法力）。
-        这是「无法获得[法力]」的唯一判定位，所有来源都必须走 `gain_mana()`。
+        2026-11-08 用户令：【勾魂】重做为转移道纹，「无法获得[法力]」效果
+        整条撤销，本判定不再有封锁来源（保留方法供各法力来源统一调用）。
         """
-        return not self.has_status("勾魂")
+        return True
 
     def gain_mana(self, amount: int) -> int:
         """获得[法力]的统一入口，返回**实际**获得量。
 
-        - 【勾魂】期间任何来源的增益都不生效，返回 0（法力纹丝不动）；
+        - （旧【勾魂】「无法获得法力」已于 2026-11-08 随【勾魂】重做撤销；）
         - 其余情况按 [法限] 封顶，返回封顶后真正落到账上的数量。
 
         调用方若要 clamp_immortal_body（不朽之躯钳制），请在拿到返回值后
@@ -1722,7 +1732,10 @@ class GameState:
         （癌变累计）与战斗事件里的数值都是**翻倍后**的真实值，不存在
         "账上一份、面板另一份"。
         """
-        amount = amount * self.heal_multiplier(entity)
+        # 【百炼】窗口标记：使用消耗品期间回复数值翻倍（标记只在 consume
+        # 同步结算窗口内存在，见 handlers/items.py）。
+        amount = amount * self.heal_multiplier(entity) \
+            * int(getattr(self, "_consumable_effect_multiplier", 1) or 1)
         heal_ctx = normalize_context(ctx)
         if heal_ctx is None:
             heal_ctx = make_context(

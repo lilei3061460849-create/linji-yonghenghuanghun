@@ -3100,7 +3100,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             return "最终死斗无法逃跑"
         if any(r.name == "不离" for r in self.state.relics
                if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0):
-            return "【不离】：无法逃跑、撤退，也无法被移出本场战斗"
+            return "【不离】：所有角色无法离场"
         return ""
 
     def _force_disengage(self, *, reason: str) -> dict:

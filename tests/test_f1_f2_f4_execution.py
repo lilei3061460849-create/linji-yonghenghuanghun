@@ -1,7 +1,7 @@
 """F 裁定执行守护（2026-10-14，见 `三类物品审计.md` F1/F2/F4）。
 
 - F1：【猩红果实】重做为纯被动（生命可超血限），旧效果移交道纹【增殖】
-  （增殖X = 衰老X → 目标无限血限持续X）。
+  （增殖X → 目标无限血限持续X；代价原衰老X，2026-11-07 改冷却X）。
 - F2：【余火印】删除（extra 整段删，不并入）；【搏命】删除，疲惫换法力并入【透支】
   四通道（流血4X/衰老2X/枯竭X/疲惫X 四选一 → X法力，touzhi_cost 指定，缺省流血）；
   龙心谷事件「逆行者·接过余火」改授【透支】道纹。
@@ -43,21 +43,23 @@ def _add_monster(engine, hp=100):
 
 # ==================== F1：增殖 ====================
 
-def test_zengzhi_cast_pays_aging_without_pending():
+def test_zengzhi_cast_pays_cooldown_without_pending():
     engine = _setup()
     player = engine.state.player
     _grant(engine, ["增殖"])
     m = _add_monster(engine)
-    hp0 = player.current_hp
+    blood0 = player.blood_limit
     r = engine.execute_action("use_daowen", {"daowen_name": "增殖", "x": 2, "target_ref": "enemy:0"})
     assert r["success"], r
-    assert player.blood_limit == hp0 - 2  # 衰老X 即付
+    # 2026-11-07：代价由血限X改冷却X——血限不扣，【增殖】进冷却2场。
+    assert player.blood_limit == blood0
+    assert player.dao_wen["增殖"].cooldown_remaining == 2
     assert m.blood_limit == 100  # 战终前不涨
     assert "zengzhi_pending" not in engine.state.event_modifiers
     assert m.has_status("无限血限")
 
 
-def test_zengzhi_settles_at_battle_end_and_stacks():
+def test_zengzhi_settles_at_battle_end_and_cooldown_blocks_recast():
     engine = _setup()
     player = engine.state.player
     from engine.models import StatusEffect
@@ -69,7 +71,8 @@ def test_zengzhi_settles_at_battle_end_and_stacks():
     assert engine.execute_action(
         "use_daowen", {"daowen_name": "增殖", "x": 1, "target_ref": "friend:0"})["success"]
     assert engine.execute_action("skip", {"actor_ref": "enemy:0"})["success"]
-    assert engine.execute_action(
+    # 2026-11-07：代价改冷却后，同场不得重复发动【增殖】（旧血限代价可连发）。
+    assert not engine.execute_action(
         "use_daowen", {"daowen_name": "增殖", "x": 2, "target_ref": "friend:0"})["success"]
     m.is_alive = False
     engine.state.enemies = []

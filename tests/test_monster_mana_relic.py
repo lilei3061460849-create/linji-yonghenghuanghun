@@ -76,13 +76,14 @@ def test_mana_cap_does_not_reduce_the_mutation_grant():
     assert _relic_effects(result)[0]["mana_gained"] == 2
 
 
-def test_gouhun_blocks_only_mana_not_mutation():
+def test_gouhun_status_no_longer_blocks_mana_or_mutation():
+    # 2026-11-08【勾魂】重做为转移道纹：不再压制法力获得，异变同样不受影响。
     _, combat, _, monster = _arena()
     monster.add_status(StatusEffect("勾魂", remaining_rounds=2, value=1))
     result = combat.round_start()
-    assert monster.current_mana == 3
+    assert monster.current_mana == 10
     assert monster.mutation_count == 10
-    assert _relic_effects(result)[0]["mana_gained"] == 0
+    assert _relic_effects(result)[0]["mana_gained"] == 7
 
 
 def test_grant_reads_current_mana_limit_not_the_original_panel():

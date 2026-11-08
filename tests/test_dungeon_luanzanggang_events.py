@@ -124,14 +124,19 @@ def test_xuanmu_option2_hongsha_on_shaifa():
 
 # ---------- 孤坟香案 ----------
 
-def test_gufen_option1_relic():
-    """正常路径：上前续香——衰老6+获三香通冥。"""
+def test_gufen_option1_consumable():
+    """正常路径：上前续香——衰老6+获消耗品三香通冥（耐久3/3）。
+
+    2026-11-07 用户令：【三香通冥】由遗物改消耗品，不再进遗物列表。
+    """
     e = _engine("gf1")
     bl0 = e.state.player.blood_limit
     r = _resolve(e, "孤坟香案", 1)
     assert r["success"], r
     assert e.state.player.blood_limit == bl0 - 6
-    assert any(x.name == "三香通冥" for x in e.state.relics)
+    assert not any(x.name == "三香通冥" for x in e.state.relics)
+    cup = next(x for x in e.state.consumables if x.name == "三香通冥")
+    assert cup.current_uses == cup.max_uses == 3
 
 
 def test_gufen_option2_shards():
@@ -191,11 +196,11 @@ def test_wuming_option1_missing_daowen_rejected():
 
 
 def test_wuming_option2_armor_to_ally():
-    """正常路径：供奉——失去20碎片+队友获重甲兵躯。"""
+    """正常路径：供奉——失去20碎片+队友获重甲兵躯（新版不附带血限+15）。"""
     e = _engine("wm3")
     ally = e.state.friends[0]
     bl0 = ally.blood_limit
     r = _resolve(e, "无名将军墓", 2)
     assert r["success"], r
     assert any(x.name == "重甲兵躯" for x in ally.relics)
-    assert ally.blood_limit == bl0 + 15
+    assert ally.blood_limit == bl0  # 2026-11-07 新版：只发遗物本体，不改面板

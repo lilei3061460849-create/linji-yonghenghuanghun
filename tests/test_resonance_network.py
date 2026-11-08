@@ -122,12 +122,13 @@ def test_generic_core_is_four_tetrahedra():
     assert len(R.edges_of_region("通用")) == 24  # 4 个四面体 × 6 条无向边
     assert set(R.nodes_of_region("通用")) == {
         "杀伐", "再生", "庇护", "连击",
-        "操纵", "束缚", "迟滞", "封印",
+        "操纵", "束缚", "迟滞", "篡改",
         "强化", "弱化", "全力", "全速",
-        "必中", "飞行", "压迫", "篡改",
+        "必中", "飞行", "压迫", "封印",
     }
     assert R.find_transformation("连击", "反转") == "庇护"
     assert R.find_transformation("操纵", "转换") == "迟滞"
+    # 2026-11-08 用户令：【篡改】与【封印】再次调换（封印回四面体二、篡改回四面体四）。
     assert R.find_transformation("迟滞", "反转") == "封印"
     assert R.find_transformation("杀伐", "曲解") == "庇护"
     assert R.find_transformation("束缚", "曲解") == "迟滞"
@@ -136,6 +137,7 @@ def test_generic_core_is_four_tetrahedra():
     assert R.find_transformation("增殖", "反转") == "饥饿"
     assert R.find_transformation("波及", "反转") == "流动"
     assert R.find_transformation("封印", "反转") == "迟滞"
+    assert R.find_transformation("篡改", "反转") == "压迫"
     for removed in ("冲击", "慈悲", "切割", "缓慢"):
         assert removed not in R.nodes_of_region("通用")
 
@@ -166,8 +168,9 @@ def test_race_exclusive_sunken_sea_nodes_cannot_be_acquired_by_resonance():
 
 def test_region_tetrahedra_present():
     """正常路径：每个副本的四面体都在，且各自 4 节点 6 边。"""
-    expected = {"扭曲都市": 2, "罪孽都市": 2, "龙心谷": 1, "乱葬岗": 1,
-                "沉沦海": 2, "荒疫古城": 1, "永夜庭": 1}
+    # 2026-11-08：龙心谷/乱葬岗/荒疫古城/永夜庭各补齐第二组四面体（满 8 纹）。
+    expected = {"扭曲都市": 2, "罪孽都市": 2, "龙心谷": 2, "乱葬岗": 2,
+                "沉沦海": 2, "荒疫古城": 2, "永夜庭": 2}
     for region, count in expected.items():
         tetras = R.tetrahedra_of_region(region)
         assert len(tetras) == count, f"{region} 应有{count}个四面体，实：{list(tetras)}"

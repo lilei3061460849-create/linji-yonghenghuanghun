@@ -257,6 +257,23 @@ class DaowenHandlersMixin:
                 resolve_kw["order"] = params.get("caozuo_order")
             if name == "再生":
                 resolve_kw["cost_channel"] = params.get("zaisheng_cost", "法力")
+            # 2026-11-08 四副本补齐：带显式选择的道纹把选择透传给计算层。
+            if name in ("重铸", "回炉"):
+                resolve_kw["item_name"] = str(params.get("item_name") or "")
+            if name == "借尸":
+                resolve_kw["corpse_name"] = str(params.get("corpse_name") or "")
+            if name == "索取":
+                resolve_kw["resource_type"] = str(params.get("resource_type") or "法力")
+            if name == "感染":
+                resolve_kw["daowen_names"] = list(params.get("daowen_names") or [])
+            if name == "重演":
+                resolve_kw["replay_name"] = str(
+                    params.get("replay_daowen") or params.get("replay_name") or "")
+            if name == "病变":
+                resolve_kw["from_kind"] = str(params.get("from_kind") or "")
+                resolve_kw["to_kind"] = str(params.get("to_kind") or "")
+            if name == "勾魂":
+                resolve_kw["daowen_names"] = list(params.get("daowen_names") or [])
             calc = DaoWenEngine.resolve(name, x, **resolve_kw)
             if name == "冰冻":
                 calc["freeze_daowen"] = freeze_choices
@@ -300,22 +317,141 @@ class DaowenHandlersMixin:
             if target is actor:
                 return {"success": False,
                         "error": "【豪夺】必须以他人为[目标]：夺取自身的遗物不产生任何转移"}
-            pool = self.combat._relic_steal_candidates(target)
+            pool = self.combat._item_steal_candidates(target)
+            names = [n for _k, n in pool]
             if not pool:
                 return {"success": False,
-                        "error": f"【豪夺】{target.name}没有可夺取的遗物"
+                        "error": f"【豪夺】{target.name}没有可夺取的遗物或消耗品"
                                  f"（已封印/已被夺走的不算），本次发动不成立，不支付任何代价"}
-            wanted = str(params.get("relic_name") or params.get("haoduo_relic") or "").strip()
-            if wanted and wanted not in pool:
+            wanted = str(params.get("relic_name") or params.get("haoduo_relic")
+                         or params.get("item_name") or "").strip()
+            wanted_kind = str(params.get("item_kind") or "").strip()
+            if wanted and wanted not in names:
                 return {"success": False,
-                        "error": f"【豪夺】目标没有可夺取的遗物「{wanted}」，可选 {pool}"}
+                        "error": f"【豪夺】目标没有可夺取的遗物或消耗品「{wanted}」，可选 {names}"}
             if not wanted:
                 if len(pool) > 1:
                     return {"success": False,
-                            "error": f"【豪夺】{target.name}有多件可夺遗物{pool}，"
+                            "error": f"【豪夺】{target.name}有多件可夺遗物或消耗品{names}，"
                                      f"必须用relic_name显式指定要夺哪一件"}
-                wanted = pool[0]
+                wanted_kind, wanted = pool[0]
+            else:
+                kinds = [k for k, n in pool if n == wanted]
+                if wanted_kind and wanted_kind in kinds:
+                    pass
+                elif len(kinds) > 1:
+                    return {"success": False,
+                            "error": f"【豪夺】目标同时有遗物与消耗品「{wanted}」，"
+                                     f"必须用item_kind指定种类（relic/consumable）"}
+                else:
+                    wanted_kind = kinds[0]
             calc["haoduo_relic_name"] = wanted
+            calc["haoduo_item_kind"] = wanted_kind
+
+        if name in ("重铸", "回炉"):
+            # 与【豪夺】同口径：无可操作消耗品/多件未指定时必须在扣费前拒绝。
+            item_names = [i.name for i in self.combat._consumable_holder_list(target)
+                          if getattr(i, "current_uses", None) is not None]
+            if not item_names:
+                return {"success": False,
+                        "error": f"【{name}】{target.name}没有消耗品，本次发动不成立，不支付代价"}
+            wanted_item = str(params.get("item_name") or "").strip()
+            if wanted_item and wanted_item not in item_names:
+                return {"success": False,
+                        "error": f"【{name}】目标没有消耗品「{wanted_item}」，可选 {item_names}"}
+            if not wanted_item and len(item_names) > 1 and actor is self.state.player:
+                return {"success": False,
+                        "error": f"【{name}】{target.name}有多件消耗品{item_names}，必须用item_name显式指定"}
+            key = "recast_item_name" if name == "重铸" else "reforge_destroy_item_name"
+            calc[key] = wanted_item or item_names[0]
+
+        if name == "借尸":
+            corpses = [e for e in getattr(self.state, "dead_monsters", []) or []]
+            if not corpses:
+                return {"success": False,
+                        "error": "【借尸】场上没有尸体，本次发动不成立，不支付代价"}
+            corpse_names = [e.name for e in corpses]
+            wanted_corpse = str(params.get("corpse_name") or "").strip()
+            if wanted_corpse and wanted_corpse not in corpse_names:
+                return {"success": False,
+                        "error": f"【借尸】场上没有名为「{wanted_corpse}」的尸体，可选 {corpse_names}"}
+            calc["borrow_corpse_name"] = wanted_corpse or corpse_names[-1]
+
+        if name == "合体":
+            side = (self.state.get_all_player_side()
+                    if not self.state.on_enemy_side(actor)
+                    else self.state.get_all_enemy_side())
+            creations = [e for e in side if e is not actor and e.treated_as_creation()]
+            if len(creations) < x:
+                return {"success": False,
+                        "error": f"【合体】己方只有{len(creations)}个造物，不足{x}个，本次发动不成立，不支付代价"}
+
+        if name == "感染":
+            candidates = [n for n in target.dao_wen if n != "感染"]
+            if not candidates:
+                return {"success": False,
+                        "error": f"【感染】{target.name}没有可变为感染的道纹，本次发动不成立，不支付代价"}
+            picked = [str(n) for n in (params.get("daowen_names") or []) if n]
+            missing = [n for n in picked if n not in candidates]
+            if missing:
+                return {"success": False,
+                        "error": f"【感染】目标未持有可感染的道纹{missing}，持有 {candidates}"}
+            if not picked and len(candidates) > x and actor is self.state.player:
+                return {"success": False,
+                        "error": f"【感染】{target.name}持有{len(candidates)}种道纹{candidates}，必须用daowen_names显式指定"}
+            calc["infect_daowen_names"] = (picked or candidates[:x])[:x]
+
+        if name == "勾魂":
+            # 2026-11-08 重做：转移[目标]的X种道纹至1个[造物]；无造物/未指定
+            # 道纹时在扣费前拒绝（与【豪夺】同口径）。
+            calc["gouhun_creation_ref"] = str(params.get("creation_ref") or "")
+            candidates = list(target.dao_wen)
+            if not candidates:
+                return {"success": False,
+                        "error": f"【勾魂】{target.name}没有可转移的道纹，本次发动不成立，不支付代价"}
+            picked = [str(n) for n in (params.get("daowen_names") or []) if n]
+            missing = [n for n in picked if n not in candidates]
+            if missing:
+                return {"success": False,
+                        "error": f"【勾魂】目标未持有道纹{missing}，持有 {candidates}"}
+            if not picked and len(candidates) > x and actor is self.state.player:
+                return {"success": False,
+                        "error": f"【勾魂】{target.name}持有{len(candidates)}种道纹{candidates}，必须用daowen_names显式指定"}
+            everyone = self.state.get_all_player_side() + self.state.get_all_enemy_side()
+            creation_ref = calc["gouhun_creation_ref"]
+            creation = refs.get(creation_ref) if creation_ref else None
+            if creation_ref and (creation is None or not creation.treated_as_creation()):
+                return {"success": False, "error": "【勾魂】creation_ref不是场上的[造物]"}
+            if not any(e is not target and e.treated_as_creation() for e in everyone):
+                return {"success": False,
+                        "error": "【勾魂】场上没有可接收道纹的[造物]，本次发动不成立，不支付代价"}
+            calc["transfer_daowen_names"] = (picked or candidates[:x])[:x]
+
+        if name == "病变":
+            from ..daowen import purifiable_cost_layers
+            src = str(params.get("from_kind") or "")
+            dst = str(params.get("to_kind") or "")
+            if not src or not dst:
+                return {"success": False, "error": "病变必须显式指定from_kind与to_kind"}
+            if purifiable_cost_layers(target, src) <= 0:
+                return {"success": False,
+                        "error": f"【病变】{target.name}未持有可转化的【{src}】层数，本次发动不成立，不支付代价"}
+
+        if name == "重演":
+            from ..daowen import DaoWenEngine as _DWE
+            history = sorted(n for n in getattr(target, "daowen_use_history", set())
+                             if n in _DWE.list_all() and n != "重演")
+            if not history:
+                return {"success": False,
+                        "error": f"【重演】{target.name}本场尚未发动过任何道纹，本次发动不成立，不支付代价"}
+            wanted_replay = str(params.get("replay_daowen") or params.get("replay_name") or "").strip()
+            if wanted_replay and wanted_replay not in history:
+                return {"success": False,
+                        "error": f"【重演】{target.name}本场未发动过【{wanted_replay}】，已发动 {history}"}
+            if not wanted_replay and len(history) > 1 and actor is self.state.player:
+                return {"success": False,
+                        "error": f"【重演】{target.name}本场已发动过{history}，必须用replay_daowen显式指定"}
+            calc["replay_daowen_name"] = wanted_replay or history[-1]
 
         # 「发动道纹」的共用前置环节（与法术每一步同一实现，见
         # CombatEngine._daowen_step_preflight）：缄默面具 → 目标发动道纹前反应 →

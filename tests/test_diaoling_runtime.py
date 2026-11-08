@@ -65,12 +65,11 @@ def test_cost_ownership_and_no_unconfirmed_resonance_edge():
         "凋零", owned={"分裂"}, region="乱葬岗", known=known) is None
     assert "当前副本无法习得" in learnability_error(
         "凋零", owned={"分裂"}, region="龙心谷", known=known)
-    # 2026-11-02 乱葬岗四面体：反转 分裂⇄凋零、招魂⇄勾魂 ｜ 转换 分裂⇄招魂、凋零⇄勾魂
-    # ｜ 曲解 分裂⇄勾魂、凋零⇄招魂。凋零的三条边都指向真实道纹。
-    assert ResonanceEngine.find_transformation("凋零", "反转") == "分裂"
-    assert ResonanceEngine.find_transformation("凋零", "转换") == "勾魂"
-    assert ResonanceEngine.find_transformation("凋零", "曲解") == "招魂"
-    assert ResonanceEngine.find_transformation("分裂", "反转") == "凋零"
+    # 2026-11-08 乱葬岗·四面体二（最终结构）：凋零 反转⇄招魂、转换⇄借尸、曲解⇄立冢。
+    assert ResonanceEngine.find_transformation("凋零", "反转") == "招魂"
+    assert ResonanceEngine.find_transformation("凋零", "转换") == "借尸"
+    assert ResonanceEngine.find_transformation("凋零", "曲解") == "立冢"
+    assert ResonanceEngine.find_transformation("招魂", "反转") == "凋零"
 
 
 def test_target_is_required_and_non_self_target_does_not_exempt_caster():

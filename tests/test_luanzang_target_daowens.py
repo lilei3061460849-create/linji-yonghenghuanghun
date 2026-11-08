@@ -84,62 +84,40 @@ def test_requires_target_flag_now_true(tmp_path):
         assert "target" in inspect.signature(DaoWenEngine._registry[name]).parameters, name
 
 
-def test_monster_gouhun_blocks_player_mana_gain(tmp_path):
-    """怪物勾魂 → 玩家获得勾魂状态，持续X回合**无法获得法力**（不扣已有法力）。
+def test_monster_gouhun_transfers_player_daowen(tmp_path):
+    """怪物勾魂 → 玩家道纹被转移到怪物方[造物]身上（2026-11-08 重做）。
 
     版本史：旧版「[回始]失去2X法力，持续∞」→ 2026-08-30「无法获得法力」
-    → 2026-09-09 因法力改一池制一度改为「消耗翻倍」
-    → 2026-10-08 用户令：恢复「无法获得[法力]」，翻倍撤销。
+    → 2026-09-09 一度「消耗翻倍」→ 2026-10-08 恢复「无法获得[法力]」
+    → 2026-11-08 改为「法力5X，转移目标X种道纹至1个[造物]，持续∞」，
+    法力增益不再被压制。
     """
     e = _mk_engine(tmp_path)
     p = e.state.player
     p.current_mana = 30
     m = _monster_with("勾魂使者", {"勾魂": 2})
+    m.mana_limit = m.current_mana = 50
     e.state.enemies.append(m)
+    creation = Entity(name="尸傀", entity_type="造物", blood_limit=30, current_hp=30)
+    e.state.enemies.append(creation)
     e.combat.reset_monster_activation()
     r = _monster_cast(e, m, "勾魂", "player:0")
     assert r, r
-    assert p.has_status("勾魂"), "勾魂应挂在玩家身上"
+    assert "杀伐" not in p.dao_wen and "杀伐" in creation.dao_wen, "道纹应被转移到造物身上"
+    assert not p.has_status("勾魂"), "新勾魂不挂持续状态"
 
-    # 勾魂期间：增益被压死，已持有的法力一分不扣，消耗也不翻倍
+    # 法力：增益照常，已持有的一分不扣，消耗也不翻倍
+    p.mana_limit = 30
     p.current_mana = 9
-    assert p.can_gain_mana() is False
-    assert p.gain_mana(5) == 0
-    assert p.current_mana == 9, f"勾魂期间不得获得法力，实剩 {p.current_mana}"
+    assert p.can_gain_mana() is True
+    assert p.gain_mana(5) == 5
+    assert p.current_mana == 14, f"勾魂已不再压制法力增益，实剩 {p.current_mana}"
     assert p.spend_mana(4) is True
-    assert p.current_mana == 5, f"勾魂不改消耗倍率，实剩 {p.current_mana}"
-
-
-
-def test_monster_huaisi_blocks_player_heal(tmp_path):
-    """怪物坏死 → 玩家无法获得[回复]（再生治疗被阻止）。
-
-    2026-10-08 用户令删除【镇尸】后，本用例改挂【坏死】——扭曲都市专属，
-    脑蜘蛛等承载，是「无法获得[回复]」的唯一实现。
-    """
-    e = _mk_engine(tmp_path, region="扭曲都市")
-    p = e.state.player
-    p.current_hp = 40
-    p.dao_wen["再生"] = DaoWenInstance(
-        DaoWen(name="再生", formula="", cost_type="消耗", cost_formula="X",
-               effect_formula=""), x_value=0)
-    m = _monster_with("脑蜘蛛", {"坏死": 2})
-    e.state.enemies.append(m)
-    e.combat.reset_monster_activation()
-    r = _monster_cast(e, m, "坏死", "player:0")
-    assert r, r
-    assert p.has_status("坏死"), "坏死应挂在玩家身上"
-    hp_after_cast = p.current_hp  # 怪物阶段包含1次1伤攻击：40→39
-    # 玩家对自身发动再生4（应回复12）→ 被坏死阻止（单目标路径：直接跳过治愈，无heal条目）
-    calc = DaoWenEngine.resolve("再生", 4, target=p, caster=p)
-    res = e.combat.apply_daowen_effect("再生", calc, p, p)
-    heals = [x for x in res.get("effects", []) if x.get("type") == "heal"]
-    assert not heals, "再生应被坏死阻止（不应产生治愈条目）"
-    assert p.current_hp == hp_after_cast, "玩家生命不应增加（应维持怪物攻击后的数值）"
+    assert p.current_mana == 10, f"勾魂不改消耗倍率，实剩 {p.current_mana}"
 
 
 def test_player_casts_daowens_with_explicit_targets(tmp_path):
-    """玩家施放道纹时仍能正确选择目标。"""
+    """玩家施放道纹时仍能正确选择目标（2026-11-08：勾魂=转移道纹）。"""
     e = _mk_engine(tmp_path)
     p = e.state.player
     for dw in ("勾魂",):
@@ -148,11 +126,17 @@ def test_player_casts_daowens_with_explicit_targets(tmp_path):
                    effect_formula=""), x_value=0)
     foe = Entity(name="敌法", entity_type="轮回者", blood_limit=80, current_hp=80,
                  mana_limit=20, current_mana=20, speed_limit=6, current_speed=6)
+    foe.dao_wen["杀伐"] = DaoWenInstance(
+        DaoWen(name="杀伐", formula="", cost_type="消耗", cost_formula="X",
+               effect_formula=""), x_value=0)
     e.state.enemies.append(foe)
-    # 勾魂→敌法（法力被挂勾魂）
-    calc = DaoWenEngine.resolve("勾魂", 2, target=foe, caster=p)
+    creation = Entity(name="尸傀", entity_type="造物", blood_limit=30, current_hp=30)
+    e.state.temp_friends.append(creation)
+    # 勾魂→敌法：其【杀伐】被转移到我方[造物]身上
+    calc = DaoWenEngine.resolve("勾魂", 1, target=foe, caster=p, daowen_names=["杀伐"])
     e.combat.apply_daowen_effect("勾魂", calc, p, foe)
-    assert foe.has_status("勾魂")
+    assert "杀伐" not in foe.dao_wen and "杀伐" in creation.dao_wen
+    assert not foe.has_status("勾魂"), "新勾魂不挂持续状态"
     # 2026-10-08 删【镇尸】：禁疗改由【坏死】唯一实现，此处不再并排验证。
 
 
