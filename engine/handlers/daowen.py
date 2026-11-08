@@ -300,22 +300,36 @@ class DaowenHandlersMixin:
             if target is actor:
                 return {"success": False,
                         "error": "【豪夺】必须以他人为[目标]：夺取自身的遗物不产生任何转移"}
-            pool = self.combat._relic_steal_candidates(target)
+            pool = self.combat._item_steal_candidates(target)
+            names = [n for _k, n in pool]
             if not pool:
                 return {"success": False,
-                        "error": f"【豪夺】{target.name}没有可夺取的遗物"
+                        "error": f"【豪夺】{target.name}没有可夺取的遗物或消耗品"
                                  f"（已封印/已被夺走的不算），本次发动不成立，不支付任何代价"}
-            wanted = str(params.get("relic_name") or params.get("haoduo_relic") or "").strip()
-            if wanted and wanted not in pool:
+            wanted = str(params.get("relic_name") or params.get("haoduo_relic")
+                         or params.get("item_name") or "").strip()
+            wanted_kind = str(params.get("item_kind") or "").strip()
+            if wanted and wanted not in names:
                 return {"success": False,
-                        "error": f"【豪夺】目标没有可夺取的遗物「{wanted}」，可选 {pool}"}
+                        "error": f"【豪夺】目标没有可夺取的遗物或消耗品「{wanted}」，可选 {names}"}
             if not wanted:
                 if len(pool) > 1:
                     return {"success": False,
-                            "error": f"【豪夺】{target.name}有多件可夺遗物{pool}，"
+                            "error": f"【豪夺】{target.name}有多件可夺遗物或消耗品{names}，"
                                      f"必须用relic_name显式指定要夺哪一件"}
-                wanted = pool[0]
+                wanted_kind, wanted = pool[0]
+            else:
+                kinds = [k for k, n in pool if n == wanted]
+                if wanted_kind and wanted_kind in kinds:
+                    pass
+                elif len(kinds) > 1:
+                    return {"success": False,
+                            "error": f"【豪夺】目标同时有遗物与消耗品「{wanted}」，"
+                                     f"必须用item_kind指定种类（relic/consumable）"}
+                else:
+                    wanted_kind = kinds[0]
             calc["haoduo_relic_name"] = wanted
+            calc["haoduo_item_kind"] = wanted_kind
 
         # 「发动道纹」的共用前置环节（与法术每一步同一实现，见
         # CombatEngine._daowen_step_preflight）：缄默面具 → 目标发动道纹前反应 →

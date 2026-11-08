@@ -785,20 +785,35 @@ class DaowenEffectMixin:
             # 2026-11-01 用户令：夺取对象必须确定，且**在任何代价支付之前**判定。
             # 无可夺遗物 → 报错中止（不扣碎片、不消耗出手）；目标有多件可夺遗物
             # 时玩家侧必须显式指定 relic_name，只有唯一候选才允许省略。
-            pool = self._relic_steal_candidates(target)
+            # 2026-11-07 加强：候选扩为遗物/消耗品（_item_steal_candidates）。
+            pool = self._item_steal_candidates(target)
+            names = [n for _k, n in pool]
             if not pool:
                 raise ValueError(
-                    f"【豪夺】{getattr(target, 'name', '目标')}没有可夺取的遗物"
+                    f"【豪夺】{getattr(target, 'name', '目标')}没有可夺取的遗物或消耗品"
                     f"（已封印/已被夺走的不算），本次发动不成立，不支付代价")
             wanted = str(calc.get("haoduo_relic_name") or "").strip()
-            if wanted and wanted not in pool:
-                raise ValueError(f"【豪夺】目标没有可夺取的遗物「{wanted}」，可选 {pool}")
+            wanted_kind = str(calc.get("haoduo_item_kind") or "").strip()
+            if wanted and wanted not in names:
+                raise ValueError(f"【豪夺】目标没有可夺取的遗物或消耗品「{wanted}」，可选 {names}")
             if not wanted:
                 if len(pool) > 1 and caster is self.state.player:
                     raise ValueError(
-                        f"【豪夺】{target.name}有多件可夺遗物{pool}，必须显式指定relic_name")
-                wanted = pool[0]      # 唯一候选：无需选择；非玩家由引擎代选
+                        f"【豪夺】{target.name}有多件可夺遗物或消耗品{names}，必须显式指定relic_name")
+                wanted_kind, wanted = pool[0]  # 唯一候选：无需选择；非玩家由引擎代选
+            else:
+                kinds = [k for k, n in pool if n == wanted]
+                if wanted_kind and wanted_kind in kinds:
+                    pass
+                elif len(kinds) > 1:
+                    if caster is self.state.player:
+                        raise ValueError(
+                            f"【豪夺】目标同时有遗物与消耗品「{wanted}」，必须用item_kind指定种类")
+                    wanted_kind = kinds[0]
+                else:
+                    wanted_kind = kinds[0]
             calc["haoduo_relic_name"] = wanted
+            calc["haoduo_item_kind"] = wanted_kind
         if name == "净化":
             reductions = calc.get("cost_reductions", {})
             kinds = set(reductions)
@@ -2083,20 +2098,28 @@ class DaowenEffectMixin:
                 result["effects"].append({"type": "dikou", "target": st_target.name,
                                           "sealed": sealed or None, "rounds": x})
         # 豪夺X（2026-09-28）：消耗5X碎片，夺取[目标]1件遗物持续X回合（夺取者持有并享受被动）
+        # 2026-11-07 加强：可夺对象扩为遗物/消耗品，按发前校验定下的种类分派。
         elif name == "豪夺":
             # 显式选定的那一件只对**真正持有它的**目标生效；波及波及其他目标时
             # 不会改投别的遗物、也不会重复夺同一件。
             wanted = str(calc.get("haoduo_relic_name") or "")
+            wanted_kind = str(calc.get("haoduo_item_kind") or "relic")
             for st_target in wave_status_targets:
-                candidates = self._relic_steal_candidates(st_target)
-                if not candidates or st_target is not target:
+                pool = self._item_steal_candidates(st_target)
+                names = [n for _k, n in pool]
+                if not pool or st_target is not target:
                     stolen = ""
+                elif wanted_kind == "consumable":
+                    stolen = self._steal_one_consumable(
+                        caster, st_target, x,
+                        wanted if wanted in names else "")
                 else:
                     stolen = self._steal_one_relic(
                         caster, st_target, x,
-                        wanted if wanted in candidates else "")
+                        wanted if wanted in names else "")
                 result["effects"].append({"type": "haoduo", "target": st_target.name,
-                                          "stolen": stolen or None, "rounds": x})
+                                          "stolen": stolen or None, "rounds": x,
+                                          "kind": wanted_kind})
 
         # 波及X：目标标记由 use_daowen 的逐目标提交建立/解除；此处只记结果。
         if name == "波及":

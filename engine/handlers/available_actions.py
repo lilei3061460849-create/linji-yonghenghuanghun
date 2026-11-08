@@ -547,7 +547,7 @@ class AvailableActionsMixin:
                        if name == "连击" else {}),
                     **({"lianmin_cost": list(DaoWenEngine.PAYABLE_TYPES)}
                        if name == "怜悯" else {}),
-                    **({"relic_name": "目标可夺取的遗物名；目标有多件时必须显式指定，无可夺遗物则本次发动被拒绝且不支付代价"}
+                    **({"relic_name": "目标可夺取的遗物或消耗品名；目标有多件时必须显式指定，同名跨种类时另加item_kind=relic/consumable，无可夺对象则本次发动被拒绝且不支付代价"}
                        if name == "豪夺" else {}),
                     **({"cost_choices": "净化：支付法力20X；显式选择目标拥有的数值类代价及层数，格式为[{type: 血限/枯竭/法限/速度/异变, layers: 正整数}]；可混选多种，所有layers之和不得超过X；单选项省略layers时默认吃满X；不能选择失忆或冷却"} if name == "净化" else {}),
                     "cost_share_target_ref": (

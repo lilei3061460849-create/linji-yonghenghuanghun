@@ -1157,7 +1157,7 @@ class DamageDeathMixin:
         if not owned:
             return ""
         stolen_set = {k for k, v in (getattr(holder, "stolen_relics", {}) or {}).items()
-                      if v.get("remaining", 0) > 0}
+                      if v.get("remaining", 0) > 0 and v.get("kind", "relic") == "relic"}
         # 封印第一件未在封印/未被夺取走的遗物
         for rname in owned:
             if holder.sealed_relics.get(rname, 0) <= 0 and rname not in stolen_set:
@@ -1191,13 +1191,71 @@ class DamageDeathMixin:
         return [relic.name for relic in tgt_list
                 if relic.name not in sealed_names and relic.name not in already_stolen]
 
+    def _consumable_container_of(self, entity: Entity) -> list:
+        """实体实际存放消耗品的列表（玩家侧 = GameState.consumables）。"""
+        if entity is self.state.player:
+            return self.state.consumables
+        lst = getattr(entity, "consumables", None)
+        if lst is None:
+            entity.consumables = lst = []
+        return lst
+
+    def _consumable_steal_candidates(self, target: Entity) -> list[str]:
+        """【豪夺】可夺取的消耗品名（目标真正持有、耐久未尽、未被夺走）。
+
+        与遗物候选同一口径：借来的（在目标自己的被夺账本里）不算其所有，
+        不能被再夺；耐久 0 的空壳没有可夺价值，不入候选。
+        """
+        if target is None:
+            return []
+        tgt_list = self._consumable_container_of(target)
+        if not tgt_list:
+            return []
+        tgt_stolen = (self.state.stolen_relics if target is self.state.player
+                      else getattr(target, "stolen_relics", None) or {})
+        already_stolen = {k for k, v in tgt_stolen.items()
+                          if isinstance(v, dict) and v.get("remaining", 0) > 0}
+        return [item.name for item in tgt_list
+                if item.name not in already_stolen
+                and int(getattr(item, "current_uses", 0)) > 0]
+
+    def _item_steal_candidates(self, target: Entity) -> list[tuple[str, str]]:
+        """【豪夺】可夺对象 [(种类, 名称)]：遗物在前、消耗品在后。
+
+        2026-11-07 用户令加强后这是唯一的候选定义点：发动前校验、怪物代选与
+        实际夺取都读它，避免「校验只认遗物、结算能夺消耗品」的脱节。
+        """
+        return ([("relic", n) for n in self._relic_steal_candidates(target)]
+                + [("consumable", n) for n in self._consumable_steal_candidates(target)])
+
     # 旧 `_haoduo_status_of(holder, name)` 已由 `find_haoduo_status(name)` 取代：
     # 后者全场定位（【流动】可能把镜像搬到别人身上），"只在持有者身上找"正是
     # 报告 P2-5 的脱节来源。
 
     def _return_stolen_relic(self, holder: Entity, holder_list: list,
                              relic_name: str, info: dict) -> str:
-        """把到期的豪夺遗物还给原持有者；返回遗物名（找不到原位时也返回，便于记账）。"""
+        """把到期的豪夺遗物还给原持有者；返回遗物名（找不到原位时也返回，便于记账）。
+
+        2026-11-07：账本可记消耗品（info["kind"]=="consumable"）——物件在
+        消耗品容器间搬家（按归还时剩余耐久），其余口径与遗物相同。
+        """
+        if info.get("kind") == "consumable":
+            holder_box = self._consumable_container_of(holder)
+            item_obj = next((c for c in holder_box if c.name == relic_name), None)
+            if item_obj is None:
+                return ""
+            holder_box.remove(item_obj)
+            if info.get("target_is_player"):
+                self.state.consumables.append(item_obj)
+                return relic_name
+            for lst in (self.state.enemies, getattr(self.state, "friends", []),
+                        getattr(self.state, "employees", []),
+                        getattr(self.state, "temp_friends", [])):
+                owner = next((e for e in lst if e.name == info.get("from_entity_name")), None)
+                if owner is not None:
+                    self._consumable_container_of(owner).append(item_obj)
+                    break
+            return relic_name
         relic_obj = next((r for r in holder_list if r.name == relic_name), None)
         if relic_obj is None:
             return ""
@@ -1382,6 +1440,7 @@ class DamageDeathMixin:
             "from_entity_ref": id(target),
             "from_entity_name": target.name,
             "target_is_player": target is self.state.player,
+            "kind": "relic",
         }
         # 持续回合的对外可见载体：挂一个同名状态在**夺取方**身上，
         # 使【回响】能按通用"持续Y"口径选中并延长。2026-11-02 修复3：
@@ -1393,6 +1452,48 @@ class DamageDeathMixin:
             effect_data={"source_daowen": "豪夺", "relic_name": stolen.name,
                          "from_entity_name": target.name,
                          # 由 _tick_stolen_relics 手动递减，通用回终不再减一次。
+                         "manual_round_countdown": True}))
+        return stolen.name
+
+    def _steal_one_consumable(
+        self, caster: Entity, target: Entity, rounds: int, item_name: str = "",
+    ) -> str:
+        """豪夺消耗品（2026-11-07 加强）：夺取[目标]1件消耗品持续X回合。
+
+        与遗物同一套账本/镜像状态/到期归还：物件本体在消耗品容器间搬家，
+        夺取期间施法者可使用；到期按归还时剩余耐久还回（用完只剩空壳，一并归还）。
+        账本 kind="consumable"，归还走 `_return_stolen_relic` 的消耗品分支。
+        返回被夺取的消耗品名；目标无可夺消耗品返回""。
+        """
+        tgt_list = self._consumable_container_of(target)
+        cst_list = self._consumable_container_of(caster)
+        cst_stolen = self._stolen_ledger(caster)
+        allowed = set(self._consumable_steal_candidates(target))
+        candidates = [c for c in tgt_list if c.name in allowed]
+        if not candidates:
+            return ""
+        wanted = str(item_name or "").strip()
+        if wanted:
+            stolen = next((c for c in candidates if c.name == wanted), None)
+            if stolen is None:
+                return ""
+        else:
+            stolen = candidates[0]
+        tgt_list.remove(stolen)
+        cst_list.append(stolen)
+        cst_stolen[stolen.name] = {
+            "remaining": max(1, rounds),
+            "from_entity_ref": id(target),
+            "from_entity_name": target.name,
+            "target_is_player": target is self.state.player,
+            "kind": "consumable",
+        }
+        caster.add_status(StatusEffect(
+            name="豪夺", remaining_rounds=max(1, int(rounds)),
+            value=max(1, int(rounds)), source=caster.name,
+            effect_data={"source_daowen": "豪夺", "relic_name": stolen.name,
+                         "item_kind": "consumable",
+                         "from_entity_name": target.name,
                          "manual_round_countdown": True}))
         return stolen.name
 

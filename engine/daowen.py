@@ -904,11 +904,13 @@ class DaoWenEngine:
     # 2026-09-28 用户令：原【抵扣】改名【豪夺】。
     @staticmethod
     def calculate_haoduo(x: int, target: Entity = None) -> dict:
-        """豪夺X：支付：5X碎片，夺取[目标]1件遗物持续X回合。
+        """豪夺X：支付：5X碎片，夺取[目标]1件遗物或消耗品持续X回合。
 
-        夺取=把目标的一件遗物转移到己方（施法者）临时持有，持续X回合，到期归还。
+        夺取=把目标的一件遗物或消耗品转移到己方（施法者）临时持有，持续X回合，到期归还。
         与旧【抵扣】（只封印）的区别：夺取期间施法者**真正持有**该遗物并能触发其被动，
         目标在这段时间里不能触发该遗物。
+        2026-11-07 用户令加强：可夺对象由遗物扩为遗物/消耗品；消耗品夺取期间可使用，
+        到期按归还时剩余耐久还回（已用完的只剩空壳，一并归还）。
         """
         target_name = target.name if target is not None else "未选定目标"
         return {
@@ -916,8 +918,8 @@ class DaoWenEngine:
             # 2026-09-28 用户令：支付：5X碎片（沿用现有 cost_shards 付费通道；
             # 不写 cost_type=MANA，避免被当成法力支付）。
             "cost_type": "代价", "cost_shards": 5 * x,
-            "relic_steal": 1, "duration": x,
-            "summary": f"支付：{5*x}碎片，夺取{target_name}一件遗物，持续{x}回合"
+            "relic_steal": 1, "item_steal": 1, "duration": x,
+            "summary": f"支付：{5*x}碎片，夺取{target_name}一件遗物或消耗品，持续{x}回合"
         }
 
     # 2026-10-31 用户令：【抢劫】【勒索】删除，补入主环四纹。

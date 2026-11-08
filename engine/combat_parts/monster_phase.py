@@ -190,7 +190,7 @@ class MonsterPhaseMixin:
                         legal_targets = [
                             option for option in legal_targets
                             if (refs[option["ref"]] is not monster
-                                and self._relic_steal_candidates(refs[option["ref"]]))
+                                and self._item_steal_candidates(refs[option["ref"]]))
                         ]
                         if not legal_targets:
                             continue
@@ -544,15 +544,21 @@ class MonsterPhaseMixin:
             calc["revive_monster_name"] = wanted or names[-1]
         if effective_name == "豪夺":
             # 2026-11-01：目标没有可夺遗物 → 本次发不动（不付5X碎片，不占出手）。
-            pool = self._relic_steal_candidates(target)
+            # 2026-11-07：候选扩为遗物/消耗品，怪物代选第一件并带种类。
+            pool = self._item_steal_candidates(target)
+            names = [n for _k, n in pool]
             if not pool:
                 return {"monster": monster.name, "daowen_skipped": name,
                         "resolves_as": effective_name,
-                        "reason": f"{getattr(target, 'name', '目标')}没有可夺取的遗物"}
+                        "reason": f"{getattr(target, 'name', '目标')}没有可夺取的遗物或消耗品"}
             wanted = str(choice.get("relic_name") or "")
-            if wanted and wanted not in pool:
-                raise ValueError(f"【豪夺】目标没有可夺取的遗物「{wanted}」，可选 {pool}")
-            calc["haoduo_relic_name"] = wanted or pool[0]
+            if wanted and wanted not in names:
+                raise ValueError(f"【豪夺】目标没有可夺取的遗物或消耗品「{wanted}」，可选 {names}")
+            if wanted:
+                calc["haoduo_relic_name"] = wanted
+                calc["haoduo_item_kind"] = next(k for k, n in pool if n == wanted)
+            else:
+                calc["haoduo_item_kind"], calc["haoduo_relic_name"] = pool[0]
         # 2026-09-16 用户令：怪物支付法力（旧条文"不支付法力"已废止）。
         # 付不起的情况已由上一闸门挡掉，这里只做实际支付。
         # 注意：法力同时就是[攻击力]，此刻支付会削弱本回合**之后**的普攻——
