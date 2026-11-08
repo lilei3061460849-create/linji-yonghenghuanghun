@@ -74,10 +74,9 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('普通回合与大梦产生的额外回合均适用', sea)
         self.assertNotIn('沉溺尚未接入', sea)
         self.assertNotIn('沉溺，支付待定', sea)
-        self.assertIn('9.长夜X：效果待重做', night)
-        self.assertNotIn('使[目标]无法经历回合，持续X', night)
-        long_night = next(r for r in self.rows if r['name'] == '长夜')
-        self.assertEqual(long_night['review'], '语义待定')
+        # 2026-11-08 用户令：【长夜】道纹正式删除（不再保留待重做名额）。
+        self.assertNotIn('长夜', night)
+        self.assertNotIn('长夜', {r['name'] for r in self.rows})
         row = next(r for r in self.rows if r['name'] == '沉溺')
         self.assertTrue(row['runtime'])
         self.assertEqual(row['review'], '暂未发现结构违规')
