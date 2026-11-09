@@ -87,6 +87,8 @@ class MonsterPhaseMixin:
         refs: dict[str, Entity] = {}
         if (self.state.player and self.state.player.is_alive
                 and not self.state.is_sealed_away(self.state.player)):
+            # 读档／重来／深拷贝快照后弱引用会丢失；幂等重绑轮回者的失血拦截钩子。
+            self._bind_intercept_hook(self.state.player)
             refs["player:0"] = self.state.player
         for prefix, entities in (
             ("friend", self.state.friends),

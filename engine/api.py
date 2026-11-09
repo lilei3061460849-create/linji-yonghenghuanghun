@@ -4755,6 +4755,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         self.dice = restored["dice"]
         self.combat.state = self.state
         self.combat.dice = self.dice
+        # pickle 恢复的实体不带战斗引擎弱引用；读档边界重绑失血拦截钩子。
+        self.combat._bind_intercept_hooks()
         # 机制系统：事件观察者必须重新绑定到当前引擎。
         # 跨进程读档时，pickle 恢复的观察者仍持旧引擎 id，会静默失效
         # （事件机制如焦黑发丝/洗劫·夺碎片不触发）。

@@ -693,9 +693,12 @@ class Entity:
                 and any(status.name == "不死" and not status.is_expired
                         for status in self.__dict__.get("status_effects", ()))):
             value = 1
-        # 庇护统一拦截实际生命写入；只有战斗绑定实体具有该判定位。
+        # 庇护／脆弱统一拦截实际生命写入。2026-11-09：轮回者在正式流程里
+        # 只绑「拦截钩子」`_hp_intercept_ref`（不绑完整的 `_hp_engine_ref`），
+        # 因此本块要兼容两种弱引用；完整绑定仍以 `_hp_engine_ref` 为准。
         if name == "current_hp" and old is not None and value < old:
-            eng = self.__dict__.get("_hp_engine_ref")
+            eng = (self.__dict__.get("_hp_intercept_ref")
+                   or self.__dict__.get("_hp_engine_ref"))
             owner = eng() if eng is not None else None
             if owner is not None:
                 value = owner._shelter_hp_loss(self, old, value)
@@ -762,6 +765,7 @@ class Entity:
         """存档/快照序列化时剔除战斗期引擎弱引用（不可 pickle）。"""
         state = self.__dict__.copy()
         state.pop("_hp_engine_ref", None)
+        state.pop("_hp_intercept_ref", None)
         state.pop("_hp_state_ref", None)
         return state
 
@@ -771,6 +775,7 @@ class Entity:
         self.__dict__["entity_type"] = normalize_entity_type(
             self.__dict__.get("entity_type", ""))
         self.__dict__["_hp_engine_ref"] = None
+        self.__dict__["_hp_intercept_ref"] = None
         # `_hp_state_ref` 不回填：反序列化后若写入 None 会被沙盒污染检查
         # 判成新状态（见 engine/pollution_guard.py）；读取端一律用 __dict__.get。
         self.__dict__.setdefault("daowen_use_history", set())

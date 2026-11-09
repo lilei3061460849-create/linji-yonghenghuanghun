@@ -263,6 +263,16 @@ class DamageDeathMixin:
         for entity in self._hp_record_entities():
             self._bind_hp_hook(entity)
 
+    def _bind_intercept_hooks(self) -> None:
+        """只重绑【庇护】/【脆弱】的失血拦截钩子（不动上限与反应窗口）。
+
+        2026-11-09：轮回者在正式流程里由 `_bind_hp_hook` 绑完整引擎会同时打开
+        属性封顶与「失去生命后」反应，改变大量既有结算。这里单独给一个轻量
+        弱引用，让 `Entity.__setattr__` 的庇护/脆弱拦截照常工作即可。
+        """
+        for entity in self._hp_record_entities():
+            self._bind_intercept_hook(entity)
+
     def _bind_hp_hook(self, entity: Optional[Entity]) -> None:
         if entity is None:
             return
@@ -270,6 +280,14 @@ class DamageDeathMixin:
             entity._hp_engine_ref = weakref.ref(self)
         except TypeError:
             pass  # 兜底：非可弱引用对象不绑定（正常 CombatEngine 均可弱引用）
+
+    def _bind_intercept_hook(self, entity: Optional[Entity]) -> None:
+        if entity is None:
+            return
+        try:
+            entity._hp_intercept_ref = weakref.ref(self)
+        except TypeError:
+            pass
 
     def _shelter_hp_loss(self, entity: Entity, old: int, new: int) -> int:
         """庇护：非目标自身导致的下一次失去生命被免疫；返回允许写入的生命值。"""

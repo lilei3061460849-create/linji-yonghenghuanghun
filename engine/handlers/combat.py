@@ -769,6 +769,7 @@ class CombatHandlersMixin:
         self.dice = copy.deepcopy(snapshot["dice"])
         self.combat.state = self.state
         self.combat.dice = self.dice
+        self.combat._bind_intercept_hooks()
         register_combat_event_observer(self.state, self.combat)
         self._restore_combat_runtime(copy.deepcopy(snapshot["combat_runtime"]))
         # 重来本场时丢弃旧战斗遗留的中断、pending 和上次结果。
@@ -1002,6 +1003,9 @@ class CombatHandlersMixin:
         # 先赋值再结算战始遗物，遗物额外法力因此叠在满池之上，不会被赋值冲掉。
         if self.state.player and self.state.player.is_alive:
             self.state.player.current_mana = self.state.player.mana_limit
+        # 本场实体（含战始抽出的怪物与轮回者）全部重绑失血拦截钩子；
+        # 深拷贝快照与读档会剔除弱引用，不重绑则【脆弱】/【庇护】静默失效。
+        self.combat._bind_intercept_hooks()
         exhaust_logs = self.combat.settle_battle_start_exhaust()
         relic_logs = self.combat.process_relics(TriggerTiming.BATTLE_START, {"relic_choices": relic_choices})
 

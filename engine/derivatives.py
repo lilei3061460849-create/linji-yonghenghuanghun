@@ -178,17 +178,26 @@ def docstring_of(name: str) -> str:
 
 
 def calculator_for(name: str):
-    """返回一个带正确签名/docstring 的计算函数，供 DaoWenEngine 注册。"""
+    """返回一个带正确签名/docstring 的计算函数，供 DaoWenEngine 注册。
+
+    【自身】类衍生（产法力）没有 target 形参：这里用 ``__signature__`` 把
+    对外可见的签名收成 ``(x)``，既让生成器标「自身」，又避免 mypy 对同一
+    函数名在两个分支里定义不同签名的报错。
+    """
+    import inspect
+
     spec = spec_of(name)
-    if spec.effect_kind == "mana_gain":
-        # 自身作用：无 target 形参，索引自动标「自身」。
-        def calc(x: int) -> dict:
-            return calculation(name, x)
-    else:
-        def calc(x: int, target=None) -> dict:
-            return calculation(name, x, target=target)
+
+    def calc(x: int, target=None) -> dict:
+        return calculation(name, x, target=target)
+
     calc.__name__ = f"calculate_{name}"
     calc.__doc__ = docstring_of(name)
+    if spec.effect_kind == "mana_gain":
+        setattr(calc, "__signature__", inspect.Signature([
+            inspect.Parameter("x", inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                              annotation=int),
+        ]))
     return calc
 
 
