@@ -164,6 +164,7 @@
       <div class="row" style="margin-bottom:8px">
         <button id="eModeRule" class="on">规则模式（25 点）</button>
         <button id="eModeFree">自由模式</button>
+        <button id="eModeRoll">🎲 随机三维</button>
       </div>
 
       <div id="eRuleFields" class="grid3">
@@ -175,6 +176,25 @@
         <label class="field">血限<input id="eBloodLimit" type="number" min="1" max="999" value="90"></label>
         <label class="field">速限<input id="eSpeedLimit" type="number" min="0" max="99" value="3"></label>
         <label class="field">法限<input id="eManaLimit" type="number" min="0" max="99" value="2"></label>
+      </div>
+      <div id="eRollFields" hidden>
+        <div class="grid3">
+          <label class="field">血限下限<input id="rBloodMin" type="number" min="1" max="999" value="30"></label>
+          <label class="field">血限上限<input id="rBloodMax" type="number" min="1" max="999" value="120"></label>
+          <label class="field">种子<input id="rSeed" placeholder="留空=真随机"></label>
+        </div>
+        <div class="grid2">
+          <label class="field">速限下限<input id="rSpeedMin" type="number" min="0" max="99" value="2"></label>
+          <label class="field">速限上限<input id="rSpeedMax" type="number" min="0" max="99" value="8"></label>
+        </div>
+        <div class="grid2">
+          <label class="field">法限下限<input id="rManaMin" type="number" min="0" max="99" value="1"></label>
+          <label class="field">法限上限<input id="rManaMax" type="number" min="0" max="99" value="8"></label>
+        </div>
+        <div class="btnbar" style="margin-top:6px">
+          <button id="rollBtn" class="primary">🎲 掷一次三维</button>
+        </div>
+        <div class="hintline" id="rollResult">还没掷；掷出来的值会填进下面的「血限 / 速限 / 法限」，还能再手改。</div>
       </div>
       <div class="hintline" id="eAttrHint"></div>
 
@@ -326,7 +346,8 @@ function limitsOf(sheet){
 }
 function sheetLine(sheet){
   const l = limitsOf(sheet);
-  return `血 ${l.blood} / 速 ${l.speed} / 法 ${l.mana} · 道纹 ${(sheet.daowen || []).length}`
+  const rolled = (sheet.roll && Object.keys(sheet.roll).length) ? " · 🎲随机" : "";
+  return `血 ${l.blood} / 速 ${l.speed} / 法 ${l.mana}${rolled} · 道纹 ${(sheet.daowen || []).length}`
        + ` · 遗物 ${(sheet.relics || []).length} · 消耗品 ${(sheet.consumables || []).length}`
        + ` · 碎片 ${sheet.shards ?? 0}`;
 }
@@ -428,7 +449,7 @@ function blankSheet(){
     blood_points: 15, speed_points: 6, mana_points: 4,
     blood_limit: 90, speed_limit: 3, mana_limit: 2,
     attribute_points: 0, shards: 20, energy: 0, resonance: "转换",
-    daowen: ["杀伐"], relics: [], consumables: [],
+    daowen: ["杀伐"], relics: [], consumables: [], roll: {},
   };
 }
 
@@ -446,17 +467,67 @@ function openEditor(sheet){
   $("eBloodLimit").value = editing.blood_limit ?? 90;
   $("eSpeedLimit").value = editing.speed_limit ?? 3;
   $("eManaLimit").value = editing.mana_limit ?? 2;
-  setEditorMode(editing.mode === "free" ? "free" : "rule");
+  restoreRollRanges();
+  setEditorMode(editing.roll && Object.keys(editing.roll).length ? "roll"
+    : (editing.mode === "free" ? "free" : "rule"));
   renderEditorChips();
   $("editor").scrollIntoView({behavior: "smooth", block: "start"});
 }
 
+let uiMode = "rule";   // rule | free | roll（roll 保存时按自由模式存三维）
+function restoreRollRanges(){
+  const r = editing.roll || {};
+  const pairs = [["blood", "rBloodMin", "rBloodMax"], ["speed", "rSpeedMin", "rSpeedMax"],
+                 ["mana", "rManaMin", "rManaMax"]];
+  for (const [key, minId, maxId] of pairs){
+    if (Array.isArray(r[key]) && r[key].length === 2){
+      $(minId).value = r[key][0];
+      $(maxId).value = r[key][1];
+    }
+  }
+}
+
+async function rollAttributes(){
+  const num = (id) => Number($(id).value);
+  const ranges = {
+    blood: [num("rBloodMin"), num("rBloodMax")],
+    speed: [num("rSpeedMin"), num("rSpeedMax")],
+    mana: [num("rManaMin"), num("rManaMax")],
+  };
+  const seed = ($("rSeed").value || "").trim();
+  $("rollBtn").disabled = true;
+  try{
+    const res = await fetch("/api/lab/roll", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ranges, seed}),
+    });
+    const data = await res.json();
+    if (!data.success){ toast("掷点失败：" + (data.error || "未知错误")); return; }
+    $("eBloodLimit").value = data.blood_limit;
+    $("eSpeedLimit").value = data.speed_limit;
+    $("eManaLimit").value = data.mana_limit;
+    editing.roll = data.roll;
+    readEditorNumbers();
+    updateEditorHint();
+    $("rollResult").textContent =
+      `本次：血限 ${data.blood_limit} / 速限 ${data.speed_limit} / 法限 ${data.mana_limit}`;
+  } catch(e){
+    toast("掷点请求失败：" + e.message);
+  } finally {
+    $("rollBtn").disabled = false;
+  }
+}
+
 function setEditorMode(mode){
-  editing.mode = mode;
+  uiMode = mode;
+  editing.mode = mode === "rule" ? "rule" : "free";
   $("eModeRule").classList.toggle("on", mode === "rule");
   $("eModeFree").classList.toggle("on", mode === "free");
+  $("eModeRoll").classList.toggle("on", mode === "roll");
   $("eRuleFields").hidden = mode !== "rule";
-  $("eFreeFields").hidden = mode !== "free";
+  // 随机模式也要能看见/微调掷出来的三个上限
+  $("eFreeFields").hidden = mode === "rule";
+  $("eRollFields").hidden = mode !== "roll";
   updateEditorHint();
 }
 
@@ -481,6 +552,8 @@ function updateEditorHint(){
     hint = `已用 ${total}/25 点，余 ${25 - total} 点进属性点池。`;
     if (total > 25) hint = `⚠ 已用 ${total} 点，超出 25 点预算。`;
     else if (editing.speed_points % 2 || editing.mana_points % 2) hint += " ⚠ 速限/法限点数必须为偶数。";
+  } else if (uiMode === "roll"){
+    hint = "随机模式：按上下限掷三个上限（NPC/造物用），只在演武场生效。";
   } else {
     hint = "自由模式：直接写三个上限，只在演武场生效。";
   }
@@ -834,6 +907,8 @@ $("saveChar").onclick = saveChar;
 $("deleteChar").onclick = () => { if (editing) removeChar(editing); };
 $("eModeRule").onclick = () => setEditorMode("rule");
 $("eModeFree").onclick = () => setEditorMode("free");
+$("eModeRoll").onclick = () => setEditorMode("roll");
+$("rollBtn").onclick = rollAttributes;
 for (const id of ["eBloodPts","eSpeedPts","eManaPts","eBloodLimit","eSpeedLimit","eManaLimit",
                   "eName","eShards"]){
   $(id).oninput = updateEditorHint;

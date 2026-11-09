@@ -230,3 +230,50 @@ def test_character_sheet_no_longer_requires_energy(roster_file):
                         "blood_points": 15, "speed_points": 6, "mana_points": 4,
                         "daowen": ["杀伐"], "relics": [], "consumables": []})["engine"]
     assert engine.state.energy == 0
+
+
+# ---------------------------------------------------------------- 随机三维
+
+
+def test_roll_limits_stays_inside_the_requested_window():
+    """NPC/造物懒得想数值：随机三维必须严格落在用户给的下限~上限之间。"""
+    ranges = {"blood": [40, 60], "speed": [2, 4], "mana": [1, 3]}
+    for seed in range(20):
+        rolled = lab.roll_limits({"ranges": ranges, "seed": seed})
+        assert 40 <= rolled["blood_limit"] <= 60
+        assert 2 <= rolled["speed_limit"] <= 4
+        assert 1 <= rolled["mana_limit"] <= 3
+        assert rolled["roll"] == ranges
+
+
+def test_roll_limits_is_reproducible_with_a_seed():
+    a = lab.roll_limits({"ranges": {"blood": [30, 300], "speed": [1, 9], "mana": [1, 9]},
+                         "seed": "abc"})
+    b = lab.roll_limits({"ranges": {"blood": [30, 300], "speed": [1, 9], "mana": [1, 9]},
+                         "seed": "abc"})
+    assert (a["blood_limit"], a["speed_limit"], a["mana_limit"]) == \
+           (b["blood_limit"], b["speed_limit"], b["mana_limit"])
+
+
+def test_roll_limits_rejects_inverted_or_out_of_range_windows():
+    with pytest.raises(ValueError):
+        lab.roll_limits({"ranges": {"blood": [80, 20]}})
+    with pytest.raises(ValueError):
+        lab.roll_limits({"ranges": {"speed": [0, 120]}})   # 速限硬上限 99
+    with pytest.raises(ValueError):
+        lab.roll_limits({"ranges": {"blood": [0, 30]}})    # 血限至少 1
+
+
+def test_random_card_keeps_the_window_and_saves_as_free_mode(roster_file):
+    rolled = lab.roll_limits({"ranges": {"blood": [40, 50], "speed": [2, 3], "mana": [1, 2]},
+                              "seed": 3})
+    saved = lab.save_sheet(_sheet(
+        "随机造物", mode="free",
+        blood_limit=rolled["blood_limit"], speed_limit=rolled["speed_limit"],
+        mana_limit=rolled["mana_limit"], roll=rolled["roll"]))
+    assert saved["mode"] == "free"
+    assert saved["roll"] == rolled["roll"]
+    assert (saved["blood_limit"], saved["speed_limit"], saved["mana_limit"]) == \
+           (rolled["blood_limit"], rolled["speed_limit"], rolled["mana_limit"])
+    reloaded = next(item for item in lab.list_sheets() if item["id"] == saved["id"])
+    assert reloaded["roll"] == rolled["roll"]

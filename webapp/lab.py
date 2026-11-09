@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import os
+import random
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -279,6 +280,22 @@ def _sheet_limits(sheet: dict[str, Any]) -> tuple[int, int, int]:
             int(sheet["mana_limit"]))
 
 
+def _clean_roll(raw: Any) -> dict[str, list[int]]:
+    """保存角色卡时保留「随机三维」的区间（只做展示/再掷，不参与结算）。"""
+    if not isinstance(raw, dict):
+        return {}
+    cleaned: dict[str, list[int]] = {}
+    for key, (label, hard_min, hard_max) in ROLL_FIELDS.items():
+        pair = raw.get(key)
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        low = _as_int(pair[0], f"{label}下限", hard_min, hard_max)
+        high = _as_int(pair[1], f"{label}上限", hard_min, hard_max)
+        if low <= high:
+            cleaned[key] = [low, high]
+    return cleaned
+
+
 def _check_daowen(names: list[str]) -> list[str]:
     runtime = set(DaoWenEngine.list_all())
     unknown = [name for name in names if name not in runtime]
@@ -312,6 +329,52 @@ def _resolve_consumables(entries: list[Any]) -> list[dict[str, Any]]:
             uses = catalog[name]["uses"]
         resolved.append({"name": name, "uses": _as_int(uses, f"{name}的耐久", 1, MAX_USES)})
     return resolved
+
+
+ROLL_FIELDS = {
+    # 字段: (界面名, 下限, 上限)
+    "blood": ("血限", 1, MAX_BLOOD_LIMIT),
+    "speed": ("速限", 0, MAX_TIER_LIMIT),
+    "mana": ("法限", 0, MAX_TIER_LIMIT),
+}
+
+
+def roll_limits(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """随机三维：给每个上限在 [min, max] 区间里等概率取一个整数。
+
+    用途是 NPC / 造物这类「懒得想数值」的角色卡（用户令 2026-11-09）。
+    - `payload["ranges"]` 形如 `{"blood": [30, 120], "speed": [2, 8], "mana": [1, 8]}`；
+      省略的项用缺省区间。
+    - 端点包含在内；min > max、越界都直接报错，不悄悄改成合法值。
+    - `seed` 可选：给了就按它复现（测试/回放用），没给就真随机。
+    """
+    payload = payload or {}
+    ranges = payload.get("ranges") or {}
+    if not isinstance(ranges, dict):
+        raise ValueError("ranges 必须是对象")
+    seed = payload.get("seed")
+    rng = random.Random(seed) if seed not in (None, "") else random.Random()
+    defaults = {"blood": (30, 120), "speed": (2, 8), "mana": (1, 8)}
+    picked: dict[str, int] = {}
+    used: dict[str, list[int]] = {}
+    for key, (label, hard_min, hard_max) in ROLL_FIELDS.items():
+        raw = ranges.get(key, defaults[key])
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            raw = [raw, raw]
+        if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+            raise ValueError(f"{label}的区间必须是 [下限, 上限]")
+        low = _as_int(raw[0], f"{label}下限", hard_min, hard_max)
+        high = _as_int(raw[1], f"{label}上限", hard_min, hard_max)
+        if low > high:
+            raise ValueError(f"{label}下限不能高于上限（{low} > {high}）")
+        picked[key] = rng.randint(low, high)
+        used[key] = [low, high]
+    return {
+        "blood_limit": picked["blood"],
+        "speed_limit": picked["speed"],
+        "mana_limit": picked["mana"],
+        "roll": used,
+    }
 
 
 def normalize_sheet(payload: dict[str, Any]) -> dict[str, Any]:
@@ -358,6 +421,7 @@ def normalize_sheet(payload: dict[str, Any]) -> dict[str, Any]:
         "relics": _check_relics(_as_name_list(payload.get("relics"), "遗物")),
         "consumables": _resolve_consumables(payload.get("consumables") or []),
         "shards": _as_int(payload.get("shards", 20), "碎片", 0, MAX_SHARDS),
+        "roll": _clean_roll(payload.get("roll")),
         # 精力是局外资源，不再作为角色卡属性出现在界面上；旧卡缺省按 0。
         "energy": _as_int(payload.get("energy", 0), "精力", 0, MAX_TIER_LIMIT),
     })

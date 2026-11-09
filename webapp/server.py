@@ -627,6 +627,13 @@ class Handler(BaseHTTPRequestHandler):
                         self._json({"success": False, "error": str(exc)}, 400)
                         return
                     self._json(_install(prepared))
+                elif path == "/api/lab/roll":
+                    try:
+                        rolled = lab.roll_limits(payload)
+                    except ValueError as exc:
+                        self._json({"success": False, "error": str(exc)}, 400)
+                        return
+                    self._json({"success": True, **rolled})
                 elif path == "/api/lab/characters/save":
                     try:
                         record = lab.save_sheet(payload.get("character") or payload)
