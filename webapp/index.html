@@ -139,6 +139,26 @@
   body.immersive .log{max-height:130px}
   #immExit{display:none;position:fixed;right:8px;top:8px;z-index:60}
   body.immersive #immExit{display:block}
+  .vp{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  /* 字号档位（预览窗很窄时用「字」按钮放大） */
+  html.big body{font-size:16px}
+  html.big .hint,html.big .kv,html.big .card h2,html.big .legend{font-size:13.5px}
+  html.big button{font-size:15px;padding:8px 12px}
+  html.big .log{font-size:14px}
+  html.big .combatant{font-size:15px}
+  html.huge body{font-size:18px}
+  html.huge .hint,html.huge .kv,html.huge .card h2,html.huge .legend{font-size:15px}
+  html.huge button{font-size:17px;padding:10px 14px}
+  html.huge .log{font-size:15.5px}
+  html.huge .combatant{font-size:17px}
+  /* 窄屏（预览窗通常只有 320~380px 宽）：按钮加大、留白收紧 */
+  @media (max-width: 639px){
+    button{min-height:40px}
+    main{padding:10px 10px 28px;gap:10px}
+    .card{padding:10px}
+    #map{padding:6px}
+    .field label{width:64px}
+  }
 </style>
 </head>
 <body>
@@ -147,7 +167,9 @@
   <div class="stats" id="stats"></div>
   <div class="spacer"></div>
   <a href="/lab" style="text-decoration:none"><button>角色演武场 · 自定义开局</button></a>
+  <button id="fontBtn" title="切换字号：标准 / 大 / 特大">字 标准</button>
   <button id="fsBtn" title="进入/退出全屏（横屏更好用）">⛶ 全屏 / 沉浸</button>
+  <span class="vp" id="vpLabel"></span>
   <button id="popBtn" title="在独立标签页打开：只有顶层窗口才能真正全屏">↗ 独立窗口</button>
   <button id="newBtn">新开一局</button>
 </header>
@@ -705,6 +727,7 @@ function renderEvent(){
   if (S.event.queued) body.append(el("div","hint", `还有 ${S.event.queued} 个事件排队`));
 }
 
+let _battleWasVisible = false;
 function renderBattle(){
   const card = $("battleCard"), body = $("battleBody");
   body.innerHTML = "";
@@ -722,6 +745,12 @@ function renderBattle(){
   }
   if (!b){ card.style.display = "none"; return; }
   card.style.display = "";
+  /* 窄屏（预览窗通常只有 320~380px）：战斗刚开始时把战斗卡滚进视野，
+     免得玩家以为「没反应」还要自己往下翻。 */
+  if (!_battleWasVisible && window.innerWidth < 680 && !b.peaceful){
+    setTimeout(() => { try { card.scrollIntoView({block: "start", behavior: "smooth"}); } catch(e){} }, 80);
+  }
+  _battleWasVisible = !b.peaceful;
   $("battlePhase").textContent = b.peaceful ? "战斗结束"
     : `第 ${b.round} 回合 · ${b.subphase}${b.actions_left !== undefined ? ` · 余 ${b.actions_left} 次出手` : ""}`;
   for (const c of b.combatants){
@@ -1019,6 +1048,31 @@ $("wait5Btn").onclick = () => act("world_wait", {turns: 5});
 $("newBtn").onclick = () => $("newModal").classList.remove("hidden");
 $("fsBtn").onclick = toggleFullscreen;
 $("immExit").onclick = toggleFullscreen;
+
+/* 字号档位：预览窗窄的时候按钮和字都能放大（存在 localStorage）。 */
+const FONT_STEPS = [["标准", ""], ["大", "big"], ["特大", "huge"]];
+let fontIdx = Number(localStorage.getItem("linjiFont") || 0) % FONT_STEPS.length;
+function applyFont(){
+  document.documentElement.classList.remove("big", "huge");
+  const step = FONT_STEPS[fontIdx];
+  if (step[1]) document.documentElement.classList.add(step[1]);
+  $("fontBtn").textContent = "字 " + step[0];
+  localStorage.setItem("linjiFont", String(fontIdx));
+}
+$("fontBtn").onclick = () => {
+  fontIdx = (fontIdx + 1) % FONT_STEPS.length;
+  applyFont();
+  if (S) render();
+};
+applyFont();
+
+/* 视口读数：用来确认预览 iframe 实际有多宽，好按真实宽度排版。 */
+function updateVp(){
+  const label = $("vpLabel");
+  if (label) label.textContent =
+    `视口 ${window.innerWidth}×${window.innerHeight} @${window.devicePixelRatio || 1}x`;
+}
+updateVp();
 /* 预览是嵌在 iframe 里的：iframe 没有 allow="fullscreen" 就拿不到真全屏。
    这里把当前页面（连同预览令牌）在顶层标签页再打开一次，那边就能真全屏。 */
 $("popBtn").onclick = () => {
@@ -1033,6 +1087,7 @@ document.addEventListener("fullscreenchange", () => { syncFsButton(); if (S) ren
 document.addEventListener("webkitfullscreenchange", syncFsButton);
 let _resizeTimer = null;
 window.addEventListener("resize", () => {
+  updateVp();
   clearTimeout(_resizeTimer);
   _resizeTimer = setTimeout(() => { if (S) renderMap(); }, 150);
 });
