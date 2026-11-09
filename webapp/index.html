@@ -712,7 +712,9 @@ function renderBattle(){
   }
   _battleWasVisible = !b.peaceful;
   $("battlePhase").textContent = b.peaceful ? "战斗结束"
-    : `第 ${b.round} 回合 · ${b.subphase}${b.actions_left !== undefined ? ` · 余 ${b.actions_left} 次出手` : ""}`;
+    : `第 ${b.round} 回合 · ${b.subphase}`
+      + (b.round_started === false ? " · 出手权未定"
+        : (b.actions_left !== undefined ? ` · 余 ${b.actions_left} 次出手` : ""));
   for (const c of b.combatants){
     const row = el("div", "combatant " + (c.side === "enemy" ? "side-enemy" : "side-player")
       + (c.alive ? "" : " dead"));
@@ -730,11 +732,16 @@ function renderBattle(){
   const has = (name) => avail.includes(name);
   if (b.manual_both){
     const foesAlive = b.combatants.filter(c => c.side === "enemy" && c.alive && c.ref);
-    const turnText = b.duel_turn === "opponent_side"
-      ? `当前行动方：B 方（${foesAlive.map(c => c.name).join("、") || "无存活单位"}）`
-      : "当前行动方：A 方";
+    const turnText = b.round_started === false
+      ? "当前行动方：未定（点「开始本回合」后按先手规则判定）"
+      : b.duel_turn === "opponent_side"
+        ? `当前行动方：B 方（${foesAlive.map(c => c.name).join("、") || "无存活单位"}）`
+        : "当前行动方：A 方";
     body.append(el("div","banner", turnText + " · 推演模式（不用 AI，双方都由你操作）"));
-    if (b.duel_turn === "opponent_side" && !b.peaceful && foesAlive.length){
+    /* 出手口径说明：每名角色每回合 1 次出手；攻击的「N 击」是当前速度，不是出手次数。 */
+    body.append(el("div","hint", "先手＝速限→法限→血限→当前生命（大者先）；四项全同则随机首手、之后交替。"
+      + "每名角色每回合基础 1 次出手，攻击的击数＝当前速度。"));
+    if (b.duel_turn === "opponent_side" && b.round_started !== false && !b.peaceful && foesAlive.length){
       body.append(manualEnemyPanel(foesAlive));
     }
   }

@@ -328,3 +328,48 @@ def test_inject_enemies_guards_are_explicit(roster_file):
         "inject_enemies": [alive], "world_encounter_id": "fake-encounter"})
     assert failed["success"] is False
     assert "world_encounter_id" in failed["error"]
+
+
+def test_duel_first_move_uses_the_engine_priority_rule(roster_file):
+    """A/B 必须对称：先手按 速限→法限→血限→当前生命 判定，不能默认 A 先手。
+
+    这条同时钉住方向性——把两张卡对调，先手方必须跟着对调。
+    """
+    weak = lab.save_sheet(_sheet("弱", mode="free", blood_limit=30,
+                                 speed_limit=3, mana_limit=2))
+    strong = lab.save_sheet(_sheet("强", mode="free", blood_limit=120,
+                                   speed_limit=8, mana_limit=8))
+
+    def first_mover(a_id, b_id):
+        engine = lab.duel({"a": {"id": a_id}, "b": {"id": b_id},
+                           "manual_both": True, "seed": 7})["engine"]
+        engine.execute_action("round_start", {"relic_choices": {}})
+        return engine.state.duel_turn
+
+    assert first_mover(weak["id"], strong["id"]) == "opponent_side"
+    assert first_mover(strong["id"], weak["id"]) == "player_side"
+
+
+def test_duel_priority_tie_is_random_then_alternates(roster_file):
+    """四项全同不能固定成 A 先：随机首手并记下，之后每次平局交替。
+
+    直接比对 CombatEngine 的判定：随机开局可能给玩家侧发【灾厄轮盘】等遗物，
+    回始会改当前生命，真跑一整回合反而造不出「四项全同」的稳定场景。
+    """
+    left = lab.save_sheet(_sheet("同甲", mode="free", blood_limit=60,
+                                 speed_limit=5, mana_limit=5))
+    right = lab.save_sheet(_sheet("同乙", mode="free", blood_limit=60,
+                                  speed_limit=5, mana_limit=5))
+    engine = lab.duel({"a": {"id": left["id"]}, "b": {"id": right["id"]},
+                       "manual_both": True, "seed": 11})["engine"]
+    player, rival = engine.state.player, engine.state.enemies[0]
+    rival.current_hp = player.current_hp = 60
+    player.blood_limit = rival.blood_limit = 60
+    player.speed_limit = rival.speed_limit = 5
+    player.mana_limit = rival.mana_limit = 5
+
+    first = engine.combat._stats_priority_side()
+    assert first == engine.state.event_modifiers["duel_priority_tie_first"]
+    assert first in {"player_side", "opponent_side"}
+    second = engine.combat._stats_priority_side()
+    assert second != first                     # 下一次平局交给另一边

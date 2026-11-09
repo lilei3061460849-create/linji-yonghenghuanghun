@@ -766,6 +766,10 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
     # 敌方回合由用户在下方面板里点选，服务端不再调用 AI 启发式。
     manual_both = bool(payload.get("manual_both"))
     engine.state.event_modifiers["lab_manual_both"] = manual_both
+    # 用户令 2026-11-09：A/B 必须完全对称，A 方不能靠「轮回者侧优先」白拿先手。
+    # B 方是轮回者时改按死斗先手口径（速限→法限→血限→当前生命）判定；
+    # B 方是副本怪物时它们的行动本来就在怪物阶段，不套这套。
+    engine.state.event_modifiers["duel_priority_by_stats"] = b_sheet is not None
     if manual_both:
         notes.append("推演模式：双方都由你操作，B 方回合不使用 AI。")
     _apply_loadout(engine, a_sheet, region, notes)
@@ -784,6 +788,9 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
         height = _as_int(payload.get("height", width), "地图高", 5, 41)
         battle = _start_custom_battle(engine, entities, width, height)
 
+    if b_sheet is not None:
+        notes.append("首手按死斗先手口径判定（速限→法限→血限→当前生命，大者先手）；"
+                     "四项全同则随机首手、之后每回合交替。A 方不再默认先手。")
     a_blood, a_speed, a_mana = _sheet_limits(a_sheet)
     notes.append(f"A方 {a_sheet['name']}：{a_blood}/{a_speed}/{a_mana}（血限/速限/法限）")
     if b_sheet is not None:

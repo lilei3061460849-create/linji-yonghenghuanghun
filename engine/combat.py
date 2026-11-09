@@ -1225,8 +1225,60 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             and self.entity_can_take_active_action(e)
             for e in entities)
 
+    @staticmethod
+    def _duel_priority_key_of(entity) -> tuple:
+        """先手四项：速限→法限→血限→当前生命，数值大者先手（与最终死斗同一口径）。"""
+        return (entity.speed_limit, entity.mana_limit,
+                entity.blood_limit, entity.current_hp)
+
+    def _stats_priority_side(self) -> str:
+        """按四项先手属性决定回始先手（演武场 A/B 轮回者对打用）。
+
+        常规战斗的旧规则是「轮回者侧优先」，那对 A/B 对称的演武场不公平——
+        A 方永远先手就是结构性红利。这里改用最终死斗已有的先手口径；四项
+        完全相同则随机首手、之后每回合交替，避免平局也固定成 A 先。
+        先手方若本回合已无出手权（沉溺/无力/预算耗尽），仍交给另一方能动的
+        一侧，和旧规则的兜底一致。
+        """
+        player = self.state.player
+        player_key = (None if player is None or not player.is_alive
+                      else self._duel_priority_key_of(player))
+        enemy_keys = [self._duel_priority_key_of(e) for e in self.state.enemies
+                      if e is not None and e.is_alive
+                      and not getattr(e, "has_retreated", False)]
+        enemy_key = max(enemy_keys) if enemy_keys else None
+        if player_key is None and enemy_key is None:
+            return "player_side"
+        if enemy_key is None:
+            side = "player_side"
+        elif player_key is None:
+            side = "opponent_side"
+        elif player_key != enemy_key:
+            side = "player_side" if player_key > enemy_key else "opponent_side"
+        else:
+            first = self.state.event_modifiers.get("duel_priority_tie_first")
+            if not first:
+                roll = self.dice.auto_roll(
+                    "duel_priority_tie_first", ["player_side", "opponent_side"],
+                    context="演武场四项先手完全平局：随机首手")
+                first = roll["selected"]
+                self.state.event_modifiers["duel_priority_tie_first"] = first
+            # 用「第几次平局」计数交替，不用 current_round 奇偶：回始时回合号已经
+            # 递增过，奇偶会和「这是第几回合」错开一位。
+            tied = int(self.state.event_modifiers.get("duel_priority_tie_rounds", 0))
+            self.state.event_modifiers["duel_priority_tie_rounds"] = tied + 1
+            side = first if tied % 2 == 0 else (
+                "opponent_side" if first == "player_side" else "player_side")
+        if not self.side_can_act(side):
+            other = "opponent_side" if side == "player_side" else "player_side"
+            if self.side_can_act(other):
+                return other
+        return side
+
     def _initial_priority_side(self) -> str:
         """回始时该由哪一方先出手：优先轮回者侧，其次敌方，双方皆无余手则轮回者侧。"""
+        if self.state.event_modifiers.get("duel_priority_by_stats"):
+            return self._stats_priority_side()
         if self.side_can_act("player_side"):
             return "player_side"
         if self.side_can_act("opponent_side"):

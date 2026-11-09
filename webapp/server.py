@@ -170,6 +170,9 @@ def _battle_view(engine: GameEngine) -> dict[str, Any] | None:
         "round": state.current_round,
         "subphase": state.combat_subphase,
         "duel_turn": state.duel_turn or "player_side",
+        # 回始前 duel_turn 只是占位值（引擎在 round_start 才按先手规则定方），
+        # 界面据此把「当前行动方」写成未定，别让人以为默认 A 先手。
+        "round_started": state.combat_subphase != "await_round_start",
         "manual_both": bool(state.event_modifiers.get("lab_manual_both")),
         # 演武场「直接对战」没有地图：界面据此隐藏地图卡，结算按钮也不再写「回到地图」。
         "direct": bool(state.event_modifiers.get("lab_direct")),
