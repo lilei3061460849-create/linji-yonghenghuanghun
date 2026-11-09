@@ -140,6 +140,21 @@ def opponent_passes(engine) -> dict:
     return engine.execute_action("rest", {"actor_ref": ref})
 
 
+def hand_priority_to_player(engine) -> dict:
+    """把本回合优先权直接标记给轮回者（夹具的状态声明，不改任何资源）。
+
+    先手已是通用规则（规则正文·战斗行动：[速限]→[法限]→[血限]→当前生命，
+    大者先手），速限更高的怪物会在[回始]拿到优先权。只验玩家侧机制的夹具用本
+    函数把状态声明成「轮到轮回者」，与 `hand_priority_to_enemy` 完全对称——它
+    不执行行动、不改资源，也不触发「对方跳过」类遗物。
+    """
+    if engine.state.duel_turn == "player_side":
+        return {"success": True, "changed": False, "note": "优先权已在轮回者"}
+    engine.state.duel_turn = "player_side"
+    engine.combat._ended_turn_sides.discard("opponent_side")
+    return {"success": True, "changed": True}
+
+
 def hand_priority_to_enemy(engine) -> dict:
     """把「本回合优先权」直接标记给敌方，使 `prepare_monster_phase` 可用。
 
@@ -151,13 +166,14 @@ def hand_priority_to_enemy(engine) -> dict:
     这是夹具的状态声明，不是绕过闸门：生产代码里的优先权检查一行未改，
     真正越过优先权的提交仍会被拒（见 `tests/test_priority_gate.py`）。
     """
-    if engine.state.duel_turn == "opponent_side":
-        return {"success": True, "changed": False, "note": "优先权已在敌方"}
+    changed = engine.state.duel_turn != "opponent_side"
     engine.state.duel_turn = "opponent_side"
     # 与真实【跳过】一致：轮回者这一侧本回合不再有出手（否则怪物行动后子阶段会
-    # 停在 player_actions 等一个夹具里根本不存在的玩家行动）。
+    # 停在 player_actions 等一个夹具里根本不存在的玩家行动）。先手改为通用规则后，
+    # 回始的优先权本来就可能已在敌方，此时同样要声明玩家侧已交出——否则本函数的
+    # 承诺会随「谁先手」时有时无。
     engine.combat._ended_turn_sides.add("player_side")
-    return {"success": True, "changed": True}
+    return {"success": True, "changed": changed}
 
 
 def player_passes(engine) -> dict:
@@ -180,15 +196,20 @@ def advance_to_player_turn(engine) -> dict:
     from engine.enums import CombatSubphase
 
     steps = []
-    if engine.state.duel_turn == "opponent_side":
-        steps.append(("enemy_pass", opponent_passes(engine)))
-    subphase = engine.state.combat_subphase
-    if subphase == CombatSubphase.AWAIT_ROUND_END.value:
-        steps.append(("round_end", engine.execute_action("round_end", {})))
+    # 先手按四项属性判定（通用规则），新的一回合也可能仍由怪物先手，因此这里
+    # 必须循环：敌方【跳过】→ 必要时回终/回始 → 再看优先权落到哪一侧。
+    for _ in range(4):
+        if engine.state.duel_turn == "opponent_side":
+            steps.append(("enemy_pass", opponent_passes(engine)))
         subphase = engine.state.combat_subphase
-    if subphase == CombatSubphase.AWAIT_ROUND_START.value:
-        steps.append(("round_start", begin_round(engine)))
-    failed = [(name, res) for name, res in steps if not res.get("success")]
-    if failed:
-        return {"success": False, "steps": steps, "failed": failed}
+        if subphase == CombatSubphase.AWAIT_ROUND_END.value:
+            steps.append(("round_end", engine.execute_action("round_end", {})))
+            subphase = engine.state.combat_subphase
+        if subphase == CombatSubphase.AWAIT_ROUND_START.value:
+            steps.append(("round_start", begin_round(engine)))
+        failed = [(name, res) for name, res in steps if not res.get("success")]
+        if failed:
+            return {"success": False, "steps": steps, "failed": failed}
+        if engine.state.duel_turn != "opponent_side":
+            break
     return {"success": True, "steps": steps, "duel_turn": engine.state.duel_turn}

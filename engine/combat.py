@@ -1232,13 +1232,13 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 entity.blood_limit, entity.current_hp)
 
     def _stats_priority_side(self) -> str:
-        """按四项先手属性决定回始先手（演武场 A/B 轮回者对打用）。
+        """按四项先手属性决定回始先手——**通用规则**，所有战斗同一口径。
 
-        常规战斗的旧规则是「轮回者侧优先」，那对 A/B 对称的演武场不公平——
-        A 方永远先手就是结构性红利。这里改用最终死斗已有的先手口径；四项
-        完全相同则随机首手、之后每回合交替，避免平局也固定成 A 先。
-        先手方若本回合已无出手权（沉溺/无力/预算耗尽），仍交给另一方能动的
-        一侧，和旧规则的兜底一致。
+        规则正文·战斗行动：[速限]→[法限]→[血限]→当前生命，数值大者先手；
+        四项完全相同则随机首手、之后每回合交替（2026-11-09 用户令：不再有
+        「仅死斗适用」，也不再限制开放地图对局）。
+        先手方若本回合已无出手权（沉溺/无力/预算耗尽），交给另一侧，避免死在
+        「拿不到优先权」的一侧。
         """
         player = self.state.player
         player_key = (None if player is None or not player.is_alive
@@ -1260,7 +1260,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             if not first:
                 roll = self.dice.auto_roll(
                     "duel_priority_tie_first", ["player_side", "opponent_side"],
-                    context="演武场四项先手完全平局：随机首手")
+                    context="四项先手完全平局：随机首手")
                 first = roll["selected"]
                 self.state.event_modifiers["duel_priority_tie_first"] = first
             # 用「第几次平局」计数交替，不用 current_round 奇偶：回始时回合号已经
@@ -1276,14 +1276,12 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         return side
 
     def _initial_priority_side(self) -> str:
-        """回始时该由哪一方先出手：优先轮回者侧，其次敌方，双方皆无余手则轮回者侧。"""
-        if self.state.event_modifiers.get("duel_priority_by_stats"):
-            return self._stats_priority_side()
-        if self.side_can_act("player_side"):
-            return "player_side"
-        if self.side_can_act("opponent_side"):
-            return "opponent_side"
-        return "player_side"
+        """回始先手：一律按四项先手属性判定（见 `_stats_priority_side`）。
+
+        旧实现在这里写「轮回者侧优先」，那等于给玩家一个结构性先手红利，
+        也把先手规则锁进了死斗兼容路径；两者都已按用户令删除。
+        """
+        return self._stats_priority_side()
 
     def round_start(self, relic_choices: Optional[dict] = None) -> dict:
         """

@@ -531,6 +531,21 @@ class CombatHandlersMixin:
         # 「当前轮到，」这类无主语拒绝；正常战斗在 battle_start 已写入 duel_turn。
         if not self.state.duel_turn:
             self.state.duel_turn = "opponent_side"
+        # 敌方这一侧根本没法出手（没有参战者、已被清场、或本回合余手用尽）：
+        # 没有可准备的行动，按【跳过】结束敌方回合即可。若不先判这一步，
+        # `_normalize_priority()` 会把优先权归位给玩家，紧接着的闸门就以
+        # 「当前轮到player_side」拒绝——而调用方（驱动/夹具）在「场上已无怪」时
+        # 准备怪物阶段是完全合法的收尾步骤。
+        if not self._duel_side_can_act("opponent_side"):
+            # 优先权确实在敌方这一侧、而敌方拿不出行动：按【跳过】把它的回合收掉，
+            # 由 _advance_priority_skip 统一处理子阶段（双方都无余手 → await_round_end）。
+            self.state.duel_turn = "opponent_side"
+            self._advance_priority_skip()
+            return {"success": True, "action": "敌方无可用出手，按【跳过】结束其回合",
+                    "skipped": True,
+                    "result": {"token": None, "spell_logs": [], "skipped": [], "actors": [],
+                               "note": "敌方这一侧没有可行动者；无需resolve_monster_phase"},
+                    "instruction": "继续当前优先权，或双方余手用尽后进入回终"}
         # 优先权只属于还能出手的一方：对方没有参战者/已用尽出手时自动归位。
         self._normalize_priority()
         # 优先权闸门对所有战斗一致：只有敌方持有优先权时才能准备怪物行动。

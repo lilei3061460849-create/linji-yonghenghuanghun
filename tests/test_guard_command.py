@@ -7,7 +7,8 @@ import os
 import sys
 import tempfile
 
-from tests.setup_support import finish_initial_daowen, hand_priority_to_enemy, grant_extra_actions
+from tests.setup_support import (finish_initial_daowen, hand_priority_to_enemy,
+                                 hand_priority_to_player, grant_extra_actions)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
@@ -51,6 +52,9 @@ def _start_battle_with(engine, monster):
     engine.state.enemies.append(monster)
     engine.state.monster_reinforcements = []
     engine.execute_action("round_start", {"relic_choices": round_start_relic_choices(engine)})
+    # 先手通用规则（速限→法限→血限→当前生命）：夹具的单怪速限更高时会先手。
+    # 本文件验的是「轮回者下指令」，故声明本回合轮到轮回者。
+    hand_priority_to_player(engine)
 
 
 def _resolve_monster_phase(engine):

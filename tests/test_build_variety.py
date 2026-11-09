@@ -12,7 +12,7 @@ import sys
 
 import pytest
 
-from tests.setup_support import finish_initial_daowen
+from tests.setup_support import finish_initial_daowen, hand_priority_to_player
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.api import GameEngine
@@ -125,6 +125,9 @@ def test_ai_uses_region_specific_daowen(dw, monkeypatch):
     # 不变量仍是「持有即会发动」，给它把法力打空的时间，别把窗口卡在 3 手。
     for _ in range(6):
         ai.new_round()
+        # 先手通用规则（速限→法限→血限→当前生命）：怪物速限更高时[回始]归怪物。
+        # 本例只验「持有专属道纹就会用」，故每一轮都声明轮到轮回者。
+        hand_priority_to_player(e)
         ai.take_turn()
     assert ai.used.get(dw, 0) > 0, f"{dw} 从未被使用，实际使用：{ai.used}"
 

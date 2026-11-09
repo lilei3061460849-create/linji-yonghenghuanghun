@@ -21,7 +21,8 @@ sys.path.insert(0, ROOT)
 from engine.ai_tactics import TacticalAI
 from engine.models import Entity
 
-from tests.setup_support import begin_battle, begin_round, finish_initial_daowen
+from tests.setup_support import (begin_battle, begin_round, finish_initial_daowen,
+                                hand_priority_to_player)
 
 
 def _engine(tmp_path, seed: int = 20260822):
@@ -55,6 +56,9 @@ def _setup(e, monster, player_power):
     e.state.player.attack_count = 1
     e.state.player.current_speed = 1
     assert begin_round(e)["success"]
+    # 先手通用规则：靶怪速限通常高于轮回者，[回始]优先权归怪物；本文件验的是
+    # 行动方替怪物算出的闪避决策，故声明本回合轮到轮回者。
+    hand_priority_to_player(e)
     return e
 
 
