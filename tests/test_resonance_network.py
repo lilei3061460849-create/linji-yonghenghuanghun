@@ -121,12 +121,12 @@ def test_generic_core_is_four_tetrahedra():
     assert set(generic) == {"通用四面体一", "通用四面体二", "通用四面体三", "通用四面体四"}
     assert len(R.edges_of_region("通用")) == 24  # 4 个四面体 × 6 条无向边
     assert set(R.nodes_of_region("通用")) == {
-        "杀伐", "再生", "庇护", "连击",
+        "杀伐", "再生", "庇护", "脆弱",
         "操纵", "束缚", "迟滞", "篡改",
         "强化", "弱化", "全力", "全速",
         "必中", "飞行", "压迫", "封印",
     }
-    assert R.find_transformation("连击", "反转") == "庇护"
+    assert R.find_transformation("脆弱", "反转") == "庇护"
     assert R.find_transformation("操纵", "转换") == "迟滞"
     # 2026-11-08 用户令：【篡改】与【封印】再次调换（封印回四面体二、篡改回四面体四）。
     assert R.find_transformation("迟滞", "反转") == "封印"

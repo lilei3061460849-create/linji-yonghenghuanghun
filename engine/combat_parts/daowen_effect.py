@@ -1340,7 +1340,7 @@ class DaowenEffectMixin:
                 if dmg.get("actual_damage", 0) > 0:
                     caster.damage_dealt_this_round += dmg["actual_damage"]
 
-        # ---- 再生的攻击力代价：发动者失去攻击力，随后按正常目标结算回复 ----
+        # ---- 攻击力代价（【再生衍生·舍力】）：发动者失去攻击力，随后按正常目标结算 ----
         if calc.get("cost_type") == "攻击力" and calc.get("cost_attack", 0) > 0:
             self._refuse_blocked_payment(caster, "攻击力")
             amount = int(calc["cost_attack"])

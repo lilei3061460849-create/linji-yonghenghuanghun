@@ -20,7 +20,8 @@ def test_rebirth_cost_channels_and_healing_are_unified():
     assert mana["target_heal"] == 12
     assert "支付：法力3" in mana["summary"]
 
-    attack = DaoWenEngine.calculate_zaisheng(3, cost_channel="攻击力")
+    # 2026-11-09：攻击力通道已拆为衍生道纹【舍力】。
+    attack = DaoWenEngine.resolve("舍力", 3)
     assert attack["cost_attack"] == 12
     assert attack["target_heal"] == 12
     assert "支付：攻击力12" in attack["summary"]

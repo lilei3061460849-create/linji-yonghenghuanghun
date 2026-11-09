@@ -8,6 +8,7 @@ from .models import Entity, StatusEffect, DaoWen, DaoWenInstance
 from .enums import CostType, RESOURCE_TYPES, normalize_payment_type
 from .rule_engine import daowen_migration_status, get_daowen_rule
 from .gamedata import UNIMPLEMENTED_DAOWEN, RACE_EXCLUSIVE_DAOWEN, BLOODLINE_EXCLUSIVE_DAOWEN
+from . import derivatives as derivative_rules
 import math
 
 
@@ -181,19 +182,14 @@ class DaoWenEngine:
         }
     
     @staticmethod
-    def calculate_zaisheng(x: int, target: Entity = None, cost_channel: str = "法力") -> dict:
-        """再生X：支付：法力X／攻击力4X；为[目标]回复4X点生命。"""
+    def calculate_zaisheng(x: int, target: Entity = None) -> dict:
+        """再生X：支付：法力X。为[目标]回复4X点生命。
+
+        2026-11-09 用户令：多途径道纹收成一条途径。【攻击力4X】通道改由
+        【再生衍生·舍力】独立承载（见 engine/derivatives.py），母本不再接受通道参数。
+        """
         target_name = target.name if target is not None else "未选定目标"
         heal = 4 * x
-        if cost_channel == "攻击力":
-            return {
-                "dao_wen": "再生", "x": x,
-                "cost_type": "攻击力", "cost_attack": heal,
-                "target_heal": heal,
-                "summary": f"支付：攻击力{heal}，为{target_name}回复{heal}点生命",
-            }
-        if cost_channel != "法力":
-            raise ValueError("再生支付必须选择法力或攻击力")
         return {
             "dao_wen": "再生", "x": x,
             "cost_type": CostType.MANA.value, "cost": x,
@@ -221,58 +217,37 @@ class DaoWenEngine:
             "summary": f"支付：法力{x}，使{target_name}免疫非{target_name}导致的下{x}次失去生命"
         }
     
-    # 连击六通道价格（2026-10-22 用户令：与【透支】同类多代价道纹，价格与效果全表同乘五）：
-    # 生命5X／法力5X／血限X／枯竭X／碎片5X／假碎片50X；效果 选择[目标]5X次、每次1点伤害。
-    # 比率锚现有体系：消耗品【逆命筹】承接重投效果；【假钞】1法力=10假碎片、
-    # 【透支】上限类按整X计价；全乘五后血限/枯竭回到整数X计价，不留⌈X/5⌉零头，
-    # 生命也回到旧【血债】「1点生命换1点伤害」的老比率（只是以5为一段）。
-    # 各通道效果完全相同，只有倍率不同，不带任何通道专属机制
-    # （演出差异不进引擎，用户 2026-10-22 令）。
-    LIANJI_CHANNELS = ("生命", "法力", "血限", "枯竭", "碎片", "假碎片")
-
-    # 2026-10-22 用户令：原【血债】改名【连击】并扩为六通道支付；六条通道只改倍率、效果恒同。
+    # 【脆弱】2026-11-09 用户令：原【连击】的通用四面体一格改由【脆弱】承接。
+    # 纯次数型：状态 value=X、remaining_rounds=-1（不按回合递减），下一次实际
+    # 失去生命时由 CombatEngine._fragile_hp_loss 一次性消费。
     @staticmethod
-    def calculate_lianji(x: int, target: Entity = None, cost_channel: str = "生命") -> dict:
-        """连击X：支付六选一：生命5X／法力5X／血限X／枯竭X／碎片5X／假碎片50X。选择[目标]5X次，每次对其造成1点伤害。
+    def calculate_cuiruo(x: int, target: Entity = None) -> dict:
+        """脆弱X：支付：法力2X。使[目标]下次失去生命重复X次。"""
+        target_name = target.name if target is not None else "未选定目标"
+        return {
+            "dao_wen": "脆弱", "x": x,
+            "cost_type": CostType.MANA.value, "cost": 2 * x,
+            "fragile_repeats": x,
+            "duration": -1,
+            "summary": f"支付：法力{2 * x}，使{target_name}下次失去生命重复{x}次",
+        }
 
-        支付途径只改倍率，效果恒同；cost_channel 缺省生命（怪物/旧调用/预设法术不传参
-        即原行为），碎片与假碎片是两个独立通道，只扣各自池子（不走「假碎片优先」的
-        合并失去）。
+    @staticmethod
+    def calculate_lianji(x: int, target: Entity = None) -> dict:
+        """连击X：支付：生命5X。选择[目标]5X次，每次对其造成1点伤害。
+
+        2026-11-09 用户令：原【连击】六通道拆散，改为【杀伐】的衍生道纹池；
+        本条只保留生命通道（缺省、旧档与怪物面板沿用）。其余五条途径由
+        【连珠】【血伐】【竭伐】【碎伐】【伪伐】各自单途径承载，见 engine/derivatives.py。
         """
-        cost_channel = normalize_payment_type(cost_channel)
         target_name = target.name if target is not None else "未选定目标"
         hits = 5 * x
-        damage_per_hit = 1
-        if cost_channel == "生命":
-            extra = {"cost_type": CostType.BLEED.value, "cost_hp": 5 * x}
-            price = f"生命{5 * x}"
-        elif cost_channel == "法力":
-            extra = {"cost_type": CostType.MANA.value, "cost": 5 * x}
-            price = f"法力{5 * x}"
-        elif cost_channel == "血限":
-            extra = {"cost_type": CostType.AGING.value, "cost_blood_limit": x}
-            price = f"血限{x}"
-        elif cost_channel == "枯竭":
-            extra = {"cost_type": CostType.EXHAUST.value, "cost_mana_limit": x}
-            price = f"枯竭{x}"
-        elif cost_channel == "碎片":
-            extra = {"cost_type": "碎片", "cost_real_shards": 5 * x}
-            price = f"碎片{5 * x}"
-        elif cost_channel == "假碎片":
-            extra = {"cost_type": "碎片", "cost_fake_shards": 50 * x}
-            price = f"假碎片{50 * x}"
-        else:
-            raise ValueError(
-                f"连击cost_channel非法：{cost_channel!r}，可选生命/法力/血限/枯竭/碎片/假碎片")
         return {
-            "dao_wen": "连击",
-            "x": x,
-            **extra,
-            "cost_channel": cost_channel,
-            "hits": hits,
-            "damage_per_hit": damage_per_hit,
-            "total_damage": hits * damage_per_hit,
-            "summary": f"{price}，选择{target_name} {hits}次，每次造成{damage_per_hit}点伤害"
+            "dao_wen": "连击", "x": x,
+            "cost_type": CostType.BLEED.value, "cost_hp": 5 * x,
+            "derivative_of": "杀伐",
+            "hits": hits, "damage_per_hit": 1, "total_damage": hits,
+            "summary": f"支付：生命{5 * x}，选择{target_name} {hits}次，每次造成1点伤害",
         }
     
     @staticmethod
@@ -390,37 +365,23 @@ class DaoWenEngine:
         }
     
     @staticmethod
-    def calculate_touzhi(x: int, cost_channel: str = "生命") -> dict:
-        """透支X：支付：（四选一）：生命4X／血限2X／枯竭X／速度X。你获得X点法力
+    def calculate_touzhi(x: int) -> dict:
+        """透支X：支付：枯竭X。你获得X点法力。
 
         用户裁定 2026-09-12：与【再生X】构成生命⇄法力闭环，净值不产生免费资源；
         实际上限由【癌变】(本场累计回复=2×血限) 自然封死。
         用户裁定 2026-09-13：3X→4X。与【再生X】(支付：法力X→回复4X生命) 对齐为
         严格 4:1 双向汇率，闭环净值归零，不再每轮白赚生命。
-        2026-10-14 用户令：改为多代价道纹——合并【搏命】（速度X换X法力）并删除搏命；
-        遗物【余火印】删除（其发动时额外耗龙心模式一并取消，龙心只走通用抵扣）。
-        速度通道沿用搏命的 k=1 结论：卖X速度得kX法力可经【超频】买回 kX/2 速度，
-        k≥2 即永动，故取 k=1（每卖1点速度净亏0.5点，循环必然收敛）。
-        cost_channel 缺省生命（向后兼容：怪物/旧调用不传参即原行为）。
+        2026-11-09 用户令：多途径道纹收成一条途径，母本只留【枯竭X】；
+        生命4X／血限2X／速度X 三条改由【透支衍生·燃血／折寿／疾贷】独立承载。
+        （速度通道的 k=1 结论继续沿用：卖X速度得kX法力可经【超频】买回 kX/2 速度，
+        k≥2 即永动，故取 k=1。）
         """
-        cost_channel = normalize_payment_type(cost_channel)
-        if cost_channel == "生命":
-            cost_type, cost_key, amount = CostType.BLEED.value, "cost_hp", 4 * x
-        elif cost_channel == "血限":
-            cost_type, cost_key, amount = CostType.AGING.value, "cost_blood_limit", 2 * x
-        elif cost_channel == "枯竭":
-            cost_type, cost_key, amount = CostType.EXHAUST.value, "cost_mana_limit", x
-        elif cost_channel == "速度":
-            cost_type, cost_key, amount = CostType.FATIGUE.value, "cost_speed", x
-        else:
-            raise ValueError(f"透支cost_channel非法：{cost_channel!r}，可选生命/血限/枯竭/速度")
         return {
-            "dao_wen": "透支",
-            "x": x,
-            "cost_type": cost_type,
-            cost_key: amount,
+            "dao_wen": "透支", "x": x,
+            "cost_type": CostType.EXHAUST.value, "cost_mana_limit": x,
             "mana_gain": x,
-            "summary": f"{cost_channel}{amount}，获得{x}点法力"
+            "summary": f"支付枯竭{x}，获得{x}点法力",
         }
     
     @staticmethod
@@ -473,14 +434,17 @@ class DaoWenEngine:
     
     @staticmethod
     def calculate_qianghua(x: int, target: Entity = None) -> dict:
-        """强化X：支付：法力X／生命2X。使[目标]获得2X额外攻击力，持续∞。"""
+        """强化X：支付：法力X与生命2X。使[目标]获得2X额外攻击力，持续∞。
+
+        2026-11-09：明确为「一条复合途径、两种资源同时支付」，不是多途径二选一。
+        """
         if x < 1:
             raise ValueError("X必须为正整数")
         target_name = target.name if target is not None else "未选定目标"
         return {
             "dao_wen": "强化", "x": x, "cost_type": CostType.MANA.value,
             "cost": x, "cost_hp": 2 * x, "attack_bonus": 2 * x, "duration": -1,
-            "summary": f"支付：法力{x}／生命{2*x}，使{target_name}获得{2*x}额外攻击力，持续∞",
+            "summary": f"支付：法力{x}与生命{2*x}，使{target_name}获得{2*x}额外攻击力，持续∞",
         }
 
     @staticmethod
@@ -1466,6 +1430,9 @@ class DaoWenEngine:
             "杀伐": cls.calculate_shaifa,
             "再生": cls.calculate_zaisheng,
             "庇护": cls.calculate_bihu,
+            # 2026-11-09：【连击】退出通用四面体，其格由【脆弱】承接；
+            # 【连击】本身改作【杀伐衍生】保留在注册表里（旧档/旧面板照常读入）。
+            "脆弱": cls.calculate_cuiruo,
             "连击": cls.calculate_lianji,
             "波及": cls.calculate_boba,
             "共罪": cls.calculate_gongzui,
@@ -1552,6 +1519,12 @@ class DaoWenEngine:
             "原初": cls.calculate_yuanchu,
             "病变": cls.calculate_bingbian,
         }
+        # 衍生道纹不是四面体节点，也不进学习/开局发现池；但它们是正常可发动的
+        # 道纹，公式由 engine/derivatives.py 的单途径汇率表生成，避免第二份实现。
+        for derived_name in derivative_rules.DERIVED_DAOWEN:
+            if derived_name == "连击":
+                continue  # 旧名沿用上面的人工实现（旧档/怪物面板兼容）
+            cls._registry[derived_name] = derivative_rules.calculator_for(derived_name)
     
     @staticmethod
     def single_round_action_count(entity: Entity) -> int:
@@ -1656,10 +1629,11 @@ class ResonanceEngine:
     # 两个方向都走同一种残韵、支付同样一次；反向由 find_transformations 查询时展开。
     CLOSED_LOOPS = {
         # ---- 通用（四面体一~四）----
+        # 2026-11-09 用户令：【连击】替换为【脆弱】；原【连击】拆散成【杀伐】衍生池。
         "通用四面体一": [
-            ("杀伐", "反转", "再生"), ("连击", "反转", "庇护"),
-            ("杀伐", "转换", "连击"), ("再生", "转换", "庇护"),
-            ("杀伐", "曲解", "庇护"), ("再生", "曲解", "连击"),
+            ("杀伐", "反转", "再生"), ("脆弱", "反转", "庇护"),
+            ("杀伐", "转换", "脆弱"), ("再生", "转换", "庇护"),
+            ("杀伐", "曲解", "庇护"), ("再生", "曲解", "脆弱"),
         ],
         # 2026-11-08 用户令：【篡改】与【封印】再次调换（继 2026-11-07 互换后
         # 改回）——四面体二含【封印】、四面体四含【篡改】，效果条文不变。

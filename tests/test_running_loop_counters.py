@@ -8,7 +8,7 @@ from tests.test_daowen_wiring import _engine,_give,_monster
 
 def setup(suffix):
     e=_engine('running_counter_'+suffix);p=e.state.player
-    _give(p,'杀伐');_give(p,'透支');_give(p,'不死')
+    _give(p,'杀伐');_give(p,'折寿');_give(p,'不死')
     a=_monster(e,'反制者',hp=10000)
     e.execute_action('round_start',{})
     e.state.relics=[Relic('不朽之躯','')]
@@ -62,13 +62,13 @@ def test_relic_supply_can_be_removed_after_prefix_and_before_later_cost():
     e,p,a=setup('relic');_give(a,'豪夺');a.current_mana=a.mana_limit=100
     # 豪夺＝支付 5X 真碎片夺 1 件遗物（不抢碎片），付不起就发不动。
     a.shards=5
-    assert paid_step(e,p,'透支',p,{'cost_channel':'衰老'}).status==StepStatus.COMPLETED
+    assert paid_step(e,p,'折寿',p).status==StepStatus.COMPLETED
     assert paid_step(e,p,'杀伐',a).status==StepStatus.COMPLETED
     blood=p.blood_limit
     # 豪夺是实际遗物转移执行器，不是测试直接把供能遗物pop掉。
     result=e.combat.apply_daowen_effect('豪夺',DaoWenEngine.resolve('豪夺',1,target=p),a,p)
     assert not e.state.side_has(p,'不朽之躯'),result
-    assert paid_step(e,p,'透支',p,{'cost_channel':'衰老'}).status==StepStatus.COMPLETED
+    assert paid_step(e,p,'折寿',p).status==StepStatus.COMPLETED
     assert p.blood_limit==blood-2
 
 
@@ -85,10 +85,11 @@ def test_bizhong_blocks_passive_actions_not_reaction_spells():
     assert e.combat.prepare_daowen_trigger_spells(p)!={}
 
 
-def test_instant_steps_do_not_silently_discard_selected_supply_channel():
+def test_instant_steps_use_the_single_derivative_channel():
+    """2026-11-09：衰老通道已独立为衍生【折寿】；不再有可切换的通道参数。"""
     e,p,a=setup('channel');hp=p.current_hp;blood=p.blood_limit
-    execution=e.combat.build_instant_execution(p,'发动透支X于自身→发动杀伐X于目标',a,
-        [{'x':1,'cost_channel':'衰老'},{'x':1,'dodge':False}],e.combat._combat_entity_refs())
+    execution=e.combat.build_instant_execution(p,'发动折寿X于自身→发动杀伐X于目标',a,
+        [{'x':1},{'x':1,'dodge':False}],e.combat._combat_entity_refs())
     execution.run_all()
     assert len(execution.results)==2 and all(r.status==StepStatus.COMPLETED for r in execution.results)
     assert p.current_hp==hp and p.blood_limit==blood and a.current_hp==9999

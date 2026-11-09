@@ -7,7 +7,7 @@
 DSL 定次（循环N次）。10000 次是工程安全阀，不是游戏规则。
 
 本文件锁定三条真实语义：
-1. 零法力起步的【透支】+【再生】自持循环可以提交并结算（校验期不得把
+1. 零法力起步的【燃血】+【再生】自持循环可以提交并结算（校验期不得把
    产法力道纹当成纯支出）；
 2. 每轮法力净零、生命净零，累计回复推进【癌变】阈值 → 到顶即命零、循环终止；
 3. 付不起的循环仍然会被拒绝——只是从"提交时报错"变成"执行期中断"。
@@ -23,12 +23,12 @@ from tests.test_dragon_heart import _new_engine, _start_with_enemy
 
 # 与官方条目 死者之书.md「## 可学法术 → 血炼周天」同构（现已是内置法术，
 # 这里刻意用另一个名字自创同一流程，以覆盖"自创循环法术"这条路径）。先【再生】回血、再
-# 【透支】把血卖成法力，【透支】的流血同时满足「失去生命后」驱动下一轮。
+# 【燃血】把血卖成法力，【燃血】的流血同时满足「失去生命后」驱动下一轮。
 SPELL = {
     "name": "周天自持",
-    "required_daowen": ["再生", "透支"],
+    "required_daowen": ["再生", "燃血"],
     "trigger_condition": "失去生命后",
-    "effect_flow": "发动再生X于自身→发动透支X于自身→循环",
+    "effect_flow": "发动再生X于自身→发动燃血X于自身→循环",
 }
 SEED_MANA = 3
 
@@ -37,12 +37,12 @@ def _engine_with_loop_spell(suffix, *, hp, mana, spells=None):
     engine = _new_engine(suffix)
     player = engine.state.player
     engine.state.relics = []   # 2026-10-13：遗物池删2件后随机发放漂移（万钧印改向攻击会打断循环触发），本文件只测法术循环，清空钉死。
-    for name in ("透支", "再生"):
+    for name in ("燃血", "再生"):
         player.dao_wen[name] = DaoWenInstance(
             DaoWen(name=name, formula="", cost_type="", cost_formula="X", effect_formula=""))
     # 2026-09-16：自创法术只能在战斗中用 define_spell 完成。
     _start_with_enemy(engine)
-    # 2026-10-25：法术阶数＝重数。周天自持 = 失去生命后 + 再生 + 透支 = 3 阶 = 3 次出手；
+    # 2026-10-25：法术阶数＝重数。周天自持 = 失去生命后 + 再生 + 燃血 = 3 阶 = 3 次出手；
     # 条件分支的两臂各算一重，本文件的「血溅」分支写法到 6 阶。基础出手只 2 次，
     # 先用【蓄锐·增】把出手预算补到 11 再定义（阶数＝重数，不设上限）。
     grant_extra_actions(engine.state.player, 9)  # 战斗开始时可能替换 player 对象，取最新引用
@@ -101,12 +101,12 @@ def _spell_logs(result, name="周天自持"):
 
 BRANCH_SPELL = {
     "name": "血溅五步",
-    "required_daowen": ["再生", "透支", "杀伐"],
+    "required_daowen": ["再生", "燃血", "杀伐"],
     "trigger_condition": "失去生命后",
     "effect_flow": (
         "若自身 法力 大于等于 2 则 "
-        "发动再生X于自身；发动杀伐X于攻击者；发动透支X于自身 "
-        "否则 发动再生X于自身；发动透支X于自身→循环"
+        "发动再生X于自身；发动杀伐X于攻击者；发动燃血X于自身 "
+        "否则 发动再生X于自身；发动燃血X于自身→循环"
     ),
 }
 
@@ -120,7 +120,7 @@ def _engine_with_branch_spell(suffix, *, mana):
     # = 6 阶，须一次付清 6 次出手；基础预算只有 2 次，故用【蓄锐·增】把预算补足。
     # （action_count 是只读属性，只能走正文的修正项。）
     grant_extra_actions(engine.state.player, 9)
-    for name in ("杀伐", "再生", "透支"):
+    for name in ("杀伐", "再生", "燃血"):
         player.dao_wen[name] = DaoWenInstance(
             DaoWen(name=name, formula="", cost_type="", cost_formula="X", effect_formula=""))
 
@@ -140,7 +140,7 @@ def _engine_with_branch_spell(suffix, *, mana):
 
 
 def _branch_steps(x=1):
-    """程序有 5 个决策槽位：则分支 3 个（再生/杀伐/透支）→ 否则分支 2 个（再生/透支）。"""
+    """程序有 5 个决策槽位：则分支 3 个（再生/杀伐/燃血）→ 否则分支 2 个（再生/燃血）。"""
     return [
         {"x": x, "target_ref": "player:0"},
         {"x": x, "target_ref": "enemy:0", "dodge": False},
@@ -192,7 +192,7 @@ def test_blood_splash_branch_evaluated_at_execution_and_frozen_across_hits():
     engine = _engine_with_branch_spell("branch_low", mana=1)
     decision = {"use": True, "steps": _branch_steps(), "max_iterations": 1}
     # 第一个命中到达条件时法力=1 → 走"否则"分支（2 步）；
-    # 结算后【透支】把法力推到 2，但第二、三次命中复用同一份提交 → 分支冻结。
+    # 结算后【燃血】把法力推到 2，但第二、三次命中复用同一份提交 → 分支冻结。
     result = _resolve_branch_phase(engine, [
         (True, decision),
         (True, decision),
@@ -201,7 +201,7 @@ def test_blood_splash_branch_evaluated_at_execution_and_frozen_across_hits():
     assert result and engine.state.player.is_alive
     assert engine.state.player.current_mana == 3
     used = [log["daowen"] for log in _spell_logs(result, "血溅五步") if "daowen" in log]
-    assert used == ["再生", "透支", "再生", "透支"]
+    assert used == ["再生", "燃血", "再生", "燃血"]
     # 冻结快照随提交写回调用方，且归属标记可序列化（字符串）
     assert decision["branch_snapshot"] == {"0L0": 1}
     assert isinstance(decision["_engine_branch_owner"], str)
@@ -209,7 +209,7 @@ def test_blood_splash_branch_evaluated_at_execution_and_frozen_across_hits():
 
 
 def test_blood_splash_high_mana_branch_submits_three_steps_and_loops():
-    """高法力分支按当前状态求值：再生→杀伐→透支（各一步）。"""
+    """高法力分支按当前状态求值：再生→杀伐→燃血（各一步）。"""
     engine = _engine_with_branch_spell("branch_high", mana=2)
     result = _resolve_branch_phase(engine, [
         (True, {"use": True, "steps": _branch_steps(), "max_iterations": 1}),
@@ -218,17 +218,17 @@ def test_blood_splash_high_mana_branch_submits_three_steps_and_loops():
     ])
     assert result and engine.state.player.is_alive
     used = [log["daowen"] for log in _spell_logs(result, "血溅五步") if "daowen" in log]
-    assert used == ["再生", "杀伐", "透支"]
+    assert used == ["再生", "杀伐", "燃血"]
 
 
 def test_single_iteration_is_mana_neutral():
-    """一轮循环法力净零：再生耗3、透支产3，法力回到起点，生命净+3。"""
+    """一轮循环法力净零：再生耗3、燃血产3，法力回到起点，生命净+3。"""
     engine = _engine_with_loop_spell("loop_one", hp=40, mana=SEED_MANA)
     player = engine.state.player
 
     _fire(engine, max_iterations=1)
 
-    # 挨打5点后触发：再生3(耗3法力、回12生命) → 透支3(流血12、产3法力)
+    # 挨打5点后触发：再生3(耗3法力、回12生命) → 燃血3(流血12、产3法力)
     assert player.current_hp == 35          # 40-5+12-12
     assert player.current_mana == SEED_MANA  # 用3产3，回到起点
     assert player.total_healed == 12
@@ -273,7 +273,7 @@ def test_cancer_still_caps_the_loop():
         assert player.total_healed == cap   # 132，不因提交更多轮数而继续累加
         assert player.current_hp == 0
         assert not player.is_alive
-        # 第 11 轮的【透支】不再结算：循环因施法者命零而中止
+        # 第 11 轮的【燃血】不再结算：循环因施法者命零而中止
         logs = _spell_logs(result)
         assert logs[-1]["interrupted"] == "caster_dead"
         assert max_iterations == 11 or len(logs) == 22

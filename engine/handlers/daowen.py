@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from .. import custom_resources
+from .. import derivatives as derivative_rules
 from ..action_registry import ACTION_REGISTRY
 from ..consumables import note_action_targets
 from ..daowen import DaoWenEngine, ResonanceEngine
@@ -241,12 +242,9 @@ class DaowenHandlersMixin:
             if name == "净化":
                 resolve_kw["cost_choices"] = params.get("cost_choices")
             resolve_kw["y"] = daowen_y
-            # 2026-10-14：【透支】多支付通道（缺省生命；resolve 按签名分发，其余道纹无感）。
-            if name == "透支":
-                resolve_kw["cost_channel"] = params.get("touzhi_cost", "生命")
-            # 2026-10-22：【连击】多支付通道（缺省生命；与透支同一接线口径）。
-            if name == "连击":
-                resolve_kw["cost_channel"] = params.get("lianji_cost", "生命")
+            # 2026-11-09 用户令：【透支】【再生】【连击】都收成单途径，
+            # 其余通道改由各自的衍生道纹独立承载；旧参数名（touzhi_cost /
+            # lianji_cost / zaisheng_cost）不再接线，提交它们也不改变结算。
             # 2026-10-31：【怜悯】封锁一种支付途径（缺省法力）。
             if name == "怜悯":
                 resolve_kw["blocked_type"] = params.get("lianmin_cost", "法力")
@@ -255,8 +253,6 @@ class DaowenHandlersMixin:
             if name == "操纵":
                 # 剩余次数＝X（2026-11-02 用户令：由「下一次」改为「下X次」）。
                 resolve_kw["order"] = params.get("caozuo_order")
-            if name == "再生":
-                resolve_kw["cost_channel"] = params.get("zaisheng_cost", "法力")
             # 2026-11-08 四副本补齐：带显式选择的道纹把选择透传给计算层。
             if name in ("重铸", "回炉"):
                 resolve_kw["item_name"] = str(params.get("item_name") or "")
@@ -281,7 +277,7 @@ class DaowenHandlersMixin:
             return {"success": False, "error": f"道纹计算失败: {str(e)}"}
         if calc.get("cost_type") == "攻击力" and calc.get("cost_attack", 0) > actor.effective_attack_power():
             return {"success": False,
-                    "error": f"再生攻击力代价需要{calc.get('cost_attack', 0)}点，{actor.name}当前有效攻击力为{actor.effective_attack_power()}"}
+                    "error": f"{name}攻击力代价需要{calc.get('cost_attack', 0)}点，{actor.name}当前有效攻击力为{actor.effective_attack_power()}"}
         if calc.get("cost_type") == "失忆" and calc.get("cost", 0) > len(actor.dao_wen):
             return {"success": False,
                     "error": f"失忆{calc.get('cost', 0)}无法支付：{actor.name}仅持有{len(actor.dao_wen)}种道纹"}
@@ -902,3 +898,165 @@ class DaowenHandlersMixin:
         }
 
     # 2026-09-28：_pre_battle_wangyou 已删除（局外【忘忧】被删除，忘忧香效果为溢出回复转格挡）。
+
+    # ==================== 衍生道纹（2026-11-09 用户令） ====================
+
+    def _derivative_recipient(self, ref: str):
+        """接收者＝轮回者本人（默认）或现存朋友/员工/临时朋友；按 runtime_id 稳定查找。"""
+        player = self.state.player
+        if player is None:
+            return None
+        if not ref or ref in ("player", player.name, player.runtime_id):
+            return player
+        for group in (self.state.friends, self.state.employees, self.state.temp_friends):
+            for entity in group:
+                if entity.is_alive and ref in (entity.name, entity.runtime_id):
+                    return entity
+        return None
+
+    @staticmethod
+    def _pending_derivative(state) -> list[str]:
+        return list(getattr(state, "pending_derivative_choices", []) or [])
+
+    def _offer_derivative_choices(self, recipient, parent: str, *, source: str) -> list[str]:
+        """从母本衍生池里随机列出至多 3 个未持有选项（不替玩家做选择）。"""
+        remaining = [n for n in derivative_rules.pool_of(parent) if n not in recipient.dao_wen]
+        choices: list[str] = []
+        for slot in range(min(derivative_rules.DISCOVERY_OPTION_COUNT, len(remaining))):
+            roll = self.dice.auto_roll(
+                f"derivative_discovery_{parent}_{slot + 1}",
+                remaining,
+                context=f"{source}：母本【{parent}】衍生候选{slot + 1}",
+            )
+            choices.append(remaining.pop(roll["record"]["selected_index"]))
+        return choices
+
+    @staticmethod
+    def _pay_derivative_blood_limit(recipient, amount: int) -> None:
+        """局内衍生行动的代价：只改血限面板并封顶当前生命，不走衰老代价总线。"""
+        recipient.blood_limit = max(0, recipient.blood_limit - amount)
+        if recipient.current_hp > recipient.blood_limit:
+            object.__setattr__(recipient, "current_hp", recipient.blood_limit)
+
+    @ACTION_REGISTRY.action("derive_daowen", group="daowen",
+                            allowed_phases=("in_combat",),
+                            note="局内0出手衍生行动；代价【转换】×1+血限2+灵魂碎片3")
+    def _action_derive_daowen(self, params: dict) -> dict:
+        """局内【衍生】行动（占0次主动出手，不结束回合）。
+
+        母本道纹 → 支付【转换】×1 + 血限2 + 灵魂碎片3 → 【发现】一种衍生道纹。
+        2026-11-09 用户令：衍生改在战斗中使用，作为独立的 0 出手行动；代价不变。
+        """
+        state = self.state
+        if self._pending_derivative(state):
+            return {"success": False,
+                    "error": "已有待选择的衍生发现；请先领取、刷新或放弃"}
+        recipient = self._derivative_recipient(str(params.get("recipient") or ""))
+        if recipient is None:
+            return {"success": False, "error": "衍生发现的接收者不存在或已离场"}
+        parent = str(params.get("source_daowen") or "")
+        if derivative_rules.is_derivative(parent):
+            return {"success": False, "error": "衍生道纹不能再作为母本衍生"}
+        if parent not in recipient.dao_wen:
+            return {"success": False, "error": f"接收者【{recipient.name}】未持有母本道纹【{parent}】"}
+        pool = derivative_rules.pool_of(parent)
+        if not pool:
+            return {"success": False, "error": f"母本【{parent}】没有衍生道纹池"}
+        unowned = [n for n in pool if n not in recipient.dao_wen]
+        if not unowned:
+            return {"success": False,
+                    "error": f"母本【{parent}】的衍生道纹已全部持有，无需再衍生"}
+        if state.resonance.get(derivative_rules.DERIVE_RESONANCE, 0) < derivative_rules.DERIVE_RESONANCE_COST:
+            return {"success": False, "error": "衍生发现需要【转换】残韵×1"}
+        if state.shards < derivative_rules.DERIVE_SHARD_COST:
+            return {"success": False, "error": "衍生发现需要灵魂碎片3"}
+        if recipient.blood_limit <= derivative_rules.DERIVE_BLOOD_LIMIT_COST:
+            return {"success": False, "error": "血限不足以支付衍生发现的血限2"}
+        if len(recipient.dao_wen) >= recipient.daowen_capacity:
+            return {"success": False,
+                    "error": (f"【{recipient.name}】没有空余死者之页承载新的衍生道纹；"
+                              "每个衍生道纹独立占用 1 张死者之页")}
+
+        # 全部前置条件通过后才付费（不生效不扣费）。
+        state.resonance[derivative_rules.DERIVE_RESONANCE] -= derivative_rules.DERIVE_RESONANCE_COST
+        state.shards -= derivative_rules.DERIVE_SHARD_COST
+        self._pay_derivative_blood_limit(recipient, derivative_rules.DERIVE_BLOOD_LIMIT_COST)
+        choices = self._offer_derivative_choices(recipient, parent, source="衍生发现")
+        state.pending_derivative_choices = choices
+        state.pending_derivative_parent = parent
+        state.pending_derivative_recipient = recipient.runtime_id
+        return {"success": True, "action": "衍生发现",
+                "result": {"parent": parent, "recipient": recipient.name,
+                           "choices": list(choices),
+                           "cost": "【转换】×1、血限2、灵魂碎片3",
+                           "next_actions": ["choose_derivative_daowen",
+                                            "refresh_derivative_choices"]}}
+
+    @ACTION_REGISTRY.action("refresh_derivative_choices", group="daowen",
+                            allowed_phases=("in_combat",),
+                            note="局内0出手；重新支付血限2刷新衍生选项")
+    def _action_refresh_derivative_choices(self, params: dict) -> dict:
+        """局内 0 出手：对本次结果不满意，重新支付血限2，刷新 3 个未持有选项。"""
+        state = self.state
+        if not self._pending_derivative(state):
+            return {"success": False, "error": "当前没有待选择的衍生发现"}
+        recipient = self._derivative_recipient(getattr(state, "pending_derivative_recipient", ""))
+        if recipient is None:
+            return {"success": False, "error": "衍生发现的接收者已离场"}
+        if recipient.blood_limit <= derivative_rules.REFRESH_BLOOD_LIMIT_COST:
+            return {"success": False, "error": "血限不足以支付刷新选项的血限2"}
+        parent = getattr(state, "pending_derivative_parent", "")
+        if not derivative_rules.pool_of(parent):
+            return {"success": False, "error": f"母本【{parent}】没有衍生道纹池"}
+        self._pay_derivative_blood_limit(recipient, derivative_rules.REFRESH_BLOOD_LIMIT_COST)
+        choices = self._offer_derivative_choices(recipient, parent, source="衍生刷新")
+        state.pending_derivative_choices = choices
+        return {"success": True, "action": "刷新衍生选项",
+                "result": {"parent": parent, "recipient": recipient.name,
+                           "choices": list(choices), "cost": "血限2"}}
+
+    @ACTION_REGISTRY.action("choose_derivative_daowen", group="daowen",
+                            allowed_phases=("in_combat",),
+                            note="局内0出手；领取或放弃本次衍生发现")
+    def _action_choose_derivative_daowen(self, params: dict) -> dict:
+        """局内 0 出手：从本次【发现】结果里显式选择一种衍生道纹获取（或放弃）。"""
+        state = self.state
+        choices = self._pending_derivative(state)
+        if not choices:
+            return {"success": False, "error": "当前没有待选择的衍生发现"}
+        recipient = self._derivative_recipient(getattr(state, "pending_derivative_recipient", ""))
+        if recipient is None:
+            return {"success": False, "error": "衍生发现的接收者已离场"}
+        if params.get("abandon"):
+            state.pending_derivative_choices = []
+            state.pending_derivative_parent = ""
+            state.pending_derivative_recipient = ""
+            return {"success": True, "action": "放弃衍生发现",
+                    "result": {"abandoned": choices,
+                               "note": "已付出的代价不退；可重新支付完整代价再次衍生"}}
+        name = str(params.get("daowen_name") or "")
+        parent = getattr(state, "pending_derivative_parent", "")
+        if name not in choices:
+            return {"success": False, "error": "只能选择本次发现列出的衍生道纹",
+                    "choices": list(choices)}
+        if derivative_rules.parent_of(name) != parent:
+            return {"success": False, "error": "该衍生道纹不属于本次母本的衍生池"}
+        if name in recipient.dao_wen:
+            state.pending_derivative_choices = []
+            return {"success": True, "action": "领取衍生道纹",
+                    "result": {"granted": None, "note": f"已持有【{name}】，本次发现作废"}}
+        if len(recipient.dao_wen) >= recipient.daowen_capacity:
+            return {"success": False,
+                    "error": (f"【{recipient.name}】没有空余死者之页承载【{name}】；"
+                              "本次发现保留，腾出空页后可重试")}
+        recipient.dao_wen[name] = DaoWenInstance(DaoWen(
+            name=name, formula=f"{name}X", cost_type="消耗",
+            cost_formula="X", effect_formula=""))
+        state.pending_derivative_choices = []
+        state.pending_derivative_parent = ""
+        state.pending_derivative_recipient = ""
+        return {"success": True, "action": "领取衍生道纹",
+                "result": {"granted": name, "parent": parent,
+                           "recipient": recipient.name,
+                           "pages_used": recipient.pages_used,
+                           "daowen": list(recipient.dao_wen)}}

@@ -1229,6 +1229,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         2. 结算回始类效果
         3. 返回需要决策的信息
         """
+        # 读档／重来／沙盒恢复会剔除弱引用；回始统一重绑失血拦截钩子（幂等）。
+        self._bind_intercept_hooks()
         effects = self._begin_chenni_world_round(
             self.state.get_all_player_side() + self.state.get_all_enemy_side())
         # 先取出本回合应造成的伤害；被沉溺中断者整笔留到下一次真正经历的回合。

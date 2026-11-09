@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from .. import custom_resources
 from ..action_registry import ACTION_REGISTRY
+from .. import derivatives as derivative_rules
 from ..consumables import WING_MODES
 from ..daowen import DaoWenEngine, PURIFIABLE_COST_KINDS, purifiable_cost_layers
 from ..enums import CombatSubphase, GamePhase, RESOURCE_TYPES, TriggerTiming
@@ -52,6 +53,25 @@ class AvailableActionsMixin:
                 "actions": [{"type": "choose_discovered_relic",
                              "relic_name": name} for name in self.state.pending_relic_choices],
                 "source": self.state.pending_relic_source,
+            }
+        if getattr(self.state, "pending_derivative_choices", []):
+            in_combat = self.state.phase == GamePhase.IN_COMBAT.value
+            return {
+                "phase": "衍生发现待选（局内·0出手）" if in_combat else "衍生发现待选",
+                "actions": [
+                    {"action_type": "choose_derivative_daowen",
+                     "params_schema": {"daowen_name": list(self.state.pending_derivative_choices),
+                                       "abandon": "True＝放弃本次结果（已付代价不退）"},
+                     "note": "领取／放弃均占0次主动出手，不结束回合"},
+                    {"action_type": "refresh_derivative_choices",
+                     "params_schema": {"cost": "血限2（重新随机列出未持有选项）"},
+                     "note": "刷新只付血限2，同样占0次主动出手"},
+                ],
+                "parent": getattr(self.state, "pending_derivative_parent", ""),
+                "choices": list(self.state.pending_derivative_choices),
+                "combat_subphase": self.state.combat_subphase if in_combat else None,
+                "note": ("局内衍生：本次结果须显式领取／刷新／放弃；三者都是0出手行动，"
+                         "领取后可继续本回合其它行动"),
             }
         if self.state.pending_item_choices:
             return {
@@ -542,9 +562,6 @@ class AvailableActionsMixin:
                     "dodge": "敌对单目标时必填布尔值",
                     "blood_shadow": "目标持有血影时必填布尔值",
                     "spell_choices": "若触发法术，按法术选项完整提交",
-                    **({"zaisheng_cost": ["法力", "攻击力"]} if name == "再生" else {}),
-                    **({"lianji_cost": ["生命", "法力", "血限", "枯竭", "碎片", "假碎片"]}
-                       if name == "连击" else {}),
                     **({"lianmin_cost": list(DaoWenEngine.PAYABLE_TYPES)}
                        if name == "怜悯" else {}),
                     **({"relic_name": "目标可夺取的遗物或消耗品名；目标有多件时必须显式指定，同名跨种类时另加item_kind=relic/consumable，无可夺对象则本次发动被拒绝且不支付代价"}
@@ -775,6 +792,30 @@ class AvailableActionsMixin:
              "available": bool(idle_allies),
              "note": "让一名未出手的[朋友]/[员工]自主完成一个行动（无命令时）"},
         ])
+        # 2026-11-09 用户令：衍生是**局内**的独立 0 出手行动；代价不变。
+        # 它不占主动出手、不结束回合，也不因本回合出手用尽而不可用。
+        derivative_parents = [name for name in derivative_rules.known_parents()
+                              if name in player.dao_wen]
+        actions.append({
+            "action_type": "derive_daowen",
+            "params_schema": {
+                "source_daowen": derivative_parents or "需先持有母本道纹（杀伐／透支／再生）",
+                "recipient": "player（默认）或现存朋友/员工/临时朋友名称或runtime_id",
+                "cost": "【转换】×1 + 血限2 + 灵魂碎片3",
+                "note": "从该母本衍生池随机列出至多3个未持有选项，随后用 "
+                        "choose_derivative_daowen 领取、refresh_derivative_choices 刷新；"
+                        "每个衍生道纹独立占1张死者之页",
+            },
+            "available": bool(derivative_parents)
+                         and self.state.resonance.get(derivative_rules.DERIVE_RESONANCE, 0)
+                         >= derivative_rules.DERIVE_RESONANCE_COST
+                         and self.state.shards >= derivative_rules.DERIVE_SHARD_COST
+                         and player.blood_limit > derivative_rules.DERIVE_BLOOD_LIMIT_COST
+                         and len(player.dao_wen) < player.daowen_capacity
+                         and not getattr(self.state, "pending_derivative_choices", []),
+            "note": "局内【衍生】：占0次主动出手、不结束回合；代价【转换】×1＋血限2＋灵魂碎片3。"
+                    "刷新选项另付血限2；领取／刷新／放弃也都不占出手",
+        })
         return {"phase": subphase, "round": self.state.current_round,
                 "duel_turn": self.state.duel_turn,
                 "ended_turn_sides": sorted(self.combat._ended_turn_sides),
@@ -814,13 +855,9 @@ class AvailableActionsMixin:
             except Exception:
                 continue
             ctype = calc.get("cost_type")
-            if name == "再生":
-                mana_calc = DaoWenEngine.resolve(name, x, target=actor, caster=actor, cost_channel="法力")
-                attack_calc = DaoWenEngine.resolve(name, x, target=actor, caster=actor, cost_channel="攻击力")
-                mana_payable = mana_calc.get("cost", 0) <= actor.current_mana
-                attack_payable = attack_calc.get("cost_attack", 0) <= actor.effective_attack_power()
-                if not (mana_payable or attack_payable):
-                    continue
+            # 2026-11-09：多途径收成单途径后，【再生】只看法力，【舍力】只看攻击力。
+            if ctype == "攻击力" and calc.get("cost_attack", 0) > actor.effective_attack_power():
+                continue
             elif ctype == "消耗" and calc.get("cost", 0) > actor.current_mana:
                 continue
             # 2026-10-13：失忆类代价按持有道纹种数封顶（use_daowen 预检同口径）。
