@@ -1,4 +1,27 @@
 {
   "version": 1,
-  "characters": []
+  "characters": [
+    {
+      "mode": "rule",
+      "blood_points": 5,
+      "speed_points": 10,
+      "mana_points": 10,
+      "attribute_points": 0,
+      "id": "f604af92dc78",
+      "name": "新角色",
+      "resonance": "转换",
+      "blood_limit": 30,
+      "speed_limit": 5,
+      "mana_limit": 5,
+      "daowen": [
+        "庇护"
+      ],
+      "relics": [],
+      "consumables": [],
+      "shards": 20,
+      "energy": 0,
+      "created_at": "2026-11-09T17:20:06",
+      "updated_at": "2026-11-09T17:20:06"
+    }
+  ]
 }
