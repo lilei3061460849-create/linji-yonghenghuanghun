@@ -163,6 +163,14 @@ def _battle_view(engine: GameEngine) -> dict[str, Any] | None:
             "attack_power": entity.effective_attack_power(),
             "actions_used": entity.actions_used_this_round,
             "action_budget": engine._action_budget_of(entity),
+            # 状态层（含【脆弱】这种「下次失去生命重复X次」次数型状态）必须看得见，
+            # 否则玩家没法知道还有几层、什么时候会被翻倍结算。
+            "statuses": [
+                {"name": status.name, "value": status.value,
+                 "rounds": status.remaining_rounds}
+                for status in getattr(entity, "status_effects", []) or []
+                if not getattr(status, "is_expired", False)
+            ],
             "actions_left": max(0, engine._action_budget_of(entity)
                                 - entity.actions_used_this_round),
         })

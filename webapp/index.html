@@ -888,6 +888,14 @@ function renderBattle(){
     row.append(el("span","name", c.name),
                el("span","hp", `${c.hp}/${c.hp_limit}${combat}${left}`));
     body.append(row);
+    const statuses = c.statuses || [];
+    if (statuses.length){
+      body.append(el("div","hint",
+        "状态：" + statuses.map(st => {
+          const span = st.rounds > 0 ? `（${st.rounds}回合）` : (st.rounds < 0 ? "（持续∞）" : "");
+          return `${st.name}${st.value ? ` ${st.value}` : ""}${span}`;
+        }).join("、")));
+    }
   }
   if (!S.player || !S.player.alive){
     body.append(el("div","banner dead","你已倒下，这一局的胜负由世界继续写下去。"));
