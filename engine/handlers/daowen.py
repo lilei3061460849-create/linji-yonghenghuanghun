@@ -939,9 +939,14 @@ class DaowenHandlersMixin:
             object.__setattr__(recipient, "current_hp", recipient.blood_limit)
 
     @ACTION_REGISTRY.action("derive_daowen", group="daowen",
-                            allowed_phases=("pre_battle",))
+                            allowed_phases=("in_combat",),
+                            note="局内0出手衍生行动；代价【转换】×1+血限2+灵魂碎片3")
     def _action_derive_daowen(self, params: dict) -> dict:
-        """母本道纹 → 支付【转换】×1 + 血限2 + 灵魂碎片3 → 【发现】一种衍生道纹。"""
+        """局内【衍生】行动（占0次主动出手，不结束回合）。
+
+        母本道纹 → 支付【转换】×1 + 血限2 + 灵魂碎片3 → 【发现】一种衍生道纹。
+        2026-11-09 用户令：衍生改在战斗中使用，作为独立的 0 出手行动；代价不变。
+        """
         state = self.state
         if self._pending_derivative(state):
             return {"success": False,
@@ -988,9 +993,10 @@ class DaowenHandlersMixin:
                                             "refresh_derivative_choices"]}}
 
     @ACTION_REGISTRY.action("refresh_derivative_choices", group="daowen",
-                            allowed_phases=("pre_battle",))
+                            allowed_phases=("in_combat",),
+                            note="局内0出手；重新支付血限2刷新衍生选项")
     def _action_refresh_derivative_choices(self, params: dict) -> dict:
-        """对本次结果不满意：重新支付血限2，刷新 3 个未持有选项。"""
+        """局内 0 出手：对本次结果不满意，重新支付血限2，刷新 3 个未持有选项。"""
         state = self.state
         if not self._pending_derivative(state):
             return {"success": False, "error": "当前没有待选择的衍生发现"}
@@ -1010,9 +1016,10 @@ class DaowenHandlersMixin:
                            "choices": list(choices), "cost": "血限2"}}
 
     @ACTION_REGISTRY.action("choose_derivative_daowen", group="daowen",
-                            allowed_phases=("pre_battle",))
+                            allowed_phases=("in_combat",),
+                            note="局内0出手；领取或放弃本次衍生发现")
     def _action_choose_derivative_daowen(self, params: dict) -> dict:
-        """从本次【发现】结果里显式选择一种衍生道纹获取（或放弃本次结果）。"""
+        """局内 0 出手：从本次【发现】结果里显式选择一种衍生道纹获取（或放弃）。"""
         state = self.state
         choices = self._pending_derivative(state)
         if not choices:

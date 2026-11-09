@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from .. import custom_resources
 from ..action_registry import ACTION_REGISTRY
+from .. import derivatives as derivative_rules
 from ..consumables import WING_MODES
 from ..daowen import DaoWenEngine, PURIFIABLE_COST_KINDS, purifiable_cost_layers
 from ..enums import CombatSubphase, GamePhase, RESOURCE_TYPES, TriggerTiming
@@ -54,17 +55,23 @@ class AvailableActionsMixin:
                 "source": self.state.pending_relic_source,
             }
         if getattr(self.state, "pending_derivative_choices", []):
+            in_combat = self.state.phase == GamePhase.IN_COMBAT.value
             return {
-                "phase": "衍生发现待选",
+                "phase": "衍生发现待选（局内·0出手）" if in_combat else "衍生发现待选",
                 "actions": [
                     {"action_type": "choose_derivative_daowen",
                      "params_schema": {"daowen_name": list(self.state.pending_derivative_choices),
-                                       "abandon": "True＝放弃本次结果（已付代价不退）"}},
+                                       "abandon": "True＝放弃本次结果（已付代价不退）"},
+                     "note": "领取／放弃均占0次主动出手，不结束回合"},
                     {"action_type": "refresh_derivative_choices",
-                     "params_schema": {"cost": "血限2（重新随机列出未持有选项）"}},
+                     "params_schema": {"cost": "血限2（重新随机列出未持有选项）"},
+                     "note": "刷新只付血限2，同样占0次主动出手"},
                 ],
                 "parent": getattr(self.state, "pending_derivative_parent", ""),
                 "choices": list(self.state.pending_derivative_choices),
+                "combat_subphase": self.state.combat_subphase if in_combat else None,
+                "note": ("局内衍生：本次结果须显式领取／刷新／放弃；三者都是0出手行动，"
+                         "领取后可继续本回合其它行动"),
             }
         if self.state.pending_item_choices:
             return {
@@ -235,11 +242,6 @@ class AvailableActionsMixin:
                 "recipient": "player（默认）、现存朋友/员工/妖怪名称，或pending暂存给未来朋友",
                 "note": "学习所得可分配给其他角色或暂存；法术已于2026-09-16改为无需学习：持所需道纹即可在战斗中用 "
                         "统一自定义施法（define_spell，消耗1次主动出手）"}},
-            {"action_type": "derive_daowen", "params_schema": {
-                "source_daowen": "自己持有的母本道纹（杀伐／透支／再生）",
-                "recipient": "player（默认）或现存朋友/员工/妖怪名称",
-                "cost": "【转换】×1 + 血限2 + 灵魂碎片3",
-                "note": "从该母本的衍生道纹池发现至多3个未持有选项；每个衍生道纹独立占1张死者之页"}},
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "共鸣",
                 "tier": {1: "随机列3件候选并显式选择1件", 2: "额外1精力+15碎片自选"},
@@ -790,6 +792,30 @@ class AvailableActionsMixin:
              "available": bool(idle_allies),
              "note": "让一名未出手的[朋友]/[员工]自主完成一个行动（无命令时）"},
         ])
+        # 2026-11-09 用户令：衍生是**局内**的独立 0 出手行动；代价不变。
+        # 它不占主动出手、不结束回合，也不因本回合出手用尽而不可用。
+        derivative_parents = [name for name in derivative_rules.known_parents()
+                              if name in player.dao_wen]
+        actions.append({
+            "action_type": "derive_daowen",
+            "params_schema": {
+                "source_daowen": derivative_parents or "需先持有母本道纹（杀伐／透支／再生）",
+                "recipient": "player（默认）或现存朋友/员工/临时朋友名称或runtime_id",
+                "cost": "【转换】×1 + 血限2 + 灵魂碎片3",
+                "note": "从该母本衍生池随机列出至多3个未持有选项，随后用 "
+                        "choose_derivative_daowen 领取、refresh_derivative_choices 刷新；"
+                        "每个衍生道纹独立占1张死者之页",
+            },
+            "available": bool(derivative_parents)
+                         and self.state.resonance.get(derivative_rules.DERIVE_RESONANCE, 0)
+                         >= derivative_rules.DERIVE_RESONANCE_COST
+                         and self.state.shards >= derivative_rules.DERIVE_SHARD_COST
+                         and player.blood_limit > derivative_rules.DERIVE_BLOOD_LIMIT_COST
+                         and len(player.dao_wen) < player.daowen_capacity
+                         and not getattr(self.state, "pending_derivative_choices", []),
+            "note": "局内【衍生】：占0次主动出手、不结束回合；代价【转换】×1＋血限2＋灵魂碎片3。"
+                    "刷新选项另付血限2；领取／刷新／放弃也都不占出手",
+        })
         return {"phase": subphase, "round": self.state.current_round,
                 "duel_turn": self.state.duel_turn,
                 "ended_turn_sides": sorted(self.combat._ended_turn_sides),

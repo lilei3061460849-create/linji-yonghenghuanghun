@@ -533,13 +533,21 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if self.state.pending_daowen_choices and action_type != "choose_hired_daowen":
             return {"success": False,
                     "error": "雇佣后的转化道纹尚未选择，不能执行其它行动"}
-        # 衍生发现必须显式领取／刷新／放弃后才能继续其它行动（与遗物发现同口径）。
-        if (getattr(self.state, "pending_derivative_choices", [])
-                and action_type not in {"choose_derivative_daowen",
-                                        "refresh_derivative_choices",
-                                        "save_game", "load_game"}):
-            return {"success": False,
-                    "error": "衍生发现尚未选择，请领取、刷新或放弃本次结果"}
+        # 衍生发现（局内0出手）必须显式领取／刷新／放弃。它是战斗内的 0 出手行动，
+        # 不能因此把回合推进、怪物阶段、攻击提交等战斗流程动作一并锁死。
+        if getattr(self.state, "pending_derivative_choices", []):
+            derivative_pending_allowed = {
+                "choose_derivative_daowen", "refresh_derivative_choices",
+                "save_game", "load_game", "restart_battle", "submit_ruling",
+                "resolve_attack", "prepare_attack", "prepare_monster_phase",
+                "resolve_monster_phase", "round_start", "round_end", "battle_end",
+                "skip", "resolve_ally_phases", "monster_phase",
+                "choose_discovered_relic", "discard_discovered_relic",
+                "choose_discovered_item", "discard_discovered_item",
+            }
+            if action_type not in derivative_pending_allowed:
+                return {"success": False,
+                        "error": "衍生发现尚未选择，请领取、刷新或放弃本次结果（0出手，不结束回合）"}
         if (self.event_pool.current is not None
                 and action_type not in {"resolve_event", "choose_discovered_relic", "choose_discovered_item"}):
             return {"success": False,
@@ -552,8 +560,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if action_type in ("pre_battle_action", "resolve_event", "upgrade_doctor", "set_active_relics", "toggle_relic") and phase != "pre_battle":
             return {"success": False, "error": "局外行动/事件只能在局外阶段执行"}
         if (action_type in ("derive_daowen", "refresh_derivative_choices",
-                            "choose_derivative_daowen") and phase != "pre_battle"):
-            return {"success": False, "error": "衍生道纹只能在局外阶段发现／领取"}
+                            "choose_derivative_daowen") and phase != "in_combat"):
+            return {"success": False,
+                    "error": "衍生道纹只能在战斗阶段发现／领取（局内0出手行动）"}
         if action_type == "battle_start" and phase != "pre_battle":
             return {"success": False, "error": "只有局外阶段可以进入战始"}
         if action_type == "battle_start" and self.state.energy > 0 and not params.get("world_encounter_id"):

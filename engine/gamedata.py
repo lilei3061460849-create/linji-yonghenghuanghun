@@ -92,10 +92,11 @@ def learnability_error(name, *, owned, region, known) -> str | None:
     返回 None = 可学；否则返回拒绝文案（逐字沿用旧实现）。
     【典当】的发现池与【学习】同口径，共用本函数——改学习门禁时两处一起变。
     """
-    # 2026-11-09 用户令：衍生道纹只能由母本经【衍生发现】取得，不走学习/典当/发现池。
+    # 2026-11-09 用户令：衍生道纹只能由母本经局内 0 出手【衍生】取得，不走学习/典当/发现池。
     from .derivatives import is_derivative
     if is_derivative(name):
-        return f"【{name}】是衍生道纹，只能由母本支付【转换】+血限2+碎片3经衍生发现获得"
+        return (f"【{name}】是衍生道纹，只能在战斗中用 0 出手【衍生】行动，"
+                "由母本支付【转换】+血限2+碎片3经衍生发现获得")
     if name in UNIMPLEMENTED_DAOWEN:
         owner = UNIMPLEMENTED_DAOWEN[name]
         return f"【{name}】是{owner}专属道纹，尚未接入运行时，当前不能学习或通过残韵获得"
