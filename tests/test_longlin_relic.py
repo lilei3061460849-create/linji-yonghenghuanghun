@@ -1,4 +1,4 @@
-"""龙鳞遗物：固定逐笔减伤，克制任意数量的1伤连击。"""
+"""龙鳞遗物：固定逐笔减伤，克制任意数量的1伤衍生连击（【连珠】）。"""
 import pytest
 from engine.combat import CombatEngine
 from engine.daowen import DaoWenEngine, ResonanceEngine, is_reserved_slot
@@ -38,14 +38,14 @@ def test_repeated_one_damage_never_accumulates_into_hp_loss():
 def test_real_lianji_is_blocked_per_hit():
     e = _engine("longlin_lianji")
     p = e.state.player
-    _give(p, "连击")
+    _give(p, "连珠")
     target = _monster(e, "鳞甲靶", hp=100)
     target.relics.append(Relic("叠鳞甲", ""))
-    r = e.execute_action("use_daowen", {"daowen_name": "连击", "x": 10,
-        "lianji_cost": "法力", "target": target.name, "dodge": False, "blood_shadow": False})
+    r = e.execute_action("use_daowen", {"daowen_name": "连珠", "x": 10,
+        "target": target.name, "dodge": False, "blood_shadow": False})
     assert r["success"], r
     assert target.current_hp == 100
-    assert p.current_mana == 30
+    assert p.current_mana == 80 - 40  # 【连珠】法力4X＝40（夹具起始法力80）
 
 
 def test_enabled_and_sealed_relic_rules_are_respected():

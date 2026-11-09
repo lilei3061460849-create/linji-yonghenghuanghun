@@ -631,29 +631,29 @@ def test_instant_silence_mask_interrupts_cost_daowen_step():
     assert foe.current_hp < hp_foe0          # 第一步保留
 
 
-def test_instant_lianji_fake_shards_insufficient_is_normal_interrupt():
-    engine = _setup("p2_lianji_shards")
+def test_instant_weifa_fake_shards_insufficient_is_normal_interrupt():
+    engine = _setup("p2_weifa_shards")
     player, foe = engine.state.player, engine.state.enemies[0]
-    _give(player, "连击")
+    _give(player, "伪伐")
     engine.state.fake_shards = 0
     engine.state.shards = 0
     used0 = player.actions_used_this_round
-    resp = _cast(engine, "发动连击X于目标",
-                 [{"x": 1, "cost_channel": "假碎片", "dodge": False}], target=foe)
+    resp = _cast(engine, "发动伪伐X于目标",
+                 [{"x": 1, "dodge": False}], target=foe)
     assert resp["success"], resp
     assert resp["result"]["step_results"][0]["reason"] == REASON_SHARDS_INSUFFICIENT
     assert resp["result"]["execution_status"] == EXECUTION_INTERRUPTED
     assert player.actions_used_this_round == used0 + 1  # 施法失败出手照扣
 
 
-def test_instant_lianji_pays_fake_shards_like_use_daowen():
-    engine = _setup("p2_lianji_shards_ok")
+def test_instant_weifa_pays_fake_shards_like_use_daowen():
+    engine = _setup("p2_weifa_shards_ok")
     player, foe = engine.state.player, engine.state.enemies[0]
-    _give(player, "连击")
+    _give(player, "伪伐")
     engine.state.fake_shards = 60
-    resp = _cast(engine, "发动连击X于目标",
-                 [{"x": 1, "cost_channel": "假碎片", "dodge": False}], target=foe)
+    resp = _cast(engine, "发动伪伐X于目标",
+                 [{"x": 1, "dodge": False}], target=foe)
     assert resp["success"], resp
     assert resp["result"]["execution_status"] == EXECUTION_COMPLETED
-    assert engine.state.fake_shards == 10
+    assert engine.state.fake_shards == 20  # 60 - 40X
     assert foe.current_hp == foe.blood_limit - 5

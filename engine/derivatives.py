@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from .enums import CostType
 
 
-# 一次衍生发现／刷新的代价（局外行动，按《规则正文》原文口径）。
+# 一次衍生发现／刷新的代价（局内 0 出手行动，按《规则正文》原文口径）。
 DERIVE_RESONANCE = "转换"
 DERIVE_RESONANCE_COST = 1
 DERIVE_BLOOD_LIMIT_COST = 2

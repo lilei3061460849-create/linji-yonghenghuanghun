@@ -98,8 +98,8 @@ def test_zaisheng_merges_self_feeding_as_an_alternate_attack_cost():
     DaoWenEngine.register_all()
     target = Entity("目标", "轮回者", blood_limit=100, current_hp=20,
                     mana_limit=10, current_mana=10)
-    mana = DaoWenEngine.resolve("再生", 2, target=target, cost_channel="法力")
-    attack = DaoWenEngine.resolve("再生", 2, target=target, cost_channel="攻击力")
+    mana = DaoWenEngine.resolve("再生", 2, target=target)
+    attack = DaoWenEngine.resolve("舍力", 2, target=target)
 
     assert mana["cost_type"] == "消耗"
     assert mana["cost"] == 2
