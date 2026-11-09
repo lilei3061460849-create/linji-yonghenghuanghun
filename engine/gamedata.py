@@ -51,7 +51,8 @@ SHAFA_LOOP_DAOWEN = (
     # 通用四面体一 + 通用四面体二 的全部节点（开局【发现】只从这 8 种里抽）。
     # 2026-11-07 曾随互换由【封印】换为【篡改】；2026-11-08 用户令再次调换，
     # 四面体二含【封印】，发现池随之换回【封印】。
-    "杀伐", "再生", "庇护", "连击",
+    # 2026-11-09 用户令：【连击】的通用四面体一格由【脆弱】替换。
+    "杀伐", "再生", "庇护", "脆弱",
     "操纵", "束缚", "迟滞", "封印",
 )
 
@@ -91,6 +92,10 @@ def learnability_error(name, *, owned, region, known) -> str | None:
     返回 None = 可学；否则返回拒绝文案（逐字沿用旧实现）。
     【典当】的发现池与【学习】同口径，共用本函数——改学习门禁时两处一起变。
     """
+    # 2026-11-09 用户令：衍生道纹只能由母本经【衍生发现】取得，不走学习/典当/发现池。
+    from .derivatives import is_derivative
+    if is_derivative(name):
+        return f"【{name}】是衍生道纹，只能由母本支付【转换】+血限2+碎片3经衍生发现获得"
     if name in UNIMPLEMENTED_DAOWEN:
         owner = UNIMPLEMENTED_DAOWEN[name]
         return f"【{name}】是{owner}专属道纹，尚未接入运行时，当前不能学习或通过残韵获得"

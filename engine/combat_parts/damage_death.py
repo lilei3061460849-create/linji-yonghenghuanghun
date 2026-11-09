@@ -291,6 +291,31 @@ class DamageDeathMixin:
             entity.status_effects.remove(status)
         return old
 
+    def _fragile_hp_loss(self, entity: Entity, old: int, new: int) -> int:
+        """【脆弱】：目标「下次失去生命」重复 X 次 → 本次实际失血按 X+1 份合并落地。
+
+        2026-11-09 用户令。挂在与【庇护】同一个 ``Entity.current_hp`` 写入钩子上，
+        因此攻击伤害、代价失血、直接失血、血限压顶等任何**真实**降血通道都生效；
+        被【庇护】整笔免掉（写回 old）时不算失去生命，脆弱不消费。
+
+        口径（规则正文同步写明）：重复份不另开「失去生命前/后」反应窗口，也不再
+        触发另一层脆弱——同一笔结算内合并落地，避免「脆弱→不死不休→连击」无界
+        连锁。同名状态合并（数值相加），消费时一次性清空全部层数。
+        """
+        if new >= old or old <= 0:
+            return new
+        statuses = [status for status in list(getattr(entity, "status_effects", []))
+                    if status.name == "脆弱" and not status.is_expired and status.value > 0]
+        if not statuses:
+            return new
+        repeats = sum(max(0, int(status.value)) for status in statuses)
+        for status in statuses:
+            entity.status_effects.remove(status)
+        if repeats <= 0:
+            return new
+        loss = old - new
+        return max(0, old - loss * (repeats + 1))
+
     def _engine_owns(self, entity: Entity) -> bool:
         if entity is None:
             return False

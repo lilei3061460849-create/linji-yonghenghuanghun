@@ -53,6 +53,19 @@ class AvailableActionsMixin:
                              "relic_name": name} for name in self.state.pending_relic_choices],
                 "source": self.state.pending_relic_source,
             }
+        if getattr(self.state, "pending_derivative_choices", []):
+            return {
+                "phase": "衍生发现待选",
+                "actions": [
+                    {"action_type": "choose_derivative_daowen",
+                     "params_schema": {"daowen_name": list(self.state.pending_derivative_choices),
+                                       "abandon": "True＝放弃本次结果（已付代价不退）"}},
+                    {"action_type": "refresh_derivative_choices",
+                     "params_schema": {"cost": "血限2（重新随机列出未持有选项）"}},
+                ],
+                "parent": getattr(self.state, "pending_derivative_parent", ""),
+                "choices": list(self.state.pending_derivative_choices),
+            }
         if self.state.pending_item_choices:
             return {
                 "phase": "消耗品发现待选",
@@ -222,6 +235,11 @@ class AvailableActionsMixin:
                 "recipient": "player（默认）、现存朋友/员工/妖怪名称，或pending暂存给未来朋友",
                 "note": "学习所得可分配给其他角色或暂存；法术已于2026-09-16改为无需学习：持所需道纹即可在战斗中用 "
                         "统一自定义施法（define_spell，消耗1次主动出手）"}},
+            {"action_type": "derive_daowen", "params_schema": {
+                "source_daowen": "自己持有的母本道纹（杀伐／透支／再生）",
+                "recipient": "player（默认）或现存朋友/员工/妖怪名称",
+                "cost": "【转换】×1 + 血限2 + 灵魂碎片3",
+                "note": "从该母本的衍生道纹池发现至多3个未持有选项；每个衍生道纹独立占1张死者之页"}},
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "共鸣",
                 "tier": {1: "随机列3件候选并显式选择1件", 2: "额外1精力+15碎片自选"},
@@ -542,9 +560,6 @@ class AvailableActionsMixin:
                     "dodge": "敌对单目标时必填布尔值",
                     "blood_shadow": "目标持有血影时必填布尔值",
                     "spell_choices": "若触发法术，按法术选项完整提交",
-                    **({"zaisheng_cost": ["法力", "攻击力"]} if name == "再生" else {}),
-                    **({"lianji_cost": ["生命", "法力", "血限", "枯竭", "碎片", "假碎片"]}
-                       if name == "连击" else {}),
                     **({"lianmin_cost": list(DaoWenEngine.PAYABLE_TYPES)}
                        if name == "怜悯" else {}),
                     **({"relic_name": "目标可夺取的遗物或消耗品名；目标有多件时必须显式指定，同名跨种类时另加item_kind=relic/consumable，无可夺对象则本次发动被拒绝且不支付代价"}
@@ -814,13 +829,9 @@ class AvailableActionsMixin:
             except Exception:
                 continue
             ctype = calc.get("cost_type")
-            if name == "再生":
-                mana_calc = DaoWenEngine.resolve(name, x, target=actor, caster=actor, cost_channel="法力")
-                attack_calc = DaoWenEngine.resolve(name, x, target=actor, caster=actor, cost_channel="攻击力")
-                mana_payable = mana_calc.get("cost", 0) <= actor.current_mana
-                attack_payable = attack_calc.get("cost_attack", 0) <= actor.effective_attack_power()
-                if not (mana_payable or attack_payable):
-                    continue
+            # 2026-11-09：多途径收成单途径后，【再生】只看法力，【舍力】只看攻击力。
+            if ctype == "攻击力" and calc.get("cost_attack", 0) > actor.effective_attack_power():
+                continue
             elif ctype == "消耗" and calc.get("cost", 0) > actor.current_mana:
                 continue
             # 2026-10-13：失忆类代价按持有道纹种数封顶（use_daowen 预检同口径）。
