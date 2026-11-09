@@ -106,7 +106,13 @@
       <div class="btnbar">
         <button id="newChar" class="primary">＋ 新建角色</button>
       </div>
-      <div class="hintline">角色卡只保存配方（名字/三维/资源/道纹/遗物/消耗品），开局时再按配方现场构造；存档是本机文件。</div>
+      <div class="hintline">角色卡只保存配方（名字/三维/资源/道纹/遗物/消耗品），开局时再按配方现场构造。</div>
+      <div class="hintline" id="syncText">正在读取 GitHub 同步状态…</div>
+      <div class="btnbar" style="margin-top:8px">
+        <button id="syncNow">同步到 GitHub</button>
+      </div>
+      <div class="hintline">保存后会自动提交并推送到仓库<b>当前分支</b>的 data/player_characters.json；
+        换设备时从 GitHub 上取回即可。仓库是公开的，角色卡内容会公开可见，请勿写入真实姓名等隐私。</div>
     </div>
 
     <div class="card" id="editor" hidden>
@@ -222,6 +228,7 @@
 <script>
 let OPTIONS = null;
 let CHARS = [];
+let SYNC = null;
 let editing = null;          // 编辑器里的草稿
 let bMode = "char";          // 对战 B 方：char | monster
 const bMonsters = new Map(); // 怪物 B 方：name -> count
@@ -273,6 +280,7 @@ async function loadAll(){
   OPTIONS = optData.options;
   const charData = await charRes.json();
   CHARS = charData.characters || [];
+  SYNC = charData.sync || null;
 
   for (const region of OPTIONS.regions){
     const opt = el("option", null, `${region.name}（${region.tier} 阶）`);
@@ -288,9 +296,43 @@ async function loadAll(){
   }
   renderChars();
   renderDuel();
+  renderSync();
 }
 
 /* ---------------------------------------------------------------- 角色库 */
+
+function renderSync(){
+  const node = $("syncText");
+  if (!SYNC){
+    node.textContent = "GitHub 同步状态未知。";
+    return;
+  }
+  if (!SYNC.git){
+    node.textContent = "未检测到 Git 仓库：" + (SYNC.error || "")
+      + "（角色卡只保存在本机）";
+    node.className = "hintline warn";
+    return;
+  }
+  const last = SYNC.last || {};
+  const state = last.ok === true ? "已同步" : (last.ok === false ? "同步失败" : "尚未同步");
+  let text = `GitHub 分支 ${SYNC.branch || "?"} · ${state}`;
+  if (last.at) text += ` · ${last.at}`;
+  if (last.message) text += ` · ${last.message}`;
+  node.textContent = text;
+  node.className = "hintline" + (last.ok === false ? " warn" : "");
+}
+
+function applySync(sync){
+  if (!sync) return;
+  SYNC = {...(SYNC || {}), ...sync, last: sync};
+  renderSync();
+}
+
+function syncMessage(sync, prefix){
+  if (!sync) return prefix;
+  return sync.ok ? `${prefix}，${sync.message}` : `${prefix}；${sync.message}`;
+}
+
 
 function renderChars(){
   const box = $("charList");
@@ -498,11 +540,12 @@ async function saveChar(){
     if (!data.success){ toast("保存失败：" + (data.error || "未知错误")); return; }
     CHARS = data.characters || [];
     editing = data.character;
+    applySync(data.sync);
     $("editorTitle").textContent = "修改";
     $("deleteChar").hidden = false;
     renderChars();
     renderDuel();
-    toast(`已保存：${data.character.name}`);
+    toast(syncMessage(data.sync, `已保存：${data.character.name}`));
   } catch (err){
     toast("保存请求失败：" + err.message);
   } finally {
@@ -521,10 +564,11 @@ async function removeChar(sheet){
     const data = await res.json();
     if (!data.success){ toast("删除失败：" + (data.error || "未知错误")); return; }
     CHARS = data.characters || [];
+    applySync(data.sync);
     if (editing && editing.id === sheet.id){ editing = null; $("editor").hidden = true; }
     renderChars();
     renderDuel();
-    toast("已删除");
+    toast(syncMessage(data.sync, "已删除"));
   } catch (err){
     toast("删除请求失败：" + err.message);
   }
@@ -692,6 +736,24 @@ $("aSelect").onchange = updateDuelSummary;
 $("bSelect").onchange = updateDuelSummary;
 $("dRegion").onchange = () => { bMonsters.clear(); renderBMonsters(); };
 $("startDuel").onclick = startDuel;
+$("syncNow").onclick = async () => {
+  $("syncNow").disabled = true;
+  try {
+    const res = await fetch("/api/lab/sync", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: "{}"});
+    const data = await res.json();
+    if (!data.success){ toast("同步失败：" + (data.error || "未知错误")); return; }
+    CHARS = data.characters || CHARS;
+    applySync(data.sync);
+    renderChars();
+    renderDuel();
+    toast(data.sync && data.sync.message || "已同步");
+  } catch (err){
+    toast("同步请求失败：" + err.message);
+  } finally {
+    $("syncNow").disabled = false;
+  }
+};
 
 (async function boot(){
   try { await loadAll(); }

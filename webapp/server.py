@@ -40,6 +40,7 @@ from engine.monster_phase_submit import (  # noqa: E402
     decline_reaction_spell_choices,
 )
 import lab  # noqa: E402  自定义角色演武场（见 webapp/lab.py）
+import character_sync  # noqa: E402  角色卡同步进 GitHub（见 webapp/character_sync.py）
 
 # 默认只监听本机回环地址。界面没有鉴权、单进程只有一个会话（SESSION），
 # 绑到 0.0.0.0 等于把"任何人都能覆盖并操作这一局"暴露给整个局域网/公网。
@@ -474,7 +475,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/lab/characters":
             with LOCK:
-                self._json({"success": True, "characters": lab.list_sheets()})
+                self._json({"success": True, "characters": lab.list_sheets(),
+                            "sync": character_sync.status()})
+            return
+        if path == "/api/lab/sync":
+            with LOCK:
+                self._json({"success": True, "sync": character_sync.status()})
             return
         if path == "/api/snapshot":
             with LOCK:
@@ -514,16 +520,22 @@ class Handler(BaseHTTPRequestHandler):
                     except ValueError as exc:
                         self._json({"success": False, "error": str(exc)}, 400)
                         return
+                    synced = character_sync.sync("保存角色")
                     self._json({"success": True, "character": record,
-                                "characters": lab.list_sheets()})
+                                "characters": lab.list_sheets(), "sync": synced})
                 elif path == "/api/lab/characters/delete":
                     try:
                         removed = lab.delete_sheet(str(payload.get("id") or ""))
                     except ValueError as exc:
                         self._json({"success": False, "error": str(exc)}, 400)
                         return
+                    synced = character_sync.sync("删除角色") if removed else None
                     self._json({"success": removed,
                                 "error": None if removed else "角色卡不存在",
+                                "characters": lab.list_sheets(), "sync": synced})
+                elif path == "/api/lab/sync":
+                    self._json({"success": True,
+                                "sync": character_sync.sync("手动同步"),
                                 "characters": lab.list_sheets()})
                 elif path == "/api/action":
                     action = payload.get("action")

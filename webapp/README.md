@@ -33,9 +33,14 @@ http://127.0.0.1:8000/lab
 界面分两页：
 
 - **角色库**：新建 / 修改 / 删除角色卡。每张卡保存名字、三维、资源（碎片/精力/残韵）、
-  道纹、遗物、消耗品。角色卡是**配方**，不存引擎对象；存档默认写到
-  `data/player_characters.json`（已被 `.gitignore` 排除，可用 `LINJI_CHARACTERS_FILE`
-  改路径），写入走临时文件 + `os.replace`。
+  道纹、遗物、消耗品。角色卡是**配方**，不存引擎对象；存档写到
+  `data/player_characters.json`（可用 `LINJI_CHARACTERS_FILE` 改路径），
+  写入走临时文件 + `os.replace`。
+- **GitHub 同步**：保存/删除后自动把该文件提交并推送到**当前分支**
+  （`git commit -- data/player_characters.json` + `git push origin <当前分支>`），
+  换设备只需回到同一分支/会话即可取回。同步失败不会丢本机数据，界面上会显示原因，
+  并提供「同步到 GitHub」手动重试按钮。注意：本仓库是公开的，角色卡内容会公开可见；
+  也不要在角色卡里写真实姓名等隐私。
 - **A vs B 对战**：A 方从角色卡里选（玩家侧），B 方可以选另一张角色卡（引擎里造成
   轮回者实体参战），也可以切到「副本怪物」挑 1~3 只。开战后跳回 `/` 继续打。
 
@@ -81,6 +86,8 @@ http://127.0.0.1:8000/lab
 | `GET /api/lab/characters` | 角色卡列表（按修改时间倒序） |
 | `POST /api/lab/characters/save` | 新增或按 `id` 修改一张角色卡 |
 | `POST /api/lab/characters/delete` | 删除角色卡（`{id}`） |
+| `GET /api/lab/sync` | GitHub 同步状态（仓库/分支/最近一次结果） |
+| `POST /api/lab/sync` | 手动把角色卡提交并推送到当前分支 |
 | `POST /api/lab/start` | 按配装单人开局；`start_battle=true` 时直接进入战斗 |
 | `POST /api/lab/duel` | A vs B：`{a, b, region, width, height, seed}`，B 可为角色卡或怪物 |
 | `GET /api/snapshot` | 当前快照（玩家、迷雾地图、同伴、战斗、事件、日志） |

@@ -17,8 +17,8 @@ data/dbg*
 data/demo_*
 data/batch_*
 
-# 演武场角色卡（玩家本地数据，不随仓库分发）
-data/player_characters.json
+# 演武场角色卡：data/player_characters.json 会提交进仓库（换设备不丢），
+# 只忽略写入过程中的临时文件。
 data/.characters-*
 
 # 大文件 / 会话备份（历史上误提交过 5.4MB 的 linji_session.bundle，见 98d8abd0）
