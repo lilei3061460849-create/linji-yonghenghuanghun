@@ -131,14 +131,6 @@
   @media (orientation: landscape) and (max-width: 859px){
     main{grid-template-columns:minmax(0,1fr) minmax(230px,.62fr)}
   }
-  /* 沉浸模式：预览 iframe 常常不允许真全屏，就用它把顶栏让出来铺满窗口 */
-  body.immersive header{display:none}
-  body.immersive main{padding:6px 10px 12px;max-width:none;
-    grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);gap:8px}
-  body.immersive .card{padding:8px}
-  body.immersive .log{max-height:130px}
-  #immExit{display:none;position:fixed;right:8px;top:8px;z-index:60}
-  body.immersive #immExit{display:block}
   .vp{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
   /* 字号档位（预览窗很窄时用「字」按钮放大） */
   html.big body{font-size:16px}
@@ -168,9 +160,7 @@
   <div class="spacer"></div>
   <a href="/lab" style="text-decoration:none"><button>角色演武场 · 自定义开局</button></a>
   <button id="fontBtn" title="切换字号：标准 / 大 / 特大">字 标准</button>
-  <button id="fsBtn" title="进入/退出全屏（横屏更好用）">⛶ 全屏 / 沉浸</button>
   <span class="vp" id="vpLabel"></span>
-  <button id="popBtn" title="在独立标签页打开：只有顶层窗口才能真正全屏">↗ 独立窗口</button>
   <button id="newBtn">新开一局</button>
 </header>
 
@@ -261,7 +251,7 @@
   </aside>
 </main>
 
-<div class="modal" id="newModal">
+<div class="modal hidden" id="newModal">
   <div class="card">
     <h2>开局 <span>25 点属性自由分配</span></h2>
     <div class="field"><label>名字</label><input id="fName" type="text" value="轮回者" maxlength="12" /></div>
@@ -293,8 +283,6 @@
   </div>
 </div>
 
-<button id="immExit">✕ 退出沉浸</button>
-
 <div id="toast"></div>
 
 <script>
@@ -323,53 +311,6 @@ async function api(path, body){
   const data = await res.json();
   if (data.snapshot) { S = data.snapshot; render(); }
   return data;
-}
-
-/* 全屏：手机横屏推演时按钮/地图能占满一屏。Firefox Android 支持标准
-   Fullscreen API；进入后顺带尝试锁横屏（不支持就静默忽略，用户自己转）。 */
-function fsActive(){
-  return !!(document.fullscreenElement || document.webkitFullscreenElement);
-}
-function syncFsButton(){
-  const btn = $("fsBtn");
-  if (btn) btn.textContent = (fsActive() || immersiveOn()) ? "✕ 退出沉浸" : "⛶ 全屏 / 沉浸";
-}
-function immersiveOn(){
-  return document.body.classList.contains("immersive");
-}
-async function toggleFullscreen(){
-  const el = document.documentElement;
-  if (immersiveOn() && !fsActive()){
-    document.body.classList.remove("immersive");
-    syncFsButton();
-    setTimeout(() => { if (S) render(); }, 60);
-    return;
-  }
-  try{
-    if (!fsActive()){
-      const req = el.requestFullscreen || el.webkitRequestFullscreen;
-      if (!req) throw new Error("浏览器不支持全屏");
-      await req.call(el, {navigationUI: "hide"});
-      if (screen.orientation && screen.orientation.lock){
-        try { await screen.orientation.lock("landscape"); } catch(e){ /* 不支持就忽略 */ }
-      }
-    } else {
-      if (screen.orientation && screen.orientation.unlock){
-        try { screen.orientation.unlock(); } catch(e){ /* 忽略 */ }
-      }
-      const exit = document.exitFullscreen || document.webkitExitFullscreen;
-      if (exit) await exit.call(document);
-      document.body.classList.remove("immersive");
-    }
-  } catch(e){
-    // 预览是嵌在 Arena 的 iframe 里的，没给 allowfullscreen 就必然被拒；
-    // 真全屏拿不到就退一档：隐藏顶栏、两栏铺满窗口（沉浸模式）。
-    document.body.classList.add("immersive");
-    toast("预览窗口不给真全屏，已切到沉浸模式（顶栏隐藏，画面铺满）");
-  } finally {
-    syncFsButton();
-    setTimeout(() => { if (S) render(); }, 120);
-  }
 }
 
 async function act(action, params){
@@ -419,7 +360,6 @@ function renderHeader(){
       d.append(b, el("b", null, ` ${p.mana}/${p.mana_limit}`)); return d;})(),
     el("span","stat", `速 ${p.speed}/${p.speed_limit}`),
     el("span","stat", `碎片 ${p.shards}`),
-    el("span","stat", `精力 ${p.energy}`),
     el("span","stat", `遗物 ${p.relics.length} · 道纹 ${p.daowen.length}`),
     el("span","stat", `副本 ${p.region || ""}`),
   );
@@ -444,7 +384,7 @@ function renderMap(){
   const w = S && S.world;
   if (!w || !w.self) return;
   const span = Math.max(w.map_size.width, w.map_size.height, 1);
-  const wide = immersiveOn() || window.matchMedia("(orientation: landscape)").matches
+  const wide = window.matchMedia("(orientation: landscape)").matches
     || window.innerWidth >= 960;
   const budgetW = Math.max(240, window.innerWidth - (wide ? 430 : 60));
   const budgetH = Math.max(180, window.innerHeight - (wide ? 170 : 420));
@@ -1046,8 +986,6 @@ document.addEventListener("keydown", (e) => {
 $("waitBtn").onclick = () => act("world_wait", {turns: 1});
 $("wait5Btn").onclick = () => act("world_wait", {turns: 5});
 $("newBtn").onclick = () => $("newModal").classList.remove("hidden");
-$("fsBtn").onclick = toggleFullscreen;
-$("immExit").onclick = toggleFullscreen;
 
 /* 字号档位：预览窗窄的时候按钮和字都能放大（存在 localStorage）。 */
 const FONT_STEPS = [["标准", ""], ["大", "big"], ["特大", "huge"]];
@@ -1073,18 +1011,6 @@ function updateVp(){
     `视口 ${window.innerWidth}×${window.innerHeight} @${window.devicePixelRatio || 1}x`;
 }
 updateVp();
-/* 预览是嵌在 iframe 里的：iframe 没有 allow="fullscreen" 就拿不到真全屏。
-   这里把当前页面（连同预览令牌）在顶层标签页再打开一次，那边就能真全屏。 */
-$("popBtn").onclick = () => {
-  let url = location.href;
-  try{
-    const opened = window.open(url, "_blank");
-    if (!opened) toast("浏览器拦截了新标签，请允许弹窗后重试");
-    else toast("已在新标签打开：在那里点「⛶ 全屏 / 沉浸」就是真全屏");
-  } catch(e){ toast("打开新标签失败：" + e.message); }
-};
-document.addEventListener("fullscreenchange", () => { syncFsButton(); if (S) render(); });
-document.addEventListener("webkitfullscreenchange", syncFsButton);
 let _resizeTimer = null;
 window.addEventListener("resize", () => {
   updateVp();
@@ -1118,18 +1044,26 @@ async function startGame(){
   finally { $("startBtn").disabled = false; }
 }
 $("startBtn").onclick = startGame;
-$("cancelBtn").onclick = () => {
-  if (S && S.started) $("newModal").classList.add("hidden");
-  else toast("先开一局吧");
-};
+$("cancelBtn").onclick = () => { $("newModal").classList.add("hidden"); };
 
 (async function boot(){
+  /* 开局弹窗只在点「新开一局」时出现，不自动弹（用户：我自己会点，不用它提醒）。 */
   try {
     const res = await fetch("/api/snapshot");
     S = await res.json();
-    if (S.started) { $("newModal").classList.add("hidden"); render(); }
-  } catch(e){ /* 首屏失败时保留开局弹窗 */ }
+    $("newModal").classList.add("hidden");
+    if (S.started) render();
+    else renderEmpty();
+  } catch(e){ $("newModal").classList.add("hidden"); }
 })();
+
+function renderEmpty(){
+  const map = $("map");
+  if (map && !map.children.length){
+    map.append(el("div", "hint",
+      "还没有开局：点右上角「新开一局」，或去「角色演武场」配一场 A vs B。"));
+  }
+}
 </script>
 </body>
 </html>

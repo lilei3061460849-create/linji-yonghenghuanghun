@@ -52,6 +52,12 @@
     overscroll-behavior:contain}
   .picker .chips{max-height:none;overflow:visible;padding:0}
   .picker-empty{color:var(--muted);font-size:12.5px;text-align:center;padding:14px 4px}
+  /* 选中即显示完整条文：未来条目再多也不用背 */
+  .detail{min-height:46px;margin-top:8px;border:1px dashed var(--line);border-radius:9px;
+    padding:8px 9px;background:#12171d;color:#b9c4d1;font-size:12.5px;line-height:1.5;
+    word-break:break-word}
+  .detail b{color:var(--gold);font-weight:600}
+  .detail .tagline{color:var(--muted);font-size:11.5px;display:block;margin-top:3px}
   .chip{font-size:12.5px;border:1px solid var(--line);border-radius:15px;padding:5px 11px;
     color:#aab6c4;background:#131920;cursor:pointer;user-select:none}
   .chip.on{border-color:var(--gold);background:#2e2612;color:#ffe9a8}
@@ -102,12 +108,6 @@
     .summary{grid-template-columns:repeat(3,1fr)}
     #result{grid-column:1 / -1}
   }
-  /* 沉浸模式：预 iframe 不允许真全屏时的降级 */
-  body.immersive header{display:none}
-  body.immersive .tabs{padding:6px 10px}
-  body.immersive main{padding:6px 10px 40px}
-  #immExit{display:none}
-  body.immersive #immExit{display:inline-block}
   .vp{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
   html.big body{font-size:16px}
   html.big button{font-size:15px}
@@ -128,9 +128,6 @@
   <span class="spacer"></span>
   <span class="vp" id="vpLabel"></span>
   <button id="fontBtn" class="mini" title="切换字号">字 标准</button>
-  <button id="fsBtn" class="mini" hidden>⛶ 全屏 / 沉浸</button>
-  <button id="immExit" class="mini">✕ 退出沉浸</button>
-  <button id="popBtn" class="mini" title="在独立标签页打开（那里才可能真全屏）">↗ 独立窗口</button>
   <a href="/" style="font-size:13px">返回地图</a>
 </header>
 
@@ -181,25 +178,27 @@
       </div>
       <div class="hintline" id="eAttrHint"></div>
 
-      <div class="grid3" style="margin-top:10px">
+      <div class="grid2" style="margin-top:10px">
         <label class="field">碎片<input id="eShards" type="number" min="0" max="999999" value="20"></label>
-        <label class="field">精力<input id="eEnergy" type="number" min="0" max="99" value="3"></label>
         <label class="field">残韵<select id="eResonance"></select></label>
       </div>
 
       <h2 style="margin-top:16px">道纹<span id="eDaowenCount">0 种</span></h2>
       <input id="eDaowenSearch" placeholder="搜索道纹名…" style="margin-bottom:6px" />
       <div id="eDaowenGroups" class="picker"></div>
+      <div class="detail" id="eDaowenDetail">点一下道纹，这里显示它的完整效果。</div>
 
       <h2 style="margin-top:16px">遗物<span id="eRelicCount">0 件</span></h2>
-      <input id="eRelicSearch" placeholder="搜索遗物名或效果…" style="margin-bottom:6px" />
-      <div class="picker"><div id="eRelicChips" class="chips"></div></div>
+      <input id="eRelicSearch" type="search" placeholder="搜索遗物名或效果…" style="margin-bottom:6px" />
+      <div id="eRelicChips" class="picker"></div>
+      <div class="detail" id="eRelicDetail">点一下遗物，这里显示它的完整效果。</div>
       <div class="hintline" id="eRelicHint"></div>
 
       <h2 style="margin-top:16px">消耗品<span id="eItemCount">0 件</span></h2>
       <input id="eItemSearch" type="search" placeholder="搜索消耗品名 / 类型 / 效果…"
              style="margin-bottom:6px" />
       <div id="eItemPicker" class="picker"></div>
+      <div class="detail" id="eItemDetail">点一下消耗品，这里显示它的完整效果。</div>
       <div id="eItemSelected" style="margin-top:6px"></div>
 
       <div class="btnbar">
@@ -428,7 +427,7 @@ function blankSheet(){
     id: "", name: "新角色", mode: "rule",
     blood_points: 15, speed_points: 6, mana_points: 4,
     blood_limit: 90, speed_limit: 3, mana_limit: 2,
-    attribute_points: 0, shards: 20, energy: 3, resonance: "转换",
+    attribute_points: 0, shards: 20, energy: 0, resonance: "转换",
     daowen: ["杀伐"], relics: [], consumables: [],
   };
 }
@@ -440,7 +439,6 @@ function openEditor(sheet){
   $("deleteChar").hidden = !editing.id;
   $("eName").value = editing.name || "";
   $("eShards").value = editing.shards ?? 20;
-  $("eEnergy").value = editing.energy ?? 3;
   $("eResonance").value = editing.resonance || "转换";
   $("eBloodPts").value = editing.blood_points ?? 15;
   $("eSpeedPts").value = editing.speed_points ?? 6;
@@ -465,7 +463,7 @@ function setEditorMode(mode){
 function readEditorNumbers(){
   editing.name = ($("eName").value || "轮回者").slice(0, 12);
   editing.shards = Number($("eShards").value) || 0;
-  editing.energy = Number($("eEnergy").value) || 0;
+  editing.energy = 0;   // 精力是局外资源，不再作为角色卡属性；引擎侧照旧
   editing.resonance = $("eResonance").value;
   editing.blood_points = Number($("eBloodPts").value) || 0;
   editing.speed_points = Number($("eSpeedPts").value) || 0;
@@ -491,6 +489,17 @@ function updateEditorHint(){
     + ` · 遗物可同时启用 ${Math.ceil(Math.max(0, l.blood) / 30)} 件`;
 }
 
+/* 点选即显示完整条文：名称 + 效果，已选/未选标注在第二行。 */
+function showDetail(targetId, name, effect, selected){
+  const box = $(targetId);
+  if (!box) return;
+  box.innerHTML = "";
+  box.append(el("b", null, name));
+  box.append(document.createTextNode("：" + (effect || "（索引里没有它的条文）")));
+  box.append(el("span", "tagline",
+    selected ? "已选中（再点一次取消）" : "未选中（点一下加入）"));
+}
+
 function renderEditorChips(){
   $("eDaowenCount").textContent = `${(editing.daowen || []).length} 种`;
   $("eRelicCount").textContent = `${(editing.relics || []).length} 件`;
@@ -510,9 +519,12 @@ function renderEditorChips(){
       const chip = el("span", "chip" + (selectedDaowen.has(name) ? " on" : ""), name);
       chip.onclick = () => {
         const list = new Set(editing.daowen || []);
-        if (list.has(name)) list.delete(name); else list.add(name);
+        const nowSelected = !list.has(name);
+        if (nowSelected) list.add(name); else list.delete(name);
         editing.daowen = [...list];
         renderEditorChips();
+        showDetail("eDaowenDetail", name,
+          (OPTIONS.daowen_effects || {})[name], nowSelected);
       };
       chips.append(chip);
     }
@@ -526,19 +538,29 @@ function renderEditorChips(){
   const relicBox = $("eRelicChips");
   relicBox.innerHTML = "";
   const rKeyword = ($("eRelicSearch").value || "").trim();
-  for (const relic of OPTIONS.relics){
-    if (rKeyword && !relic.name.includes(rKeyword) && !relic.effect.includes(rKeyword)) continue;
-    const chip = el("span", "chip" + (relics.has(relic.name) ? " on" : ""), relic.name);
-    chip.title = relic.effect;
-    chip.onclick = () => {
+  const relicShown = OPTIONS.relics.filter(relic => !rKeyword
+    || relic.name.includes(rKeyword) || relic.effect.includes(rKeyword));
+  for (const relic of relicShown){
+    const row = el("div", "tool-row");
+    const left = el("div");
+    left.append(el("span", null, relic.name), el("span", "eff", relic.effect));
+    const btn = el("button", "mini" + (relics.has(relic.name) ? " on" : ""),
+                   relics.has(relic.name) ? "✓" : "＋");
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
       const list = new Set(editing.relics || []);
-      if (list.has(relic.name)) list.delete(relic.name); else list.add(relic.name);
+      const nowSelected = !list.has(relic.name);
+      if (nowSelected) list.add(relic.name); else list.delete(relic.name);
       editing.relics = [...list];
       renderEditorChips();
+      showDetail("eRelicDetail", relic.name, relic.effect, nowSelected);
     };
-    relicBox.append(chip);
+    row.onclick = () => showDetail("eRelicDetail", relic.name, relic.effect,
+                                   relics.has(relic.name));
+    row.append(left, btn);
+    relicBox.append(row);
   }
-  if (!relicBox.children.length){
+  if (!relicShown.length){
     relicBox.append(el("div", "picker-empty", "没有匹配的遗物"));
   }
 
@@ -554,14 +576,18 @@ function renderEditorChips(){
     left.append(el("span", null, item.name), el("span", "eff", `${item.kind} · 默认${item.uses}耐久`));
     left.title = item.effect;
     const add = el("button", "mini", "＋");
-    add.onclick = () => {
+    add.onclick = (ev) => {
+      ev.stopPropagation();
       const list = (editing.consumables || []).slice();
       if (!list.some(entry => entry.name === item.name)){
         list.push({name: item.name, uses: item.uses});
         editing.consumables = list;
         renderEditorChips();
       }
+      showDetail("eItemDetail", item.name, item.effect, true);
     };
+    row.onclick = () => showDetail("eItemDetail", item.name, item.effect,
+      (editing.consumables || []).some(entry => entry.name === item.name));
     row.append(left, add);
     picker.append(row);
   }
@@ -735,60 +761,6 @@ function renderBMonsters(){
   }
 }
 
-/* 全屏按钮（手机横屏排布时更好用）；不支持的浏览器自动隐藏。 */
-(function setupFullscreen(){
-  const btn = document.getElementById("fsBtn");
-  if (!btn) return;
-  if (!(document.documentElement.requestFullscreen
-        || document.documentElement.webkitRequestFullscreen)) return;
-  btn.hidden = false;
-  const active = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
-  const immersive = () => document.body.classList.contains("immersive");
-  const sync = () => {
-    btn.textContent = (active() || immersive()) ? "✕ 退出沉浸" : "⛶ 全屏 / 沉浸";
-  };
-  const exitImmersive = () => {
-    document.body.classList.remove("immersive");
-    sync();
-  };
-  document.getElementById("immExit").onclick = exitImmersive;
-  const pop = document.getElementById("popBtn");
-  if (pop){
-    pop.onclick = () => {
-      try{
-        const opened = window.open(location.href, "_blank");
-        if (!opened) toast("浏览器拦截了新标签，请允许弹窗后重试");
-        else toast("已在新标签打开，可在新标签里真全屏");
-      } catch(e){ toast("打开新标签失败：" + e.message); }
-    };
-  }
-  btn.onclick = async () => {
-    const el = document.documentElement;
-    if (immersive() && !active()){ exitImmersive(); return; }
-    try{
-      if (!active()){
-        const req = el.requestFullscreen || el.webkitRequestFullscreen;
-        await req.call(el, {navigationUI: "hide"});
-        if (screen.orientation && screen.orientation.lock){
-          try { await screen.orientation.lock("landscape"); } catch(e){ /* 忽略 */ }
-        }
-      } else {
-        if (screen.orientation && screen.orientation.unlock){
-          try { screen.orientation.unlock(); } catch(e){ /* 忽略 */ }
-        }
-        const exit = document.exitFullscreen || document.webkitExitFullscreen;
-        if (exit) await exit.call(document);
-        document.body.classList.remove("immersive");
-      }
-    } catch(e){
-      document.body.classList.add("immersive");
-      if (typeof toast === "function") toast("预览窗口不给真全屏，已切到沉浸模式");
-    } finally { sync(); }
-  };
-  document.addEventListener("fullscreenchange", sync);
-  document.addEventListener("webkitfullscreenchange", sync);
-})();
-
 async function startDuel(){
   const a = findChar($("aSelect").value);
   if (!a){ toast("先选 A 方角色"); return; }
@@ -863,7 +835,7 @@ $("deleteChar").onclick = () => { if (editing) removeChar(editing); };
 $("eModeRule").onclick = () => setEditorMode("rule");
 $("eModeFree").onclick = () => setEditorMode("free");
 for (const id of ["eBloodPts","eSpeedPts","eManaPts","eBloodLimit","eSpeedLimit","eManaLimit",
-                  "eName","eShards","eEnergy"]){
+                  "eName","eShards"]){
   $(id).oninput = updateEditorHint;
 }
 $("eResonance").onchange = readEditorNumbers;

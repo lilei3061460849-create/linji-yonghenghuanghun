@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from pathlib import Path
 from typing import Any
 
 from engine.api import GameEngine
@@ -39,6 +40,9 @@ from engine.models import Consumable, Relic
 from engine.monsters import assign_monster_preferences, make_monster_entity
 from engine.world import WorldState
 
+# 仓库根目录：演武场要读《全道纹索引》这类文档作为界面文案。
+ROOT = Path(__file__).resolve().parents[1]
+
 #: 演武场单场最多几只对手（地图遭遇的实际承载上限由 UI 与引擎共同决定）。
 MAX_ENEMIES = 6
 #: 属性自由模式的人为护栏：防止浏览器提交天文数字把引擎算崩。
@@ -51,6 +55,30 @@ _OPTIONS: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------- 目录
+
+
+def _daowen_effects() -> dict[str, str]:
+    """道纹 → 效果条文（供界面「点一下就看到效果」）。
+
+    唯一事实源是 `全道纹索引.md` 的 `### 名称` 小节：小节标题后第一条不以
+    `>` 开头的非空行就是该道纹的支付/效果条文。解析失败就退回空表，界面
+    只显示名字，不影响选卡。
+    """
+    path = ROOT / "全道纹索引.md"
+    if not path.exists():
+        return {}
+    effects: dict[str, str] = {}
+    current = ""
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line.startswith("### "):
+            current = line[4:].strip()
+            continue
+        if not current or not line or line.startswith(">"):
+            continue
+        effects[current] = line
+        current = ""
+    return effects
 
 
 def _daowen_groups() -> list[dict[str, Any]]:
@@ -138,6 +166,7 @@ def options(refresh: bool = False) -> dict[str, Any]:
         "resonance": ["转换", "反转", "曲解"],
         "relics": [{"name": name, "effect": effect} for name, effect in GameEngine.RELIC_DEFS],
         "daowen_groups": _daowen_groups(),
+        "daowen_effects": _daowen_effects(),
         "consumables": _consumables(),
         "max_enemies": MAX_ENEMIES,
         "notes": [
@@ -329,7 +358,8 @@ def normalize_sheet(payload: dict[str, Any]) -> dict[str, Any]:
         "relics": _check_relics(_as_name_list(payload.get("relics"), "遗物")),
         "consumables": _resolve_consumables(payload.get("consumables") or []),
         "shards": _as_int(payload.get("shards", 20), "碎片", 0, MAX_SHARDS),
-        "energy": _as_int(payload.get("energy", 3), "精力", 0, MAX_TIER_LIMIT),
+        # 精力是局外资源，不再作为角色卡属性出现在界面上；旧卡缺省按 0。
+        "energy": _as_int(payload.get("energy", 0), "精力", 0, MAX_TIER_LIMIT),
     })
     return sheet
 

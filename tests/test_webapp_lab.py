@@ -207,3 +207,26 @@ def test_duel_b_side_relic_really_changes_combat_numbers(roster_file):
 
     assert _hit(with_relic["id"]) == 9
     assert _hit(without["id"]) == 10
+
+
+def test_daowen_effects_come_from_the_index_and_cover_runtime_daowen():
+    """界面「点一下看条文」：76 条运行时道纹都要有索引条文，不许只剩名字。"""
+    catalog = lab.options(refresh=True)
+    effects = catalog["daowen_effects"]
+    runtime = set(DaoWenEngine.list_all())
+    assert runtime - set(effects) == set()
+    assert "法力" in effects["杀伐"]
+    # 每条都带支付方式或效果动词，不是空串/标题残片
+    assert all(len(text) >= 6 for text in effects.values())
+
+
+def test_character_sheet_no_longer_requires_energy(roster_file):
+    """精力是局外资源，角色卡不再要求它；缺省按 0，引擎侧仍保留该字段。"""
+    card = _sheet("无精力")
+    card.pop("energy", None)          # 旧卡默认带 energy，这里模拟界面不再提交它
+    saved = lab.save_sheet(card)
+    assert saved.get("energy", 0) == 0
+    engine = lab.start({"id": saved["id"], "region": "罪孽都市", "mode": "rule",
+                        "blood_points": 15, "speed_points": 6, "mana_points": 4,
+                        "daowen": ["杀伐"], "relics": [], "consumables": []})["engine"]
+    assert engine.state.energy == 0
