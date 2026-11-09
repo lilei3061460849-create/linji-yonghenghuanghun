@@ -1,27 +1,4 @@
 {
   "version": 1,
-  "characters": [
-    {
-      "mode": "rule",
-      "blood_points": 15,
-      "speed_points": 6,
-      "mana_points": 4,
-      "attribute_points": 0,
-      "id": "f16333c2f808",
-      "name": "同步测试",
-      "resonance": "转换",
-      "blood_limit": 90,
-      "speed_limit": 3,
-      "mana_limit": 2,
-      "daowen": [
-        "杀伐"
-      ],
-      "relics": [],
-      "consumables": [],
-      "shards": 20,
-      "energy": 3,
-      "created_at": "2026-11-09T15:40:22",
-      "updated_at": "2026-11-09T15:40:22"
-    }
-  ]
+  "characters": []
 }
