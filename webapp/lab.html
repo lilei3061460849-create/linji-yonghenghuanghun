@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>临济·永恒黄昏 · 角色演武场</title>
+<style>
+  :root{
+    --bg:#0d1014; --panel:#151a21; --panel-2:#1b222b; --line:#28313c;
+    --text:#dbe3ee; --muted:#8a97a7; --gold:#d8b45a; --ally:#6fca94;
+    --enemy:#e2645a; --mana:#5f9ad8; --blood:#d9584c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 20% -10%,#1a222c 0%,var(--bg) 60%);
+    color:var(--text);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;}
+  a{color:var(--gold);text-decoration:none}
+  a:hover{text-decoration:underline}
+  button{font:inherit;color:var(--text);background:var(--panel-2);border:1px solid var(--line);
+    border-radius:6px;padding:5px 10px;cursor:pointer;transition:.15s}
+  button:hover:not(:disabled){border-color:var(--gold);color:#fff}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.primary{background:#2c2415;border-color:#6d5a2a;color:#f2d99a}
+  button.primary:hover:not(:disabled){background:#3a2f1b;border-color:var(--gold)}
+  button.mini{padding:0 7px;line-height:20px;min-width:24px}
+  button.on{border-color:var(--gold);background:#2e2612;color:#ffe9a8}
+  input,select{font:inherit;color:var(--text);background:#0f141a;border:1px solid var(--line);
+    border-radius:5px;padding:4px 6px;min-width:0}
+  header{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:10px 18px;
+    border-bottom:1px solid var(--line);background:#10151b;position:sticky;top:0;z-index:5}
+  header h1{font-size:15px;margin:0;letter-spacing:.12em;color:var(--gold);font-weight:600}
+  header .hint{font-size:12px;color:var(--muted)}
+  .spacer{flex:1}
+  main{display:grid;grid-template-columns:minmax(320px,1.25fr) minmax(300px,.95fr);gap:14px;
+    padding:14px 18px 60px;max-width:1400px;margin:0 auto;align-items:start}
+  @media (max-width:980px){main{grid-template-columns:1fr}}
+  .stack{display:flex;flex-direction:column;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .card h2{font-size:12px;letter-spacing:.16em;color:var(--muted);margin:0 0 10px;font-weight:600}
+  .card h2 span{float:right;letter-spacing:0;color:#6b7684;font-weight:400}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row.tight{gap:6px}
+  .field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+  .field input,.field select{color:var(--text)}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;max-height:210px;overflow:auto;padding:2px}
+  .chip{font-size:12px;border:1px solid var(--line);border-radius:14px;padding:2px 9px;
+    color:#aab6c4;background:#131920;cursor:pointer;user-select:none}
+  .chip:hover{border-color:#5d6a79;color:#fff}
+  .chip.on{border-color:var(--gold);background:#2e2612;color:#ffe9a8}
+  .group-label{font-size:12px;color:var(--muted);margin:8px 0 4px}
+  .group-label:first-child{margin-top:0}
+  .group-label b{color:#c7d2df;font-weight:600}
+  .hintline{font-size:12px;color:var(--muted);margin-top:6px}
+  .warn{color:#e6b95c}
+  .tool-row{display:flex;justify-content:space-between;align-items:center;gap:8px;
+    border-bottom:1px dashed #232c36;padding:5px 0;font-size:12.5px}
+  .tool-row:last-child{border-bottom:none}
+  .tool-row .eff{color:var(--muted);font-size:11.5px;max-width:100%;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .mono{font-variant-numeric:tabular-nums}
+  .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:12.5px}
+  .summary div{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+  .summary b{display:block;font-size:17px;color:#fff;font-weight:600}
+  .summary span{color:var(--muted);font-size:11px}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .actions button{flex:1;min-width:150px;padding:9px 12px}
+  #result{display:none}
+  #result ul{margin:6px 0 0;padding-left:18px;color:#b9c4d1;font-size:12.5px}
+  #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#20272f;
+    border:1px solid var(--line);border-left:3px solid var(--gold);padding:9px 14px;border-radius:8px;
+    max-width:82vw;opacity:0;pointer-events:none;transition:.2s;z-index:30;white-space:pre-wrap}
+  #toast.show{opacity:1}
+  .loading{color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<header>
+  <h1>临济·永恒黄昏 · 角色演武场</h1>
+  <span class="hint">自定义三维／道纹／消耗品，直接开打 · 会覆盖本进程当前对局</span>
+  <span class="spacer"></span>
+  <a href="/">← 回到地图界面</a>
+</header>
+
+<main>
+  <div class="stack">
+    <section class="card">
+      <h2>基础<span>开局参数</span></h2>
+      <div class="row">
+        <label class="field">姓名<input id="fName" maxlength="12" value="轮回者" style="width:120px"></label>
+        <label class="field">副本<select id="fRegion" style="width:120px"></select></label>
+        <label class="field">残韵<select id="fResonance" style="width:96px"></select></label>
+        <label class="field">随机种子<input id="fSeed" placeholder="留空=真随机" style="width:110px"></label>
+      </div>
+      <div class="hintline">演武场默认解锁全部已实现副本，不推进阶级。</div>
+    </section>
+
+    <section class="card">
+      <h2>三维<span id="attrModeHint"></span></h2>
+      <div class="row tight" style="margin-bottom:10px">
+        <button id="modeRule" class="on">规则模式（25 点）</button>
+        <button id="modeFree">自由模式（直接填上限）</button>
+      </div>
+      <div id="ruleFields" class="grid3">
+        <label class="field">血限点 <span id="bloodPtsHint">1 点 = 6 血限</span>
+          <input id="fBloodPts" type="number" min="0" max="25" step="1" value="15"></label>
+        <label class="field">速限点 <span>2 点 = 1 速限</span>
+          <input id="fSpeedPts" type="number" min="0" max="25" step="2" value="6"></label>
+        <label class="field">法限点 <span>2 点 = 1 法限</span>
+          <input id="fManaPts" type="number" min="0" max="25" step="2" value="4"></label>
+      </div>
+      <div id="freeFields" class="grid3" style="display:none">
+        <label class="field">血限<input id="fBloodLimit" type="number" min="1" max="999" value="90"></label>
+        <label class="field">速限<input id="fSpeedLimit" type="number" min="0" max="99" value="3"></label>
+        <label class="field">法限<input id="fManaLimit" type="number" min="0" max="99" value="2"></label>
+      </div>
+      <div class="hintline" id="pointsHint"></div>
+      <div class="hintline">轮回者口径：出手次数＝当前速度，攻击力＝当前法力；当前值开局回满。</div>
+    </section>
+
+    <section class="card">
+      <h2>道纹<span id="daowenCount">0 种</span></h2>
+      <div class="row" style="margin-bottom:8px">
+        <input id="daowenSearch" placeholder="搜索道纹名…" style="flex:1">
+        <button id="daowenClear">清空</button>
+      </div>
+      <div id="daowenGroups"></div>
+      <div class="hintline">名单只含运行时已注册的道纹；出生自带的【透支】不在勾选列表里。</div>
+    </section>
+
+    <section class="card">
+      <h2>遗物<span id="relicCount">0 件</span></h2>
+      <div class="row" style="margin-bottom:8px">
+        <input id="relicSearch" placeholder="搜索遗物名或效果…" style="flex:1">
+        <button id="relicClear">清空</button>
+      </div>
+      <div id="relicChips" class="chips"></div>
+      <div class="hintline" id="relicHint"></div>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <h2>对手<span id="enemyCount">0 只</span></h2>
+      <div class="row tight" style="margin-bottom:8px">
+        <button id="enemyRandom" class="on">按副本随机（引擎出怪配方）</button>
+        <button id="enemyPick">指定怪物</button>
+      </div>
+      <div id="enemyPicker" style="display:none"></div>
+      <div class="hintline" id="enemyHint">随机模式下由引擎骰子决定本场对手。</div>
+    </section>
+
+    <section class="card">
+      <h2>消耗品<span id="itemCount">0 件</span></h2>
+      <div id="itemPicker" style="max-height:230px;overflow:auto"></div>
+      <div id="itemSelected" style="margin-top:8px"></div>
+    </section>
+
+    <section class="card">
+      <h2>资源与地图<span>局内</span></h2>
+      <div class="grid3">
+        <label class="field">碎片<input id="fShards" type="number" min="0" max="999999" value="20"></label>
+        <label class="field">精力<input id="fEnergy" type="number" min="0" max="99" value="3"></label>
+        <label class="field">地图尺寸<select id="fSize">
+          <option value="9">9 × 9</option>
+          <option value="11" selected>11 × 11</option>
+          <option value="15">15 × 15</option>
+          <option value="21">21 × 21</option>
+        </select></label>
+      </div>
+      <div class="hintline">指定对手时地图用于摆放遭遇；随机开战不建地图。</div>
+    </section>
+
+    <section class="card">
+      <h2>本局面板<span>由上面的选择算出来</span></h2>
+      <div class="summary">
+        <div><b id="sBlood">90</b><span>血限</span></div>
+        <div><b id="sSpeed">3</b><span>速限 / 出手</span></div>
+        <div><b id="sMana">2</b><span>法限 / 攻力</span></div>
+      </div>
+      <div class="hintline" id="sExtra"></div>
+      <div class="actions">
+        <button id="startBattle" class="primary">生成角色并开战</button>
+        <button id="startOnly">只生成角色（进地图）</button>
+      </div>
+    </section>
+
+    <section class="card" id="result">
+      <h2>已生成<span>下一步</span></h2>
+      <ul id="resultNotes"></ul>
+      <div class="actions">
+        <a href="/"><button class="primary" style="width:100%">进入地图 / 战斗界面 →</button></a>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+let OPTIONS = null;
+let mode = "rule";
+let enemyMode = "random";
+const selectedDaowen = new Set(["杀伐"]);
+const selectedRelics = new Set();
+const selectedItems = new Map();   // name -> uses
+const enemyCounts = new Map();     // name -> count
+
+const $ = (id) => document.getElementById(id);
+function toast(text){
+  const el = $("toast");
+  el.textContent = text;
+  el.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove("show"), 3200);
+}
+function el(tag, cls, text){
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+async function loadOptions(){
+  const res = await fetch("/api/lab/options");
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "选项加载失败");
+  OPTIONS = data.options;
+  for (const region of OPTIONS.regions){
+    const opt = el("option", null, `${region.name}（${region.tier} 阶）`);
+    opt.value = region.name;
+    $("fRegion").append(opt);
+  }
+  $("fRegion").value = OPTIONS.regions.some(r => r.name === "罪孽都市")
+    ? "罪孽都市" : OPTIONS.regions[0].name;
+  for (const type of OPTIONS.resonance){
+    const opt = el("option", null, type);
+    opt.value = type;
+    $("fResonance").append(opt);
+  }
+  renderDaowen();
+  renderRelics();
+  renderItems();
+  renderEnemies();
+  refresh();
+}
+
+function renderDaowen(){
+  const box = $("daowenGroups");
+  box.innerHTML = "";
+  const keyword = ($("daowenSearch").value || "").trim();
+  for (const group of OPTIONS.daowen_groups){
+    const names = group.names.filter(n => !keyword || n.includes(keyword));
+    if (!names.length) continue;
+    const label = el("div", "group-label");
+    label.append(el("b", null, group.label), document.createTextNode(` · ${names.length}`));
+    box.append(label);
+    const chips = el("div", "chips");
+    for (const name of names){
+      const chip = el("span", "chip" + (selectedDaowen.has(name) ? " on" : ""), name);
+      chip.onclick = () => {
+        if (selectedDaowen.has(name)) selectedDaowen.delete(name);
+        else selectedDaowen.add(name);
+        renderDaowen();
+        refresh();
+      };
+      chips.append(chip);
+    }
+    box.append(chips);
+    if (group.note) box.append(el("div", "hintline", group.note));
+  }
+  $("daowenCount").textContent = `${selectedDaowen.size} 种`;
+}
+
+function renderRelics(){
+  const box = $("relicChips");
+  box.innerHTML = "";
+  const keyword = ($("relicSearch").value || "").trim();
+  for (const relic of OPTIONS.relics){
+    if (keyword && !relic.name.includes(keyword) && !relic.effect.includes(keyword)) continue;
+    const chip = el("span", "chip" + (selectedRelics.has(relic.name) ? " on" : ""),
+                    relic.name);
+    chip.title = relic.effect;
+    chip.onclick = () => {
+      if (selectedRelics.has(relic.name)) selectedRelics.delete(relic.name);
+      else selectedRelics.add(relic.name);
+      renderRelics();
+      refresh();
+    };
+    box.append(chip);
+  }
+  $("relicCount").textContent = `${selectedRelics.size} 件`;
+}
+
+function renderItems(){
+  const picker = $("itemPicker");
+  picker.innerHTML = "";
+  for (const item of OPTIONS.consumables){
+    const row = el("div", "tool-row");
+    const left = el("div");
+    left.append(el("span", null, item.name),
+                el("span", "eff", ` · ${item.kind} · 默认${item.uses}耐久`));
+    left.title = item.effect;
+    const add = el("button", "mini", "＋");
+    add.onclick = () => {
+      selectedItems.set(item.name, selectedItems.get(item.name) || item.uses);
+      renderItems();
+      refresh();
+    };
+    row.append(left, add);
+    picker.append(row);
+  }
+  const box = $("itemSelected");
+  box.innerHTML = "";
+  if (!selectedItems.size){
+    box.append(el("div", "hintline", "还没有选择消耗品。"));
+  }
+  for (const [name, uses] of [...selectedItems]){
+    const row = el("div", "tool-row");
+    row.append(el("span", null, name));
+    const right = el("div", "row tight");
+    const input = el("input");
+    input.type = "number"; input.min = "1"; input.max = "99"; input.value = String(uses);
+    input.style.width = "64px";
+    input.onchange = () => {
+      const value = Number(input.value);
+      selectedItems.set(name, Number.isFinite(value) ? Math.max(1, Math.min(99, value)) : 1);
+      renderItems();
+    };
+    const del = el("button", "mini", "×");
+    del.onclick = () => { selectedItems.delete(name); renderItems(); refresh(); };
+    right.append(input, del);
+    row.append(right);
+    box.append(row);
+  }
+  $("itemCount").textContent = `${selectedItems.size} 件`;
+}
+
+function currentMonsters(){
+  const region = OPTIONS.regions.find(r => r.name === $("fRegion").value);
+  return region ? region.monsters : [];
+}
+
+function renderEnemies(){
+  const box = $("enemyPicker");
+  box.innerHTML = "";
+  for (const monster of currentMonsters()){
+    const row = el("div", "tool-row");
+    const left = el("div");
+    left.append(el("span", null, monster.name),
+                el("span", "eff", ` · 血${monster.blood_limit} 速${monster.speed_limit} `
+                  + `法${monster.mana_limit}` + (monster.daowen.length
+                    ? ` · 道纹 ${monster.daowen.join("/")}` : "")));
+    const right = el("div", "row tight");
+    const minus = el("button", "mini", "−");
+    minus.onclick = () => {
+      const n = (enemyCounts.get(monster.name) || 0) - 1;
+      if (n > 0) enemyCounts.set(monster.name, n); else enemyCounts.delete(monster.name);
+      renderEnemies(); refresh();
+    };
+    const count = el("span", "mono", String(enemyCounts.get(monster.name) || 0));
+    const plus = el("button", "mini", "＋");
+    plus.onclick = () => {
+      if (totalEnemies() >= OPTIONS.max_enemies) { toast(`最多 ${OPTIONS.max_enemies} 只`); return; }
+      enemyCounts.set(monster.name, (enemyCounts.get(monster.name) || 0) + 1);
+      renderEnemies(); refresh();
+    };
+    right.append(minus, count, plus);
+    row.append(left, right);
+    box.append(row);
+  }
+  $("enemyCount").textContent = `${totalEnemies()} 只`;
+}
+
+function totalEnemies(){
+  let total = 0;
+  for (const n of enemyCounts.values()) total += n;
+  return total;
+}
+
+function attrValues(){
+  if (mode === "rule"){
+    const bloodPts = Number($("fBloodPts").value) || 0;
+    const speedPts = Number($("fSpeedPts").value) || 0;
+    const manaPts = Number($("fManaPts").value) || 0;
+    return {
+      bloodPts, speedPts, manaPts,
+      blood: bloodPts * 6,
+      speed: Math.floor(speedPts / 2),
+      mana: Math.floor(manaPts / 2),
+      total: bloodPts + speedPts + manaPts,
+    };
+  }
+  return {
+    bloodPts: 0, speedPts: 0, manaPts: 0, total: 0,
+    blood: Number($("fBloodLimit").value) || 0,
+    speed: Number($("fSpeedLimit").value) || 0,
+    mana: Number($("fManaLimit").value) || 0,
+  };
+}
+
+function refresh(){
+  const attrs = attrValues();
+  $("sBlood").textContent = attrs.blood;
+  $("sSpeed").textContent = attrs.speed;
+  $("sMana").textContent = attrs.mana;
+  const relicLimit = Math.ceil(Math.max(0, attrs.blood) / 30);
+  const bits = [];
+  bits.push(`遗物可同时启用 ${relicLimit} 件（ceil(血限/30)），超出的照常持有但停用`);
+  bits.push(`道纹 ${selectedDaowen.size} 种 · 消耗品 ${selectedItems.size} 件`);
+  if (enemyMode === "pick") bits.push(`指定对手 ${totalEnemies()} 只`);
+  else bits.push("对手由引擎随机抽取");
+  $("sExtra").textContent = bits.join(" · ");
+  $("relicHint").textContent = `启用上限 ${relicLimit} 件；超出部分自动停用（仍持有）。`;
+
+  if (mode === "rule"){
+    const remain = 25 - attrs.total;
+    let hint = `已用 ${attrs.total}/25 点，余 ${remain} 点可存进属性点池。`;
+    if (attrs.total > 25) hint = `⚠ 已用 ${attrs.total} 点，超出 25 点预算。`;
+    else if (attrs.speedPts % 2 || attrs.manaPts % 2) hint += " ⚠ 速限/法限点数必须是偶数。";
+    $("pointsHint").textContent = hint;
+    $("attrModeHint").textContent = "25 点预算";
+  } else {
+    $("pointsHint").textContent = "自由模式：直接写三个上限，只有演武场会这样开局。";
+    $("attrModeHint").textContent = "自由写入";
+  }
+  $("enemyHint").textContent = enemyMode === "random"
+    ? "随机模式下由引擎骰子按副本出怪配方决定本场对手。"
+    : `从当前副本的怪物面板里挑选，最多 ${OPTIONS.max_enemies} 只。`;
+}
+
+function setMode(next){
+  mode = next;
+  $("modeRule").classList.toggle("on", next === "rule");
+  $("modeFree").classList.toggle("on", next === "free");
+  $("ruleFields").style.display = next === "rule" ? "" : "none";
+  $("freeFields").style.display = next === "free" ? "" : "none";
+  refresh();
+}
+
+function setEnemyMode(next){
+  enemyMode = next;
+  $("enemyRandom").classList.toggle("on", next === "random");
+  $("enemyPick").classList.toggle("on", next === "pick");
+  $("enemyPicker").style.display = next === "pick" ? "" : "none";
+  refresh();
+}
+
+function payload(startBattle){
+  const attrs = attrValues();
+  const size = Number($("fSize").value);
+  const data = {
+    name: $("fName").value || "轮回者",
+    region: $("fRegion").value,
+    resonance: $("fResonance").value,
+    mode,
+    seed: $("fSeed").value.trim(),
+    relics: [...selectedRelics],
+    daowen: [...selectedDaowen],
+    consumables: [...selectedItems].map(([name, uses]) => ({name, uses})),
+    shards: Number($("fShards").value) || 0,
+    energy: Number($("fEnergy").value) || 0,
+    width: size, height: size,
+    start_battle: !!startBattle,
+  };
+  if (mode === "rule"){
+    Object.assign(data, {
+      blood_points: attrs.bloodPts, speed_points: attrs.speedPts,
+      mana_points: attrs.manaPts,
+    });
+  } else {
+    Object.assign(data, {
+      blood_limit: attrs.blood, speed_limit: attrs.speed, mana_limit: attrs.mana,
+    });
+  }
+  if (startBattle && enemyMode === "pick"){
+    const enemies = [];
+    for (const [name, count] of enemyCounts){
+      for (let i = 0; i < count; i++) enemies.push(name);
+    }
+    data.enemies = enemies;
+  }
+  return data;
+}
+
+function validate(startBattle){
+  if (!selectedDaowen.size) return "至少选一种道纹（初始道纹不能为空）";
+  if (mode === "rule"){
+    const attrs = attrValues();
+    if (attrs.total > 25) return "规则模式下三项加点之和不能超过 25";
+    if (attrs.speedPts % 2 || attrs.manaPts % 2) return "速限/法限点数必须是偶数";
+  } else {
+    const attrs = attrValues();
+    if (attrs.blood < 1) return "血限至少为 1";
+    if (attrs.speed > 99 || attrs.mana > 99) return "速限/法限最大 99";
+  }
+  if (startBattle && enemyMode === "pick" && totalEnemies() === 0){
+    return "指定怪物模式下至少选一只对手（或切回随机）";
+  }
+  return null;
+}
+
+async function submit(startBattle){
+  const problem = validate(startBattle);
+  if (problem){ toast(problem); return; }
+  const battleBtn = $("startBattle"), onlyBtn = $("startOnly");
+  battleBtn.disabled = onlyBtn.disabled = true;
+  try {
+    const res = await fetch("/api/lab/start", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload(startBattle)),
+    });
+    const data = await res.json();
+    if (!data.success){ toast("开局失败：" + (data.error || "未知错误")); return; }
+    const list = $("resultNotes");
+    list.innerHTML = "";
+    for (const note of data.notes || []) list.append(el("li", null, note));
+    $("result").style.display = "";
+    $("result").scrollIntoView({behavior: "smooth", block: "center"});
+    toast(startBattle ? "角色已生成，战斗已开始。" : "角色已生成，可以进地图了。");
+  } catch (err){
+    toast("请求失败：" + err.message);
+  } finally {
+    battleBtn.disabled = onlyBtn.disabled = false;
+  }
+}
+
+$("modeRule").onclick = () => setMode("rule");
+$("modeFree").onclick = () => setMode("free");
+$("enemyRandom").onclick = () => setEnemyMode("random");
+$("enemyPick").onclick = () => setEnemyMode("pick");
+$("fRegion").onchange = () => {
+  // 换副本后旧怪物不在新池子里，留着会让开局报「当前副本没有这些怪物」。
+  enemyCounts.clear();
+  renderEnemies();
+  refresh();
+};
+$("fShards").oninput = refresh;
+$("fEnergy").oninput = refresh;
+for (const id of ["fBloodPts","fSpeedPts","fManaPts","fBloodLimit","fSpeedLimit","fManaLimit"]){
+  $(id).oninput = refresh;
+}
+$("daowenSearch").oninput = renderDaowen;
+$("daowenClear").onclick = () => { selectedDaowen.clear(); renderDaowen(); refresh(); };
+$("relicSearch").oninput = renderRelics;
+$("relicClear").onclick = () => { selectedRelics.clear(); renderRelics(); refresh(); };
+$("startBattle").onclick = () => submit(true);
+$("startOnly").onclick = () => submit(false);
+
+(async function boot(){
+  try { await loadOptions(); }
+  catch (err){
+    document.querySelector("main").prepend(el("div", "card loading", "加载失败：" + err.message
+      + "（请确认服务端已启动）"));
+  }
+})();
+</script>
+</body>
+</html>
