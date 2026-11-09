@@ -212,6 +212,11 @@
       <div id="battleBody" class="stack"></div>
     </div>
 
+    <div class="card" id="derivativeCard" style="display:none">
+      <h2>衍生道纹 <span>局内 0 出手</span></h2>
+      <div id="derivativeBody" class="stack"></div>
+    </div>
+
     <div class="card">
       <h2>世界事实 <span>最近 18 条</span></h2>
       <div class="log" id="facts"></div>
@@ -355,7 +360,7 @@ function render(){
   const mapCard = $("mapCard");
   if (mapCard) mapCard.style.display = (S && S.direct) ? "none" : "";
   renderHeader(); renderSheet(); renderPending(); renderMap(); renderAllies(); renderNear(); renderLocations();
-  renderEvent(); renderBattle(); renderDirectDone(); renderLog(); renderFacts(); renderOver();
+  renderEvent(); renderBattle(); renderDerivative(); renderDirectDone(); renderLog(); renderFacts(); renderOver();
 }
 
 function renderDirectDone(){
@@ -643,6 +648,61 @@ function renderPending(){
       row.append(send);
     }
     body.append(row);
+  }
+}
+
+function renderDerivative(){
+  /* 2026-11-09 用户令：衍生是**局内**独立 0 出手行动——不占出手、不结束回合、
+     不耗精力。界面必须能发起、领取、刷新、放弃，不能只留高级指令里手敲 action。 */
+  const card = $("derivativeCard"), body = $("derivativeBody");
+  if (!card || !body) return;
+  body.innerHTML = "";
+  const d = S && S.derivative;
+  if (!S || !S.started || !d){ card.style.display = "none"; return; }
+  card.style.display = "";
+  body.append(el("div","hint",
+    `代价 ${d.cost}；不满意可再付 ${d.refresh_cost} 刷新。每个衍生道纹独立占 1 张死者之页（空余 ${d.pages_left}）。`));
+
+  if (d.pending){
+    body.append(el("div","kv", `母本【${d.pending.parent}】发现结果——点一种领取：`));
+    for (const c of d.pending.choices){
+      const row = el("div","row");
+      row.style.alignItems = "flex-start";
+      const btn = el("button","primary", c.name);
+      btn.onclick = () => act("choose_derivative_daowen", {daowen_name: c.name});
+      row.append(btn, el("div","hint", c.effect || "（索引里没有条文）"));
+      body.append(row);
+    }
+    const ops = el("div","row");
+    const refresh = el("button", null, `刷新（${d.refresh_cost}）`);
+    refresh.disabled = !d.refresh_affordable;
+    refresh.onclick = () => act("refresh_derivative_choices", {});
+    const abandon = el("button","danger","放弃本次");
+    abandon.onclick = () => act("choose_derivative_daowen", {abandon: true});
+    ops.append(refresh, abandon);
+    body.append(ops);
+    body.append(el("div","hint","已付代价不退；放弃后可重新支付完整代价再衍生。"));
+    return;
+  }
+
+  if (!d.parents.length){
+    body.append(el("div","hint","还没有母本道纹（杀伐／透支／再生）：持有母本才能在战斗中衍生。"));
+    return;
+  }
+  const row = el("div","row");
+  const sel = el("select");
+  for (const name of d.parents){
+    const opt = el("option", null, name); opt.value = name; sel.append(opt);
+  }
+  const btn = el("button","primary","发现（占 0 出手）");
+  btn.disabled = !d.available;
+  btn.onclick = () => act("derive_daowen", {source_daowen: sel.value});
+  row.append(sel, btn);
+  body.append(row);
+  if (d.blockers.length){
+    body.append(el("div","hint","现在不能发起：" + d.blockers.join("；")));
+  } else {
+    body.append(el("div","hint","点「发现」后从该母本池的 3 个未持有选项里选 1 种。"));
   }
 }
 

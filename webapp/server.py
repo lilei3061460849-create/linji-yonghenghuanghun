@@ -265,6 +265,60 @@ def _event_view(engine: GameEngine, actions: dict[str, Any]) -> dict[str, Any] |
             "queued": len(engine.state.pending_event_queue)}
 
 
+def _derivative_view(engine: GameEngine, actions: dict[str, Any]) -> dict[str, Any] | None:
+    """局内【衍生】：0 出手行动，界面必须能发起、领取、刷新、放弃。
+
+    2026-11-09 用户令：衍生是战斗内独立行动（不占出手、不结束回合、不耗精力）。
+    引擎侧 action／pending 都已齐备，这里只把它摊平成界面好渲染的一份视图：
+    可用的母本、缺什么代价、待领取的三个选项（含《全道纹索引》原文）。
+    """
+    from engine import derivatives as derivative_rules
+    from engine.daowen_text import daowen_effects
+
+    state = engine.state
+    player = state.player
+    if player is None or state.phase != "in_combat":
+        return None
+    parents = [name for name in derivative_rules.known_parents() if name in player.dao_wen]
+    pending = list(getattr(state, "pending_derivative_choices", []) or [])
+    spec = next((a for a in actions.get("actions", [])
+                 if a.get("action_type") == "derive_daowen"), None)
+    effects = daowen_effects()
+    blockers: list[str] = []
+    if not parents:
+        blockers.append("还没有母本道纹（杀伐／透支／再生）")
+    if state.resonance.get(derivative_rules.DERIVE_RESONANCE, 0) < derivative_rules.DERIVE_RESONANCE_COST:
+        blockers.append(f"缺少【{derivative_rules.DERIVE_RESONANCE}】残韵1")
+    if state.shards < derivative_rules.DERIVE_SHARD_COST:
+        blockers.append(f"灵魂碎片不足（需{derivative_rules.DERIVE_SHARD_COST}，现有{state.shards}）")
+    if player.blood_limit <= derivative_rules.DERIVE_BLOOD_LIMIT_COST:
+        blockers.append(f"血限不足以支付血限{derivative_rules.DERIVE_BLOOD_LIMIT_COST}")
+    pages_left = player.daowen_capacity - len(player.dao_wen)
+    if pages_left <= 0:
+        blockers.append("没有空余死者之页")
+    if pending:
+        blockers.append("还有一次衍生发现没处理（先领取、刷新或放弃）")
+    if spec is not None and spec.get("available") is False and not blockers:
+        blockers.append("当前不可发起衍生")
+    return {
+        "parents": parents,
+        "available": bool(spec and spec.get("available")),
+        "blockers": blockers,
+        "pending": ({"parent": getattr(state, "pending_derivative_parent", ""),
+                     "recipient": getattr(state, "pending_derivative_recipient", ""),
+                     "choices": [{"name": name, "effect": effects.get(name, "")}
+                                 for name in pending]}
+                    if pending else None),
+        "cost": "【转换】×1 ＋ 血限2 ＋ 灵魂碎片3",
+        "refresh_cost": "血限2",
+        "resonance": state.resonance.get(derivative_rules.DERIVE_RESONANCE, 0),
+        "shards": state.shards,
+        "pages_left": pages_left,
+        "blood_limit": player.blood_limit,
+        "refresh_affordable": player.blood_limit > derivative_rules.REFRESH_BLOOD_LIMIT_COST,
+    }
+
+
 def _snapshot(engine: GameEngine | None) -> dict[str, Any]:
     if engine is None:
         return {"started": False, "log": []}
@@ -276,6 +330,7 @@ def _snapshot(engine: GameEngine | None) -> dict[str, Any]:
         "world": _world_view(engine),
         "battle": _battle_view(engine),
         "event": _event_view(engine, actions),
+        "derivative": _derivative_view(engine, actions),
         "actions": actions,
         "manual_both": bool(
             engine.state.event_modifiers.get("lab_manual_both")),

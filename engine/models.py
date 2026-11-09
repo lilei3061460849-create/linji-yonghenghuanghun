@@ -693,12 +693,18 @@ class Entity:
                 and any(status.name == "不死" and not status.is_expired
                         for status in self.__dict__.get("status_effects", ()))):
             value = 1
-        # 庇护统一拦截实际生命写入；只有战斗绑定实体具有该判定位。
+        # 庇护／脆弱统一拦截实际生命写入。2026-11-09：轮回者在正式流程里
+        # 只绑「拦截钩子」`_hp_intercept_ref`（不绑完整的 `_hp_engine_ref`），
+        # 因此本块要兼容两种弱引用；完整绑定仍以 `_hp_engine_ref` 为准。
         if name == "current_hp" and old is not None and value < old:
-            eng = self.__dict__.get("_hp_engine_ref")
+            eng = (self.__dict__.get("_hp_intercept_ref")
+                   or self.__dict__.get("_hp_engine_ref"))
             owner = eng() if eng is not None else None
             if owner is not None:
                 value = owner._shelter_hp_loss(self, old, value)
+                # 2026-11-09：【脆弱】的重复在【庇护】之后结算——被整笔免掉的
+                # 失血（value 回到 old）不算「失去生命」，脆弱不消费。
+                value = owner._fragile_hp_loss(self, old, value)
         # 萎缩：任何来源都不能使当前速度增加；下降、封顶与速限变化不受影响。
         if (name == "current_speed" and isinstance(old, int) and value > old
                 and any(status.name == "萎缩" and not status.is_expired
@@ -759,6 +765,7 @@ class Entity:
         """存档/快照序列化时剔除战斗期引擎弱引用（不可 pickle）。"""
         state = self.__dict__.copy()
         state.pop("_hp_engine_ref", None)
+        state.pop("_hp_intercept_ref", None)
         state.pop("_hp_state_ref", None)
         return state
 
@@ -768,6 +775,7 @@ class Entity:
         self.__dict__["entity_type"] = normalize_entity_type(
             self.__dict__.get("entity_type", ""))
         self.__dict__["_hp_engine_ref"] = None
+        self.__dict__["_hp_intercept_ref"] = None
         # `_hp_state_ref` 不回填：反序列化后若写入 None 会被沙盒污染检查
         # 判成新状态（见 engine/pollution_guard.py）；读取端一律用 __dict__.get。
         self.__dict__.setdefault("daowen_use_history", set())
@@ -1275,7 +1283,7 @@ class Entity:
             debuffs = {
                 "弱化", "无力", "减速", "全速", "束缚", "封印", "冰冻",
                 "坏死", "退化", "定型", "畸变", "加害", "伤痕", "沉溺",
-                "寄生", "蒙蔽", "手雷减攻", "被背负",   # 2026-10-11 删【衰败】
+                "寄生", "蒙蔽", "手雷减攻", "被背负", "脆弱",  # 2026-10-11 删【衰败】
             }
             if effect.name in buffs:
                 effect.polarity = EffectPolarity.BUFF.value
@@ -1487,6 +1495,12 @@ class GameState:
     pending_initial_daowen_source: str = ""
     # 【典当】：轮回者发动后待领取的发现（每组3选1，choose_diandang_daowen 逐组领取）。
     pending_diandang_discoveries: list[list[str]] = field(default_factory=list)
+    # 【衍生道纹】（2026-11-09）：一次衍生发现待选的 3 个未持有衍生道纹、母本与接收者。
+    # 三项都是纯 list/str，随 deepcopy 快照 / pickle 存档自然往返；旧档缺字段时
+    # 各 handler 一律用 getattr 兜底。
+    pending_derivative_choices: list[str] = field(default_factory=list)
+    pending_derivative_parent: str = ""
+    pending_derivative_recipient: str = ""
     # 救赎：怪物融化后等待接纳/无视。
     pending_redemption: dict = field(default_factory=dict)
     # 消耗品【发现】候选（如扭曲都市完成事件后的工具发现）。
@@ -2319,6 +2333,9 @@ class GameState:
             "pending_initial_daowen_choices": list(self.pending_initial_daowen_choices),
             "pending_initial_daowen_source": self.pending_initial_daowen_source,
             "pending_diandang_discoveries": [list(g) for g in self.pending_diandang_discoveries],
+            "pending_derivative_choices": list(getattr(self, "pending_derivative_choices", [])),
+            "pending_derivative_parent": getattr(self, "pending_derivative_parent", ""),
+            "pending_derivative_recipient": getattr(self, "pending_derivative_recipient", ""),
             "pending_redemption": dict(self.pending_redemption),
             "pending_item_choices": list(self.pending_item_choices),
             "pending_item_source": self.pending_item_source,

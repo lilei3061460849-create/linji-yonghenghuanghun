@@ -163,11 +163,11 @@ def test_resonance():
     assert result["target"] == "杀伐"
     print("  ✓ 再生 --反转--> 杀伐（反向）")
     
-    # 再生 → 曲解 → 连击（2026-11-02 四面体一：曲解 杀伐⇄庇护、再生⇄连击）
-    result = ResonanceEngine.apply_resonance("再生", "曲解", False, True, target_daowen="连击")
+    # 再生 → 曲解 → 脆弱（2026-11-09 四面体一：曲解 杀伐⇄庇护、再生⇄脆弱）
+    result = ResonanceEngine.apply_resonance("再生", "曲解", False, True, target_daowen="脆弱")
     assert result["success"]
-    assert result["target"] == "连击"
-    print("  ✓ 再生 --曲解--> 连击")
+    assert result["target"] == "脆弱"
+    print("  ✓ 再生 --曲解--> 脆弱")
 
     # 全力 → 反转 → 全速（2026-11-02 四面体三：反转 强化⇄弱化、全力⇄全速）
     result = ResonanceEngine.apply_resonance("全力", "反转", False, True)

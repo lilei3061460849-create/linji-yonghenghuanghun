@@ -26,6 +26,7 @@ from typing import Any
 from engine.api import GameEngine
 from engine.consumables import WING_ITEM_SPECS, make_wing_item
 from engine.daowen import DaoWenEngine
+from engine.daowen_text import daowen_effects
 from engine.events import EVENT_CONSUMABLES, TWISTED_TOOL_LIBRARY
 from engine.gamedata import (
     FIRST_EMBRACE_DAOWEN,
@@ -61,25 +62,10 @@ _OPTIONS: dict[str, Any] | None = None
 def _daowen_effects() -> dict[str, str]:
     """道纹 → 效果条文（供界面「点一下就看到效果」）。
 
-    唯一事实源是 `全道纹索引.md` 的 `### 名称` 小节：小节标题后第一条不以
-    `>` 开头的非空行就是该道纹的支付/效果条文。解析失败就退回空表，界面
-    只显示名字，不影响选卡。
+    解析逻辑与对局页共用 `engine.daowen_text`（同一份《全道纹索引》），
+    不再各写一份：一处改口径，两个界面同时生效。
     """
-    path = ROOT / "全道纹索引.md"
-    if not path.exists():
-        return {}
-    effects: dict[str, str] = {}
-    current = ""
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if line.startswith("### "):
-            current = line[4:].strip()
-            continue
-        if not current or not line or line.startswith(">"):
-            continue
-        effects[current] = line
-        current = ""
-    return effects
+    return daowen_effects()
 
 
 def _daowen_groups() -> list[dict[str, Any]]:

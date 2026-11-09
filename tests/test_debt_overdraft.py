@@ -84,9 +84,9 @@ def test_fake_shards_never_pay_the_fake_shard_channel():
     """【假碎片】作为独立资源类型仍只能由假碎片池承担（这里反过来验一次）。"""
     combat = _make_combat(_haoduo_monster(shards=100, fake=0))
     monster = combat.state.enemies[0]
-    calc = DaoWenEngine.resolve("连击", 1, target=combat.state.player, cost_channel="假碎片")
+    calc = DaoWenEngine.resolve("伪伐", 1, target=combat.state.player)
     try:
-        combat.apply_daowen_effect("连击", calc, monster, combat.state.player)
+        combat.apply_daowen_effect("伪伐", calc, monster, combat.state.player)
     except ValueError as exc:
         assert "无法完整承担" in str(exc), exc
     else:
@@ -95,12 +95,12 @@ def test_fake_shards_never_pay_the_fake_shard_channel():
 
 
 def test_lianji_shard_channel_can_borrow_from_fake_shards():
-    """连击的「碎片5X」通道额度＝真+假：真碎片为0、假碎片100 时可以发动，先扣假碎片。"""
+    """【碎伐】碎片4X：额度＝真+假；真碎片为0、假碎片100 时先扣假碎片。"""
     combat = _make_combat(_haoduo_monster(shards=0, fake=100))
     monster = combat.state.enemies[0]
-    calc = DaoWenEngine.resolve("连击", 1, target=combat.state.player, cost_channel="碎片")
-    combat.apply_daowen_effect("连击", calc, monster, combat.state.player)
-    assert monster.fake_shards == 95 and monster.shards == 0, \
+    calc = DaoWenEngine.resolve("碎伐", 1, target=combat.state.player)
+    combat.apply_daowen_effect("碎伐", calc, monster, combat.state.player)
+    assert monster.fake_shards == 96 and monster.shards == 0, \
         f"应先扣假碎片，实 真{monster.shards}／假{monster.fake_shards}"
 
 

@@ -103,12 +103,12 @@ def test_nested_if_is_evaluated_at_runtime():
 def test_loop_re_evaluates_condition_every_round():
     """循环体每轮按真实状态重新选分支（否则会锁死在第一轮的选择上）。"""
     state, combat, player, enemy = _state(player_hp=40, mana=0)
-    _give(player, "透支", "再生")
-    flow = "若自身 生命 大于 30 则 发动透支X于自身 否则 发动再生X于自身→循环"
+    _give(player, "燃血", "再生")
+    flow = "若自身 生命 大于 30 则 发动燃血X于自身 否则 发动再生X于自身→循环"
     execution = _cast(combat, player, enemy, flow,
                       [{"x": 3}, {"x": 3}], max_iterations=4)
-    # 40 →透支3(流血12) 28 → 28≤30 走再生3 → 40 → 透支3 → 28 → 再生3 …
-    assert _daowen_sequence(execution) == ["透支", "再生", "透支", "再生"]
+    # 40 →燃血3(生命12) 28 → 28≤30 走再生3 → 40 → 燃血3 → 28 → 再生3 …
+    assert _daowen_sequence(execution) == ["燃血", "再生", "燃血", "再生"]
     assert [r.iteration for r in execution.results] == [1, 2, 3, 4]
 
 
@@ -277,29 +277,29 @@ def test_event_path_applies_silence_mask_to_step():
     assert player.current_hp == 60  # 没有流血代价
 
 
-def test_event_path_pays_lianji_fake_shard_cost_and_interrupts_when_short():
-    """连击假碎片通道在事件型法术步骤里同样支付/拦截。"""
+def test_event_path_pays_weifa_fake_shard_cost_and_interrupts_when_short():
+    """【伪伐】假碎片40X 在事件型法术步骤里同样支付/拦截（单途径，无通道参数）。"""
     state, combat, player, enemy = _state(player_hp=60, mana=20)
     state.fake_shards = 0
     state.shards = 0
-    _give(player, "连击")
-    player.spells.append(Spell(name="连击", required_daowen=["连击"],
-                               trigger_condition="失去生命后", effect_flow="发动连击X于攻击者"))
+    _give(player, "伪伐")
+    player.spells.append(Spell(name="伪伐", required_daowen=["伪伐"],
+                               trigger_condition="失去生命后", effect_flow="发动伪伐X于攻击者"))
     refs = combat._combat_entity_refs()
     decision = {"use": True, "steps": [{
-        "x": 1, "target_ref": "enemy:0", "cost_channel": "假碎片", "dodge": False,
+        "x": 1, "target_ref": "enemy:0", "dodge": False,
     }]}
     logs = combat._resolve_spell_reactions(
-        "失去生命后", player, enemy, {"连击": decision}, refs)
-    entry = next(lg for lg in logs if lg.get("spell") == "连击")
+        "失去生命后", player, enemy, {"伪伐": decision}, refs)
+    entry = next(lg for lg in logs if lg.get("spell") == "伪伐")
     assert entry["interrupted"] == InterruptReason.SHARDS_INSUFFICIENT.value
     assert enemy.current_hp == 100
 
     state.fake_shards = 60
     logs2 = combat._resolve_spell_reactions(
-        "失去生命后", player, enemy, {"连击": decision}, refs)
-    assert any(lg.get("spell") == "连击" and lg.get("execution") for lg in logs2)
-    assert state.fake_shards == 10
+        "失去生命后", player, enemy, {"伪伐": decision}, refs)
+    assert any(lg.get("spell") == "伪伐" and lg.get("execution") for lg in logs2)
+    assert state.fake_shards == 20
     assert enemy.current_hp == 95
 
 
@@ -393,13 +393,13 @@ def test_same_interruption_reason_and_detail_as_use_daowen():
     engine.state.relics.clear()
     engine.state.fake_shards = 0
     engine.state.shards = 0
-    _give(player, "连击")
+    _give(player, "伪伐")
     direct2 = engine.execute_action("use_daowen", {
-        "daowen_name": "连击", "x": 1, "target_ref": "enemy:0",
-        "lianji_cost": "假碎片", "dodge": False})
-    assert not direct2["success"] and "无法完整承担假碎片50" in direct2["error"]
+        "daowen_name": "伪伐", "x": 1, "target_ref": "enemy:0",
+        "dodge": False})
+    assert not direct2["success"] and "无法完整承担假碎片40" in direct2["error"]
     execution2 = _cast(engine.combat, player, engine.state.enemies[0],
-                       "发动连击X于目标",
-                       [{"x": 1, "cost_channel": "假碎片", "dodge": False}], target=None)
+                       "发动伪伐X于目标",
+                       [{"x": 1, "dodge": False}], target=None)
     assert execution2.results[0].reason == InterruptReason.SHARDS_INSUFFICIENT
-    assert "无法完整承担假碎片50" in execution2.results[0].detail
+    assert "无法完整承担假碎片40" in execution2.results[0].detail

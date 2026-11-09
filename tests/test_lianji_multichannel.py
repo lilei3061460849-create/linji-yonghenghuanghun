@@ -1,12 +1,16 @@
-"""【连击】（2026-10-22 由【血债】改名）多支付通道测试。
+"""【衍生道纹】单途径收束与旧名边界（2026-11-09 用户令）。
 
-用户令口径：与【透支】同例的多代价道纹——支付六选一（生命5X/法力5X/
-血限X/枯竭X/碎片5X/假碎片50X，价格与效果全表同乘五），各通道只有
-倍率不同，效果完全相同：选择[目标]5X次、每次1点伤害，不带任何通道专属机制。
-旧名【血债】仅在读入边界自动映射，引擎不接受旧名提交。
+原【连击】六通道 /【透支】四通道 /【再生】双通道已全部收成「母本一条途径 +
+衍生道纹各一条途径」。本文件锁：
+
+* 10 条衍生道纹各自只有**一条**支付途径，价格按唯一事实源汇率；
+* 同域效果恒同（杀伐域 5X 次 ×1 点伤害；透支域 X 点法力；再生域 4X 回复）；
+* 战斗中每条途径真实落账，且拒绝通道参数 `lianji_cost` 之类的旧多途径入口；
+* 旧名【血债】仍只在读入边界归一为【连击】（现为杀伐衍生），引擎拒收旧名提交。
 """
 import pytest
 
+from engine import derivatives as derivative_rules
 from engine.api import GameEngine
 from engine.daowen import DaoWenEngine, normalize_daowen_name
 from engine.models import Entity, DaoWen, DaoWenInstance
@@ -15,43 +19,56 @@ from engine.monsters import make_monster_entity
 from tests.setup_support import begin_battle, finish_initial_daowen
 
 
-# ---------- 计算层：六通道同效、异价 ----------
+# ---------- 计算层：每条衍生只有一条途径 ----------
 
-def test_lianji_default_channel_is_bleed_legacy_price():
-    calc = DaoWenEngine.resolve("连击", 4)
-    assert calc["cost_type"] == "生命"
-    assert calc["cost_hp"] == 20
-    assert calc["hits"] == 20 and calc["damage_per_hit"] == 1
-    assert calc["total_damage"] == 20
-
-
-@pytest.mark.parametrize("channel,cost_key,amount,cost_type", [
-    ("生命", "cost_hp", 35, "生命"),
-    ("法力", "cost", 35, "消耗"),
-    ("血限", "cost_blood_limit", 7, "血限"),
-    ("枯竭", "cost_mana_limit", 7, "枯竭"),
-    ("碎片", "cost_real_shards", 35, "碎片"),
-    ("假碎片", "cost_fake_shards", 350, "碎片"),
+@pytest.mark.parametrize("name,cost_key,amount,cost_type", [
+    ("连击", "cost_hp", 35, "生命"),
+    ("连珠", "cost", 28, "消耗"),
+    ("血伐", "cost_blood_limit", 7, "血限"),
+    ("竭伐", "cost_mana_limit", 7, "枯竭"),
+    ("碎伐", "cost_real_shards", 28, "碎片"),
+    ("伪伐", "cost_fake_shards", 280, "碎片"),
+    ("燃血", "cost_hp", 28, "生命"),
+    ("折寿", "cost_blood_limit", 14, "血限"),
+    ("疾贷", "cost_speed", 7, "速度"),
+    ("舍力", "cost_attack", 28, "攻击力"),
 ])
-def test_lianji_channels_same_effect_different_price(channel, cost_key, amount, cost_type):
-    calc = DaoWenEngine.resolve("连击", 7, cost_channel=channel)
-    assert calc[cost_key] == amount
+def test_derivative_has_exactly_one_channel(name, cost_key, amount, cost_type):
+    DaoWenEngine.register_all()
+    calc = DaoWenEngine.resolve(name, 7)
     assert calc["cost_type"] == cost_type
-    # 效果恒同：与缺省生命通道逐字段一致（除代价）
+    assert calc[cost_key] == amount
+    assert calc["derivative_of"] == derivative_rules.parent_of(name)
+    amount_keys = [k for k in calc
+                   if k != "cost_type" and (k.startswith("cost_") or k == "cost")]
+    assert amount_keys == [cost_key], f"{name} 出现了第二条支付途径: {amount_keys}"
+    assert f"支付：{derivative_rules.spec_of(name).cost_kind}{amount}" in calc["summary"]
+
+
+@pytest.mark.parametrize("name", ["连击", "连珠", "血伐", "竭伐", "碎伐", "伪伐"])
+def test_shafa_derivatives_share_the_same_effect(name):
+    calc = DaoWenEngine.resolve(name, 7)
     assert calc["hits"] == 35 and calc["damage_per_hit"] == 1
     assert calc["total_damage"] == 35
 
 
-def test_lianji_limit_channels_priced_in_whole_x():
-    # 全乘五后上限类回到整数X计价，无⌈X/5⌉零头
-    assert DaoWenEngine.resolve("连击", 5, cost_channel="血限")["cost_blood_limit"] == 5
-    assert DaoWenEngine.resolve("连击", 6, cost_channel="枯竭")["cost_mana_limit"] == 6
-    assert DaoWenEngine.resolve("连击", 1, cost_channel="血限")["cost_blood_limit"] == 1
+@pytest.mark.parametrize("name", ["燃血", "折寿", "疾贷"])
+def test_touzhi_derivatives_share_the_same_effect(name):
+    assert DaoWenEngine.resolve(name, 7)["mana_gain"] == 7
 
 
-def test_lianji_invalid_channel_rejected():
-    with pytest.raises(ValueError):
-        DaoWenEngine.resolve("连击", 1, cost_channel="寿命")
+def test_zaisheng_derivative_heals_4x():
+    assert DaoWenEngine.resolve("舍力", 7)["target_heal"] == 28
+
+
+def test_mothers_keep_exactly_one_channel():
+    assert DaoWenEngine.resolve("杀伐", 2)["cost_type"] == "消耗"
+    assert DaoWenEngine.resolve("透支", 2)["cost_mana_limit"] == 2
+    assert DaoWenEngine.resolve("再生", 2)["cost"] == 2
+    # 旧多途径入口不再是形参：传入 cost_channel 也不得改出第二条途径。
+    for name in ("透支", "再生", "杀伐"):
+        base = DaoWenEngine.resolve(name, 1)
+        assert DaoWenEngine.resolve(name, 1, cost_channel="生命") == base
 
 
 # ---------- 改名与旧名边界 ----------
@@ -85,21 +102,20 @@ def test_load_migration_renames_entity_daowen(tmp_path):
     p.dao_wen["血债"] = DaoWenInstance(
         DaoWen(name="连击", formula="", cost_type="生命", cost_formula="X", effect_formula=""),
         x_value=3)
-    # DaoWen.__post_init__ 已把实例名归一；此处模拟 pickle 旧档的键与实例名双旧
     p.dao_wen["血债"].dao_wen.name = "血债"
     assert e._migrate_legacy_xuezhai_names() is True
     assert list(p.dao_wen) == ["透支", "连击"]
     assert p.dao_wen["连击"].dao_wen.name == "连击"
     assert p.dao_wen["连击"].x_value == 3
-    assert e._migrate_legacy_xuezhai_names() is False  # 幂等
+    assert e._migrate_legacy_xuezhai_names() is False
 
 
-# ---------- 战斗层：通道支付真实落账 ----------
+# ---------- 战斗层：单途径支付真实落账 ----------
 
-def _setup_battle(tmp_path):
+def _setup_battle(tmp_path, daowen_name="连击"):
     e = GameEngine(db_path=str(tmp_path / "test.db"), rng_seed=4)
     e.execute_action("setup_attributes", {
-        "name": "连击手", "blood_points": 5, "speed_points": 8, "mana_points": 12})
+        "name": "衍生手", "blood_points": 5, "speed_points": 8, "mana_points": 12})
     finish_initial_daowen(e)
     e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
     s = e.execute_action("setup_choose_region", {"region": "龙心谷"})
@@ -109,75 +125,68 @@ def _setup_battle(tmp_path):
     started = begin_battle(e)
     assert started["success"], started
     p = e.state.player
-    p.dao_wen["连击"] = DaoWenInstance(
-        DaoWen(name="连击", formula="", cost_type="生命", cost_formula="X", effect_formula=""),
-        x_value=0, x_free=True)
-    m = Entity("靶怪", "怪物", blood_limit=80, current_hp=80, attack_count=1, attack_power=1)
+    p.dao_wen[daowen_name] = DaoWenInstance(
+        DaoWen(name=daowen_name, formula="", cost_type="消耗",
+               cost_formula="X", effect_formula=""), x_value=0, x_free=True)
+    m = Entity("靶怪", "怪物", blood_limit=80, current_hp=80,
+               attack_count=1, attack_power=1)
     e.state.enemies[:] = [m]
     e.execute_action("round_start", {"relic_choices": {}})
     return e, p, m
 
 
-def _cast(e, m, x, channel):
+def _cast(e, m, name, x):
     return e.execute_action("use_daowen", {
-        "daowen_name": "连击", "x": x, "target": m.name,
-        "lianji_cost": channel, "dodge": False})
+        "daowen_name": name, "x": x, "target": m.name, "dodge": False})
 
 
-def test_battle_mana_channel_laser(tmp_path):
-    e, p, m = _setup_battle(tmp_path)
+def test_battle_mana_channel_derivative(tmp_path):
+    e, p, m = _setup_battle(tmp_path, "连珠")
     mana0, hp0 = p.current_mana, p.current_hp
-    assert mana0 >= 5
-    r = _cast(e, m, 1, "法力")
+    assert mana0 >= 4
+    r = _cast(e, m, "连珠", 1)
     assert r["success"], r
-    assert p.current_mana == mana0 - 5       # 法力通道：5/击扣法力
-    assert p.current_hp == hp0               # 不生命
-    assert m.current_hp == 80 - 5            # 效果恒同：5击×1点
+    assert p.current_mana == mana0 - 4
+    assert p.current_hp == hp0
+    assert m.current_hp == 80 - 5
 
 
-def test_battle_shard_channel_spends_fake_shards_first(tmp_path):
-    """2026-11-01 用户令：支付[碎片]的额度＝真+假，实际扣除先假后真。
-
-    代价10（5/击×2）→ 假碎片40先扣掉10，真碎片20分文不动。
-    """
-    e, p, m = _setup_battle(tmp_path)
-    e.state.shards, e.state.fake_shards = 20, 40
-    r = _cast(e, m, 2, "碎片")
+def test_battle_fake_shard_derivative_only_touches_fake(tmp_path):
+    e, p, m = _setup_battle(tmp_path, "伪伐")
+    e.state.shards, e.state.fake_shards = 10, 200
+    r = _cast(e, m, "伪伐", 2)
     assert r["success"], r
-    assert e.state.fake_shards == 30         # 先扣假碎片
-    assert e.state.shards == 20              # 假碎片够用时真碎片不动
-    assert m.current_hp == 80 - 10           # X=2 → 10击
-
-
-def test_battle_shard_channel_falls_back_to_real_shards(tmp_path):
-    """假碎片不足时，不足部分由真碎片补足（合计额度）。"""
-    e, p, m = _setup_battle(tmp_path)
-    e.state.shards, e.state.fake_shards = 20, 4
-    r = _cast(e, m, 2, "碎片")
-    assert r["success"], r
-    assert e.state.fake_shards == 0 and e.state.shards == 14   # 10 = 假4 + 真6
+    assert e.state.fake_shards == 200 - 80
+    assert e.state.shards == 10
     assert m.current_hp == 80 - 10
 
 
-def test_battle_fake_shard_channel_only_touches_fake(tmp_path):
-    """【假碎片】作为独立资源类型，仍然只能由假碎片池承担（真碎片补不进来）。"""
-    e, p, m = _setup_battle(tmp_path)
-    e.state.shards, e.state.fake_shards = 10, 200
-    r = _cast(e, m, 2, "假碎片")
+def test_battle_real_shard_derivative_spends_fake_first(tmp_path):
+    """【碎片】代价按通用口径：额度=真+假，实际扣除先假后真。"""
+    e, p, m = _setup_battle(tmp_path, "碎伐")
+    e.state.shards, e.state.fake_shards = 20, 40
+    r = _cast(e, m, "碎伐", 2)
     assert r["success"], r
-    assert e.state.fake_shards == 200 - 100  # 50/击
-    assert e.state.shards == 10
-    assert m.current_hp == 80 - 10           # X=2 → 10击
+    assert e.state.fake_shards == 40 - 8
+    assert e.state.shards == 20
+    assert m.current_hp == 80 - 10
 
 
-def test_battle_shard_channel_insufficient_rejected_cleanly(tmp_path):
-    """两池合计仍不足（真9＋假0 < 10）→ 拒绝，且一分不扣、一点不伤。"""
-    e, p, m = _setup_battle(tmp_path)
-    e.state.shards, e.state.fake_shards = 9, 0
-    r = _cast(e, m, 2, "碎片")
+def test_battle_real_shard_derivative_falls_back_to_real(tmp_path):
+    e, p, m = _setup_battle(tmp_path, "碎伐")
+    e.state.shards, e.state.fake_shards = 20, 3
+    r = _cast(e, m, "碎伐", 2)
+    assert r["success"], r
+    assert e.state.fake_shards == 0 and e.state.shards == 20 - 5
+    assert m.current_hp == 80 - 10
+
+
+def test_battle_shard_derivative_insufficient_rejected_cleanly(tmp_path):
+    e, p, m = _setup_battle(tmp_path, "碎伐")
+    e.state.shards, e.state.fake_shards = 7, 0
+    r = _cast(e, m, "碎伐", 2)
     assert r["success"] is False
-    assert "无法完整承担碎片10" in r["error"]
-    assert e.state.shards == 9 and m.current_hp == 80  # 未扣未伤
+    assert e.state.shards == 7 and m.current_hp == 80
 
 
 def test_battle_old_name_submission_rejected(tmp_path):
