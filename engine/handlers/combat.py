@@ -91,31 +91,87 @@ class CombatHandlersMixin:
             } for _ in range(attacker.effective_attack_count())],
         }
         token = uuid.uuid4().hex
-        self.state.pending_attack = {"token": token, "round": self.state.current_round, "options": options}
+        self.state.pending_attack = {
+            "token": token, "round": self.state.current_round, "options": options,
+            # 逐击推进用：已结算几击、已落地的选择、本击是否已声明、出手是否已扣。
+            "hit_index": 0, "hits_done": [], "declared": None, "action_spent": False,
+        }
         return {"success": True, "action": "准备攻击", "result": {"token": token, **options}}
 
-    @ACTION_REGISTRY.action("resolve_attack", group="combat")
-    def _action_resolve_attack(self, params: dict) -> dict:
-        """第二阶段：只接受prepare快照中的逐击完整选择并原子结算。"""
-        pending = self.state.pending_attack
-        if not pending:
-            return {"success": False, "error": "请先调用prepare_attack"}
-        if params.get("token") != pending.get("token") or pending.get("round") != self.state.current_round:
-            return {"success": False, "error": "攻击token无效或已过期"}
-        hits = params.get("hits")
+    # ---------------------------------------------------------------- 普攻逐击
+    # 规则正文·战斗行动：「攻击（占1次主动出手）：声明瞬间锁定击数与总伤害上限，
+    # 逐击分配非负整数伤害……每击按『攻击者确定伤害→目标选择承受/招架/闪避→
+    # 公开伤害→结算』推进。」这是通用规则，不分玩家/怪物、轮回者/微光者：
+    # 所以逐击状态挂在 `state.pending_attack` 上，由引擎自己的三个动作推进，
+    # 任何调用方（网页、AI、怪物阶段）走的都是同一条路。
+    #
+    # * `attack_declare_hit`：攻击方定这一击的目标与 X（还不结算）；
+    # * `attack_respond_hit`：防守方选硬扛/招架/闪避/血影，立刻结算这一击；
+    # * `resolve_attack`：老的一次性批量提交，保留兼容（等价于连续提交多击）。
+
+    def _attack_defender_options(self, pending: dict, ref: str) -> dict:
+        """防守方在这一击上能做什么（逐击询问用，不含任何预选）。"""
         options = pending["options"]
-        if not isinstance(hits, list) or len(hits) != options["hit_count"]:
-            return {"success": False, "error": f"必须提交{options['hit_count']}个hits"}
+        entry = {item["ref"]: item for item in options["target_options"]}.get(ref) or {}
+        refs = self.combat._combat_entity_refs()
+        target = refs.get(ref)
+        attacker = refs.get(options["actor_ref"])
+        speed = int(getattr(target, "current_speed", 0) or 0)
+        index = int(pending.get("hit_index", 0))
+        bizhong = int(self.combat.bizhong_remaining(attacker)) if attacker else 0
+        return {
+            "target_ref": ref,
+            "target": entry.get("name"),
+            "can_tank": True,
+            "can_parry": bool(entry.get("can_parry")) and speed > 0,
+            "can_dodge": bool(entry.get("can_dodge")) and speed > 0,
+            "can_blood_shadow": bool(entry.get("can_blood_shadow")),
+            # 【必中】剩余次数覆盖本击时，闪避无效（与结算同一判定）。
+            "dodge_locked": bizhong > index,
+            "speed_left": speed,
+            "blood_shadow_cost_share_target_options":
+                entry.get("blood_shadow_cost_share_target_options") or [],
+        }
+
+    def _attack_pending_view(self, pending: dict) -> dict:
+        """这一手的进度：第几击、还剩几击、伤害预算与已分配。"""
+        options = pending["options"]
+        done = list(pending.get("hits_done") or [])
+        index = int(pending.get("hit_index", 0))
+        return {
+            "hit_index": index,
+            "hit_count": int(options["hit_count"]),
+            "remaining": max(0, int(options["hit_count"]) - index),
+            "damage_budget": int(options["damage_budget"]),
+            "damage_allocated": sum(int(hit.get("damage", 0)) for hit in done),
+            "declared": copy.deepcopy(pending.get("declared") or {}),
+        }
+
+    def _apply_attack_hits(self, pending: dict, hits: list) -> dict:
+        """结算 pending 攻击里的接下来若干击；击数没用完就保持 pending 打开。"""
+        options = pending["options"]
         refs = self.combat._combat_entity_refs()
         attacker = refs.get(options["actor_ref"])
         if attacker is None or not attacker.is_alive:
             return {"success": False, "error": "攻击者已失效"}
         legal = {entry["ref"]: entry for entry in options["target_options"]}
+        offset = int(pending.get("hit_index", 0))
+        hit_count = int(options["hit_count"])
+        if not isinstance(hits, list):
+            return {"success": False, "error": "hits必须是列表"}
+        # 0 击的攻击（雕塑等）仍然占一次出手：允许空列表收尾，但不能拿它跳过余击。
+        if not hits and hit_count - offset > 0:
+            return {"success": False, "error": "至少要提交1击"}
+        if len(hits) > hit_count - offset:
+            return {"success": False,
+                    "error": f"本次出手只剩{hit_count - offset}击可提交"}
+        done = pending.setdefault("hits_done", [])
         speed_spend: dict[str, int] = {}
         blood_spend: dict[str, int] = {}
         for index, hit in enumerate(hits):
+            absolute = offset + index + 1
             if not isinstance(hit, dict) or hit.get("target_ref") not in legal:
-                return {"success": False, "error": f"第{index + 1}击目标不在prepare快照中"}
+                return {"success": False, "error": f"第{absolute}击目标不在prepare快照中"}
             # 旧客户端未提交新字段时保持旧等伤分刀；新客户端可显式空刀/集中伤害。
             hit.setdefault("damage", attacker.effective_attack_power())
             hit.setdefault("parry", False)
@@ -130,8 +186,9 @@ class CombatHandlersMixin:
             ref = hit["target_ref"]
             target = refs.get(ref)
             if target is None:
-                return {"success": False, "error": "prepare攻击目标已失效"}
-            if hit["dodge"] and self.combat.bizhong_remaining(attacker) <= index:
+                # 目标已经命零离场：这一击记成空刀，不再校验防御选择。
+                continue
+            if hit["dodge"] and self.combat.bizhong_remaining(attacker) <= offset + index:
                 speed_spend[ref] = speed_spend.get(ref, 0) + 1
                 if speed_spend[ref] > target.current_speed:
                     return {"success": False, "error": f"{target.name}速度不足以完成全部闪避"}
@@ -165,11 +222,15 @@ class CombatHandlersMixin:
             self.combat.validate_spell_reaction_submission(
                 target, attacker, hit.get("spell_choices"), refs,
             )
-        allocated_damage = sum(hit["damage"] for hit in hits)
-        if allocated_damage > options["damage_budget"]:
+        # 伤害预算按「整手」累计，而不是只看本次提交：逐击提交也一样。
+        allocated_damage = sum(int(hit.get("damage", 0)) for hit in done) + \
+            sum(hit["damage"] for hit in hits)
+        if allocated_damage > int(options["damage_budget"]):
             return {"success": False,
                     "error": f"分配总伤害{allocated_damage}超过上限{options['damage_budget']}"}
         # 闪避和招架都预付1速度；招架真刀会在单击结算后返还。
+        # 逐击提交时，先前那几击已经真的花掉速度（current_speed 已减少），
+        # 所以这里只校验本次提交，不会重复扣。
         for ref in legal:
             defense_spend = sum(1 for hit in hits if hit["target_ref"] == ref
                                 and (hit["dodge"] or hit["parry"]))
@@ -183,18 +244,24 @@ class CombatHandlersMixin:
         caozuo_error = self.combat.caozuo_check(attacker, "攻击", hits)
         if caozuo_error:
             return caozuo_error
-        budget_error = self._consume_action_or_error(attacker)
-        if budget_error:
-            return budget_error
-        # 「目标死亡时」按是否被选中判定，而不是是否命中；必须在逐击结算前记账，
+        spent_now = False
+        if not pending.get("action_spent"):
+            # 出手只扣一次：第一击落下时占掉这次主动出手，后面几击是同一次出手。
+            budget_error = self._consume_action_or_error(attacker)
+            if budget_error:
+                return budget_error
+            pending["action_spent"] = True
+            spent_now = True
+        # 「目标死亡时」按是否被选中判定，而不是是否命中；必须在结算前记账，
         # 否则首击击杀目标时，死亡钩子先于此处记账执行，会漏掉自愈触发。
         note_action_targets(self.state, attacker,
                             [refs.get(hit["target_ref"]) for hit in hits])
         results = []
         for index, hit in enumerate(hits):
-            target = refs[hit["target_ref"]]
-            if not target.is_alive:
-                results.append({"hit_index": index + 1, "skipped": "目标已命零"})
+            target = refs.get(hit["target_ref"])
+            absolute = offset + index + 1
+            if target is None or not target.is_alive:
+                results.append({"hit_index": absolute, "skipped": "目标已命零"})
                 continue
             result = self.combat.resolve_attack(
                 attacker, target, dodge=hit["dodge"], parry=hit["parry"],
@@ -203,13 +270,124 @@ class CombatHandlersMixin:
                 dodge_relic_target_ref=hit.get("dodge_relic_target_ref"),
                 cost_share_target_ref=hit.get("cost_share_target_ref", ""),
             )
-            result["hit_index"] = index + 1
+            result["hit_index"] = absolute
             results.append(result)
-        self.state.pending_attack = {}
-        if self.state.in_final_duel and not self._duel_side_can_act("player_side") and not self._duel_side_can_act("opponent_side"):
-            self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
-        return {"success": True, "action": f"{attacker.name}结算一轮攻击",
-                "result": {"attacker": attacker.name, "hits": results}}
+        done.extend(hits)
+        pending["hit_index"] = offset + len(hits)
+        pending["declared"] = None
+        finished = pending["hit_index"] >= hit_count
+        view = self._attack_pending_view(pending)
+        if finished:
+            self.state.pending_attack = {}
+            # 一手打完才交优先权。整手一次提交时由 _execute_action_core 统一推进
+            # （本次已扣出手 → 不要在这里再推一次，否则会原地换回去）。
+            if not spent_now:
+                self._advance_duel_turn()
+            if (self.state.in_final_duel
+                    and not self._duel_side_can_act("player_side")
+                    and not self._duel_side_can_act("opponent_side")):
+                self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
+        # 老文案「结算一轮攻击」= 整手一次提交；逐击提交带击数，方便战报看清进度。
+        label = (f"{attacker.name}结算一轮攻击"
+                 if finished and len(done) == hit_count
+                 else f"{attacker.name}攻击结算{len(hits)}击")
+        return {"success": True, "action": label,
+                "result": {"attacker": attacker.name, "hits": results,
+                           "finished": finished, **view}}
+
+    @ACTION_REGISTRY.action("attack_declare_hit", group="combat")
+    def _action_attack_declare_hit(self, params: dict) -> dict:
+        """逐击第一阶段：攻击方只声明「这一击打谁、打多少」，伤害尚未公开结算。"""
+        pending = self.state.pending_attack
+        if not pending:
+            return {"success": False, "error": "请先调用prepare_attack"}
+        token = params.get("token")
+        if (token is not None and token != pending.get("token")) or \
+                pending.get("round") != self.state.current_round:
+            return {"success": False, "error": "攻击token无效或已过期"}
+        if pending.get("declared"):
+            return {"success": False, "error": "这一击已声明，等目标选择承受/招架/闪避"}
+        options = pending["options"]
+        offset = int(pending.get("hit_index", 0))
+        if offset >= int(options["hit_count"]):
+            return {"success": False, "error": "本次出手的击数已用尽"}
+        legal = {entry["ref"]: entry for entry in options["target_options"]}
+        ref = str(params.get("target_ref") or "")
+        if ref not in legal:
+            return {"success": False, "error": "目标不在本次出手的合法列表里"}
+        try:
+            damage = int(params.get("damage", 0))
+        except (TypeError, ValueError):
+            return {"success": False, "error": "本击伤害X必须是整数"}
+        if damage < 0:
+            return {"success": False, "error": "本击伤害X不能是负数"}
+        allocated = sum(int(hit.get("damage", 0)) for hit in pending.get("hits_done") or [])
+        if allocated + damage > int(options["damage_budget"]):
+            return {"success": False,
+                    "error": f"本击后总伤害{allocated + damage}超过本回合伤害预算{options['damage_budget']}"}
+        pending["declared"] = {"target_ref": ref, "damage": damage}
+        return {"success": True, "action": "声明本击",
+                "result": {"hit_index": offset + 1,
+                           **self._attack_pending_view(pending),
+                           "target": self._attack_defender_options(pending, ref)}}
+
+    @ACTION_REGISTRY.action("attack_respond_hit", group="combat")
+    def _action_attack_respond_hit(self, params: dict) -> dict:
+        """逐击第二阶段：目标选择承受/招架/闪避/血影，本击立刻公开结算。"""
+        pending = self.state.pending_attack
+        if not pending:
+            return {"success": False, "error": "没有进行中的攻击"}
+        declared = pending.get("declared")
+        if not declared:
+            return {"success": False,
+                    "error": "先由攻击方分配伤害（声明这一击的目标与 X）"}
+        choice = str(params.get("choice") or "")
+        if choice not in {"tank", "parry", "dodge", "blood_shadow"}:
+            return {"success": False, "error": "应对方式只能是 硬扛/招架/闪避/血影"}
+        ref = declared["target_ref"]
+        legal = {entry["ref"]: entry for entry in pending["options"]["target_options"]}
+        entry = legal.get(ref) or {}
+        defender = self._attack_defender_options(pending, ref)
+        if choice == "dodge" and not defender["can_dodge"]:
+            return {"success": False,
+                    "error": f"{entry.get('name')}当前不能闪避"
+                             f"（剩余速度 {defender['speed_left']}）"}
+        if choice == "parry" and not defender["can_parry"]:
+            return {"success": False,
+                    "error": f"{entry.get('name')}当前不能招架"
+                             f"（剩余速度 {defender['speed_left']}）"}
+        if choice == "blood_shadow" and not defender["can_blood_shadow"]:
+            return {"success": False, "error": f"{entry.get('name')}现在不能使用血影"}
+        spell_choices = {
+            timing: {spell["spell_name"]: {"use": False} for spell in spells}
+            for timing, spells in (entry.get("spell_options") or {}).items()}
+        hit = {"target_ref": ref, "damage": declared["damage"],
+               "dodge": choice == "dodge", "parry": choice == "parry",
+               "blood_shadow": choice == "blood_shadow",
+               "spell_choices": copy.deepcopy(spell_choices)}
+        for key in ("cost_share_target_ref", "dodge_relic_target_ref"):
+            if params.get(key):
+                hit[key] = params[key]
+        applied = self._apply_attack_hits(pending, [hit])
+        if not applied.get("success"):
+            return applied
+        applied["result"]["defender"] = defender
+        applied["result"]["choice"] = choice
+        return applied
+
+    @ACTION_REGISTRY.action("resolve_attack", group="combat")
+    def _action_resolve_attack(self, params: dict) -> dict:
+        """批量提交：一次交出接下来若干击的完整选择（旧客户端/AI 仍可整手提交）。"""
+        pending = self.state.pending_attack
+        if not pending:
+            return {"success": False, "error": "请先调用prepare_attack"}
+        if params.get("token") != pending.get("token") or \
+                pending.get("round") != self.state.current_round:
+            return {"success": False, "error": "攻击token无效或已过期"}
+        hits = params.get("hits")
+        if not isinstance(hits, list):
+            return {"success": False, "error": "hits必须是列表"}
+        return self._apply_attack_hits(pending, hits)
 
     @ACTION_REGISTRY.action("focus", group="combat")
     def _action_focus(self, params: dict) -> dict:

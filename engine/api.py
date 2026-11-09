@@ -721,14 +721,16 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "error": "必须先从发现候选中选择1件消耗品",
                 "choices": list(self.state.pending_item_choices),
             }
-        if self.state.pending_attack and action_type != "resolve_attack":
+        if self.state.pending_attack and action_type not in {
+                "resolve_attack", "attack_declare_hit", "attack_respond_hit"}:
             return {
                 "success": False,
-                "error": "已有待提交的攻击决策，请先调用resolve_attack",
+                "error": "已有待提交的攻击决策，请先继续逐击或调用resolve_attack",
                 "token": self.state.pending_attack.get("token"),
                 "recoverable": True,
                 "instruction": "攻击pending仍有效（上次提交失败已被整体回滚）；"
-                               "用上方token重新调用resolve_attack提交完整选择",
+                               "用上方token继续 attack_declare_hit/attack_respond_hit，"
+                               "或调用resolve_attack批量提交",
             }
         if self.state.pending_monster_phase and action_type not in {"resolve_monster_phase", "restart_battle"}:
             return {
@@ -819,7 +821,10 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                         and not self.combat._spell_stack):
                     if action_spent:
                         self.combat._priority_passes = 0
-                        self._advance_duel_turn()
+                        # 逐击普攻占到本次出手后，优先权要等这一手打完才交出去：
+                        # 否则第 1 击结算完就换边，剩下的击数永远打不出去。
+                        if not self.state.pending_attack:
+                            self._advance_duel_turn()
                 if result.get("success"):
                     side_logs = self._settle_side_turn_end_spells(side_capacity_before, params)
                     if side_logs:

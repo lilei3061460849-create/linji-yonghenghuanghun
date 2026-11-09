@@ -692,11 +692,11 @@ let _battleWasVisible = false;
 /* ---- 逐击普攻（A 分伤害 → B 选应对 → 循环） ---- */
 let ATK = null;   // 服务端草稿的一步快照：{phase, hit_index, hit_count, ...}
 
-async function attackPrepare(){
+async function attackPrepare(actorRef){
   if (busy) return; busy = true;
   ATK = null;
   try {
-    const data = await api("/api/ui_attack_prepare", {actor_ref: "player:0"});
+    const data = await api("/api/ui_attack_prepare", {actor_ref: actorRef || "player:0"});
     if (!data.success){ toast("准备攻击失败：" + (data.error || "未知错误")); return; }
     ATK = data.attack || null;
     render();
@@ -730,13 +730,13 @@ function attackPanel(b){
   const wrap = el("div","stack");
   if (!ATK){
     const again = el("button","primary","继续这次出手（逐击）");
-    again.onclick = () => attackPrepare();
+    again.onclick = () => attackPrepare(ATK && ATK.actor_ref);
     wrap.append(el("div","banner","这次出手还没打完：按「逐击」重新列出当前这一击。"), again);
     return wrap;
   }
   const a = ATK;
   const head = a.phase === "respond"
-    ? `第 ${a.hit_index}/${a.hit_count} 击 · 轮到 ${a.current.target} 应对 ${a.current.damage} 点`
+    ? `第 ${a.hit_index}/${a.hit_count} 击 · ${a.actor} 打 ${a.current.target} ${a.current.damage} 点：轮到 ${a.current.target} 选应对`
     : `第 ${a.hit_index}/${a.hit_count} 击 · ${a.actor} 分配本击伤害（预算 ${a.damage_budget}，已分配 ${a.damage_used}，剩 ${a.damage_left}）`;
   wrap.append(el("div","banner", head));
 
@@ -847,7 +847,16 @@ function renderBattle(){
     body.append(el("div","hint", "先手＝速限→法限→血限→当前生命（大者先）；四项全同则随机首手、之后交替。"
       + "每名角色每回合基础 1 次出手，攻击的击数＝当前速度。"));
     if (b.duel_turn === "opponent_side" && b.round_started !== false && !b.peaceful && foesAlive.length){
-      body.append(manualEnemyPanel(foesAlive));
+      /* 逐击是通用规则：B 方出手也走同一套（攻击方定 X → 防守方选应对）。
+         只有单人多角色同侧的旧怪物阶段面板才保留批量提交。 */
+      if (foesAlive.length === 1 && foesAlive[0].ref){
+        const go = el("button","primary", `B 方出手（逐击）：${foesAlive[0].name}`);
+        go.onclick = () => attackPrepare(foesAlive[0].ref);
+        body.append(go);
+        body.append(el("div","hint","这一手同样是一击一问：B 定 X，你替 A 选硬扛/招架/闪避。"));
+      } else {
+        body.append(manualEnemyPanel(foesAlive));
+      }
     }
   }
   const row = el("div","row"); row.style.marginTop = "8px";

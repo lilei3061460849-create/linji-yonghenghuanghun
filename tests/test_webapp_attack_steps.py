@@ -64,15 +64,15 @@ def test_attack_is_declared_and_defended_hit_by_hit(duel):
     assert step["attack"]["hits"] == [{"index": 1, "target": "乙",
                                        "damage": 1, "choice": "dodge"}]
 
-    # 余下全部硬扛，一次结算
+    # 余下全部硬扛：引擎逐击结算，最后一击收尾
     done = server._ui_attack_auto({})
     assert done["success"], done
-    hits = done["result"]["hits"]
-    assert len(hits) == hit_count
-    assert hits[0]["damage_dealt"] == 0          # 闪避掉了
-    assert hits[1]["damage_dealt"] > 0           # 硬扛吃满
+    assert done["result"]["finished"] is True
+    assert done["result"]["hit_index"] == hit_count
+    assert done["result"]["hits"][-1]["damage_dealt"] > 0    # 硬扛吃满
     assert not engine.state.pending_attack
-    assert server.SESSION["attack"] is None
+    # 第 1 击闪避掉了、其余落地：乙的血量必须真的掉了
+    assert engine.state.enemies[0].current_hp < 200
 
 
 def test_declare_cannot_exceed_the_damage_budget(duel):
@@ -103,3 +103,40 @@ def test_defence_needs_speed_and_order_is_enforced(duel):
     assert blocked["success"] is False
     assert "速度" in blocked["error"]
     assert engine.state.pending_attack          # 没被这次拒绝弄丢
+
+
+def test_target_dying_mid_attack_still_finishes_the_hand(duel):
+    """逐击中途把人打死：剩下的击数照常走完（记空刀），不能把这一手卡住。"""
+    engine = duel
+    rival = engine.state.enemies[0]
+    rival.current_hp = 1
+    prepared = server._ui_attack_prepare({"actor_ref": "player:0"})
+    budget = prepared["attack"]["damage_budget"]
+
+    step = server._ui_attack_declare({"target_ref": "enemy:0", "damage": budget})
+    assert step["success"], step
+    step = server._ui_attack_respond({"choice": "tank"})
+    assert step["success"], step
+    assert rival.current_hp == 0 and not rival.is_alive
+
+    done = server._ui_attack_auto({})
+    assert done["success"], done
+    assert done["result"]["finished"] is True
+    assert not engine.state.pending_attack
+    # 剩下的击全部以「目标已命零」跳过，且出手只算一次
+    assert engine.state.player.actions_used_this_round == 1
+
+
+def test_priority_hands_over_only_when_the_hand_is_finished(duel):
+    """一次出手内优先权不换边：否则第 1 击结算完就换人，剩下的击永远打不出去。"""
+    engine = duel
+    prepared = server._ui_attack_prepare({"actor_ref": "player:0"})
+    hit_count = prepared["attack"]["hit_count"]
+    assert engine.state.duel_turn == "player_side"
+    for index in range(hit_count):
+        assert server._ui_attack_declare(
+            {"target_ref": "enemy:0", "damage": 0})["success"]
+        assert server._ui_attack_respond({"choice": "tank"})["success"]
+        if index < hit_count - 1:
+            assert engine.state.duel_turn == "player_side"
+    assert engine.state.duel_turn == "opponent_side"     # 这一手打完了才交棒

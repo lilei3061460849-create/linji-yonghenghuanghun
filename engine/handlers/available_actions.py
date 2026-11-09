@@ -100,12 +100,34 @@ class AvailableActionsMixin:
                 "queued_events_remaining": len(self.state.pending_event_queue),
             }
         if self.state.pending_attack:
+            # 逐击是通用规则：默认下一步是「谁来定这一击」，而不是整手一次交。
             pending = self.state.pending_attack
+            options = pending["options"]
+            declared = pending.get("declared")
+            if declared:
+                return {
+                    "phase": "本击待应对",
+                    "action_type": "attack_respond_hit",
+                    "params_schema": {"choice": "tank / parry / dodge / blood_shadow",
+                                      "token": pending["token"]},
+                    "declared": declared,
+                    "target": self._attack_defender_options(pending, declared["target_ref"]),
+                    **options,
+                }
+            if int(pending.get("hit_index", 0)) < int(options["hit_count"]):
+                return {
+                    "phase": "本击待声明",
+                    "action_type": "attack_declare_hit",
+                    "params_schema": {"target_ref": [o["ref"] for o in options["target_options"]],
+                                      "damage": "非负整数；本击X，整手总和不得超过damage_budget",
+                                      "token": pending["token"]},
+                    **options,
+                }
             return {
-                "phase": "攻击待提交",
+                "phase": "攻击待收尾",
                 "action_type": "resolve_attack",
-                "params_schema": {"token": pending["token"], "hits": pending["options"]["hits_schema"]},
-                **pending["options"],
+                "params_schema": {"token": pending["token"], "hits": options["hits_schema"]},
+                **options,
             }
         if self.state.pending_monster_phase:
             pending = self.state.pending_monster_phase
