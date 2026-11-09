@@ -171,3 +171,39 @@ def test_duel_monster_side_still_uses_engine_monster_panels(roster_file):
                          "b": {"kind": "monster", "monsters": ["毒枭", "打手"]},
                          "region": "罪孽都市", "width": 11, "seed": 6})
     assert [enemy.name for enemy in prepared["engine"].state.enemies] == ["毒枭", "打手"]
+
+
+def test_duel_b_side_relics_use_the_engine_opponent_channel(roster_file):
+    """B 方遗物必须进 opponent_relics，否则 side_has/_relic_active 读不到，只是摆设。"""
+    a = lab.save_sheet(_sheet("甲"))
+    b = lab.save_sheet(_sheet(
+        "乙", mode="free", blood_limit=30, speed_limit=1, mana_limit=1,
+        relics=["叠鳞甲", "千荆甲", "避风铃"]))
+    prepared = lab.duel({"a": {"id": a["id"]}, "b": {"id": b["id"]},
+                         "region": "罪孽都市", "width": 11, "seed": 5})
+    engine = prepared["engine"]
+    rival = engine.state.enemies[0]
+    assert [relic.name for relic in engine.state.opponent_relics] == ["叠鳞甲", "千荆甲", "避风铃"]
+    # 启用槽位与 A 方同口径：ceil(30/30)=1，后面两件照常持有但停用。
+    assert [relic.enabled for relic in engine.state.opponent_relics] == [True, False, False]
+    assert engine.state.side_has(rival, "叠鳞甲")
+    assert engine.state._relic_active(rival, "叠鳞甲")
+    assert not engine.state._relic_active(rival, "千荆甲")
+
+
+def test_duel_b_side_relic_really_changes_combat_numbers(roster_file):
+    """叠鳞甲（受到伤害-1）在 B 方身上必须真的减伤，而不是只做展示。"""
+    a = lab.save_sheet(_sheet("甲"))
+    with_relic = lab.save_sheet(_sheet("乙", relics=["叠鳞甲"]))
+    without = lab.save_sheet(_sheet("丙"))
+
+    def _hit(b_id):
+        engine = lab.duel({"a": {"id": a["id"]}, "b": {"id": b_id},
+                           "region": "罪孽都市", "width": 11, "seed": 5})["engine"]
+        rival = engine.state.enemies[0]
+        before = rival.current_hp
+        engine.combat._apply_hostile_damage(rival, 10, "普通", engine.state.player)
+        return before - rival.current_hp
+
+    assert _hit(with_relic["id"]) == 9
+    assert _hit(without["id"]) == 10

@@ -464,8 +464,12 @@ def _make_rival(engine: GameEngine, sheet: dict[str, Any], a_name: str) -> Any:
     """把一张角色卡造成 B 方实体（轮回者）。
 
     与 A 方共用同一套口径：三维直接写上限，道纹/残韵/消耗品挂在该实体上。
-    遗物也挂在实体上，但引擎里绝大多数遗物效果只读玩家侧 ``state.relics``，
-    所以 B 方遗物目前只是「持有记录」——界面会照实提示。
+    遗物同时写两处：
+
+    * ``rival.relics``：实体自己的持有记录（展示、以及怪物/队友口径的回退读取）；
+    * ``state.opponent_relics``：引擎给「敌方轮回者」准备的阵营遗物通道
+      （死斗同款）。战斗里绝大多数遗物判定走 ``state.side_has`` / ``_relic_active``，
+      它们对敌方轮回者读的正是这份名单——不登记进去，B 方遗物就只是摆设。
     """
     from engine.models import Entity
 
@@ -483,8 +487,14 @@ def _make_rival(engine: GameEngine, sheet: dict[str, Any], a_name: str) -> Any:
         engine._grant_named_daowen(rival, daowen_name)
     if sheet["relics"]:
         defs = dict(GameEngine.RELIC_DEFS)
-        for relic_name in sheet["relics"]:
-            rival.relics.append(Relic(name=relic_name, effect=defs.get(relic_name, "")))
+        # 启用槽位与 A 方同口径：ceil(血限/30)，超出的照常持有但停用。
+        limit = rival.enabled_relic_limit
+        squad = [
+            Relic(name=relic_name, effect=defs.get(relic_name, ""), enabled=index < limit)
+            for index, relic_name in enumerate(dict.fromkeys(sheet["relics"]))
+        ]
+        rival.relics.extend(squad)
+        engine.state.opponent_relics = squad
     catalog = {item["name"]: item for item in _consumables()}
     for entry in sheet["consumables"]:
         spec = catalog[entry["name"]]
@@ -646,7 +656,11 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
         b_blood, b_speed, b_mana = _sheet_limits(b_sheet)
         notes.append(f"B方 {b_sheet['name']}：{b_blood}/{b_speed}/{b_mana}")
         if b_sheet["relics"]:
-            notes.append("B方遗物只作持有记录：引擎多数遗物效果只读玩家侧，暂不生效。")
+            enabled = min(len(b_sheet["relics"]), max(0, (b_blood + 29) // 30))
+            notes.append(
+                f"B方遗物按敌方轮回者通道（opponent_relics）生效："
+                f"启用 {enabled}/{len(b_sheet['relics'])} 件；"
+                "回锋刀[回始]、减速、忘忧香、无所求、同魂笔 仍以玩家为中枢，只对 A 方生效。")
     else:
         notes.append(f"B方怪物：{'、'.join(b_names)}")
     notes.append(f"开战：{'、'.join(battle['enemies'])}")
