@@ -25,6 +25,10 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+# 同一目录下的 lab.py：既是 `python3 webapp/server.py` 的脚本入口，也是
+# `from webapp import server` 的包入口，所以目录本身也要在搜索路径上。
+WEBAPP_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(WEBAPP_DIR))
 
 from engine.api import GameEngine  # noqa: E402
 from engine.models import Entity  # noqa: E402
@@ -35,6 +39,8 @@ from engine.monster_phase_submit import (  # noqa: E402
     daowen_submission,
     decline_reaction_spell_choices,
 )
+import lab  # noqa: E402  自定义角色演武场（见 webapp/lab.py）
+import character_sync  # noqa: E402  角色卡同步进 GitHub（见 webapp/character_sync.py）
 
 # 默认只监听本机回环地址。界面没有鉴权、单进程只有一个会话（SESSION），
 # 绑到 0.0.0.0 等于把"任何人都能覆盖并操作这一局"暴露给整个局域网/公网。
@@ -42,6 +48,7 @@ from engine.monster_phase_submit import (  # noqa: E402
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8000"))
 INDEX_PATH = Path(__file__).resolve().parent / "index.html"
+LAB_PATH = Path(__file__).resolve().parent / "lab.html"
 
 SESSION: dict[str, Any] = {"engine": None, "log": [], "last_world": None}
 LOCK = threading.Lock()
@@ -118,8 +125,10 @@ def _player_view(engine: GameEngine) -> dict[str, Any] | None:
         "mana_limit": player.mana_limit,
         "speed": player.current_speed,
         "speed_limit": player.speed_limit,
-        "attack_count": player.attack_count,
-        "attack_power": player.attack_power,
+        # 轮回者口径：攻次＝当前速度、攻力＝当前法力（面板字段只是占位）；
+        # 界面必须显示实际生效值，否则演武场自定义出来的角色会显示成 0/0。
+        "attack_count": player.effective_attack_count(),
+        "attack_power": player.effective_attack_power(),
         "shards": engine.state.shards,
         "fake_shards": engine.state.fake_shards,
         "energy": engine.state.energy,
@@ -150,8 +159,8 @@ def _battle_view(engine: GameEngine) -> dict[str, Any] | None:
             "hp": entity.current_hp,
             "hp_limit": entity.blood_limit,
             "alive": bool(entity.is_alive and not entity.is_departed),
-            "attack_count": entity.attack_count,
-            "attack_power": entity.attack_power,
+            "attack_count": entity.effective_attack_count(),
+            "attack_power": entity.effective_attack_power(),
         })
     view: dict[str, Any] = {
         "round": state.current_round,
@@ -420,6 +429,17 @@ def _start(payload: dict[str, Any]) -> dict[str, Any]:
     return _snapshot(engine)
 
 
+def _install(prepared: dict[str, Any]) -> dict[str, Any]:
+    """把演武场/对战生成好的引擎装进当前会话，返回响应体。"""
+    SESSION["engine"] = prepared["engine"]
+    SESSION["log"] = []
+    SESSION["last_world"] = None
+    for note in prepared["notes"]:
+        _log(note)
+    return {"success": True, "notes": prepared["notes"],
+            "snapshot": _snapshot(SESSION["engine"])}
+
+
 # ---------------------------------------------------------------- HTTP
 
 
@@ -443,6 +463,25 @@ class Handler(BaseHTTPRequestHandler):
         if path in {"/", "/index.html"}:
             self._send(200, INDEX_PATH.read_bytes(), "text/html; charset=utf-8")
             return
+        if path in {"/lab", "/lab.html"}:
+            if not LAB_PATH.exists():
+                self._send(404, "lab.html 不存在".encode("utf-8"), "text/plain; charset=utf-8")
+                return
+            self._send(200, LAB_PATH.read_bytes(), "text/html; charset=utf-8")
+            return
+        if path == "/api/lab/options":
+            with LOCK:
+                self._json({"success": True, "options": lab.options()})
+            return
+        if path == "/api/lab/characters":
+            with LOCK:
+                self._json({"success": True, "characters": lab.list_sheets(),
+                            "sync": character_sync.status()})
+            return
+        if path == "/api/lab/sync":
+            with LOCK:
+                self._json({"success": True, "sync": character_sync.status()})
+            return
         if path == "/api/snapshot":
             with LOCK:
                 self._json(_snapshot(SESSION["engine"]))
@@ -461,6 +500,43 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 if path == "/api/new":
                     self._json({"success": True, "snapshot": _start(payload)})
+                elif path == "/api/lab/start":
+                    try:
+                        prepared = lab.start(payload)
+                    except ValueError as exc:
+                        self._json({"success": False, "error": str(exc)}, 400)
+                        return
+                    self._json(_install(prepared))
+                elif path == "/api/lab/duel":
+                    try:
+                        prepared = lab.duel(payload)
+                    except ValueError as exc:
+                        self._json({"success": False, "error": str(exc)}, 400)
+                        return
+                    self._json(_install(prepared))
+                elif path == "/api/lab/characters/save":
+                    try:
+                        record = lab.save_sheet(payload.get("character") or payload)
+                    except ValueError as exc:
+                        self._json({"success": False, "error": str(exc)}, 400)
+                        return
+                    synced = character_sync.sync("保存角色")
+                    self._json({"success": True, "character": record,
+                                "characters": lab.list_sheets(), "sync": synced})
+                elif path == "/api/lab/characters/delete":
+                    try:
+                        removed = lab.delete_sheet(str(payload.get("id") or ""))
+                    except ValueError as exc:
+                        self._json({"success": False, "error": str(exc)}, 400)
+                        return
+                    synced = character_sync.sync("删除角色") if removed else None
+                    self._json({"success": removed,
+                                "error": None if removed else "角色卡不存在",
+                                "characters": lab.list_sheets(), "sync": synced})
+                elif path == "/api/lab/sync":
+                    self._json({"success": True,
+                                "sync": character_sync.sync("手动同步"),
+                                "characters": lab.list_sheets()})
                 elif path == "/api/action":
                     action = payload.get("action")
                     if not isinstance(action, str) or not action:
@@ -491,6 +567,8 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     if not INDEX_PATH.exists():
         raise SystemExit(f"找不到界面文件：{INDEX_PATH}")
+    if not LAB_PATH.exists():
+        raise SystemExit(f"找不到演武场界面文件：{LAB_PATH}")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"可玩界面已启动：http://{HOST}:{PORT}/  （Ctrl+C 停止）", flush=True)
     try:
