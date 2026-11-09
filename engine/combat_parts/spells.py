@@ -988,7 +988,7 @@ class SpellReactionMixin:
                 reason=InterruptReason.MANA_INSUFFICIENT, detail=err,
                 trigger_spell_logs=trigger_logs, iteration=iteration)
 
-        # --- 碎片代价（连击真/假碎片独立通道） ---
+        # --- 碎片代价（衍生【碎伐】真碎片／【伪伐】假碎片独立通道） ---
         shard_error = self.pay_daowen_shard_cost(caster, daowen, calc, x)
         if shard_error:
             return StepResult(

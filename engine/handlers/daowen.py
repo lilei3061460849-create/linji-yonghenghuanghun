@@ -933,7 +933,7 @@ class DaowenHandlersMixin:
 
     @staticmethod
     def _pay_derivative_blood_limit(recipient, amount: int) -> None:
-        """支付血限（局外代价，永久、不触发战斗期失血反应窗口）。"""
+        """局内衍生行动的代价：只改血限面板并封顶当前生命，不走衰老代价总线。"""
         recipient.blood_limit = max(0, recipient.blood_limit - amount)
         if recipient.current_hp > recipient.blood_limit:
             object.__setattr__(recipient, "current_hp", recipient.blood_limit)
