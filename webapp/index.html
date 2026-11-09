@@ -688,6 +688,111 @@ function renderEvent(){
 }
 
 let _battleWasVisible = false;
+
+/* ---- 逐击普攻（A 分伤害 → B 选应对 → 循环） ---- */
+let ATK = null;   // 服务端草稿的一步快照：{phase, hit_index, hit_count, ...}
+
+async function attackPrepare(){
+  if (busy) return; busy = true;
+  ATK = null;
+  try {
+    const data = await api("/api/ui_attack_prepare", {actor_ref: "player:0"});
+    if (!data.success){ toast("准备攻击失败：" + (data.error || "未知错误")); return; }
+    ATK = data.attack || null;
+    render();
+  } catch(e){ toast("请求失败：" + e.message); }
+  finally { busy = false; }
+}
+
+async function attackSend(path, body){
+  if (busy) return; busy = true;
+  try {
+    const data = await api(path, body || {});
+    if (!data.success){ toast("失败：" + (data.error || "未知错误")); return; }
+    if (data.attack){ ATK = data.attack; }
+    else {
+      ATK = null;
+      const r = (data.result && (data.result.result || data.result)) || {};
+      const hits = r.hits || [];
+      if (hits.length){
+        toast("这一手打完了：" + hits.map(h => h.skipped ? "（目标已命零）"
+          : `${h.target || ""} ${h.damage_dealt ?? 0}`).join(" / "));
+      }
+      const snap = await fetch("/api/snapshot").then(r2 => r2.json()).catch(() => null);
+      if (snap){ S = snap; }
+    }
+    render();
+  } catch(e){ toast("请求失败：" + e.message); }
+  finally { busy = false; }
+}
+
+function attackPanel(b){
+  const wrap = el("div","stack");
+  if (!ATK){
+    const again = el("button","primary","继续这次出手（逐击）");
+    again.onclick = () => attackPrepare();
+    wrap.append(el("div","banner","这次出手还没打完：按「逐击」重新列出当前这一击。"), again);
+    return wrap;
+  }
+  const a = ATK;
+  const head = a.phase === "respond"
+    ? `第 ${a.hit_index}/${a.hit_count} 击 · 轮到 ${a.current.target} 应对 ${a.current.damage} 点`
+    : `第 ${a.hit_index}/${a.hit_count} 击 · ${a.actor} 分配本击伤害（预算 ${a.damage_budget}，已分配 ${a.damage_used}，剩 ${a.damage_left}）`;
+  wrap.append(el("div","banner", head));
+
+  if (a.phase === "declare"){
+    const targetSelect = el("select");
+    for (const t of a.target_options){
+      const o = el("option", null, t.name); o.value = t.ref; targetSelect.append(o);
+    }
+    const remain = Math.max(1, a.hit_count - a.hit_index + 1);
+    const input = el("input"); input.type = "number"; input.min = "0"; input.step = "1";
+    input.value = Math.max(0, Math.floor(a.damage_left / remain));
+    const tbox = el("label","field"); tbox.append(el("span",null,"目标"), targetSelect);
+    const dbox = el("label","field"); dbox.append(el("span",null,"X（本击伤害）"), input);
+    const go = el("button","primary","确定 → 交给对方应对");
+    go.onclick = () => attackSend("/api/ui_attack_declare",
+      {target_ref: targetSelect.value, damage: Number(input.value) || 0});
+    const bar = el("div","row"); bar.append(tbox, dbox, go);
+    wrap.append(bar);
+  } else {
+    const c = a.current;
+    wrap.append(el("div","hint", `剩余速度 ${c.speed_left}（闪避/招架各占 1 点）`
+      + (c.dodge_locked ? " · 本击被【必中】锁定，闪避无效" : "")));
+    const bar = el("div","row");
+    const mk = (label, choice, disabled, hint) => {
+      const btn = el("button", choice === "tank" ? "primary" : "", label);
+      btn.disabled = !!disabled;
+      if (hint) btn.title = hint;
+      btn.onclick = () => attackSend("/api/ui_attack_respond", {choice});
+      return btn;
+    };
+    bar.append(
+      mk("硬扛（不吃速度）", "tank", false),
+      mk("招架（-1 速度）", "parry", !c.can_parry || c.speed_left <= 0,
+         c.can_parry ? "" : "当前不能招架"),
+      mk("闪避（-1 速度）", "dodge", !c.can_dodge || c.speed_left <= 0,
+         c.can_dodge ? "" : "当前不能闪避"),
+      mk("血影（-10 生命）", "blood_shadow",
+         !c.can_blood_shadow || c.blood_shadow_needs_target,
+         c.can_blood_shadow ? "" : "需要【血影】遗物"),
+    );
+    wrap.append(bar);
+    const fast = el("button","", "余下全部硬扛并结算");
+    fast.onclick = () => attackSend("/api/ui_attack_auto", {});
+    wrap.append(fast);
+  }
+  if (a.hits && a.hits.length){
+    const log = el("div","hits");
+    for (const h of a.hits){
+      const label = {tank:"硬扛", dodge:"闪避", parry:"招架", blood_shadow:"血影"}[h.choice] || h.choice;
+      log.append(el("div","hit", `第 ${h.index} 击 · ${h.target} · X=${h.damage} → ${label}`));
+    }
+    wrap.append(log);
+  }
+  return wrap;
+}
+
 function renderBattle(){
   const card = $("battleCard"), body = $("battleBody");
   body.innerHTML = "";
@@ -879,36 +984,9 @@ function manualEnemyPanel(foesAlive){
     return;
   }
   if (b.pending_attack){
-    const pa = b.pending_attack;
-    const targetSelect = el("select");
-    for (const t of pa.target_options){
-      const o = el("option", null, `${t.name}（${t.ref}）`); o.value = t.ref; targetSelect.append(o);
-    }
-    const trow = el("div","field"); trow.append(el("label",null,"目标"), targetSelect);
-    body.append(trow);
-    const hitsBox = el("div","hits");
-    const per = Math.floor(pa.damage_budget / Math.max(1, pa.hit_count));
-    const inputs = [];
-    for (let i = 0; i < pa.hit_count; i++){
-      const line = el("div","hit");
-      line.append(el("span",null,`第 ${i+1} 击`));
-      const input = el("input"); input.type = "number"; input.min = "0"; input.step = "1";
-      input.value = i === pa.hit_count - 1 ? pa.damage_budget - per * (pa.hit_count - 1) : per;
-      line.append(input); inputs.push(input); hitsBox.append(line);
-    }
-    const go = el("button","primary","提交攻击");
-    go.onclick = async () => {
-      if (busy) return; busy = true;
-      try {
-        const data = await api("/api/ui_attack", {target_ref: targetSelect.value,
-          damages: inputs.map(i => Number(i.value) || 0)});
-        if (!data.success) toast("攻击失败：" + (data.result && data.result.error));
-        else toast("攻击已结算");
-      } finally { busy = false; }
-    };
-    body.append(hitsBox, el("div","kv", `总伤害上限 ${pa.damage_budget} · ${pa.hit_count} 击`));
-    row.append(go);
-    body.append(row);
+    /* 普攻逐击流程：A 分配本击目标与 X → 切到 B 选应对 → A 还有余击就回到起点，
+       否则一次性结算这一次出手。 */
+    body.append(attackPanel(b));
     return;
   }
 
@@ -931,7 +1009,7 @@ function manualEnemyPanel(foesAlive){
         : noActionsLeft ? "准备攻击（本回合出手已用完）"
         : `准备攻击（余 ${b.actions_left ?? "?"} 次）`);
     prep.disabled = noActionsLeft || noEnemy;
-    prep.onclick = () => act("prepare_attack", {actor_ref: "player:0"});
+    prep.onclick = () => attackPrepare();
     row.append(prep);
   }
   if (has("resolve_ally_phases")) row.append(allyBtn());

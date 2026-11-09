@@ -84,6 +84,15 @@
   .summary div{background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:8px 9px}
   .summary b{display:block;font-size:18px;color:#fff;font-weight:600}
   .summary span{color:var(--muted);font-size:11px}
+  /* 点了就动：开战/掷骰这类要等引擎的按钮，按下后原地变进度条，
+     免得用户以为没反应又点好几下。 */
+  .progressbar{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:12.5px;
+    color:var(--muted)}
+  .progressbar .track{position:relative;flex:1;height:10px;border-radius:6px;overflow:hidden;
+    background:#1b222b;border:1px solid var(--line)}
+  .progressbar .track i{position:absolute;top:0;bottom:0;width:38%;border-radius:6px;
+    background:linear-gradient(90deg,#6d5a2a,#f2d99a,#6d5a2a);animation:slide 1.15s linear infinite}
+  @keyframes slide{0%{left:-40%}100%{left:100%}}
   .btnbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
   .btnbar button{flex:1;min-width:130px;padding:11px 12px}
   .vs{display:flex;align-items:center;justify-content:center;gap:10px;color:var(--muted);
@@ -273,6 +282,10 @@
       </label>
       <div class="btnbar">
         <button id="startDuel" class="primary">开始 A vs B 对战</button>
+      </div>
+      <div class="progressbar" id="duelProgress" hidden>
+        <div class="track"><i></i></div>
+        <span id="duelProgressText">正在开战…</span>
       </div>
     </div>
 
@@ -852,24 +865,34 @@ async function startDuel(){
     if (!b){ toast("先选 B 方角色"); return; }
     payload.b = {id: b.id};
   }
-  $("startDuel").disabled = true;
+  const btn = $("startDuel"), bar = $("duelProgress");
+  btn.disabled = true;
+  btn.hidden = true;                       /* 按钮原地消失，换成进度条 */
+  bar.hidden = false;
+  const startedAt = Date.now();
+  const tick = setInterval(() => {
+    const secs = ((Date.now() - startedAt) / 1000).toFixed(1);
+    $("duelProgressText").textContent = `正在开战… ${secs}s`;
+  }, 100);
+  const finish = () => { clearInterval(tick); bar.hidden = true; btn.hidden = false;
+                         btn.disabled = false; };
   try {
     const res = await fetch("/api/lab/duel", {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload),
     });
     const data = await res.json();
-    if (!data.success){ toast("开战失败：" + (data.error || "未知错误")); return; }
+    if (!data.success){ toast("开战失败：" + (data.error || "未知错误")); finish(); return; }
     const list = $("resultNotes");
     list.innerHTML = "";
     for (const note of data.notes || []) list.append(el("li", null, note));
     $("result").style.display = "";
     $("result").scrollIntoView({behavior: "smooth", block: "center"});
-    toast("对战已开始");
+    finish();
+    toast("对战已开始，往下看结果 →");
   } catch (err){
     toast("开战请求失败：" + err.message);
-  } finally {
-    $("startDuel").disabled = false;
+    finish();
   }
 }
 

@@ -50,7 +50,9 @@ PORT = int(os.environ.get("PORT", "8000"))
 INDEX_PATH = Path(__file__).resolve().parent / "index.html"
 LAB_PATH = Path(__file__).resolve().parent / "lab.html"
 
-SESSION: dict[str, Any] = {"engine": None, "log": [], "last_world": None}
+SESSION: dict[str, Any] = {"engine": None, "log": [], "last_world": None,
+                           # 逐击攻击草稿：A 分配本击伤害 → B 选应对 → 下击。
+                           "attack": None}
 LOCK = threading.Lock()
 
 REGIONS = ("罪孽都市", "扭曲都市", "龙心谷", "乱葬岗")
@@ -327,7 +329,214 @@ def _execute(action: str, params: dict[str, Any]) -> dict[str, Any]:
         return {"success": False, "error": "还没有开局"}
     result = engine.execute_action(action, params or {})
     _log(_describe(action, params or {}, result))
+    if action in {"resolve_attack", "battle_end", "battle_start", "round_end"}:
+        # 逐击草稿只在一次出手内有效：换了攻击入口/战斗阶段就作废。
+        SESSION["attack"] = None
     return result
+
+
+def _attack_refs(engine: GameEngine) -> dict[str, Any]:
+    return engine.combat._combat_entity_refs()
+
+
+def _attack_legal(draft: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {entry["ref"]: entry for entry in draft["options"]["target_options"]}
+
+
+def _attack_view(engine: GameEngine, draft: dict[str, Any]) -> dict[str, Any]:
+    """把逐击草稿翻译成界面要显示的一步（绝不含引擎结算结果）。"""
+    options = draft["options"]
+    legal = _attack_legal(draft)
+    hits = draft["hits"]
+    used = sum(hit["damage"] for hit in hits)
+    refs = _attack_refs(engine)
+    view: dict[str, Any] = {
+        "actor": options["actor"],
+        "phase": draft["phase"],
+        "hit_index": min(draft["index"] + 1, options["hit_count"]),
+        "hit_count": options["hit_count"],
+        "damage_budget": options["damage_budget"],
+        "damage_used": used,
+        "damage_left": int(options["damage_budget"]) - used,
+        "hits": [{"index": index + 1,
+                  "target": legal[hit["target_ref"]]["name"],
+                  "damage": hit["damage"],
+                  "choice": hit["choice"]} for index, hit in enumerate(hits)],
+        "target_options": [{"ref": entry["ref"], "name": entry["name"],
+                            "can_dodge": entry["can_dodge"],
+                            "can_parry": entry["can_parry"],
+                            "can_blood_shadow": entry["can_blood_shadow"]}
+                           for entry in options["target_options"]],
+    }
+    if draft["phase"] == "respond" and hits:
+        hit = hits[-1]
+        entry = legal[hit["target_ref"]]
+        target = refs.get(hit["target_ref"])
+        spent = sum(1 for item in hits[:-1]
+                    if item["target_ref"] == hit["target_ref"]
+                    and item["choice"] in ("dodge", "parry"))
+        speed = int(getattr(target, "current_speed", 0) or 0)
+        view["current"] = {
+            "target_ref": hit["target_ref"],
+            "target": entry["name"],
+            "damage": hit["damage"],
+            "can_dodge": bool(entry["can_dodge"]),
+            "can_parry": bool(entry["can_parry"]),
+            "can_blood_shadow": bool(entry["can_blood_shadow"]),
+            "speed_left": max(0, speed - spent),
+            "dodge_locked": draft.get("dodge_locked", False),
+            "blood_shadow_needs_target": bool(
+                entry.get("blood_shadow_cost_share_target_options")),
+        }
+    return view
+
+
+def _ui_attack_prepare(params: dict[str, Any]) -> dict[str, Any]:
+    """第一步：A 方准备一次出手，返回「第 1 击：选目标 + 填 X」。"""
+    engine: GameEngine = SESSION["engine"]
+    if engine is None:
+        return {"success": False, "error": "还没有开局"}
+    draft = SESSION.get("attack")
+    pending = engine.state.pending_attack
+    if draft and pending and draft.get("token") == pending.get("token"):
+        return {"success": True, "attack": _attack_view(engine, draft)}
+    if not pending:
+        prepared = engine.execute_action(
+            "prepare_attack", {"actor_ref": params.get("actor_ref") or "player:0"})
+        _log(_describe("prepare_attack", params or {}, prepared))
+        if not prepared.get("success"):
+            return prepared
+        pending = engine.state.pending_attack
+    SESSION["attack"] = {
+        "token": pending["token"],
+        "options": pending["options"],
+        "index": 0,
+        "phase": "declare",
+        "hits": [],
+    }
+    return {"success": True, "attack": _attack_view(engine, SESSION["attack"])}
+
+
+def _ui_attack_declare(params: dict[str, Any]) -> dict[str, Any]:
+    """第二步：A 方指定本击目标与 X，交棒给防守方。"""
+    engine: GameEngine = SESSION["engine"]
+    draft = SESSION.get("attack")
+    if engine is None or not draft or not engine.state.pending_attack:
+        return {"success": False, "error": "请先点『准备攻击』"}
+    if draft["phase"] != "declare":
+        return {"success": False, "error": "这一击已经交出去了，等对方选应对"}
+    legal = _attack_legal(draft)
+    ref = str(params.get("target_ref") or "")
+    if ref not in legal:
+        return {"success": False, "error": "目标不在这次出手的合法列表里"}
+    try:
+        damage = int(params.get("damage", 0))
+    except (TypeError, ValueError):
+        return {"success": False, "error": "X（伤害）必须是整数"}
+    if damage < 0:
+        return {"success": False, "error": "X（伤害）不能是负数"}
+    used = sum(hit["damage"] for hit in draft["hits"])
+    if used + damage > int(draft["options"]["damage_budget"]):
+        return {"success": False,
+                "error": f"本回合总伤害预算 {draft['options']['damage_budget']}，"
+                         f"已分配 {used}，本击最多 {int(draft['options']['damage_budget']) - used}"}
+    draft["hits"].append({"target_ref": ref, "damage": damage, "choice": "tank"})
+    draft["phase"] = "respond"
+    # 【必中】剩余次数覆盖本击时，闪避无效（与 resolve_attack 同一判定）。
+    refs = _attack_refs(engine)
+    attacker = refs.get(draft["options"]["actor_ref"])
+    index = len(draft["hits"]) - 1
+    draft["dodge_locked"] = bool(
+        attacker is not None
+        and engine.combat.bizhong_remaining(attacker) > index)
+    return {"success": True, "attack": _attack_view(engine, draft)}
+
+
+def _attack_hits_payload(draft: dict[str, Any]) -> list[dict[str, Any]]:
+    """逐击草稿 → resolve_attack 需要的完整 hits（一次性原子提交）。"""
+    legal = _attack_legal(draft)
+    hits = []
+    for item in draft["hits"]:
+        entry = legal[item["target_ref"]]
+        spell_choices = {
+            timing: {spell["spell_name"]: {"use": False} for spell in spells}
+            for timing, spells in (entry.get("spell_options") or {}).items()}
+        hits.append({
+            "target_ref": item["target_ref"],
+            "damage": item["damage"],
+            "dodge": item["choice"] == "dodge",
+            "parry": item["choice"] == "parry",
+            "blood_shadow": item["choice"] == "blood_shadow",
+            "spell_choices": json.loads(json.dumps(spell_choices)),
+        })
+    return hits
+
+
+def _attack_finish(engine: GameEngine, draft: dict[str, Any]) -> dict[str, Any]:
+    """逐击问完了：一次性交给引擎结算这一次出手，然后清掉草稿。"""
+    result = _execute("resolve_attack", {"token": draft["token"],
+                                         "hits": _attack_hits_payload(draft)})
+    SESSION["attack"] = None
+    return result
+
+
+def _ui_attack_respond(params: dict[str, Any]) -> dict[str, Any]:
+    """第三步：防守方选应对（硬扛/招架/闪避/血影）；还有余击就回到 A。"""
+    engine: GameEngine = SESSION["engine"]
+    draft = SESSION.get("attack")
+    if engine is None or not draft or not engine.state.pending_attack:
+        return {"success": False, "error": "没有进行中的攻击"}
+    if draft["phase"] != "respond" or not draft["hits"]:
+        return {"success": False, "error": "现在轮到攻击方分配伤害"}
+    choice = str(params.get("choice") or "tank")
+    if choice not in {"tank", "dodge", "parry", "blood_shadow"}:
+        return {"success": False, "error": "未知的应对方式"}
+    hit = draft["hits"][-1]
+    entry = _attack_legal(draft)[hit["target_ref"]]
+    if choice == "dodge" and not entry["can_dodge"]:
+        return {"success": False, "error": f"{entry['name']}当前无法闪避（速度不高于 0）"}
+    if choice == "parry" and not entry["can_parry"]:
+        return {"success": False, "error": f"{entry['name']}当前无法招架（速度不高于 0）"}
+    if choice == "blood_shadow" and not entry["can_blood_shadow"]:
+        return {"success": False, "error": f"{entry['name']}现在不能使用血影"}
+    if choice in ("dodge", "parry"):
+        target = _attack_refs(engine).get(hit["target_ref"])
+        spent = sum(1 for item in draft["hits"][:-1]
+                    if item["target_ref"] == hit["target_ref"]
+                    and item["choice"] in ("dodge", "parry"))
+        speed = int(getattr(target, "current_speed", 0) or 0)
+        if spent + 1 > speed:
+            return {"success": False,
+                    "error": f"{entry['name']}剩余速度 {max(0, speed - spent)}，"
+                             "不够再做一次闪避/招架"}
+    hit["choice"] = choice
+    draft["index"] += 1
+    if draft["index"] >= int(draft["options"]["hit_count"]):
+        return _attack_finish(engine, draft)
+    draft["phase"] = "declare"
+    return {"success": True, "attack": _attack_view(engine, draft)}
+
+
+def _ui_attack_auto(params: dict[str, Any]) -> dict[str, Any]:
+    """省事按钮：余下所有击按「硬扛」打出去（伤害按剩余预算均分）。"""
+    engine: GameEngine = SESSION["engine"]
+    draft = SESSION.get("attack")
+    if engine is None or not draft or not engine.state.pending_attack:
+        return {"success": False, "error": "没有进行中的攻击"}
+    if draft["phase"] == "respond" and draft["hits"]:
+        draft["hits"][-1]["choice"] = "tank"
+        draft["index"] += 1
+    while draft["index"] < int(draft["options"]["hit_count"]):
+        remaining = int(draft["options"]["hit_count"]) - draft["index"]
+        left = int(draft["options"]["damage_budget"]) - sum(
+            hit["damage"] for hit in draft["hits"])
+        damage = left // remaining if remaining else left
+        ref = draft["hits"][-1]["target_ref"] if draft["hits"] else \
+            draft["options"]["target_options"][0]["ref"]
+        draft["hits"].append({"target_ref": ref, "damage": max(0, damage),
+                              "choice": "tank"})
+        draft["index"] += 1
+    return _attack_finish(engine, draft)
 
 
 def _ui_attack(params: dict[str, Any]) -> dict[str, Any]:
@@ -525,6 +734,7 @@ def _ui_monster_phase(params: dict[str, Any]) -> dict[str, Any]:
 
 def _start(payload: dict[str, Any]) -> dict[str, Any]:
     engine = _new_engine(payload)
+    SESSION["attack"] = None
     SESSION["engine"] = engine
     SESSION["log"] = []
     SESSION["last_world"] = None
@@ -537,6 +747,7 @@ def _install(prepared: dict[str, Any]) -> dict[str, Any]:
     SESSION["engine"] = prepared["engine"]
     SESSION["log"] = []
     SESSION["last_world"] = None
+    SESSION["attack"] = None
     for note in prepared["notes"]:
         _log(note)
     return {"success": True, "notes": prepared["notes"],
@@ -669,6 +880,30 @@ class Handler(BaseHTTPRequestHandler):
                         self._json({"success": False, "error": "缺少action"}, 400)
                         return
                     result = _execute(action, payload.get("params") or {})
+                    self._json({"success": bool(result.get("success")),
+                                "result": result,
+                                "snapshot": _snapshot(SESSION["engine"])})
+                elif path == "/api/ui_attack_prepare":
+                    result = _ui_attack_prepare(payload)
+                    self._json({"success": bool(result.get("success")),
+                                "error": result.get("error"),
+                                "attack": result.get("attack"),
+                                "snapshot": _snapshot(SESSION["engine"])})
+                elif path == "/api/ui_attack_declare":
+                    result = _ui_attack_declare(payload)
+                    self._json({"success": bool(result.get("success")),
+                                "error": result.get("error"),
+                                "attack": result.get("attack"),
+                                "snapshot": _snapshot(SESSION["engine"])})
+                elif path == "/api/ui_attack_respond":
+                    result = _ui_attack_respond(payload)
+                    self._json({"success": bool(result.get("success")),
+                                "error": result.get("error"),
+                                "attack": result.get("attack"),
+                                "result": result if result.get("attack") is None else None,
+                                "snapshot": _snapshot(SESSION["engine"])})
+                elif path == "/api/ui_attack_auto":
+                    result = _ui_attack_auto(payload)
                     self._json({"success": bool(result.get("success")),
                                 "result": result,
                                 "snapshot": _snapshot(SESSION["engine"])})
