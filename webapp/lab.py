@@ -214,68 +214,6 @@ def _set_limits(player: Any, blood: int, speed: int, mana: int) -> None:
     player.current_mana = player.mana_limit
 
 
-def _replace_relics(engine: GameEngine, names: list[str]) -> list[str]:
-    """把开局随机发现的遗物换成用户勾选的名单。
-
-    返回实际写入的名单。启用槽位沿用引擎口径 ``ceil(血限/30)``：
-    超出的部分照常持有、只是停用（与常规获得的处理一致）。
-    """
-    defs = dict(GameEngine.RELIC_DEFS)
-    unknown = [name for name in names if name not in defs]
-    if unknown:
-        raise ValueError(f"未知道的遗物：{'、'.join(unknown)}")
-    engine.state.pending_relic_choices = []
-    engine.state.pending_relic_source = ""
-    limit = engine.state.player.enabled_relic_limit
-    engine.state.relics = [
-        Relic(name=name, effect=defs[name], enabled=index < limit)
-        for index, name in enumerate(dict.fromkeys(names))
-    ]
-    # 已经从池子里拿到手里的，商人不要再卖同一件。
-    taken = {relic.name for relic in engine.state.relics}
-    pool = list(getattr(engine.state, "relics_pool", []) or [])
-    engine.state.relics_pool = [relic for relic in pool if relic.name not in taken]
-    return [relic.name for relic in engine.state.relics]
-
-
-def _grant_daowen(engine: GameEngine, names: list[str]) -> list[str]:
-    runtime = set(DaoWenEngine.list_all())
-    unknown = [name for name in names if name not in runtime]
-    if unknown:
-        raise ValueError(f"未实装的道纹：{'、'.join(unknown)}")
-    for name in dict.fromkeys(names):
-        engine._grant_named_daowen(engine.state.player, name)
-    return list(engine.state.player.dao_wen)
-
-
-def _grant_consumables(engine: GameEngine, entries: list[Any]) -> list[dict[str, Any]]:
-    catalog = {item["name"]: item for item in _consumables()}
-    granted = []
-    for entry in entries:
-        if isinstance(entry, str):
-            name, uses = entry, None
-        elif isinstance(entry, dict):
-            name, uses = entry.get("name"), entry.get("uses")
-        else:
-            raise ValueError("消耗品必须是名字或 {name, uses}")
-        if name not in catalog:
-            raise ValueError(f"未登记的消耗品：{name}")
-        spec = catalog[name]
-        if uses in (None, ""):
-            uses = spec["uses"]
-        uses = _as_int(uses, f"{name}的耐久", 1, MAX_USES)
-        if name in WING_ITEM_SPECS:
-            item = make_wing_item(name)
-            item.current_uses = uses
-            item.max_uses = max(uses, int(WING_ITEM_SPECS[name]["max_uses"]))
-        else:
-            item = Consumable(name=name, effect=spec["effect"],
-                              current_uses=uses, max_uses=uses)
-        engine.state.consumables.append(item)
-        granted.append({"name": name, "uses": item.current_uses, "max_uses": item.max_uses})
-    return granted
-
-
 def _battle_slots(world: WorldState, origin: tuple[int, int], count: int) -> list[tuple[int, int]]:
     """找 ``count`` 个离玩家最近的空可通行格，供指定对手入场。"""
     occupied = {actor.position for actor in world.actors.values()}
@@ -294,21 +232,279 @@ def _battle_slots(world: WorldState, origin: tuple[int, int], count: int) -> lis
     return candidates[:count]
 
 
-def _start_custom_battle(engine: GameEngine, names: list[str],
-                         width: int, height: int) -> dict[str, Any]:
-    """按指定怪物开场：先建地图，再把对手摆到玩家身边并登记遭遇。"""
-    pool = {monster["name"]: monster
-            for monster in engine._monster_pool_for_battle()}
+# ---------------------------------------------------------------- 角色卡
+
+try:  # 包导入（from webapp import lab）与脚本导入（server.py 的 sys.path 口径）都支持
+    from . import characters as roster
+except ImportError:  # pragma: no cover - 只在直接跑脚本时走到
+    import characters as roster
+
+
+def _sheet_limits(sheet: dict[str, Any]) -> tuple[int, int, int]:
+    """角色卡的三维上限（血限/速限/法限）。"""
+    if sheet["mode"] == "rule":
+        return (int(sheet["blood_points"]) * 6,
+                int(sheet["speed_points"]) // 2,
+                int(sheet["mana_points"]) // 2)
+    return (int(sheet["blood_limit"]), int(sheet["speed_limit"]),
+            int(sheet["mana_limit"]))
+
+
+def _check_daowen(names: list[str]) -> list[str]:
+    runtime = set(DaoWenEngine.list_all())
+    unknown = [name for name in names if name not in runtime]
+    if unknown:
+        raise ValueError(f"未实装的道纹：{'、'.join(unknown)}")
+    return list(dict.fromkeys(names))
+
+
+def _check_relics(names: list[str]) -> list[str]:
+    defs = dict(GameEngine.RELIC_DEFS)
+    unknown = [name for name in names if name not in defs]
+    if unknown:
+        raise ValueError(f"未知道的遗物：{'、'.join(unknown)}")
+    return list(dict.fromkeys(names))
+
+
+def _resolve_consumables(entries: list[Any]) -> list[dict[str, Any]]:
+    """把「名字」或 ``{name, uses}`` 统一成 ``{name, uses}``（缺省取登记耐久）。"""
+    catalog = {item["name"]: item for item in _consumables()}
+    resolved = []
+    for entry in entries:
+        if isinstance(entry, str):
+            name, uses = entry, None
+        elif isinstance(entry, dict):
+            name, uses = entry.get("name"), entry.get("uses")
+        else:
+            raise ValueError("消耗品必须是名字或 {name, uses}")
+        if name not in catalog:
+            raise ValueError(f"未登记的消耗品：{name}")
+        if uses in (None, ""):
+            uses = catalog[name]["uses"]
+        resolved.append({"name": name, "uses": _as_int(uses, f"{name}的耐久", 1, MAX_USES)})
+    return resolved
+
+
+def normalize_sheet(payload: dict[str, Any]) -> dict[str, Any]:
+    """把请求体/旧存档规范成一张角色卡配方（只校验，不碰引擎）。"""
+    if not isinstance(payload, dict):
+        raise ValueError("角色卡必须是对象")
+    name = str(payload.get("name") or "轮回者").strip()[:12] or "轮回者"
+    mode = "free" if str(payload.get("mode") or "rule") == "free" else "rule"
+    resonance = str(payload.get("resonance") or "转换")
+    if resonance not in options()["resonance"]:
+        raise ValueError(f"残韵必须从 {options()['resonance']} 中选择")
+
+    if mode == "rule":
+        blood_points = _as_int(payload.get("blood_points", 11), "血限点", 0, 25)
+        speed_points = _as_int(payload.get("speed_points", 8), "速限点", 0, 25)
+        mana_points = _as_int(payload.get("mana_points", 6), "法限点", 0, 25)
+        if blood_points + speed_points + mana_points > 25:
+            raise ValueError("规则模式下三项加点之和不能超过 25")
+        if speed_points % 2 or mana_points % 2:
+            raise ValueError("速限/法限按 2 点一档计价，点数必须是偶数")
+        sheet = {
+            "mode": "rule",
+            "blood_points": blood_points, "speed_points": speed_points,
+            "mana_points": mana_points,
+            "attribute_points": 25 - blood_points - speed_points - mana_points,
+        }
+    else:
+        sheet = {
+            "mode": "free",
+            "blood_points": 0, "speed_points": 0, "mana_points": 0,
+            "blood_limit": _as_int(payload.get("blood_limit", 90), "血限", 1, MAX_BLOOD_LIMIT),
+            "speed_limit": _as_int(payload.get("speed_limit", 5), "速限", 0, MAX_TIER_LIMIT),
+            "mana_limit": _as_int(payload.get("mana_limit", 5), "法限", 0, MAX_TIER_LIMIT),
+            "attribute_points": _as_int(payload.get("attribute_points", 0), "属性点池", 0, 999),
+        }
+    blood, speed, mana = _sheet_limits({**sheet, "name": name})
+    sheet.update({
+        "id": str(payload.get("id") or "").strip(),
+        "name": name,
+        "resonance": resonance,
+        # 规则模式的三个上限是派生值；存下来只为列表/对战展示，不当作独立事实源。
+        "blood_limit": blood, "speed_limit": speed, "mana_limit": mana,
+        "daowen": _check_daowen(_as_name_list(payload.get("daowen"), "道纹")) or ["杀伐"],
+        "relics": _check_relics(_as_name_list(payload.get("relics"), "遗物")),
+        "consumables": _resolve_consumables(payload.get("consumables") or []),
+        "shards": _as_int(payload.get("shards", 20), "碎片", 0, MAX_SHARDS),
+        "energy": _as_int(payload.get("energy", 3), "精力", 0, MAX_TIER_LIMIT),
+    })
+    return sheet
+
+
+def save_sheet(payload: dict[str, Any]) -> dict[str, Any]:
+    """保存 / 修改一张角色卡。"""
+    sheet = normalize_sheet(payload)
+    if not sheet["daowen"]:
+        sheet["daowen"] = ["杀伐"]
+    return roster.save_character(sheet)
+
+
+def list_sheets() -> list[dict[str, Any]]:
+    return roster.list_characters()
+
+
+def delete_sheet(character_id: str) -> bool:
+    return roster.delete_character(str(character_id or ""))
+
+
+# ---------------------------------------------------------------- 开局装配
+
+
+def _regions_by_name() -> dict[str, dict[str, Any]]:
+    return {region["name"]: region for region in options()["regions"]}
+
+
+def _replace_relics(engine: GameEngine, names: list[str]) -> list[str]:
+    """把开局随机发现的遗物换成用户勾选的名单。
+
+    启用槽位沿用引擎口径 ``ceil(血限/30)``：超出的照常持有、只是停用。
+    """
+    defs = dict(GameEngine.RELIC_DEFS)
+    engine.state.pending_relic_choices = []
+    engine.state.pending_relic_source = ""
+    limit = engine.state.player.enabled_relic_limit
+    engine.state.relics = [
+        Relic(name=name, effect=defs[name], enabled=index < limit)
+        for index, name in enumerate(names)
+    ]
+    taken = {relic.name for relic in engine.state.relics}
+    pool = list(getattr(engine.state, "relics_pool", []) or [])
+    engine.state.relics_pool = [relic for relic in pool if relic.name not in taken]
+    return [relic.name for relic in engine.state.relics]
+
+
+def _grant_consumables(engine: GameEngine, resolved: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    catalog = {item["name"]: item for item in _consumables()}
+    granted = []
+    for entry in resolved:
+        name, uses = entry["name"], int(entry["uses"])
+        spec = catalog[name]
+        if name in WING_ITEM_SPECS:
+            item = make_wing_item(name)
+            item.current_uses = uses
+            item.max_uses = max(uses, int(WING_ITEM_SPECS[name]["max_uses"]))
+        else:
+            item = Consumable(name=name, effect=spec["effect"],
+                              current_uses=uses, max_uses=uses)
+        engine.state.consumables.append(item)
+        granted.append({"name": name, "uses": item.current_uses, "max_uses": item.max_uses})
+    return granted
+
+
+def _apply_loadout(engine: GameEngine, sheet: dict[str, Any], region: str,
+                   notes: list[str]) -> list[dict[str, Any]]:
+    """按角色卡把引擎配置成开局状态（属性→遗物→道纹→残韵→副本→资源）。"""
+    name = sheet["name"]
+    if sheet["mode"] == "rule":
+        setup = engine.execute_action("setup_attributes", {
+            "name": name, "blood_points": sheet["blood_points"],
+            "speed_points": sheet["speed_points"], "mana_points": sheet["mana_points"],
+        })
+    else:
+        # 先用一组合法点数过开局流程，再把三个上限直接写成用户要的值。
+        setup = engine.execute_action("setup_attributes", {
+            "name": name, "blood_points": 25, "speed_points": 0, "mana_points": 0,
+        })
+        if setup.get("success"):
+            blood, speed, mana = _sheet_limits(sheet)
+            _set_limits(engine.state.player, blood, speed, mana)
+            engine.state.attribute_points = int(sheet["attribute_points"])
+            notes.append(f"自由模式：三维 {blood}/{speed}/{mana}（血限/速限/法限）"
+                         f"已直接写入，不经过 25 点预算。")
+    if not setup.get("success"):
+        raise ValueError(f"属性分配失败：{setup.get('error')}")
+
+    relics = list(sheet["relics"])
+    if not relics:
+        # 没选就沿用引擎本次开局随机发现的第一件（副本选择要求至少持有一件）。
+        relics = list(engine.state.pending_relic_choices)[:1]
+        if relics:
+            notes.append(f"未选遗物，沿用开局随机发现的第一件：{relics[0]}")
+    if relics:
+        _replace_relics(engine, relics)
+
+    for daowen_name in sheet["daowen"]:
+        engine._grant_named_daowen(engine.state.player, daowen_name)
+
+    chosen = engine.execute_action("setup_choose_resonance",
+                                   {"resonance_type": sheet["resonance"]})
+    if not chosen.get("success"):
+        raise ValueError(f"残韵选择失败：{chosen.get('error')}")
+
+    # 演武场不推进阶级：把已实现副本全部解锁，省得用户还要先打一场死斗。
+    engine.state.unlocked_tier = max(int(REGION_TIERS.get(key, 1)) for key in _regions_by_name())
+    entered = engine.execute_action("setup_choose_region", {"region": region})
+    if not entered.get("success"):
+        raise ValueError(f"进入副本失败：{entered.get('error')}")
+
+    granted = _grant_consumables(engine, sheet["consumables"])
+    engine.state.shards = int(sheet["shards"])
+    engine.state.energy = int(sheet["energy"])
+    return granted
+
+
+def _monster_entities(engine: GameEngine, names: list[str]) -> list[Any]:
+    pool = {monster["name"]: monster for monster in engine._monster_pool_for_battle()}
     unknown = [name for name in names if name not in pool]
     if unknown:
         raise ValueError(f"当前副本没有这些怪物：{'、'.join(unknown)}")
-
-    engine.state.enemies = []
+    entities = []
     for name in names:
         monster = make_monster_entity(pool[name])
         assign_monster_preferences(monster, engine._current_tier(), engine.dice)
         engine.combat.init_monster_shards(monster)
-        engine.state.enemies.append(monster)
+        entities.append(monster)
+    return entities
+
+
+def _make_rival(engine: GameEngine, sheet: dict[str, Any], a_name: str) -> Any:
+    """把一张角色卡造成 B 方实体（轮回者）。
+
+    与 A 方共用同一套口径：三维直接写上限，道纹/残韵/消耗品挂在该实体上。
+    遗物也挂在实体上，但引擎里绝大多数遗物效果只读玩家侧 ``state.relics``，
+    所以 B 方遗物目前只是「持有记录」——界面会照实提示。
+    """
+    from engine.models import Entity
+
+    blood, speed, mana = _sheet_limits(sheet)
+    name = sheet["name"]
+    if name == a_name:
+        name = f"{name}·B"
+    rival = Entity(
+        name=name, entity_type="轮回者",
+        blood_limit=blood, current_hp=blood,
+        speed_limit=speed, current_speed=speed,
+        mana_limit=mana, current_mana=mana,
+    )
+    for daowen_name in sheet["daowen"]:
+        engine._grant_named_daowen(rival, daowen_name)
+    if sheet["relics"]:
+        defs = dict(GameEngine.RELIC_DEFS)
+        for relic_name in sheet["relics"]:
+            rival.relics.append(Relic(name=relic_name, effect=defs.get(relic_name, "")))
+    catalog = {item["name"]: item for item in _consumables()}
+    for entry in sheet["consumables"]:
+        spec = catalog[entry["name"]]
+        rival.consumables.append(Consumable(
+            name=entry["name"], effect=spec["effect"],
+            current_uses=int(entry["uses"]), max_uses=int(entry["uses"])))
+    if sheet["resonance"]:
+        rival.resonance[sheet["resonance"]] = 1
+    return rival
+
+
+# ---------------------------------------------------------------- 开战
+
+
+def _start_custom_battle(engine: GameEngine, entities: list[Any],
+                         width: int, height: int) -> dict[str, Any]:
+    """按指定对手开场：先建地图，再把对手摆到玩家身边并登记遭遇。"""
+    if not entities:
+        raise ValueError("没有对手，无法开战")
+    engine.state.enemies = list(entities)
 
     initialized = engine.execute_action("world_initialize", {"width": width, "height": height})
     if not initialized.get("success"):
@@ -320,16 +516,16 @@ def _start_custom_battle(engine: GameEngine, names: list[str],
     if player_actor is None:
         raise ValueError("玩家没有登记到地图上，无法开战")
     origin = player_actor.position
-    for monster, cell in zip(engine.state.enemies,
-                             _battle_slots(world, origin, len(engine.state.enemies))):
-        actor = world.actors.get(monster.runtime_id)
+    for entity, cell in zip(engine.state.enemies,
+                            _battle_slots(world, origin, len(engine.state.enemies))):
+        actor = world.actors.get(entity.runtime_id)
         if actor is None:
             continue
         actor.x, actor.y = cell
         actor.mode = "manual"
-        monster.world_x, monster.world_y = cell
+        entity.world_x, entity.world_y = cell
     encounter = world.start_encounter(
-        [player.runtime_id] + [monster.runtime_id for monster in engine.state.enemies],
+        [player.runtime_id] + [entity.runtime_id for entity in engine.state.enemies],
         origin)
     engine.state.world_state = world.to_dict()
 
@@ -342,7 +538,7 @@ def _start_custom_battle(engine: GameEngine, names: list[str],
     return {
         "mode": "指定对手",
         "encounter_id": encounter.encounter_id,
-        "enemies": [monster.name for monster in engine.state.enemies],
+        "enemies": [entity.name for entity in engine.state.enemies],
     }
 
 
@@ -359,90 +555,45 @@ def _start_random_battle(engine: GameEngine) -> dict[str, Any]:
     }
 
 
+def _resolve_side(side: Any, label: str) -> dict[str, Any]:
+    """解析 A/B 方：``{id}`` 取存档卡，或直接内联一张卡。"""
+    if not isinstance(side, dict):
+        raise ValueError(f"{label}没有选择角色")
+    inner = side.get("character") if isinstance(side.get("character"), dict) else side
+    if side.get("id") and not any(key in inner for key in ("mode", "blood_points", "blood_limit")):
+        record = roster.get_character(str(side["id"]))
+        if record is None:
+            raise ValueError(f"{label}的角色卡不存在（可能已被删除）")
+        inner = record
+    if not inner.get("name"):
+        raise ValueError(f"{label}还没选角色")
+    return normalize_sheet(inner)
+
+
 def start(payload: dict[str, Any]) -> dict[str, Any]:
-    """按用户配装开一局演武场，返回 ``{"engine": ..., "notes": [...]}``。
+    """按一份配装开一局单人演武场，返回 ``{"engine": ..., "notes": [...]}``。
 
     抛 ``ValueError`` 表示是用户输入问题（界面直接显示）；其它异常按 500 处理。
     """
-    catalog = options()
-    name = str(payload.get("name") or "轮回者").strip()[:12] or "轮回者"
-    regions = {region["name"]: region for region in catalog["regions"]}
+    sheet = normalize_sheet(payload)
+    regions = _regions_by_name()
     region = str(payload.get("region") or "")
     if region not in regions:
         raise ValueError(f"副本必须从 {list(regions)} 中选择")
 
     engine = _new_engine(payload)
     notes: list[str] = []
-    rule_mode = str(payload.get("mode") or "rule") != "free"
-
-    if rule_mode:
-        blood_points = _as_int(payload.get("blood_points", 11), "血限点", 0, 25)
-        speed_points = _as_int(payload.get("speed_points", 8), "速限点", 0, 25)
-        mana_points = _as_int(payload.get("mana_points", 6), "法限点", 0, 25)
-        if blood_points + speed_points + mana_points > 25:
-            raise ValueError("规则模式下三项加点之和不能超过 25")
-        if speed_points % 2 or mana_points % 2:
-            raise ValueError("速限/法限按 2 点一档计价，点数必须是偶数")
-        setup = engine.execute_action("setup_attributes", {
-            "name": name, "blood_points": blood_points,
-            "speed_points": speed_points, "mana_points": mana_points,
-        })
-    else:
-        # 先用一组合法点数过开局流程，再把三个上限直接写成用户要的值。
-        setup = engine.execute_action("setup_attributes", {
-            "name": name, "blood_points": 25, "speed_points": 0, "mana_points": 0,
-        })
-        if setup.get("success"):
-            blood = _as_int(payload.get("blood_limit", 90), "血限", 1, MAX_BLOOD_LIMIT)
-            speed = _as_int(payload.get("speed_limit", 5), "速限", 0, MAX_TIER_LIMIT)
-            mana = _as_int(payload.get("mana_limit", 5), "法限", 0, MAX_TIER_LIMIT)
-            _set_limits(engine.state.player, blood, speed, mana)
-            engine.state.attribute_points = _as_int(
-                payload.get("attribute_points", 0), "属性点池", 0, 999)
-            notes.append(f"自由模式：三维 {blood}/{speed}/{mana}（血限/速限/法限）"
-                         f"已直接写入，不经过 25 点预算。")
-    if not setup.get("success"):
-        raise ValueError(f"属性分配失败：{setup.get('error')}")
-
-    relics = _as_name_list(payload.get("relics"), "遗物")
-    if not relics:
-        # 没勾就沿用引擎本次开局随机发现的第一件，保持与正式流程一致。
-        offered = list(engine.state.pending_relic_choices)
-        relics = offered[:1]
-    if relics:
-        _replace_relics(engine, relics)
-
-    daowen = _as_name_list(payload.get("daowen"), "道纹")
-    if not daowen:
-        daowen = ["杀伐"]
-    _grant_daowen(engine, daowen)
-
-    resonance = str(payload.get("resonance") or "转换")
-    if resonance not in catalog["resonance"]:
-        raise ValueError(f"残韵必须从 {catalog['resonance']} 中选择")
-    chosen = engine.execute_action("setup_choose_resonance", {"resonance_type": resonance})
-    if not chosen.get("success"):
-        raise ValueError(f"残韵选择失败：{chosen.get('error')}")
-
-    # 演武场不推进阶级：把已实现副本全部解锁，省得用户还要先打一场死斗。
-    engine.state.unlocked_tier = max(int(REGION_TIERS.get(key, 1)) for key in regions)
-    entered = engine.execute_action("setup_choose_region", {"region": region})
-    if not entered.get("success"):
-        raise ValueError(f"进入副本失败：{entered.get('error')}")
-
-    granted_items = _grant_consumables(engine, payload.get("consumables") or [])
-    engine.state.shards = _as_int(payload.get("shards", 20), "碎片", 0, MAX_SHARDS)
-    engine.state.energy = _as_int(payload.get("energy", 3), "精力", 0, MAX_TIER_LIMIT)
+    granted = _apply_loadout(engine, sheet, region, notes)
 
     width = _as_int(payload.get("width", 9), "地图宽", 5, 41)
     height = _as_int(payload.get("height", width), "地图高", 5, 41)
 
-    battle: dict[str, Any] | None = None
     if payload.get("start_battle"):
         enemies = _as_name_list(payload.get("enemies"), "对手")
         if len(enemies) > MAX_ENEMIES:
             raise ValueError(f"指定对手最多 {MAX_ENEMIES} 只")
-        battle = (_start_custom_battle(engine, enemies, width, height) if enemies
+        battle = (_start_custom_battle(engine, _monster_entities(engine, enemies),
+                                       width, height) if enemies
                   else _start_random_battle(engine))
         notes.append(f"{battle['mode']}：{'、'.join(battle['enemies']) or '（无）'}")
 
@@ -450,5 +601,53 @@ def start(payload: dict[str, Any]) -> dict[str, Any]:
     notes.append(
         f"{player.name} · 血限{player.blood_limit} 速限{player.speed_limit} "
         f"法限{player.mana_limit} · 道纹{len(player.dao_wen)} 种 · "
-        f"遗物{len(engine.state.relics)} 件 · 消耗品{len(granted_items)} 件")
+        f"遗物{len(engine.state.relics)} 件 · 消耗品{len(granted)} 件")
+    return {"engine": engine, "notes": notes}
+
+
+def duel(payload: dict[str, Any]) -> dict[str, Any]:
+    """A 方 vs B 方：两边都填角色卡（B 方也可以填副本怪物）。"""
+    regions = _regions_by_name()
+    region = str(payload.get("region") or "")
+    if region not in regions:
+        raise ValueError(f"副本必须从 {list(regions)} 中选择")
+
+    a_sheet = _resolve_side(payload.get("a"), "A方")
+    b_side = payload.get("b") if isinstance(payload.get("b"), dict) else {}
+    b_is_monster = str(b_side.get("kind") or "") == "monster"
+    b_names: list[str] = []
+    b_sheet: dict[str, Any] | None = None
+    if b_is_monster:
+        b_names = _as_name_list(b_side.get("monsters"), "B方怪物")
+        if not b_names:
+            raise ValueError("B方还没有选怪物")
+        if len(b_names) > MAX_ENEMIES:
+            raise ValueError(f"B方最多 {MAX_ENEMIES} 只怪物")
+    else:
+        b_sheet = _resolve_side(b_side, "B方")
+
+    engine = _new_engine(payload)
+    notes: list[str] = []
+    _apply_loadout(engine, a_sheet, region, notes)
+
+    if b_is_monster:
+        entities = _monster_entities(engine, b_names)
+    else:
+        assert b_sheet is not None
+        entities = [_make_rival(engine, b_sheet, a_sheet["name"])]
+
+    width = _as_int(payload.get("width", 11), "地图宽", 5, 41)
+    height = _as_int(payload.get("height", width), "地图高", 5, 41)
+    battle = _start_custom_battle(engine, entities, width, height)
+
+    a_blood, a_speed, a_mana = _sheet_limits(a_sheet)
+    notes.append(f"A方 {a_sheet['name']}：{a_blood}/{a_speed}/{a_mana}（血限/速限/法限）")
+    if b_sheet is not None:
+        b_blood, b_speed, b_mana = _sheet_limits(b_sheet)
+        notes.append(f"B方 {b_sheet['name']}：{b_blood}/{b_speed}/{b_mana}")
+        if b_sheet["relics"]:
+            notes.append("B方遗物只作持有记录：引擎多数遗物效果只读玩家侧，暂不生效。")
+    else:
+        notes.append(f"B方怪物：{'、'.join(b_names)}")
+    notes.append(f"开战：{'、'.join(battle['enemies'])}")
     return {"engine": engine, "notes": notes}

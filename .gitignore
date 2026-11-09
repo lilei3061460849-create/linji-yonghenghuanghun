@@ -17,6 +17,10 @@ data/dbg*
 data/demo_*
 data/batch_*
 
+# 演武场角色卡（玩家本地数据，不随仓库分发）
+data/player_characters.json
+data/.characters-*
+
 # 大文件 / 会话备份（历史上误提交过 5.4MB 的 linji_session.bundle，见 98d8abd0）
 *.bundle
 *.patch

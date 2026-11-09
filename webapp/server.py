@@ -428,6 +428,17 @@ def _start(payload: dict[str, Any]) -> dict[str, Any]:
     return _snapshot(engine)
 
 
+def _install(prepared: dict[str, Any]) -> dict[str, Any]:
+    """把演武场/对战生成好的引擎装进当前会话，返回响应体。"""
+    SESSION["engine"] = prepared["engine"]
+    SESSION["log"] = []
+    SESSION["last_world"] = None
+    for note in prepared["notes"]:
+        _log(note)
+    return {"success": True, "notes": prepared["notes"],
+            "snapshot": _snapshot(SESSION["engine"])}
+
+
 # ---------------------------------------------------------------- HTTP
 
 
@@ -461,6 +472,10 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 self._json({"success": True, "options": lab.options()})
             return
+        if path == "/api/lab/characters":
+            with LOCK:
+                self._json({"success": True, "characters": lab.list_sheets()})
+            return
         if path == "/api/snapshot":
             with LOCK:
                 self._json(_snapshot(SESSION["engine"]))
@@ -485,13 +500,31 @@ class Handler(BaseHTTPRequestHandler):
                     except ValueError as exc:
                         self._json({"success": False, "error": str(exc)}, 400)
                         return
-                    SESSION["engine"] = prepared["engine"]
-                    SESSION["log"] = []
-                    SESSION["last_world"] = None
-                    for note in prepared["notes"]:
-                        _log(note)
-                    self._json({"success": True, "notes": prepared["notes"],
-                                "snapshot": _snapshot(SESSION["engine"])})
+                    self._json(_install(prepared))
+                elif path == "/api/lab/duel":
+                    try:
+                        prepared = lab.duel(payload)
+                    except ValueError as exc:
+                        self._json({"success": False, "error": str(exc)}, 400)
+                        return
+                    self._json(_install(prepared))
+                elif path == "/api/lab/characters/save":
+                    try:
+                        record = lab.save_sheet(payload.get("character") or payload)
+                    except ValueError as exc:
+                        self._json({"success": False, "error": str(exc)}, 400)
+                        return
+                    self._json({"success": True, "character": record,
+                                "characters": lab.list_sheets()})
+                elif path == "/api/lab/characters/delete":
+                    try:
+                        removed = lab.delete_sheet(str(payload.get("id") or ""))
+                    except ValueError as exc:
+                        self._json({"success": False, "error": str(exc)}, 400)
+                        return
+                    self._json({"success": removed,
+                                "error": None if removed else "角色卡不存在",
+                                "characters": lab.list_sheets()})
                 elif path == "/api/action":
                     action = payload.get("action")
                     if not isinstance(action, str) or not action:

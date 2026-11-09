@@ -96,3 +96,78 @@ def test_bad_payloads_are_rejected_with_readable_errors(payload, message):
     with pytest.raises(ValueError) as caught:
         lab.start(payload)
     assert message in str(caught.value)
+
+
+# ---------------------------------------------------------------- 角色卡 + A vs B
+
+
+@pytest.fixture
+def roster_file(tmp_path, monkeypatch):
+    """角色卡写到临时文件，绝不碰仓库里的 data/player_characters.json。"""
+    path = tmp_path / "player_characters.json"
+    monkeypatch.setenv("LINJI_CHARACTERS_FILE", str(path))
+    return path
+
+
+def _sheet(name, **overrides):
+    sheet = {
+        "name": name, "mode": "rule", "blood_points": 15,
+        "speed_points": 6, "mana_points": 4, "daowen": ["杀伐"],
+        "relics": [], "consumables": [], "resonance": "转换",
+        "shards": 20, "energy": 3,
+    }
+    sheet.update(overrides)
+    return sheet
+
+
+def test_character_cards_can_be_saved_updated_and_deleted(roster_file):
+    saved = lab.save_sheet(_sheet("甲", relics=["叠鳞甲"], consumables=["急救箱"]))
+    assert roster_file.exists()
+    assert saved["id"] and saved["name"] == "甲"
+    assert (saved["blood_limit"], saved["speed_limit"], saved["mana_limit"]) == (90, 3, 2)
+    assert saved["consumables"] == [{"name": "急救箱", "uses": 2}]
+
+    updated = lab.save_sheet({**saved, "name": "甲改"})
+    assert updated["id"] == saved["id"]
+    assert [item["name"] for item in lab.list_sheets()] == ["甲改"]
+
+    assert lab.delete_sheet(saved["id"]) is True
+    assert lab.list_sheets() == []
+    assert lab.delete_sheet(saved["id"]) is False
+
+
+def test_duel_character_vs_character_builds_a_real_rival(roster_file):
+    a = lab.save_sheet(_sheet("甲"))
+    b = lab.save_sheet(_sheet(
+        "乙", mode="free", blood_limit=120, speed_limit=4, mana_limit=6,
+        daowen=["庇护", "操纵"], relics=["缓厄沙漏"],
+        consumables=[{"name": "定命丸", "uses": 1}], resonance="反转"))
+    prepared = lab.duel({"a": {"id": a["id"]}, "b": {"id": b["id"]},
+                         "region": "罪孽都市", "width": 11, "height": 11, "seed": 5})
+    engine = prepared["engine"]
+    assert engine.state.phase == "in_combat"
+    assert engine.state.combat_subphase == "await_round_start"
+    rival = engine.state.enemies[0]
+    assert rival.entity_type == "轮回者"
+    assert (rival.blood_limit, rival.speed_limit, rival.mana_limit) == (120, 4, 6)
+    assert (rival.current_hp, rival.current_speed, rival.current_mana) == (120, 4, 6)
+    assert {"庇护", "操纵"} <= set(rival.dao_wen)
+    assert rival.resonance == {"反转": 1}
+    assert [relic.name for relic in rival.relics] == ["缓厄沙漏"]
+    assert [item.name for item in rival.consumables] == ["定命丸"]
+
+
+def test_duel_rejects_a_missing_character_card(roster_file):
+    a = lab.save_sheet(_sheet("甲"))
+    with pytest.raises(ValueError) as caught:
+        lab.duel({"a": {"id": a["id"]}, "b": {"id": "does-not-exist"},
+                  "region": "罪孽都市"})
+    assert "B方" in str(caught.value)
+
+
+def test_duel_monster_side_still_uses_engine_monster_panels(roster_file):
+    a = lab.save_sheet(_sheet("甲"))
+    prepared = lab.duel({"a": {"id": a["id"]},
+                         "b": {"kind": "monster", "monsters": ["毒枭", "打手"]},
+                         "region": "罪孽都市", "width": 11, "seed": 6})
+    assert [enemy.name for enemy in prepared["engine"].state.enemies] == ["毒枭", "打手"]
