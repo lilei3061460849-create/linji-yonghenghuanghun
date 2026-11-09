@@ -47,10 +47,10 @@ def test_next_x_conversions_keep_original_then_normal_replacement_resumes():
     assert r['success'] and r['original_preserved'], r
     assert p.dao_wen['杀伐'] is original and original.cooldown_remaining == 3
     assert '再生' in p.dao_wen and p.get_status_value('出土') == 1
-    # 2026-11-02 四面体一：曲解 杀伐⇄庇护、再生⇄连击。
-    r = resonance(e, source='再生', dest='连击', rtype='曲解')
+    # 2026-11-09 四面体一：曲解 杀伐⇄庇护、再生⇄脆弱。
+    r = resonance(e, source='再生', dest='脆弱', rtype='曲解')
     assert r['success'] and r['original_preserved'], r
-    assert {'杀伐', '再生', '连击'} <= set(p.dao_wen)
+    assert {'杀伐', '再生', '脆弱'} <= set(p.dao_wen)
     assert not p.has_status('出土')
     r = resonance(e)
     assert r['success'] and not r['original_preserved'], r

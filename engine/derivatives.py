@@ -76,7 +76,7 @@ DERIVATIVE_SPECS: tuple[DerivativeSpec, ...] = (
                    "枯竭通道：登记 X 点待结算枯竭，计价不变。"),
     DerivativeSpec("碎伐", "杀伐", "碎片", 4, "multi_hit",
                    "支付：碎片4X", _SHAFA_HITS,
-                   "真碎片通道：5X→4X，且不再与假碎片合并扣除。"),
+                   "真碎片通道：5X→4X；按通用【碎片】代价口径，假碎片优先、真碎片补足。"),
     DerivativeSpec("伪伐", "杀伐", "假碎片", 40, "multi_hit",
                    "支付：假碎片40X", _SHAFA_HITS,
                    "假碎片通道：50X→40X，只扣假碎片池。"),
@@ -165,7 +165,9 @@ def calculation(name: str, x: int, target=None) -> dict:
         effect = f"为{target_name}回复{4 * x}点生命"
     else:  # pragma: no cover - 事实源自检兜底
         raise ValueError(f"衍生道纹{name}的效果种类非法：{spec.effect_kind}")
-    calc["summary"] = f"{spec.cost_text.replace('X', str(x))}，{effect}"
+    # 摘要里写的是**实际金额**，不是把字面 "X" 替换成 X 值：
+    # 「法力4X」在 X=7 时应为「法力28」，若用 str.replace 会得到「法力47」。
+    calc["summary"] = f"支付：{spec.cost_kind}{amount}，{effect}"
     return calc
 
 

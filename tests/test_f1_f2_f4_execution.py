@@ -136,19 +136,17 @@ def test_scarlet_relic_has_no_battle_start_decision():
     assert not any("猩红" in log for log in logs)
 
 
-# ==================== F2：透支·四通道 ====================
-# 2026-10-14 追裁定：【余火印】extra 整段删除（yuhuo_heart_name 不再存在）；
-# 【搏命】删除并入【透支】，透支X = 四选一（流血4X/衰老2X/枯竭X/疲惫X）→ X法力。
+# ==================== F2：透支单途径 + 三条衍生 ====================
+# 2026-11-09 用户令：多途径道纹一律收成一条途径；【透支】母本只留枯竭X→X法力，
+# 生命4X／血限2X／速度X 三条同效果途径改为衍生道纹【燃血】【折寿】【疾贷】。
 
-def _cast_touzhi(cost_channel=None, x=1, extra=None):
+def _cast_touzhi(name="透支", x=1, extra=None):
     engine = _setup()
     player = engine.state.player
-    _grant(engine, ["透支"])
+    _grant(engine, [name])
     player.current_mana = 0
     _add_monster(engine)
-    params = {"daowen_name": "透支", "x": x}
-    if cost_channel is not None:
-        params["touzhi_cost"] = cost_channel
+    params = {"daowen_name": name, "x": x}
     if extra:
         params.update(extra)
     snap = {"hp": player.current_hp, "bl": player.blood_limit,
@@ -157,36 +155,38 @@ def _cast_touzhi(cost_channel=None, x=1, extra=None):
     return engine, player, snap, r
 
 
-def test_touzhi_defaults_to_bleed_channel():
-    """正常路径：缺省通道=流血4X → X法力。"""
+def test_touzhi_only_exhaust_channel():
+    """母本只有枯竭X：不动生命/血限/速度，本次 X 法力仍到账。"""
     engine, player, snap, r = _cast_touzhi()
+    assert r["success"], r
+    assert player.current_hp == snap["hp"]
+    assert player.blood_limit == snap["bl"]
+    assert player.current_speed == snap["sp"]
+    assert player.current_mana == 1
+    assert player.pending_exhaust_mana == 1
+
+
+def test_ranxue_derivative_costs_life():
+    """【燃血】生命4X → X法力（原透支生命通道，汇率不变）。"""
+    engine, player, snap, r = _cast_touzhi("燃血")
     assert r["success"], r
     assert player.current_hp == snap["hp"] - 4
     assert player.current_mana == 1
-    assert player.blood_limit == snap["bl"]  # 其它通道不动
+    assert player.blood_limit == snap["bl"]
 
 
-def test_touzhi_aging_channel_costs_blood_limit():
-    """正常路径：衰老通道 衰老2X → X法力。"""
-    engine, player, snap, r = _cast_touzhi("衰老")
+def test_zheshou_derivative_costs_blood_limit():
+    """【折寿】血限2X → X法力。"""
+    engine, player, snap, r = _cast_touzhi("折寿")
     assert r["success"], r
     assert player.blood_limit == snap["bl"] - 2
-    assert player.current_hp == snap["bl"] - 2  # 血限动词走统一入口：生命随血限封顶
+    assert player.current_hp == snap["bl"] - 2
     assert player.current_mana == 1
 
 
-def test_touzhi_exhaust_channel_registers_next_battle_mana_loss():
-    """正常路径：枯竭通道登记下一次战始法力-X，本次获得的X法力仍到账。"""
-    engine, player, snap, r = _cast_touzhi("枯竭")
-    assert r["success"], r
-    assert player.mana_limit == snap["ml"]
-    assert player.pending_exhaust_mana == 1
-    assert player.current_mana == 1
-
-
-def test_touzhi_fatigue_channel_costs_speed():
-    """正常路径：疲惫通道（原【搏命】）疲惫X → X法力，1:1。"""
-    engine, player, snap, r = _cast_touzhi("疲惫")
+def test_jidai_derivative_costs_speed():
+    """【疾贷】速度X → X法力，1:1。"""
+    engine, player, snap, r = _cast_touzhi("疾贷")
     assert r["success"], r
     assert player.current_speed == snap["sp"] - 1
     assert player.current_mana == 1
@@ -194,18 +194,18 @@ def test_touzhi_fatigue_channel_costs_speed():
     assert "fatigue_cost" in types and "mana_gain" in types
 
 
-def test_touzhi_heart_offsets_same_channel_cost():
-    """正常路径：龙心通用抵扣同类代价（衰老龙心抵衰老通道）。"""
+def test_zheshou_heart_offsets_same_channel_cost():
+    """龙心通用抵扣同类代价（衰老龙心抵【折寿】的血限代价）。"""
     engine = _setup()
     player = engine.state.player
-    _grant(engine, ["透支"])
+    _grant(engine, ["折寿"])
     player.current_mana = 0
     engine.state.consumables = [
         Consumable("衰老龙心", "", 5, 5, kind="dragon_heart", dragon_heart_type="衰老")]
     _add_monster(engine)
     bl0 = player.blood_limit
-    r = engine.execute_action("use_daowen", {"daowen_name": "透支", "x": 1,
-                                             "touzhi_cost": "衰老", "dragon_heart_use": 1})
+    r = engine.execute_action("use_daowen", {"daowen_name": "折寿", "x": 1,
+                                             "dragon_heart_use": 1})
     assert r["success"], r
     fx = next(e for e in r["execution"]["effects"] if e["type"] == "aging_cost")
     assert fx["dragon_heart_offset"] == 1
@@ -214,16 +214,17 @@ def test_touzhi_heart_offsets_same_channel_cost():
     assert player.current_mana == 1
 
 
-def test_touzhi_rejects_illegal_channel_whole_cast():
-    """错误输入：非法通道整单拒绝，代价与法力都不结算。"""
-    engine, player, snap, r = _cast_touzhi("异变")
-    assert not r["success"]
+def test_touzhi_legacy_channel_param_is_ignored():
+    """旧多途径入口已删除：传 touzhi_cost 也只按母本唯一的枯竭途径结算。"""
+    engine, player, snap, r = _cast_touzhi(extra={"touzhi_cost": "异变"})
+    assert r["success"], r
     assert player.current_hp == snap["hp"]
-    assert player.current_mana == 0
+    assert player.pending_exhaust_mana == 1
+    assert player.current_mana == 1
 
 
-def test_touzhi_fatigue_channel_cannot_outpace_chaopin():
-    """核心约束（原【搏命】永动护栏）：透支·速度 + 超频的闭环必须净亏速度。
+def test_jidai_cannot_outpace_chaopin():
+    """核心约束（原【搏命】永动护栏）：疾贷 + 超频的闭环必须净亏速度。
 
     倍率 k=1（速度X→X法力）：卖 X 速度得 X 法力，经超频买回 X/2 速度，
     净变化恒负，不得永动。改倍率前先看这条。
@@ -231,7 +232,7 @@ def test_touzhi_fatigue_channel_cannot_outpace_chaopin():
     from engine.daowen import DaoWenEngine
     DaoWenEngine.register_all()
     for x in (1, 2, 4, 8):
-        sold = DaoWenEngine.resolve("透支", x, target=None, caster=None, cost_channel="速度")
+        sold = DaoWenEngine.resolve("疾贷", x, target=None, caster=None)
         assert sold["cost_type"] == "速度" and sold["cost_speed"] == x
         assert sold["mana_gain"] == x
         mana = sold["mana_gain"]
@@ -240,9 +241,8 @@ def test_touzhi_fatigue_channel_cannot_outpace_chaopin():
                                    caster=None)["cost"] <= mana:
             bought += 1
         net = bought - sold["cost_speed"]
-        assert net < 0, (f"透支·速度{x}卖{sold['cost_speed']}速度换{mana}法力，"
+        assert net < 0, (f"疾贷{x}卖{sold['cost_speed']}速度换{mana}法力，"
                          f"经超频买回{bought}速度，净{net:+d}——非负即可无限永动")
-
 
 
 def test_nixingzhe_grants_touzhi_daowen():

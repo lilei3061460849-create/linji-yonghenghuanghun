@@ -26,7 +26,7 @@ def test_three_daowen_are_written_into_dragon_valley_text_and_index():
     assert "支付待定" not in dungeon
 
     index = (ROOT / "全道纹索引.md").read_text(encoding="utf-8")
-    assert "本索引收录 76 条道纹" in index
+    assert "本索引收录 86 条道纹" in index
     assert "尚未接入运行时的草案节点" not in index
     for name in NAMES:
         assert f"### {name}\n" in index
@@ -35,7 +35,7 @@ def test_three_daowen_are_written_into_dragon_valley_text_and_index():
 
 def test_three_daowen_are_registered_runtime_and_learnable_in_region():
     DaoWenEngine.register_all()
-    assert len(DaoWenEngine._registry) == 76  # 2026-11-08 四副本各补4纹
+    assert len(DaoWenEngine._registry) == 86  # 2026-11-09 +10条衍生道纹
     assert REGION_EXCLUSIVE_DAOWEN["龙心谷"] == {"锻造", "熔化", "炽热", "淬火", "百炼", "锈蚀", "重铸", "回炉"}
     for name in NAMES:
         assert name in DaoWenEngine._registry
