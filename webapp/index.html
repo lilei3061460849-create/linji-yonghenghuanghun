@@ -78,7 +78,7 @@
   .modal{position:fixed;inset:0;background:rgba(6,9,12,.82);display:flex;align-items:center;
     justify-content:center;z-index:20;padding:18px}
   .modal.hidden{display:none}
-  .modal .card{width:min(520px,100%);background:var(--panel)}
+  .modal .card{width:min(520px,100%);background:var(--panel);max-height:92dvh;overflow:auto}
   .field{display:flex;align-items:center;gap:8px;margin:7px 0}
   .field label{width:82px;color:var(--muted);font-size:13px}
   .field input[type=number]{width:74px}
@@ -106,7 +106,7 @@
     font-size:13px;margin-bottom:10px}
   .banner.dead{border-color:#5c2b27;background:#241716;color:#f0a49c}
   /* 横屏（手机横过来 / 桌面）：地图与右侧面板并排，把一屏用满 */
-  @media (orientation: landscape) and (max-height: 640px){
+  @media (orientation: landscape){
     header{padding:6px 12px;gap:10px;position:sticky;top:0}
     header h1{font-size:13px;letter-spacing:.08em}
     .stats{gap:10px;font-size:12px}
@@ -120,6 +120,25 @@
     .legend{font-size:11px;gap:10px}
     .hint{font-size:11px}
   }
+  /* 横屏且够宽（手机桌面版≈980px）：左段自己再分两栏 —— 地图 | 战斗/事件 */
+  @media (orientation: landscape) and (min-width: 860px){
+    main{grid-template-columns:minmax(0,1fr) minmax(290px,.52fr)}
+    main > section.stack{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
+      gap:10px;align-items:start}
+    main > section.stack > .card{margin:0}
+  }
+  /* 横屏但很窄（老手机 640×360）：右栏收窄，别把地图挤没 */
+  @media (orientation: landscape) and (max-width: 859px){
+    main{grid-template-columns:minmax(0,1fr) minmax(230px,.62fr)}
+  }
+  /* 沉浸模式：预览 iframe 常常不允许真全屏，就用它把顶栏让出来铺满窗口 */
+  body.immersive header{display:none}
+  body.immersive main{padding:6px 10px 12px;max-width:none;
+    grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);gap:8px}
+  body.immersive .card{padding:8px}
+  body.immersive .log{max-height:130px}
+  #immExit{display:none;position:fixed;right:8px;top:8px;z-index:60}
+  body.immersive #immExit{display:block}
 </style>
 </head>
 <body>
@@ -251,6 +270,8 @@
   </div>
 </div>
 
+<button id="immExit">✕ 退出沉浸</button>
+
 <div id="toast"></div>
 
 <script>
@@ -288,14 +309,23 @@ function fsActive(){
 }
 function syncFsButton(){
   const btn = $("fsBtn");
-  if (btn) btn.textContent = fsActive() ? "⛶ 退出全屏" : "⛶ 全屏";
+  if (btn) btn.textContent = (fsActive() || immersiveOn()) ? "✕ 退出沉浸" : "⛶ 全屏 / 沉浸";
+}
+function immersiveOn(){
+  return document.body.classList.contains("immersive");
 }
 async function toggleFullscreen(){
   const el = document.documentElement;
+  if (immersiveOn() && !fsActive()){
+    document.body.classList.remove("immersive");
+    syncFsButton();
+    setTimeout(() => { if (S) render(); }, 60);
+    return;
+  }
   try{
     if (!fsActive()){
       const req = el.requestFullscreen || el.webkitRequestFullscreen;
-      if (!req){ toast("这个浏览器不支持全屏，直接把手机横过来用"); return; }
+      if (!req) throw new Error("浏览器不支持全屏");
       await req.call(el, {navigationUI: "hide"});
       if (screen.orientation && screen.orientation.lock){
         try { await screen.orientation.lock("landscape"); } catch(e){ /* 不支持就忽略 */ }
@@ -306,9 +336,13 @@ async function toggleFullscreen(){
       }
       const exit = document.exitFullscreen || document.webkitExitFullscreen;
       if (exit) await exit.call(document);
+      document.body.classList.remove("immersive");
     }
   } catch(e){
-    toast("全屏失败：" + (e && e.message ? e.message : "浏览器不支持"));
+    // 预览是嵌在 Arena 的 iframe 里的，没给 allowfullscreen 就必然被拒；
+    // 真全屏拿不到就退一档：隐藏顶栏、两栏铺满窗口（沉浸模式）。
+    document.body.classList.add("immersive");
+    toast("预览窗口不给真全屏，已切到沉浸模式（顶栏隐藏，画面铺满）");
   } finally {
     syncFsButton();
     setTimeout(() => { if (S) render(); }, 120);
@@ -387,9 +421,10 @@ function renderMap(){
   const w = S && S.world;
   if (!w || !w.self) return;
   const span = Math.max(w.map_size.width, w.map_size.height, 1);
-  const landscape = window.matchMedia("(orientation: landscape) and (max-height: 640px)").matches;
-  const budgetW = Math.max(260, window.innerWidth - (landscape ? 470 : 60));
-  const budgetH = Math.max(200, window.innerHeight - (landscape ? 190 : 420));
+  const wide = immersiveOn() || window.matchMedia("(orientation: landscape)").matches
+    || window.innerWidth >= 960;
+  const budgetW = Math.max(240, window.innerWidth - (wide ? 430 : 60));
+  const budgetH = Math.max(180, window.innerHeight - (wide ? 170 : 420));
   const size = Math.max(12, Math.min(28, Math.floor(Math.min(budgetW / span, budgetH / span))));
   map.style.gridTemplateColumns = `repeat(${w.map_size.width}, ${size}px)`;
   const terrain = new Map((w.known_terrain||[]).map(t => [`${t.x},${t.y}`, t.terrain]));
@@ -982,6 +1017,7 @@ $("waitBtn").onclick = () => act("world_wait", {turns: 1});
 $("wait5Btn").onclick = () => act("world_wait", {turns: 5});
 $("newBtn").onclick = () => $("newModal").classList.remove("hidden");
 $("fsBtn").onclick = toggleFullscreen;
+$("immExit").onclick = toggleFullscreen;
 document.addEventListener("fullscreenchange", () => { syncFsButton(); if (S) render(); });
 document.addEventListener("webkitfullscreenchange", syncFsButton);
 let _resizeTimer = null;
