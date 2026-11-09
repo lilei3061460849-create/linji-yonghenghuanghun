@@ -548,12 +548,28 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        # 预览面板可能以跨源 iframe 嵌入：公开只读的单会话演示，允许任意源。
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
     def _json(self, payload: dict[str, Any], status: int = 200) -> None:
         self._send(status, json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                    "application/json; charset=utf-8")
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        """预检请求直接放行。
+
+        页面用同源 fetch，本来不该有预检；但预览网关/某些移动端浏览器会先
+        发 OPTIONS 探路，BaseHTTPRequestHandler 默认回 501，容易被中间层
+        显示成错误页。这里统一回 204。
+        """
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0]
