@@ -15,6 +15,7 @@ import sqlite3
 from typing import Optional
 from pathlib import Path
 from .daowen import DaoWenEngine
+from . import derivatives as derivative_rules
 from .dm_rulings import DMRulingsDB
 from .document_sources import (COMMON_RULES_FILE, DEATH_BOOK_FILE, DUNGEON_INDEX_FILE,
                                ITEM_INDEX_FILE)
@@ -168,23 +169,33 @@ class RuleSync:
 
         definitions: dict[str, dict] = {}
         lines = content.splitlines()
+        # 2026-11-09：【衍生道纹】条文与通用道纹同写《规则正文》，但衍生不是通用
+        # 道纹（不进学习/发现池、不占四面体节点、只能局外衍生获取）。抽取通用
+        # 道纹时必须按唯一事实源把它们排除，否则 common 19→29 且双事实源失配。
+        def is_common_only(name: str) -> bool:
+            return not (full_path.name == COMMON_RULES_FILE
+                        and derivative_rules.is_derivative(name))
+
         for line_number, line in enumerate(lines, 1):
             # 标准格式：道纹X（可选说明）：效果；副本正文统一使用此格式。
             standard = re.match(
                 r"^(?:\d+\.)?([\u4e00-\u9fff]{2})X(?:（[^）]*）)?[：:](.+)$", line)
             if standard:
                 name, description = standard.groups()
-                definitions.setdefault(name, {
-                    "name": name,
-                    "description": description.strip(),
-                    "source": filepath,
-                    "line": line_number,
-                })
+                if is_common_only(name):
+                    definitions.setdefault(name, {
+                        "name": name,
+                        "description": description.strip(),
+                        "source": filepath,
+                        "line": line_number,
+                    })
 
             # 规则正文的原始/转化道纹使用“名称X（消耗/代价与效果）”内联格式。
             for name, description in re.findall(
                     r"([\u4e00-\u9fff]{2})X（([^（）]+)）", line):
                 if not any(label in description for label in ("消耗", "代价", "支付")):
+                    continue
+                if not is_common_only(name):
                     continue
                 definitions.setdefault(name, {
                     "name": name,
@@ -194,6 +205,36 @@ class RuleSync:
                 })
 
         return list(definitions.values())
+
+    def extract_derivative_daowen(self, filepath: str = COMMON_RULES_FILE) -> list[dict]:
+        """从《规则正文》【衍生道纹】节抽取衍生条文（与通用道纹分开计数）。
+
+        衍生条文与通用道纹写在同一个文件里，但既不是通用道纹也不是副本道纹：
+        `extract_daowen_from_file` 必须继续只返回 19 条通用，差异检测则需要把
+        这 10 条算进「正文已定义」，否则引擎注册会被误报成 engine-only 缺口。
+        """
+        full_path = Path(filepath) if Path(filepath).is_absolute() else Path(self.rules_dir) / filepath
+        if not full_path.exists():
+            return []
+        lines = full_path.read_text(encoding="utf-8").splitlines()
+        start = next((i for i, line in enumerate(lines) if line == "### 衍生道纹"), None)
+        if start is None:
+            return []
+        end = next((i for i in range(start + 1, len(lines))
+                    if lines[i].startswith("### ")), len(lines))
+        rows: list[dict] = []
+        for index in range(start + 1, end):
+            match = re.match(
+                r"^([\u4e00-\u9fff]{2})X(?:（[^）]*）)?[：:](.+)$", lines[index])
+            if match and derivative_rules.is_derivative(match.group(1)):
+                rows.append({
+                    "name": match.group(1),
+                    "description": match.group(2).strip(),
+                    "source": filepath,
+                    "line": index + 1,
+                    "category": "derivative",
+                })
+        return rows
 
     def extract_events_from_file(self, filepath: str) -> list[dict]:
         """从规则文件中提取事件定义"""
@@ -449,6 +490,7 @@ class RuleSync:
         manifest = load_dungeon_manifest(index_path)
         return {
             "common_daowen": self.extract_daowen_from_file(COMMON_RULES_FILE),
+            "derivative_daowen": self.extract_derivative_daowen(COMMON_RULES_FILE),
             "dungeon_daowen": self.extract_dungeon_daowen(include_drafts=True),
             "event_daowen": self.extract_event_daowen(),
             "spells": self.extract_spells_from_file(DEATH_BOOK_FILE),
@@ -480,6 +522,7 @@ class RuleSync:
     def diff_project_daowen(self) -> dict:
         """比较引擎与当前已实现正文中的通用及副本专属道纹。"""
         file_daowen = self.extract_daowen_from_file(COMMON_RULES_FILE)
+        file_daowen += self.extract_derivative_daowen(COMMON_RULES_FILE)
         file_daowen += self.extract_dungeon_daowen(include_drafts=False)
         # 初拥选项5中的专属道纹定义于结构化特殊事件事实源，而非通用/副本正文。
         file_daowen += self.extract_event_daowen()
