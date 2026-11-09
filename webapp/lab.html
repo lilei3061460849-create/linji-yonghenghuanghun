@@ -82,6 +82,18 @@
     max-width:88vw;opacity:0;pointer-events:none;transition:.2s;z-index:30;white-space:pre-wrap;font-size:13px}
   #toast.show{opacity:1}
   [hidden]{display:none !important}
+  /* 横屏（手机横过来 / 桌面）：角色库与对战配置并排，减少上下滚动 */
+  @media (orientation: landscape) and (max-height: 640px){
+    header{padding:6px 12px;position:sticky;top:0;z-index:6}
+    header h1{font-size:13px}
+    .tabs{max-width:none;padding:6px 12px}
+    .tabs button{padding:7px 10px}
+    main{max-width:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:10px;padding:8px 12px 60px;align-items:start}
+    .chips{max-height:132px}
+    .summary{grid-template-columns:repeat(3,1fr)}
+    #result{grid-column:1 / -1}
+  }
 </style>
 </head>
 <body>
@@ -89,6 +101,7 @@
   <h1>临济·永恒黄昏 · 演武场</h1>
   <span class="hint">角色卡 + A vs B</span>
   <span class="spacer"></span>
+  <button id="fsBtn" class="mini" hidden>⛶ 全屏</button>
   <a href="/" style="font-size:13px">返回地图</a>
 </header>
 
@@ -662,6 +675,39 @@ function renderBMonsters(){
     box.append(row);
   }
 }
+
+/* 全屏按钮（手机横屏排布时更好用）；不支持的浏览器自动隐藏。 */
+(function setupFullscreen(){
+  const btn = document.getElementById("fsBtn");
+  if (!btn) return;
+  if (!(document.documentElement.requestFullscreen
+        || document.documentElement.webkitRequestFullscreen)) return;
+  btn.hidden = false;
+  const active = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  const sync = () => { btn.textContent = active() ? "⛶ 退出全屏" : "⛶ 全屏"; };
+  btn.onclick = async () => {
+    const el = document.documentElement;
+    try{
+      if (!active()){
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        await req.call(el, {navigationUI: "hide"});
+        if (screen.orientation && screen.orientation.lock){
+          try { await screen.orientation.lock("landscape"); } catch(e){ /* 忽略 */ }
+        }
+      } else {
+        if (screen.orientation && screen.orientation.unlock){
+          try { screen.orientation.unlock(); } catch(e){ /* 忽略 */ }
+        }
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) await exit.call(document);
+      }
+    } catch(e){
+      if (typeof toast === "function") toast("全屏失败：" + (e && e.message ? e.message : "浏览器不支持"));
+    } finally { sync(); }
+  };
+  document.addEventListener("fullscreenchange", sync);
+  document.addEventListener("webkitfullscreenchange", sync);
+})();
 
 async function startDuel(){
   const a = findChar($("aSelect").value);

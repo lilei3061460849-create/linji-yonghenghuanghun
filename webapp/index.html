@@ -105,6 +105,21 @@
   .banner{border:1px solid #6d5a2a;background:#241f14;color:#f2d99a;border-radius:8px;padding:8px 10px;
     font-size:13px;margin-bottom:10px}
   .banner.dead{border-color:#5c2b27;background:#241716;color:#f0a49c}
+  /* 横屏（手机横过来 / 桌面）：地图与右侧面板并排，把一屏用满 */
+  @media (orientation: landscape) and (max-height: 640px){
+    header{padding:6px 12px;gap:10px;position:sticky;top:0}
+    header h1{font-size:13px;letter-spacing:.08em}
+    .stats{gap:10px;font-size:12px}
+    .bar{width:78px;height:7px}
+    main{grid-template-columns:minmax(0,1.2fr) minmax(300px,.8fr);gap:10px;
+      padding:8px 12px 20px;max-width:none;align-items:start}
+    .card{padding:9px}
+    .card h2{margin-bottom:7px}
+    .log{max-height:150px}
+    #map{padding:5px;gap:1px}
+    .legend{font-size:11px;gap:10px}
+    .hint{font-size:11px}
+  }
 </style>
 </head>
 <body>
@@ -113,6 +128,7 @@
   <div class="stats" id="stats"></div>
   <div class="spacer"></div>
   <a href="/lab" style="text-decoration:none"><button>角色演武场 · 自定义开局</button></a>
+  <button id="fsBtn" title="进入/退出全屏（横屏更好用）">⛶ 全屏</button>
   <button id="newBtn">新开一局</button>
 </header>
 
@@ -265,6 +281,40 @@ async function api(path, body){
   return data;
 }
 
+/* 全屏：手机横屏推演时按钮/地图能占满一屏。Firefox Android 支持标准
+   Fullscreen API；进入后顺带尝试锁横屏（不支持就静默忽略，用户自己转）。 */
+function fsActive(){
+  return !!(document.fullscreenElement || document.webkitFullscreenElement);
+}
+function syncFsButton(){
+  const btn = $("fsBtn");
+  if (btn) btn.textContent = fsActive() ? "⛶ 退出全屏" : "⛶ 全屏";
+}
+async function toggleFullscreen(){
+  const el = document.documentElement;
+  try{
+    if (!fsActive()){
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!req){ toast("这个浏览器不支持全屏，直接把手机横过来用"); return; }
+      await req.call(el, {navigationUI: "hide"});
+      if (screen.orientation && screen.orientation.lock){
+        try { await screen.orientation.lock("landscape"); } catch(e){ /* 不支持就忽略 */ }
+      }
+    } else {
+      if (screen.orientation && screen.orientation.unlock){
+        try { screen.orientation.unlock(); } catch(e){ /* 忽略 */ }
+      }
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) await exit.call(document);
+    }
+  } catch(e){
+    toast("全屏失败：" + (e && e.message ? e.message : "浏览器不支持"));
+  } finally {
+    syncFsButton();
+    setTimeout(() => { if (S) render(); }, 120);
+  }
+}
+
 async function act(action, params){
   if (busy) return; busy = true;
   try {
@@ -336,7 +386,11 @@ function renderMap(){
   const map = $("map"); map.innerHTML = "";
   const w = S && S.world;
   if (!w || !w.self) return;
-  const size = Math.max(16, Math.min(28, Math.floor(620 / Math.max(w.map_size.width, w.map_size.height))));
+  const span = Math.max(w.map_size.width, w.map_size.height, 1);
+  const landscape = window.matchMedia("(orientation: landscape) and (max-height: 640px)").matches;
+  const budgetW = Math.max(260, window.innerWidth - (landscape ? 470 : 60));
+  const budgetH = Math.max(200, window.innerHeight - (landscape ? 190 : 420));
+  const size = Math.max(12, Math.min(28, Math.floor(Math.min(budgetW / span, budgetH / span))));
   map.style.gridTemplateColumns = `repeat(${w.map_size.width}, ${size}px)`;
   const terrain = new Map((w.known_terrain||[]).map(t => [`${t.x},${t.y}`, t.terrain]));
   const visible = new Set((w.visible_cells||[]).map(c => `${c[0]},${c[1]}`));
@@ -927,6 +981,14 @@ document.addEventListener("keydown", (e) => {
 $("waitBtn").onclick = () => act("world_wait", {turns: 1});
 $("wait5Btn").onclick = () => act("world_wait", {turns: 5});
 $("newBtn").onclick = () => $("newModal").classList.remove("hidden");
+$("fsBtn").onclick = toggleFullscreen;
+document.addEventListener("fullscreenchange", () => { syncFsButton(); if (S) render(); });
+document.addEventListener("webkitfullscreenchange", syncFsButton);
+let _resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => { if (S) renderMap(); }, 150);
+});
 $("rawSend").onclick = () => {
   let params = {};
   try { params = JSON.parse($("rawParams").value || "{}"); }
