@@ -18,6 +18,26 @@ from engine.daowen import DaoWenEngine
 from webapp import lab
 
 
+def test_derivative_daowen_can_go_straight_into_a_character_sheet():
+    """2026-11-09 用户令：衍生道纹也能像普通道纹一样直接放进角色卡的道纹栏。
+
+    角色卡是局外配装，不该被「局内 0 出手衍生」这一条获得途径锁死——衍生道纹
+    既是母本的收益置换，也是怪物去同质化的素材，必须先能在卡里选到。
+    """
+    from webapp import lab
+
+    groups = {g["label"]: g["names"] for g in lab.options(refresh=True)["daowen_groups"]}
+    label = next(name for name in groups if name.startswith("衍生道纹"))
+    assert set(groups[label]) >= {"连击", "连珠", "血伐", "舍力", "疾贷"}
+
+    sheet = lab.normalize_sheet({
+        "name": "衍生测试", "mode": "free", "blood_limit": 40,
+        "speed_limit": 6, "mana_limit": 8, "resonance": "转换",
+        "daowen": ["杀伐", "连击", "血伐"],
+    })
+    assert sheet["daowen"] == ["杀伐", "连击", "血伐"]
+
+
 def test_options_only_expose_runtime_entries():
     catalog = lab.options(refresh=True)
     assert [region["name"] for region in catalog["regions"]]

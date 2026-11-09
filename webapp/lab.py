@@ -27,6 +27,7 @@ from engine.api import GameEngine
 from engine.consumables import WING_ITEM_SPECS, make_wing_item
 from engine.daowen import DaoWenEngine
 from engine.daowen_text import daowen_effects
+from engine import derivatives as derivative_rules
 from engine.events import EVENT_CONSUMABLES, TWISTED_TOOL_LIBRARY
 from engine.gamedata import (
     FIRST_EMBRACE_DAOWEN,
@@ -86,6 +87,11 @@ def _daowen_groups() -> list[dict[str, Any]]:
         seen.update(picked)
         groups.append({"label": label, "names": picked, "note": note})
 
+    # 2026-11-09 用户令：衍生道纹可以像普通道纹一样直接放进角色卡的道纹栏，
+    # 不必非得在局内花【转换】+血限2+碎片3 去发现。这里单独成组，名字与条文
+    # 直接从 engine.derivatives 取，避免界面自建一份名单。
+    add("衍生道纹（母本衍生）", [spec.name for spec in derivative_rules.DERIVATIVE_SPECS],
+        "由母本道纹（杀伐／透支／再生）收益置换而来；局内也可用 0 出手【衍生】发现。")
     add("通用核心（开局可发现）", list(SHAFA_LOOP_DAOWEN),
         "开局【发现】只从这八种里抽；演武场里可任选。")
     add("原始怪物", sorted(ORIGINAL_MONSTER_DAOWEN))
