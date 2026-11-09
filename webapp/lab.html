@@ -208,6 +208,10 @@
         </select></label>
         <label class="field">种子<input id="dSeed" placeholder="留空=随机"></label>
       </div>
+      <label class="check" style="display:flex;align-items:center;gap:8px;margin:6px 0">
+        <input type="checkbox" id="dManual" checked>
+        <span>推演模式：双方都由我操作（B 方回合不用 AI，适合测试）</span>
+      </label>
       <div class="btnbar">
         <button id="startDuel" class="primary">开始 A vs B 对战</button>
       </div>
@@ -664,6 +668,7 @@ async function startDuel(){
   if (!a){ toast("先选 A 方角色"); return; }
   const payload = {
     a: {id: a.id},
+    manual_both: !!($("dManual") && $("dManual").checked),
     region: $("dRegion").value,
     width: Number($("dSize").value),
     height: Number($("dSize").value),

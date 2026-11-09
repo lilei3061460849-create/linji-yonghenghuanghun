@@ -246,6 +246,7 @@ const SUGGESTIONS = [
 ];
 let S = null;
 let busy = false;
+let MANUAL = null;   // 推演模式：B 方待点选的行动（prepare_monster_phase 结果）
 
 const $ = (id) => document.getElementById(id);
 function el(tag, cls, text){ const n = document.createElement(tag); if(cls) n.className = cls;
@@ -637,7 +638,9 @@ function renderBattle(){
     const row = el("div", "combatant " + (c.side === "enemy" ? "side-enemy" : "side-player")
       + (c.alive ? "" : " dead"));
     const combat = (c.attack_count > 0) ? ` · 攻 ${c.attack_count}×${c.attack_power}` : "";
-    row.append(el("span","name", c.name), el("span","hp", `${c.hp}/${c.hp_limit}${combat}`));
+    const left = (c.actions_left !== undefined) ? ` · 余 ${c.actions_left}/${c.action_budget} 手` : "";
+    row.append(el("span","name", c.name),
+               el("span","hp", `${c.hp}/${c.hp_limit}${combat}${left}`));
     body.append(row);
   }
   if (!S.player || !S.player.alive){
@@ -646,6 +649,16 @@ function renderBattle(){
   }
   const avail = (S.actions && S.actions.actions || []).map(a => a.action_type);
   const has = (name) => avail.includes(name);
+  if (b.manual_both){
+    const foesAlive = b.combatants.filter(c => c.side === "enemy" && c.alive && c.ref);
+    const turnText = b.duel_turn === "opponent_side"
+      ? `当前行动方：B 方（${foesAlive.map(c => c.name).join("、") || "无存活单位"}）`
+      : "当前行动方：A 方";
+    body.append(el("div","banner", turnText + " · 推演模式（不用 AI，双方都由你操作）"));
+    if (b.duel_turn === "opponent_side" && !b.peaceful && foesAlive.length){
+      body.append(manualEnemyPanel(foesAlive));
+    }
+  }
   const row = el("div","row"); row.style.marginTop = "8px";
 
   const endBtn = () => {
@@ -681,6 +694,98 @@ function renderBattle(){
     };
     return b2;
   };
+
+
+function manualEnemyPanel(foesAlive){
+  /* 推演模式：B 方回合由用户点选一次真实行动（不用 AI）。
+     提交后引擎按「交替出手」自动换回 A 方，面板随之消失。 */
+  const wrap = el("div","stack");
+  if (!MANUAL){
+    const prep = el("button","primary","① 准备 B 方行动");
+    prep.onclick = async () => {
+      if (busy) return; busy = true;
+      try{
+        const data = await api("/api/ui_monster_prepare", {});
+        if (!data.success){ toast("准备失败：" + (data.error || "未知错误")); return; }
+        MANUAL = data.prepare || {};
+        render();
+      } catch(e){ toast("请求失败：" + e.message); }
+      finally { busy = false; }
+    };
+    wrap.append(prep, el("div","hint","点了之后会列出 B 方这次能做什么：攻击谁、闪不闪、用哪个道纹。"));
+    return wrap;
+  }
+  const actor = (MANUAL.actors || [])[0];
+  const actionRow = el("div","row"); actionRow.style.marginTop = "8px";
+  const finish = (params) => async () => {
+    if (busy) return; busy = true;
+    try{
+      const data = await api("/api/ui_monster_phase", params);
+      if (!data.success){ toast("B 方行动失败：" + (data.result && data.result.error)); return; }
+      MANUAL = null; render();
+    } catch(e){ toast("请求失败：" + e.message); }
+    finally { busy = false; }
+  };
+  const endTurn = async () => {
+    if (busy) return; busy = true;
+    try{
+      const data = await api("/api/ui_end_side", {actor_ref: foesAlive[0].ref});
+      if (!data.success) toast("结束回合失败：" + (data.result && data.result.error));
+      else MANUAL = null;
+    } catch(e){ toast("请求失败：" + e.message); }
+    finally { busy = false; }
+  };
+  if (!actor){
+    wrap.append(el("div","kv","B 方这次没有合法行动。"));
+    const skip = el("button","primary","结束 B 方回合（保留剩余出手）");
+    skip.onclick = endTurn;
+    actionRow.append(skip);
+    wrap.append(actionRow);
+    return wrap;
+  }
+  wrap.append(el("div","kv", `轮到 ${actor.monster || actor.actor_ref}：${(actor.attack_target_options||[]).length ? `可攻击 ${actor.hit_count} 击、总伤害上限 ${actor.damage_budget}` : "没有攻击目标"}`));
+  /* 目标 */
+  let targetSelect = null;
+  const targets = actor.attack_target_options || [];
+  if (targets.length){
+    targetSelect = el("select");
+    for (const t of targets){
+      const o = el("option", null, `${t.name}（${t.ref}）`); o.value = t.ref; targetSelect.append(o);
+    }
+    const trow = el("div","field"); trow.append(el("label",null,"攻击目标"), targetSelect);
+    wrap.append(trow);
+  }
+  /* 道纹（可选） */
+  let daowenSelect = null;
+  const daowens = actor.daowen_options || [];
+  daowenSelect = el("select");
+  const none = el("option", null, "（不使用道纹，进行普通攻击）"); none.value = ""; daowenSelect.append(none);
+  for (const d of daowens){
+    const o = el("option", null, `道纹：${d.name}${d.x ? ` X=${d.x}` : ""}`); o.value = d.name; daowenSelect.append(o);
+  }
+  if (daowens.length){
+    const draw = el("div","field"); draw.append(el("label",null,"道纹"), daowenSelect);
+    wrap.append(draw);
+  }
+  /* 闪避 */
+  const dodgeWrap = el("label","kv"); dodgeWrap.style.margin = "6px 0";
+  const dodge = el("input"); dodge.type = "checkbox";
+  dodgeWrap.append(dodge, document.createTextNode(" 这次攻击尝试闪避"));
+  wrap.append(dodgeWrap);
+  /* 操作 */
+  const go = el("button","primary","执行 B 方行动");
+  go.onclick = () => {
+    const params = {manual: true, dodge: !!dodge.checked};
+    if (targetSelect) params.target_ref = targetSelect.value;
+    if (daowenSelect && daowenSelect.value) params.daowen_name = daowenSelect.value;
+    finish(params)();
+  };
+  const endSide = el("button","","结束 B 方回合（保留剩余出手）");
+  endSide.onclick = endTurn;
+  actionRow.append(go, endSide);
+  wrap.append(actionRow);
+  return wrap;
+}
 
   if (b.peaceful){
     row.append(endBtn());
@@ -744,14 +849,17 @@ function renderBattle(){
     row.append(prep);
   }
   if (has("resolve_ally_phases")) row.append(allyBtn());
-  if (has("prepare_monster_phase") || has("resolve_monster_phase")) row.append(monsterBtn(dodgeBoxes));
+  if (!b.manual_both && (has("prepare_monster_phase") || has("resolve_monster_phase"))) {
+    row.append(monsterBtn(dodgeBoxes));
+  }
   if (has("round_end")) row.append(roundEndBtn());
   if (has("round_start")) row.append(roundStartBtn());
   if (has("battle_end")) row.append(endBtn());
   body.append(row);
 
   const foes = (b.combatants || []).filter(c => c.side === "enemy" && c.alive && c.ref);
-  if (foes.length && (has("prepare_monster_phase") || has("resolve_monster_phase"))){
+  if (!b.manual_both && foes.length
+      && (has("prepare_monster_phase") || has("resolve_monster_phase"))){
     const dodgeWrap = el("div","kv");
     dodgeWrap.append(document.createTextNode("敌方阶段尝试闪避："));
     foes.forEach((c) => {

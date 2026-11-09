@@ -638,6 +638,13 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
 
     engine = _new_engine(payload)
     notes: list[str] = []
+    # 推演模式（2026-11-09 用户令）：演武场是给自己推演/测试用的，AI 自动打会
+    # 干扰测试，所以允许「双方都手动」——每方行动完由引擎的交替出手自动换边，
+    # 敌方回合由用户在下方面板里点选，服务端不再调用 AI 启发式。
+    manual_both = bool(payload.get("manual_both"))
+    engine.state.event_modifiers["lab_manual_both"] = manual_both
+    if manual_both:
+        notes.append("推演模式：双方都由你操作，B 方回合不使用 AI。")
     _apply_loadout(engine, a_sheet, region, notes)
 
     if b_is_monster:
@@ -660,8 +667,8 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
             notes.append(
                 f"B方遗物按敌方轮回者通道（opponent_relics）生效："
                 f"启用 {enabled}/{len(b_sheet['relics'])} 件；"
-                "遗物按持有者阵营结算（回锋刀[回始]、减速、忘忧香已与 A 方对称）；"
-                "仅「无所求」事件选项与「同魂笔」第二目标提交依赖玩家交互，B 方无对应动作。")
+                "遗物按持有者阵营结算（回锋刀[回始]、减速、忘忧香、同魂笔已与 A 方对称）；"
+                "仅「无所求」事件选项依赖玩家交互，B 方无对应动作。")
     else:
         notes.append(f"B方怪物：{'、'.join(b_names)}")
     notes.append(f"开战：{'、'.join(battle['enemies'])}")

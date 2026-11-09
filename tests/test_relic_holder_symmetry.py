@@ -7,7 +7,8 @@
 - 【减速】[战始]：持有者让**自己的敌对侧**当前速度减半；
 - 【回锋刀】[回始]：持有者按 3×（速限−当前速度）造伤，敌方没有「显式提交
   目标」这一步，走确定性缺省目标；
-- 【忘忧香】：溢出回复 1:1 转格挡，敌方轮回者从 `opponent_relics` 读取。
+- 【忘忧香】：溢出回复 1:1 转格挡，敌方轮回者从 `opponent_relics` 读取；
+- 【同魂笔】：施法者持有即生效，B 方发动残韵时同样能影响第二个目标。
 """
 import os
 import sys
@@ -129,3 +130,52 @@ def test_player_side_wangyouxiang_still_covers_friends():
 
     assert detail["wangyouxiang_block"] == 7
     assert friend.shield == 7
+
+
+# ---------------------------------------------------------------- 同魂笔
+
+
+def _daowen(name):
+    from engine.models import DaoWen, DaoWenInstance
+    return DaoWenInstance(DaoWen(name=name, formula="", cost_type="消耗",
+                                 cost_formula="X", effect_formula=""))
+
+
+def _tonghunbi_setup(*, b_holds_pen=True):
+    engine, player = _engine()
+    player.dao_wen["杀伐"] = _daowen("杀伐")
+    friend = Entity("友", "朋友", blood_limit=30, current_hp=30)
+    friend.dao_wen["再生"] = _daowen("再生")
+    engine.state.friends = [friend]
+    rival = _rival(engine)
+    rival.resonance = {"反转": 1}
+    engine.state.opponent_relics = (
+        [Relic(name="同魂笔", effect="", enabled=True)] if b_holds_pen else [])
+    return engine, player, friend, rival
+
+
+def _cast_by_rival(engine):
+    return engine.execute_action("use_resonance", {
+        "actor_ref": "enemy:0", "source_daowen": "杀伐", "resonance_type": "反转",
+        "target_ref": "player:0", "second_target_ref": "friend:0",
+        "second_source_daowen": "再生",
+    })
+
+
+def test_opponent_tonghunbi_affects_the_second_target():
+    """B 方持【同魂笔】：B 发动残韵时，第二目标身上同种道纹也受同种残韵影响。"""
+    engine, player, friend, rival = _tonghunbi_setup()
+    result = _cast_by_rival(engine)
+    assert result["success"], result
+    log = result["second_target_log"]
+    assert log and "同魂笔" in log and "永久变为杀伐" in log
+    assert "杀伐" in friend.dao_wen
+    assert "杀伐" in rival.dao_wen
+
+
+def test_opponent_without_tonghunbi_gets_no_second_target_effect():
+    engine, player, friend, rival = _tonghunbi_setup(b_holds_pen=False)
+    result = _cast_by_rival(engine)
+    assert result["success"], result
+    assert result["second_target_log"] is None
+    assert "再生" in friend.dao_wen

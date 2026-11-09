@@ -161,10 +161,17 @@ def _battle_view(engine: GameEngine) -> dict[str, Any] | None:
             "alive": bool(entity.is_alive and not entity.is_departed),
             "attack_count": entity.effective_attack_count(),
             "attack_power": entity.effective_attack_power(),
+            "actions_used": entity.actions_used_this_round,
+            "action_budget": engine._action_budget_of(entity),
+            "actions_left": max(0, engine._action_budget_of(entity)
+                                - entity.actions_used_this_round),
         })
     view: dict[str, Any] = {
         "round": state.current_round,
         "subphase": state.combat_subphase,
+        "duel_turn": state.duel_turn or "player_side",
+        "manual_both": bool(state.event_modifiers.get("lab_manual_both")),
+        "monster_pending": bool(state.pending_monster_phase),
         "combatants": sides,
         "actions_used": state.player.actions_used_this_round,
         "action_budget": engine._action_budget_of(state.player),
@@ -265,6 +272,8 @@ def _snapshot(engine: GameEngine | None) -> dict[str, Any]:
         "battle": _battle_view(engine),
         "event": _event_view(engine, actions),
         "actions": actions,
+        "manual_both": bool(
+            engine.state.event_modifiers.get("lab_manual_both")),
         "log": SESSION["log"][-80:],
     }
 
@@ -396,6 +405,88 @@ def _monster_choices(engine: GameEngine, actors: list[dict],
     return choices
 
 
+def _manual_monster_choices(engine: GameEngine, actors: list[dict],
+                           params: dict[str, Any]) -> list[dict]:
+    """推演模式：把**用户点选**翻译成 resolve_monster_phase 的合法提交。
+
+    与 `_monster_choices`（AI 口径）并列，不做任何启发式：目标就是用户选的
+    目标；用户点「不使用」/「跳过」就交空组；道纹必须落在 prepare 给出的
+    合法选项里，否则报错让用户重选（不替用户挑）。
+    """
+    choices: list[dict] = []
+    for actor in actors:
+        name = actor.get("monster") or actor["actor_ref"]
+        daowen_name = str(params.get("daowen_name") or "")
+        option = next((o for o in (actor.get("daowen_options") or [])
+                       if o.get("name") == daowen_name), None)
+        if daowen_name and option is None:
+            raise ValueError(f"{name}当前没有可用的道纹【{daowen_name}】（残韵/代价不足或不在选项中）")
+        if option is not None:
+            choices.append({"actor_ref": actor["actor_ref"],
+                            "daowen": daowen_submission(option),
+                            "attack_actions": []})
+            continue
+        targets = actor.get("attack_target_options") or []
+        action_count = int(actor.get("base_attack_actions") or 0)
+        hit_count = int(actor.get("base_hits_per_attack") or 0)
+        if not targets or action_count <= 0 or hit_count <= 0:
+            # 没有合法攻击目标：引擎要求 actions 组数恰好等于 base_attack_actions，
+            # 空组即「这次什么都不做」。
+            choices.append({"actor_ref": actor["actor_ref"], "daowen": None,
+                            "attack_actions": [{"hits": []}
+                                               for _ in range(max(0, action_count))]})
+            continue
+        legal = {t["ref"]: t for t in targets}
+        target_ref = str(params.get("target_ref") or "")
+        if target_ref not in legal:
+            target_ref = targets[0]["ref"]
+        target_option = legal[target_ref]
+        dodge = bool(params.get("dodge"))
+        spells = decline_reaction_spell_choices(target_option)
+        hits = [{"target_ref": target_ref, "dodge": dodge,
+                 "blood_shadow": False,
+                 "spell_choices": json.loads(json.dumps(spells))}
+                for _ in range(hit_count)]
+        choices.append({"actor_ref": actor["actor_ref"], "daowen": None,
+                        "attack_actions": [{"hits": json.loads(json.dumps(hits))}
+                                           for _ in range(action_count)]})
+    return choices
+
+
+def _ui_monster_prepare() -> dict[str, Any]:
+    """推演模式：把敌方这一个真实行动的可选项交给前端，由用户点选。"""
+    engine: GameEngine = SESSION["engine"]
+    pending = engine.state.pending_monster_phase
+    if pending:
+        options = dict(pending["options"])
+        options["token"] = pending.get("token")
+        return {"success": True, "result": options}
+    prepared = engine.execute_action("prepare_monster_phase", {})
+    if not prepared.get("success"):
+        _log(f"✗ 准备敌方行动：{prepared.get('error')}")
+        return prepared
+    result = prepared.get("result") or {}
+    if not result.get("actors"):
+        return {"success": True, "result": {"token": None, "actors": [],
+                                            "skipped": True,
+                                            "note": "敌方没有合法行动，可直接结束其回合"}}
+    return {"success": True, "result": result}
+
+
+def _ui_end_side(params: dict[str, Any]) -> dict[str, Any]:
+    """推演模式：结束当前方的回合并保留剩余出手（引擎【跳过】）。
+
+    如果用户先点了「准备 B 方行动」又改主意，pending 快照会挡住 skip，
+    所以这里先回滚 pending 再跳过（用户点的是界面按钮，不是 AI 重提）。
+    """
+    engine: GameEngine = SESSION["engine"]
+    if engine.state.pending_monster_phase:
+        engine._roll_back_monster_phase_pending()
+    result = engine.execute_action("skip", {"actor_ref": params.get("actor_ref") or ""})
+    _log(_describe("skip", params, result))
+    return result
+
+
 def _ui_monster_phase(params: dict[str, Any]) -> dict[str, Any]:
     engine: GameEngine = SESSION["engine"]
     # 上一次提交被拒时引擎保留 pending 与同一个 token：直接复用快照重交，
@@ -411,7 +502,13 @@ def _ui_monster_phase(params: dict[str, Any]) -> dict[str, Any]:
             return prepared
         actors = prepared["result"]["actors"]
         token = prepared["result"]["token"]
-    choices = _monster_choices(engine, actors, set(params.get("dodge_refs") or []))
+    if engine.state.event_modifiers.get("lab_manual_both") and params.get("manual"):
+        try:
+            choices = _manual_monster_choices(engine, actors, params)
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+    else:
+        choices = _monster_choices(engine, actors, set(params.get("dodge_refs") or []))
     result = engine.execute_action("resolve_monster_phase",
                                    {"token": token, "choices": choices})
     if not result.get("success"):
@@ -549,6 +646,16 @@ class Handler(BaseHTTPRequestHandler):
                 elif path == "/api/ui_attack":
                     result = _ui_attack(payload)
                     self._json({"success": bool(result.get("success")), "result": result,
+                                "snapshot": _snapshot(SESSION["engine"])})
+                elif path == "/api/ui_end_side":
+                    result = _ui_end_side(payload)
+                    self._json({"success": bool(result.get("success")), "result": result,
+                                "snapshot": _snapshot(SESSION["engine"])})
+                elif path == "/api/ui_monster_prepare":
+                    result = _ui_monster_prepare()
+                    self._json({"success": bool(result.get("success")),
+                                "error": result.get("error"),
+                                "prepare": result.get("result"),
                                 "snapshot": _snapshot(SESSION["engine"])})
                 elif path == "/api/ui_monster_phase":
                     result = _ui_monster_phase(payload)

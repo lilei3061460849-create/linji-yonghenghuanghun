@@ -766,7 +766,19 @@ class DaowenHandlersMixin:
         second = params.get("second_target_ref", "")
         second_source_daowen = params.get("second_source_daowen", "")
         second_log = None
-        if second and any(r.name == "同魂笔" and getattr(r, "enabled", True) for r in self.state.relics):
+        # 【同魂笔】按**持有者阵营**结算：施法者自己持有即生效（敌方轮回者从
+        # opponent_relics 读取），玩家侧朋友/员工施法时也认玩家本局的同魂笔。
+        # 旧式/桩状态（只有 state.relics）退回原口径，按玩家遗物池判定。
+        relic_active = getattr(self.state, "_relic_active", None)
+        if callable(relic_active):
+            pen_active = (relic_active(actor, "同魂笔")
+                          or (self.state.on_player_side(actor)
+                              and relic_active(self.state.player, "同魂笔")))
+        else:
+            pen_active = any(
+                getattr(r, "name", "") == "同魂笔" and getattr(r, "enabled", True)
+                for r in (getattr(self.state, "relics", ()) or ()))
+        if second and pen_active:
             if not second_source_daowen:
                 second_log = "同魂笔：必须指定second_source_daowen(第二个目标身上要受影响的道纹)，未生效"
             else:
