@@ -1775,20 +1775,29 @@ class GameState:
         if legacy:
             detail["context_warning"] = "回复缺少EffectContext；已按legacy来源兼容记录"
         overheal = detail.get("overheal", 0)
+        # 【忘忧香】按**持有者阵营**结算（不只看玩家）：
+        #   · 玩家侧实体（含朋友/员工）→ 看本局玩家遗物池；
+        #   · 敌方轮回者 → 看 opponent_relics；
+        #   · 其他实体 → 看自身 relics。
+        wangyou_holder = None
+        if self.on_player_side(entity):
+            wangyou_holder = self.player
+        elif self.on_enemy_side(entity) and entity.entity_type == "轮回者":
+            wangyou_holder = entity
+        elif any(r.name == "忘忧香" for r in getattr(entity, "relics", ()) or ()):
+            wangyou_holder = entity
+        if overheal > 0 and wangyou_holder is not None and self._relic_active(wangyou_holder, "忘忧香"):
+            entity.gain_shield(overheal)
+            detail["wangyouxiang_block"] = overheal
+            detail["wangyouxiang_ctx"] = make_context(
+                timing=heal_ctx.timing, source="忘忧香", source_type="relic",
+                actor=entity, target=entity, owner=entity,
+                mechanic="shield", subtype="overheal_to_block", amount=overheal,
+                tags={"overheal", "block", "wangyouxiang"},
+                parent_event_id=heal_ctx.event_id,
+            ).to_dict()
+        # 【龙血瓶】是玩家的消耗品，只有玩家侧溢出才进瓶。
         if overheal > 0 and self.on_player_side(entity):
-            # 【忘忧香】：战斗被动。受到溢出回复时将其转化为等量格挡。
-            # 这是遗物级被动：只要持有者（己方实体/轮回者阵营）持有忘忧香，溢出回复1:1转格挡。
-            wangyou = next((r for r in self.relics if r.name == "忘忧香"), None)
-            if wangyou is not None and getattr(wangyou, "enabled", True):
-                entity.gain_shield(overheal)
-                detail["wangyouxiang_block"] = overheal
-                detail["wangyouxiang_ctx"] = make_context(
-                    timing=heal_ctx.timing, source="忘忧香", source_type="relic",
-                    actor=entity, target=entity, owner=entity,
-                    mechanic="shield", subtype="overheal_to_block", amount=overheal,
-                    tags={"overheal", "block", "wangyouxiang"},
-                    parent_event_id=heal_ctx.event_id,
-                ).to_dict()
             bottle = next((item for item in self.consumables if item.name == "龙血瓶"), None)
             if bottle is not None:
                 # 忘忧香先转化格挡，剩余溢出再进龙血瓶；两者同时存在时忘忧香优先。

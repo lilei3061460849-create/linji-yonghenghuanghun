@@ -660,7 +660,8 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
             notes.append(
                 f"B方遗物按敌方轮回者通道（opponent_relics）生效："
                 f"启用 {enabled}/{len(b_sheet['relics'])} 件；"
-                "回锋刀[回始]、减速、忘忧香、无所求、同魂笔 仍以玩家为中枢，只对 A 方生效。")
+                "遗物按持有者阵营结算（回锋刀[回始]、减速、忘忧香已与 A 方对称）；"
+                "仅「无所求」事件选项与「同魂笔」第二目标提交依赖玩家交互，B 方无对应动作。")
     else:
         notes.append(f"B方怪物：{'、'.join(b_names)}")
     notes.append(f"开战：{'、'.join(battle['enemies'])}")
