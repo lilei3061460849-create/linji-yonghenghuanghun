@@ -147,7 +147,8 @@
   <div class="stats" id="stats"></div>
   <div class="spacer"></div>
   <a href="/lab" style="text-decoration:none"><button>角色演武场 · 自定义开局</button></a>
-  <button id="fsBtn" title="进入/退出全屏（横屏更好用）">⛶ 全屏</button>
+  <button id="fsBtn" title="进入/退出全屏（横屏更好用）">⛶ 全屏 / 沉浸</button>
+  <button id="popBtn" title="在独立标签页打开：只有顶层窗口才能真正全屏">↗ 独立窗口</button>
   <button id="newBtn">新开一局</button>
 </header>
 
@@ -1018,6 +1019,16 @@ $("wait5Btn").onclick = () => act("world_wait", {turns: 5});
 $("newBtn").onclick = () => $("newModal").classList.remove("hidden");
 $("fsBtn").onclick = toggleFullscreen;
 $("immExit").onclick = toggleFullscreen;
+/* 预览是嵌在 iframe 里的：iframe 没有 allow="fullscreen" 就拿不到真全屏。
+   这里把当前页面（连同预览令牌）在顶层标签页再打开一次，那边就能真全屏。 */
+$("popBtn").onclick = () => {
+  let url = location.href;
+  try{
+    const opened = window.open(url, "_blank");
+    if (!opened) toast("浏览器拦截了新标签，请允许弹窗后重试");
+    else toast("已在新标签打开：在那里点「⛶ 全屏 / 沉浸」就是真全屏");
+  } catch(e){ toast("打开新标签失败：" + e.message); }
+};
 document.addEventListener("fullscreenchange", () => { syncFsButton(); if (S) render(); });
 document.addEventListener("webkitfullscreenchange", syncFsButton);
 let _resizeTimer = null;

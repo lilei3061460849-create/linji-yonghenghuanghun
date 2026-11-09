@@ -109,6 +109,7 @@
   <span class="spacer"></span>
   <button id="fsBtn" class="mini" hidden>⛶ 全屏 / 沉浸</button>
   <button id="immExit" class="mini">✕ 退出沉浸</button>
+  <button id="popBtn" class="mini" title="在独立标签页打开（那里才可能真全屏）">↗ 独立窗口</button>
   <a href="/" style="font-size:13px">返回地图</a>
 </header>
 
@@ -700,6 +701,16 @@ function renderBMonsters(){
     sync();
   };
   document.getElementById("immExit").onclick = exitImmersive;
+  const pop = document.getElementById("popBtn");
+  if (pop){
+    pop.onclick = () => {
+      try{
+        const opened = window.open(location.href, "_blank");
+        if (!opened) toast("浏览器拦截了新标签，请允许弹窗后重试");
+        else toast("已在新标签打开，可在新标签里真全屏");
+      } catch(e){ toast("打开新标签失败：" + e.message); }
+    };
+  }
   btn.onclick = async () => {
     const el = document.documentElement;
     if (immersive() && !active()){ exitImmersive(); return; }
