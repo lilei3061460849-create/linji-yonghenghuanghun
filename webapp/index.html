@@ -166,7 +166,7 @@
 
 <main>
   <section class="stack">
-    <div class="card">
+    <div class="card" id="mapCard">
       <h2>地图 <span id="turnLabel"></span></h2>
       <div class="mapwrap">
         <div id="map"></div>
@@ -185,6 +185,15 @@
         </div>
         <div id="posLabel" class="hint"></div>
         <div id="staleBanner" class="banner" style="display:none;width:100%;text-align:center"></div>
+      </div>
+    </div>
+
+    <div class="card" id="directDoneCard" style="display:none">
+      <h2>本场结束 <span>演武场 · 直接对战</span></h2>
+      <div class="kv">对手倒下、结算完毕。这一局没有副本地图要跑。</div>
+      <div class="row">
+        <button class="primary" onclick="location.href='/lab'">回演武场再来一局</button>
+        <button id="directMapBtn">继续：生成地图（可选）</button>
       </div>
     </div>
 
@@ -343,8 +352,19 @@ function summarize(action, result){
 }
 
 function render(){
+  const mapCard = $("mapCard");
+  if (mapCard) mapCard.style.display = (S && S.direct) ? "none" : "";
   renderHeader(); renderSheet(); renderPending(); renderMap(); renderAllies(); renderNear(); renderLocations();
-  renderEvent(); renderBattle(); renderLog(); renderFacts(); renderOver();
+  renderEvent(); renderBattle(); renderDirectDone(); renderLog(); renderFacts(); renderOver();
+}
+
+function renderDirectDone(){
+  /* 直接对战（无地图）：战斗结算完就没有下一步了，给一个明确的落点。 */
+  const card = $("directDoneCard");
+  if (!card) return;
+  card.style.display = (S && S.started && S.direct && !S.battle) ? "" : "none";
+  const btn = $("directMapBtn");
+  if (btn && !btn.onclick) btn.onclick = () => act("world_initialize", {});
 }
 
 function renderHeader(){
@@ -721,7 +741,7 @@ function renderBattle(){
   const row = el("div","row"); row.style.marginTop = "8px";
 
   const endBtn = () => {
-    const b2 = el("button","primary","结算战斗，回到地图");
+    const b2 = el("button","primary", S.direct ? "结算战斗" : "结算战斗，回到地图");
     b2.onclick = () => act("battle_end", {});
     return b2;
   };

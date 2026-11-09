@@ -646,6 +646,30 @@ def _start_custom_battle(engine: GameEngine, entities: list[Any],
     }
 
 
+def _start_direct_battle(engine: GameEngine, entities: list[Any]) -> dict[str, Any]:
+    """直接开战：不建地图、不登记遭遇，对手直接摆上擂台（杀戮尖塔式）。
+
+    演武场是测试工具，走地图那套只是为了「像正式对局」；用户明确表示不需要
+    副本当地图，所以这里只调 `battle_start`，战斗结算与正式对局完全一致。
+    """
+    if not entities:
+        raise ValueError("没有对手，无法开战")
+    engine.state.event_modifiers["lab_direct"] = True
+    engine.state.enemies = list(entities)
+    engine.state.energy = 0
+    started = engine.execute_action("battle_start", {
+        "relic_choices": {},
+        "inject_enemies": list(entities),
+    })
+    if not started.get("success"):
+        raise ValueError(f"开战失败：{started.get('error')}")
+    return {
+        "mode": "直接对战（无地图）",
+        "encounter_id": "",
+        "enemies": [entity.name for entity in engine.state.enemies],
+    }
+
+
 def _start_random_battle(engine: GameEngine) -> dict[str, Any]:
     """按副本随机：沿用引擎出怪配方，不需要地图。"""
     engine.state.energy = 0
@@ -712,10 +736,15 @@ def start(payload: dict[str, Any]) -> dict[str, Any]:
 def duel(payload: dict[str, Any]) -> dict[str, Any]:
     """A 方 vs B 方：两边都填角色卡（B 方也可以填副本怪物）。"""
     regions = _regions_by_name()
+    # 直接对战没有地图，副本只在「B 方用副本怪物」时决定怪物池；没传就给个默认，
+    # 别为了开一场测试架还逼用户选副本。
     region = str(payload.get("region") or "")
+    if not region:
+        region = "罪孽都市" if "罪孽都市" in regions else next(iter(regions))
     if region not in regions:
-        raise ValueError(f"副本必须从 {list(regions)} 中选择")
+        raise ValueError(f"怪物池必须从 {list(regions)} 中选择")
 
+    direct = bool(payload.get("direct", True))
     a_sheet = _resolve_side(payload.get("a"), "A方")
     b_side = payload.get("b") if isinstance(payload.get("b"), dict) else {}
     b_is_monster = str(b_side.get("kind") or "") == "monster"
@@ -747,9 +776,13 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
         assert b_sheet is not None
         entities = [_make_rival(engine, b_sheet, a_sheet["name"])]
 
-    width = _as_int(payload.get("width", 11), "地图宽", 5, 41)
-    height = _as_int(payload.get("height", width), "地图高", 5, 41)
-    battle = _start_custom_battle(engine, entities, width, height)
+    if direct:
+        # 用户令 2026-11-09：不需要副本当地图，直接开打。
+        battle = _start_direct_battle(engine, entities)
+    else:
+        width = _as_int(payload.get("width", 11), "地图宽", 5, 41)
+        height = _as_int(payload.get("height", width), "地图高", 5, 41)
+        battle = _start_custom_battle(engine, entities, width, height)
 
     a_blood, a_speed, a_mana = _sheet_limits(a_sheet)
     notes.append(f"A方 {a_sheet['name']}：{a_blood}/{a_speed}/{a_mana}（血限/速限/法限）")

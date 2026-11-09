@@ -802,6 +802,14 @@ class CombatHandlersMixin:
         self.combat.validate_battle_start_relic_choices(relic_choices)
         world_encounter_id = params.get("world_encounter_id")
         world_battle = bool(world_encounter_id)
+        # 演武场「直接对战」：调用方（webapp/lab.py）已造好对手实体，随战始注入，
+        # 跳过随机出怪。只给工具层用，正式对局永远不传这个参数。
+        injected_enemies = list(params.get("inject_enemies") or [])
+        if injected_enemies and world_battle:
+            return {"success": False,
+                    "error": "inject_enemies 不能与 world_encounter_id 同时使用"}
+        if any(not getattr(entity, "is_alive", False) for entity in injected_enemies):
+            return {"success": False, "error": "inject_enemies 含已死亡单位"}
         world_participant_enemies = []
         if world_battle:
             try:
@@ -920,6 +928,12 @@ class CombatHandlersMixin:
             drawn_names = [entity.name for entity in world_participant_enemies]
             spawn_plan = {"total": draw_count, "first_count": draw_count,
                           "queue_rounds": [], "waves": [], "world_encounter_id": world_encounter_id}
+        elif injected_enemies:
+            self.state.enemies.extend(injected_enemies)
+            draw_count = len(injected_enemies)
+            drawn_names = [entity.name for entity in injected_enemies]
+            spawn_plan = {"total": draw_count, "first_count": draw_count,
+                          "queue_rounds": [], "waves": []}
         elif pool:
             spawn_plan = roll_spawn_plan(self.dice, self.state.current_battle, self._current_tier())
             draw_count = spawn_plan["total"]

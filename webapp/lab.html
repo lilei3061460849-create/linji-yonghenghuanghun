@@ -261,16 +261,12 @@
     </div>
 
     <div class="card">
-      <h2>战场<span>副本只影响地图与怪物池</span></h2>
+      <h2>战场<span>点「开始」直接开打，不进地图</span></h2>
       <div class="grid3">
-        <label class="field">副本<select id="dRegion"></select></label>
-        <label class="field">地图<select id="dSize">
-          <option value="9">9 × 9</option>
-          <option value="11" selected>11 × 11</option>
-          <option value="15">15 × 15</option>
-        </select></label>
+        <label class="field">怪物池<select id="dRegion"></select></label>
         <label class="field">种子<input id="dSeed" placeholder="留空=随机"></label>
       </div>
+      <div class="hintline" style="margin:2px 0 6px">对手摆好就开打（杀戮尖塔式），没有副本地图要跑。怪物池只在 B 方选「用副本怪物」时决定能挑哪些怪。</div>
       <label class="check" style="display:flex;align-items:center;gap:8px;margin:6px 0">
         <input type="checkbox" id="dManual" checked>
         <span>推演模式：双方都由我操作（B 方回合不用 AI，适合测试）</span>
@@ -841,8 +837,7 @@ async function startDuel(){
     a: {id: a.id},
     manual_both: !!($("dManual") && $("dManual").checked),
     region: $("dRegion").value,
-    width: Number($("dSize").value),
-    height: Number($("dSize").value),
+    direct: true,
     seed: $("dSeed").value.trim(),
   };
   if (bMode === "monster"){

@@ -5,7 +5,7 @@
 1. 可选项只来自运行时（道纹必须已注册、消耗品必须有登记规格）；
 2. 规则模式仍受 25 点预算与偶数档位约束；
 3. 自由模式直接写三个上限，但只影响本局；
-4. 指定对手走真实地图遭遇 → battle_start，敌人就是用户选的那几只。
+4. 指定对手随 battle_start 注入（`inject_enemies`），不建地图，敌人就是用户选的那几只。
 """
 import os
 import sys
@@ -277,3 +277,54 @@ def test_random_card_keeps_the_window_and_saves_as_free_mode(roster_file):
            (rolled["blood_limit"], rolled["speed_limit"], rolled["mana_limit"])
     reloaded = next(item for item in lab.list_sheets() if item["id"] == saved["id"])
     assert reloaded["roll"] == rolled["roll"]
+
+
+def test_duel_runs_directly_without_a_dungeon_map(roster_file):
+    """用户令 2026-11-09：不需要副本当地图，对手摆好就直接开打。
+
+    这条钉住「直接对战」的两半：引擎侧 `inject_enemies` 真的把对手摆上台
+    （不是被随机出怪顶掉），界面侧 `direct` 标记让前端隐藏地图卡。
+    """
+    from webapp import server
+
+    a = lab.save_sheet(_sheet("甲"))
+    b = lab.save_sheet(_sheet("乙", mode="free", blood_limit=120, speed_limit=4,
+                              mana_limit=6))
+    # 连副本都不传：直接对战不该为了开一场测试架逼用户选副本。
+    prepared = lab.duel({"a": {"id": a["id"]}, "b": {"id": b["id"]},
+                         "manual_both": True, "seed": 5})
+    engine = prepared["engine"]
+
+    assert engine.state.phase == "in_combat"
+    assert not engine.state.world_state          # 没有地图
+    assert engine.state.world_encounter_id in (None, "")
+    assert [enemy.name for enemy in engine.state.enemies] == ["乙"]
+    assert [enemy.name for enemy in engine.state.enemies] == ["乙"]  # 没被随机出怪替换
+    assert engine.state.enemies[0].entity_type == "轮回者"
+
+    view = server._battle_view(engine)
+    assert view["direct"] is True
+    assert server._snapshot(engine)["direct"] is True
+
+
+def test_inject_enemies_guards_are_explicit(roster_file):
+    """`inject_enemies` 只给演武场用：死单位、和地图遭遇同时用都必须报错。"""
+    from engine.monsters import make_monster_entity
+
+    a = lab.save_sheet(_sheet("甲"))
+    prepared = lab.start({"name": "甲", "region": "罪孽都市", "mode": "free",
+                          "blood_limit": 90, "speed_limit": 3, "mana_limit": 2,
+                          "seed": 9})
+    engine = prepared["engine"]
+
+    dead = make_monster_entity(engine.monster_pool["罪孽都市"][0])
+    dead.is_alive = False
+    failed = engine.execute_action("battle_start", {"inject_enemies": [dead]})
+    assert failed["success"] is False
+    assert "已死亡" in failed["error"]
+
+    alive = make_monster_entity(engine.monster_pool["罪孽都市"][0])
+    failed = engine.execute_action("battle_start", {
+        "inject_enemies": [alive], "world_encounter_id": "fake-encounter"})
+    assert failed["success"] is False
+    assert "world_encounter_id" in failed["error"]

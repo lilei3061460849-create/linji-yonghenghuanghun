@@ -171,6 +171,8 @@ def _battle_view(engine: GameEngine) -> dict[str, Any] | None:
         "subphase": state.combat_subphase,
         "duel_turn": state.duel_turn or "player_side",
         "manual_both": bool(state.event_modifiers.get("lab_manual_both")),
+        # 演武场「直接对战」没有地图：界面据此隐藏地图卡，结算按钮也不再写「回到地图」。
+        "direct": bool(state.event_modifiers.get("lab_direct")),
         "monster_pending": bool(state.pending_monster_phase),
         "combatants": sides,
         "actions_used": state.player.actions_used_this_round,
@@ -274,6 +276,7 @@ def _snapshot(engine: GameEngine | None) -> dict[str, Any]:
         "actions": actions,
         "manual_both": bool(
             engine.state.event_modifiers.get("lab_manual_both")),
+        "direct": bool(engine.state.event_modifiers.get("lab_direct")),
         "log": SESSION["log"][-80:],
     }
 
