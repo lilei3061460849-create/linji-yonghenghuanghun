@@ -45,6 +45,13 @@
   .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
   .chips{display:flex;flex-wrap:wrap;gap:6px;max-height:210px;overflow:auto;padding:2px;
     -webkit-overflow-scrolling:touch}
+  /* 固定高度的选择器：道纹/遗物/消耗品统一一个高度、内部滚动 + 搜索，
+     选项再多也不会把编辑器越撑越长。 */
+  .picker{height:236px;overflow:auto;border:1px solid var(--line);border-radius:10px;
+    padding:8px;background:#10151a;-webkit-overflow-scrolling:touch;
+    overscroll-behavior:contain}
+  .picker .chips{max-height:none;overflow:visible;padding:0}
+  .picker-empty{color:var(--muted);font-size:12.5px;text-align:center;padding:14px 4px}
   .chip{font-size:12.5px;border:1px solid var(--line);border-radius:15px;padding:5px 11px;
     color:#aab6c4;background:#131920;cursor:pointer;user-select:none}
   .chip.on{border-color:var(--gold);background:#2e2612;color:#ffe9a8}
@@ -91,6 +98,7 @@
     main{max-width:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
       gap:10px;padding:8px 12px 60px;align-items:start}
     .chips{max-height:132px}
+    .picker{height:190px}
     .summary{grid-template-columns:repeat(3,1fr)}
     #result{grid-column:1 / -1}
   }
@@ -181,15 +189,17 @@
 
       <h2 style="margin-top:16px">道纹<span id="eDaowenCount">0 种</span></h2>
       <input id="eDaowenSearch" placeholder="搜索道纹名…" style="margin-bottom:6px" />
-      <div id="eDaowenGroups"></div>
+      <div id="eDaowenGroups" class="picker"></div>
 
       <h2 style="margin-top:16px">遗物<span id="eRelicCount">0 件</span></h2>
       <input id="eRelicSearch" placeholder="搜索遗物名或效果…" style="margin-bottom:6px" />
-      <div id="eRelicChips" class="chips"></div>
+      <div class="picker"><div id="eRelicChips" class="chips"></div></div>
       <div class="hintline" id="eRelicHint"></div>
 
       <h2 style="margin-top:16px">消耗品<span id="eItemCount">0 件</span></h2>
-      <div id="eItemPicker" style="max-height:220px;overflow:auto"></div>
+      <input id="eItemSearch" type="search" placeholder="搜索消耗品名 / 类型 / 效果…"
+             style="margin-bottom:6px" />
+      <div id="eItemPicker" class="picker"></div>
       <div id="eItemSelected" style="margin-top:6px"></div>
 
       <div class="btnbar">
@@ -508,6 +518,9 @@ function renderEditorChips(){
     }
     box.append(chips);
   }
+  if (!box.children.length){
+    box.append(el("div", "picker-empty", "没有匹配的道纹"));
+  }
 
   const relics = new Set(editing.relics || []);
   const relicBox = $("eRelicChips");
@@ -525,10 +538,17 @@ function renderEditorChips(){
     };
     relicBox.append(chip);
   }
+  if (!relicBox.children.length){
+    relicBox.append(el("div", "picker-empty", "没有匹配的遗物"));
+  }
 
   const picker = $("eItemPicker");
   picker.innerHTML = "";
-  for (const item of OPTIONS.consumables){
+  const iKeyword = ($("eItemSearch").value || "").trim();
+  const itemShown = OPTIONS.consumables.filter(item => !iKeyword
+    || item.name.includes(iKeyword) || (item.kind || "").includes(iKeyword)
+    || (item.effect || "").includes(iKeyword));
+  for (const item of itemShown){
     const row = el("div", "tool-row");
     const left = el("div");
     left.append(el("span", null, item.name), el("span", "eff", `${item.kind} · 默认${item.uses}耐久`));
@@ -544,6 +564,9 @@ function renderEditorChips(){
     };
     row.append(left, add);
     picker.append(row);
+  }
+  if (!itemShown.length){
+    picker.append(el("div", "picker-empty", "没有匹配的消耗品"));
   }
   const selectedBox = $("eItemSelected");
   selectedBox.innerHTML = "";
@@ -846,6 +869,7 @@ for (const id of ["eBloodPts","eSpeedPts","eManaPts","eBloodLimit","eSpeedLimit"
 $("eResonance").onchange = readEditorNumbers;
 $("eDaowenSearch").oninput = renderEditorChips;
 $("eRelicSearch").oninput = renderEditorChips;
+$("eItemSearch").oninput = renderEditorChips;
 $("bModeChar").onclick = () => setBMode("char");
 $("bModeMonster").onclick = () => setBMode("monster");
 $("aSelect").onchange = updateDuelSummary;
