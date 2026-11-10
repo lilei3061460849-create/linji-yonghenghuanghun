@@ -46,7 +46,10 @@
   .chips{display:flex;flex-wrap:wrap;gap:6px;max-height:210px;overflow:auto;padding:2px;
     -webkit-overflow-scrolling:touch}
   /* 固定高度的选择器：道纹/遗物/消耗品统一一个高度、内部滚动 + 搜索，
-     选项再多也不会把编辑器越撑越长。 */
+     选项再多也不会把编辑器越撑越长。
+     【界面统一格式·2026-11-10 用户令】非弹窗的列表/选择类窗口一律：
+     固定高度 + 内部上下滚动（overscroll-behavior:contain）+ 顶部搜索框；
+     完整口径见 webapp/README.md「界面统一格式」。 */
   .picker{height:236px;overflow:auto;border:1px solid var(--line);border-radius:10px;
     padding:8px;background:#10151a;-webkit-overflow-scrolling:touch;
     overscroll-behavior:contain}
