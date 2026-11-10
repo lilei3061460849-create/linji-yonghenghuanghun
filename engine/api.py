@@ -41,7 +41,6 @@ from .npc_consumables import (consume_tool, consume_named_combat_item,
 from .spell_dsl import parse_spell_definition, SpellDslError
 from .combat_events import register_combat_event_observer
 from .consumables import (
-    ZIYU_TRIGGER_BATTLE_END, apply_zi_yu_trigger, note_action_targets,
     WING_BLOOD, WING_EMBER, WING_MODE_FLEE, WING_MODE_FLY, WING_MODE_LIFESTEAL,
     WING_MODE_SUPPRESS, WING_MODES, WING_STATUS_LIFESTEAL, WING_STATUS_SUPPRESS,
     make_wing_item)
@@ -3087,12 +3086,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if huangfu_spell is not None:
             cast_result["huangfu_mana_spent"] = huangfu_mana
             cast_result["huangfu_mana_payment"] = huangfu_payment
-        # 自愈X「目标死亡时」：记持有者本次施法的显式目标。
-        _cast_refs = [params.get("target_ref")] + [
-            st.get("target_ref") for st in params.get("steps") or []
-            if isinstance(st, dict)]
-        note_action_targets(self.state, actor,
-                            [refs.get(r) for r in _cast_refs if r])
         return {"success": True, "action": f"{actor.name}施放{spell_name}",
                 "result": cast_result}
 

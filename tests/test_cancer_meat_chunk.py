@@ -4,7 +4,7 @@
 - 癌变不再为局外【休整】提供额外恢复量（原「每吸收一只+8」已废止，
   GameState.rest_heal_bonus 字段随之删除）；
 - 每吸收一只癌变怪物获得【无限肉块】（1/1）：使用后恢复10生命，
-  不计入本场癌变累计回复量；[战终]自愈80%已损耐久，向上取整；
+  不计入本场癌变累计回复量；[战终]恢复80%已损耐久，向上取整；
 - 癌变怪物不产碎片；轮回者/同伴癌变直接命零、不产生奖励。
 """
 import math
@@ -61,7 +61,7 @@ def test_monster_cancer_grants_meat_chunk_not_rest_bonus(tmp_path):
     for meat in meats:
         assert meat.current_uses == 1 and meat.max_uses == 1
         assert "恢复10生命" in meat.effect
-        assert "战终自愈80%已损耐久" in meat.effect
+        assert "战终恢复80%已损耐久" in meat.effect
     # 休整加成机制已删除：状态上不应再有 rest_heal_bonus 字段
     assert not hasattr(engine.state, "rest_heal_bonus")
 
@@ -72,7 +72,7 @@ def test_meat_chunk_heals_ten_and_excludes_cancer_accumulation(tmp_path):
     player = _setup_player(engine)
     engine.state.consumables.append(Consumable(
         name="无限肉块",
-        effect="使用后恢复10生命，不计入癌变累计治疗量；战终自愈80%已损耐久",
+        effect="使用后恢复10生命，不计入癌变累计治疗量；战终恢复80%已损耐久",
         current_uses=1, max_uses=1, kind="infinite_meat"))
     player.current_hp = max(1, player.current_hp - 30)
     total_before = player.total_healed
@@ -90,11 +90,11 @@ def test_meat_chunk_heals_ten_and_excludes_cancer_accumulation(tmp_path):
 
 
 def test_meat_chunk_restores_eighty_percent_durability_at_battle_end(tmp_path):
-    """正常路径：[战终]自愈80%已损耐久（向上取整）。"""
+    """正常路径：[战终]恢复80%已损耐久（向上取整）。"""
     engine = _engine(tmp_path)
     _setup_player(engine)
     meat = Consumable(name="无限肉块",
-                      effect="使用后恢复10生命，不计入癌变累计治疗量；战终自愈80%已损耐久",
+                      effect="使用后恢复10生命，不计入癌变累计治疗量；战终恢复80%已损耐久",
                       current_uses=1, max_uses=1, kind="infinite_meat")
     engine.state.consumables.append(meat)
     meat.current_uses = 0  # 已用完：已损耐久=1
