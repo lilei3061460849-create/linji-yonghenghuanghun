@@ -108,6 +108,32 @@
       "energy": 0,
       "created_at": "2026-11-10T12:48:08",
       "updated_at": "2026-11-10T12:48:08"
+    },
+    {
+      "mode": "free",
+      "blood_points": 0,
+      "speed_points": 0,
+      "mana_points": 0,
+      "blood_limit": 100,
+      "speed_limit": 4,
+      "mana_limit": 2,
+      "attribute_points": 0,
+      "id": "2917972ad2fd",
+      "name": "乙敌",
+      "faction": "轮回者",
+      "resonance": "转换",
+      "daowen": [
+        "杀伐"
+      ],
+      "relics": [
+        "避风铃"
+      ],
+      "consumables": [],
+      "shards": 20,
+      "roll": {},
+      "energy": 0,
+      "created_at": "2026-11-10T12:48:10",
+      "updated_at": "2026-11-10T12:48:10"
     }
   ]
 }
