@@ -369,11 +369,25 @@ def roll_limits(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
+# 角色卡可选阵营（2026-11-10 用户令）：轮回者＝玩家侧逻辑；怪物＝怪物侧逻辑。
+FACTIONS = ("轮回者", "怪物")
+
+
+def sheet_faction(sheet: dict[str, Any]) -> str:
+    """旧卡没有 faction 字段，一律按轮回者读。"""
+    return "怪物" if sheet.get("faction") == "怪物" else "轮回者"
+
+
 def normalize_sheet(payload: dict[str, Any]) -> dict[str, Any]:
     """把请求体/旧存档规范成一张角色卡配方（只校验，不碰引擎）。"""
     if not isinstance(payload, dict):
         raise ValueError("角色卡必须是对象")
     name = str(payload.get("name") or "轮回者").strip()[:12] or "轮回者"
+    # 2026-11-10 用户令：角色卡自选阵营（轮回者/怪物）。选了什么阵营，开战就按
+    # 那个阵营的逻辑运行——摆位与规则分支都跟阵营走，不按 A/B 槽位硬编码。
+    faction = str(payload.get("faction") or "轮回者").strip()
+    if faction not in FACTIONS:
+        raise ValueError(f"阵营必须从 {list(FACTIONS)} 中选择")
     mode = "free" if str(payload.get("mode") or "rule") == "free" else "rule"
     resonance = str(payload.get("resonance") or "转换")
     if resonance not in options()["resonance"]:
@@ -406,6 +420,7 @@ def normalize_sheet(payload: dict[str, Any]) -> dict[str, Any]:
     sheet.update({
         "id": str(payload.get("id") or "").strip(),
         "name": name,
+        "faction": faction,
         "resonance": resonance,
         # 规则模式的三个上限是派生值；存下来只为列表/对战展示，不当作独立事实源。
         "blood_limit": blood, "speed_limit": speed, "mana_limit": mana,
@@ -551,25 +566,32 @@ def _monster_entities(engine: GameEngine, names: list[str]) -> list[Any]:
     return entities
 
 
-def _make_rival(engine: GameEngine, sheet: dict[str, Any], a_name: str) -> Any:
-    """把一张角色卡造成 B 方实体（轮回者）。
+def _make_rival(engine: GameEngine, sheet: dict[str, Any], other_name: str) -> Any:
+    """把一张角色卡造成对手实体，阵营按卡走（2026-11-10 用户令）。
 
-    与 A 方共用同一套口径：三维直接写上限，道纹/残韵/消耗品挂在该实体上。
-    遗物同时写两处：
+    与轮回者侧共用同一套口径：三维直接写上限，道纹/残韵/消耗品挂在该实体上。
+    阵营＝怪物时，实体就是 ``entity_type="怪物"``——引擎的怪物分支（痛苦的偏爱、
+    回始回满法力与异变、怪物道纹判定等）全部按实体类型自动生效；碎片按当前
+    怪物池口径初始化，与副本怪物同规矩。
 
-    * ``rival.relics``：实体自己的持有记录（展示、以及怪物/队友口径的回退读取）；
-    * ``state.opponent_relics``：引擎给「敌方轮回者」准备的阵营遗物通道
-      （死斗同款）。战斗里绝大多数遗物判定走 ``state.side_has`` / ``_relic_active``，
-      它们对敌方轮回者读的正是这份名单——不登记进去，B 方遗物就只是摆设。
+    遗物登记分阵营：
+
+    * 轮回者对手：写两处——``rival.relics``（持有记录）＋
+      ``state.opponent_relics``（引擎给「敌方轮回者」的阵营遗物通道，死斗同款）。
+      战斗里绝大多数遗物判定走 ``state.side_has`` / ``_relic_active``，它们对
+      敌方轮回者读的正是这份名单——不登记进去，遗物就只是摆设。
+    * 怪物对手：只写 ``rival.relics``——怪物口径按实体自带名单回退读取，
+      opponent_relics 通道只属于敌方轮回者。
     """
     from engine.models import Entity
 
+    faction = sheet_faction(sheet)
     blood, speed, mana = _sheet_limits(sheet)
     name = sheet["name"]
-    if name == a_name:
+    if name == other_name:
         name = f"{name}·B"
     rival = Entity(
-        name=name, entity_type="轮回者",
+        name=name, entity_type=faction,
         blood_limit=blood, current_hp=blood,
         speed_limit=speed, current_speed=speed,
         mana_limit=mana, current_mana=mana,
@@ -578,14 +600,18 @@ def _make_rival(engine: GameEngine, sheet: dict[str, Any], a_name: str) -> Any:
         engine._grant_named_daowen(rival, daowen_name)
     if sheet["relics"]:
         defs = dict(GameEngine.RELIC_DEFS)
-        # 启用槽位与 A 方同口径：ceil(血限/30)，超出的照常持有但停用。
+        # 启用槽位与轮回者侧同口径：ceil(血限/30)，超出的照常持有但停用。
         limit = rival.enabled_relic_limit
         squad = [
             Relic(name=relic_name, effect=defs.get(relic_name, ""), enabled=index < limit)
             for index, relic_name in enumerate(dict.fromkeys(sheet["relics"]))
         ]
         rival.relics.extend(squad)
-        engine.state.opponent_relics = squad
+        if faction == "轮回者":
+            engine.state.opponent_relics = squad
+    if faction == "怪物":
+        # 怪物阵营逻辑：碎片与副本怪物同口径初始化（罪孽都市按专属道纹数值×2）。
+        engine.combat.init_monster_shards(rival)
     catalog = {item["name"]: item for item in _consumables()}
     for entry in sheet["consumables"]:
         spec = catalog[entry["name"]]
@@ -701,6 +727,9 @@ def start(payload: dict[str, Any]) -> dict[str, Any]:
     抛 ``ValueError`` 表示是用户输入问题（界面直接显示）；其它异常按 500 处理。
     """
     sheet = normalize_sheet(payload)
+    if sheet_faction(sheet) == "怪物":
+        raise ValueError("单人演武由你亲自扮演轮回者；怪物阵营卡请放进 A/B 对决"
+                         "（任意槽位都可以，会自动摆到怪物侧）")
     regions = _regions_by_name()
     region = str(payload.get("region") or "")
     if region not in regions:
@@ -756,6 +785,19 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         b_sheet = _resolve_side(b_side, "B方")
 
+    # 2026-11-10 用户令：阵营决定摆位，不按 A/B 槽位硬编码。
+    # 引擎的战斗结构是「轮回者侧 vs 怪物侧」，所以谁当轮回者由卡的阵营说了算：
+    # A 卡是怪物、B 卡是轮回者时，B 卡驱动轮回者侧、A 卡造成怪物对手——
+    # 单位完全按自己的阵营逻辑运行，与它填在哪个槽位无关。
+    swapped = (sheet_faction(a_sheet) == "怪物")
+    if swapped and b_sheet is None:
+        raise ValueError("A 方卡是怪物阵营时，B 方必须选一张轮回者阵营的角色卡"
+                         "（两边都是怪物侧，引擎摆不下）")
+    if swapped and sheet_faction(b_sheet) == "怪物":
+        raise ValueError("双方都是怪物阵营：演武场对决需要恰好一名轮回者")
+    player_sheet = b_sheet if swapped else a_sheet
+    rival_sheet = a_sheet if swapped else b_sheet
+
     engine = _new_engine(payload)
     notes: list[str] = []
     # 推演模式（2026-11-09 用户令）：演武场是给自己推演/测试用的，AI 自动打会
@@ -767,13 +809,18 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
     # 演武场不再需要任何开关：A 方不会白拿先手，也不需要给 B 方开特权。
     if manual_both:
         notes.append("推演模式：双方都由你操作，B 方回合不使用 AI。")
-    _apply_loadout(engine, a_sheet, region, notes)
+    _apply_loadout(engine, player_sheet, region, notes)
 
     if b_is_monster:
         entities = _monster_entities(engine, b_names)
     else:
-        assert b_sheet is not None
-        entities = [_make_rival(engine, b_sheet, a_sheet["name"])]
+        assert rival_sheet is not None
+        entities = [_make_rival(engine, rival_sheet, player_sheet["name"])]
+        if swapped:
+            notes.append(
+                f"阵营摆位（2026-11-10 用户令）：A方卡【{a_sheet['name']}】是怪物阵营"
+                f"→ 怪物侧；B方卡【{b_sheet['name']}】是轮回者阵营 → 轮回者侧。"
+                "单位各自按阵营逻辑运行，与槽位无关。")
 
     if direct:
         # 用户令 2026-11-09：不需要副本当地图，直接开打。
@@ -786,11 +833,13 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
     notes.append("先手按通用规则判定（速限→法限→血限→当前生命，大者先手）；"
                  "四项全同则随机首手、之后每回合交替。")
     a_blood, a_speed, a_mana = _sheet_limits(a_sheet)
-    notes.append(f"A方 {a_sheet['name']}：{a_blood}/{a_speed}/{a_mana}（血限/速限/法限）")
+    notes.append(f"A方 {a_sheet['name']}（{sheet_faction(a_sheet)}）："
+                 f"{a_blood}/{a_speed}/{a_mana}（血限/速限/法限）")
     if b_sheet is not None:
         b_blood, b_speed, b_mana = _sheet_limits(b_sheet)
-        notes.append(f"B方 {b_sheet['name']}：{b_blood}/{b_speed}/{b_mana}")
-        if b_sheet["relics"]:
+        notes.append(f"B方 {b_sheet['name']}（{sheet_faction(b_sheet)}）："
+                     f"{b_blood}/{b_speed}/{b_mana}")
+        if b_sheet["relics"] and sheet_faction(b_sheet) == "轮回者" and not swapped:
             enabled = min(len(b_sheet["relics"]), max(0, (b_blood + 29) // 30))
             notes.append(
                 f"B方遗物按敌方轮回者通道（opponent_relics）生效："

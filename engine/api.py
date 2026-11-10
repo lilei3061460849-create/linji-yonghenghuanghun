@@ -3206,7 +3206,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     "paid": amount, "cooled_daowen": cooled}
         return self.combat.pay_numeric_cost(target, cost_type, amount, forced=True, ctx=ctx)
 
-    def _consume_merged_item(self, item: Consumable, params: dict) -> dict:
+    def _consume_merged_item(self, item: Consumable, params: dict,
+                             actor: Entity | None = None) -> dict:
         """使用【改造】合成条目：按原顺序逐条结算全部来源效果。
 
         每个来源都用一份临时 Consumable 走同一条使用管线，因此耐久扣除只发生在
@@ -3239,7 +3240,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             if isinstance(own, dict):
                 source_params.update(own)
             try:
-                outcome = self._consume_item_effect(temp, source_params)
+                outcome = self._consume_item_effect(temp, source_params, actor=actor)
             except Exception as exc:  # 单条效果异常不拖垮其余来源
                 outcome = {"success": False, "error": f"效果结算异常：{exc}"}
             executed += 1
@@ -3266,21 +3267,38 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "state": self.combat._get_combat_state() if self.state.phase == GamePhase.IN_COMBAT.value else None,
         }
 
-    def _consume_item_effect(self, item: Consumable, params: dict) -> dict:
-        """单件消耗品的真实结算（改造合成条目也复用这条管线）。"""
+    def _item_actor_opponents(self, actor: Entity | None) -> list:
+        """消耗品使用者视角的「对面」名单（2026-11-10 阵营自选：不按 A/B 硬编码）。
+
+        使用者在轮回者侧 → 对面是敌方名单；使用者在怪物侧 → 对面是玩家侧存活单位。
+        """
+        if actor is None or self.state.on_player_side(actor):
+            return self.state.get_all_enemy_side()
+        refs = self.combat._combat_entity_refs()
+        return [entity for ref, entity in refs.items()
+                if self.state.on_player_side(entity) and entity.is_alive]
+
+    def _consume_item_effect(self, item: Consumable, params: dict,
+                             actor: Entity | None = None) -> dict:
+        """单件消耗品的真实结算（改造合成条目也复用这条管线）。
+
+        2026-11-10 阵营自选：``actor`` 是真实使用者（缺省仍是玩家）；效果里的
+        「自身/对面」都按使用者阵营推，不再硬编码 state.player。
+        """
+        actor = self.state.player if actor is None else actor
         item_name = item.name
 
         # 扭曲工具库消耗品：引擎侧真实结算（F3）
         if item.name in TWISTED_TOOL_LIBRARY:
-            return self._consume_twisted_tool(item, params)
+            return self._consume_twisted_tool(item, params, actor=actor)
 
         # 翼类消耗品（2026-10-23 用户令）：每次使用选一个模式，耗 1 点耐久。
         #   血翼：噬血（本回合你失去的生命改为回复）／飞行1／立刻逃跑
         #   烬翼：熄事（本回合不触发任何特殊事件）／飞行1／立刻逃跑
         if item.kind == "wing" or item.name in WING_MODES:
-            player = self.state.player
+            player = actor
             if player is None or not player.is_alive:
-                return {"success": False, "error": "没有可行动的玩家"}
+                return {"success": False, "error": f"{item_name}的使用者不存在或已倒下"}
             modes = WING_MODES.get(item.name, {})
             mode = params.get("mode", "")
             if mode not in modes:
@@ -3312,9 +3330,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             target = None
             if mode == "damage":
                 target = self.combat._combat_entity_refs().get(params.get("target_ref", ""))
-                if target not in self.state.get_all_enemy_side():
+                if target not in self._item_actor_opponents(actor):
                     target = None
-            result = self.combat.use_sculpture(item, target=target, mode=mode)
+            result = self.combat.use_sculpture(item, target=target, mode=mode, actor=actor)
             return {
                 "success": result.get("success", True),
                 "action": f"使用雕塑【{item_name}】({mode})",
@@ -3360,13 +3378,13 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
 
         # 【无限肉块】：恢复10生命（2026-10-05 用户令：5→10），但本次恢复不计入癌变累计治疗量。
         if item.kind == "infinite_meat":
-            return consume_infinite_meat(self.combat, item, self.state.player)
+            return consume_infinite_meat(self.combat, item, actor)
 
         # 正文具名消耗品：全部在扣耐久前完成参数校验；未实现项不得“成功但只扣耐久”。
         # 2026-10-14 审计F4：镇魂铁钉处理器补齐（此前发而无用）；替死鬼/赶尸铃/黄符见下。
         if item.name in {"绝息淤泥", "活性土壤", "假钞贴", "破障晶", "洗劫面具", "赤泉囊", "龙血瓶",
                           "镇魂铁钉", "赶尸铃", "黄符", "逆命筹", "怒火针", "灼罪钉", "定命丸"}:
-            return self._consume_named_event_item(item, params)
+            return self._consume_named_event_item(item, params, actor=actor)
 
         # 自定义消耗品（2026-10-23）：声明里的 effects 由 verbs 执行，不占出手。
         # 触发式（trigger 非空）的消耗品走机制自动结算，不接受手动使用。
@@ -3377,25 +3395,28 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                         "error": f"消耗品【{item.name}】是被动触发型，不能手动使用"}
             target_ref = params.get("target_ref", "")
             refs = self.combat._combat_entity_refs()
-            target = refs.get(target_ref, self.state.player) if target_ref else self.state.player
+            target = refs.get(target_ref, actor) if target_ref else actor
             if target_ref and target is None:
                 return {"success": False, "error": "target_ref不是当前合法目标"}
             remaining = item.use()
             logs = custom_resources.apply_effects(
                 self.combat, custom_item.spec["effects"],
-                actor=self.state.player, target=target,
+                actor=actor, target=target,
                 x=int(params.get("x", 1)), source=item.name)
             return {"success": True, "action": f"使用消耗品【{item.name}】",
                     "result": {"uses_remaining": remaining, "effects": logs},
                     "state": self.combat._get_combat_state()}
 
-        return consume_ordinary(self.combat, item, self.state.player)
+        return consume_ordinary(self.combat, item, actor)
 
-    def _consume_named_event_item(self, item: Consumable, params: dict) -> dict:
+    def _consume_named_event_item(self, item: Consumable, params: dict,
+                                  actor: Entity | None = None) -> dict:
+        # 2026-11-10 阵营自选：使用者按 actor 结算（缺省玩家）；个别条目涉及的
+        # 世界侧副作用（逃跑标记、[朋友]、假碎片）仍是全局状态，保持原样。
         refs = self.combat._combat_entity_refs()
-        player = self.state.player
+        player = self.state.player if actor is None else actor
         if player is None:
-            return {"success": False, "error": "没有玩家"}
+            return {"success": False, "error": "没有使用者"}
         name = item.name
         if name in NAMED_COMBAT_ITEMS:
             return consume_named_combat_item(self.combat, item, params, player)
@@ -3591,9 +3612,11 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         result.update({"uses_remaining": item.current_uses, "is_depleted": item.is_depleted})
         return {"success": True, "action": f"使用消耗品【{name}】", "result": result}
 
-    def _consume_twisted_tool(self, item: Consumable, params: dict) -> dict:
-        return consume_tool(self.combat, item, params, self.state.player,
-                            self.state.get_all_enemy_side())
+    def _consume_twisted_tool(self, item: Consumable, params: dict,
+                              actor: Entity | None = None) -> dict:
+        actor = self.state.player if actor is None else actor
+        return consume_tool(self.combat, item, params, actor,
+                            self._item_actor_opponents(actor))
 
     # ==================== 事件结算 ====================
 

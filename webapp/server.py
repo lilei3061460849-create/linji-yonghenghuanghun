@@ -250,6 +250,8 @@ def _battle_view(engine: GameEngine) -> dict[str, Any] | None:
             "ref": ref_by_id.get(id(entity)),
             "name": entity.name,
             "side": "player" if entity in player_side else "enemy",
+            # 2026-11-10 用户令：阵营自选后界面上要看得见谁是什么阵营。
+            "faction": "轮回者" if entity.entity_type == "轮回者" else entity.entity_type,
             "hp": entity.current_hp,
             "hp_limit": entity.blood_limit,
             "alive": bool(entity.is_alive and not entity.is_departed),

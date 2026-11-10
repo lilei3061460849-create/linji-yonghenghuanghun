@@ -357,21 +357,18 @@ class CombatHandlersMixin:
         defender = self._attack_defender_options(pending, ref)
         if choice == "use_item":
             # 2026-11-10 用户令：消耗品是「主动且被动」行动——被选中时可先用消耗品
-            # 再选应对；不耗出手也不耗应对，本击窗口保持开放。
+            # 再选应对；不耗出手也不耗应对，本击窗口保持开放。使用者按阵营摆位
+            # 定（actor_ref），不硬编码玩家槽位。
             if defender.get("item_locked"):
                 return {"success": False,
                         "error": "【必中】次数覆盖本击：目标无法进行被动行动（含使用消耗品）"}
             if not defender.get("item_options"):
                 return {"success": False,
                         "error": f"{entry.get('name')}没有可用消耗品（耐久耗尽或未持有）"}
-            if ref != "player:0":
-                return {"success": False,
-                        "error": "消耗品目前只有轮回者（玩家）能使用；"
-                                 "这一击请直接选硬扛/招架/闪避/血影"}
             item_name = str(params.get("item_name") or "")
             if not item_name:
                 return {"success": False, "error": "必须提交 item_name（要使用的消耗品名）"}
-            consume_params = {"name": item_name}
+            consume_params = {"name": item_name, "actor_ref": ref}
             if params.get("item_target_ref"):
                 consume_params["target_ref"] = params["item_target_ref"]
             consumed = self._action_consume_item(consume_params)

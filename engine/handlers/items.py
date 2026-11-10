@@ -17,10 +17,23 @@ class ItemHandlersMixin:
 
     @ACTION_REGISTRY.action("consume_item", group="items")
     def _action_consume_item(self, params: dict) -> dict:
-        """使用消耗品（雕塑/普通/扭曲工具库8件，遵守现有消耗品规则，使用不消耗出手）"""
+        """使用消耗品（雕塑/普通/扭曲工具库8件，遵守现有消耗品规则，使用不消耗出手）
+
+        2026-11-10 用户令（阵营自选）：使用者由 ``actor_ref`` 决定，不再硬编码
+        玩家——轮回者侧、怪物侧的任何参战单位都用**自己携带的**消耗品。
+        """
         item_name = params.get("name", "")
+        item_user = self.state.player
+        pool = self.state.consumables
+        actor_ref = str(params.get("actor_ref") or "")
+        if actor_ref and actor_ref != "player:0":
+            found = self.combat._combat_entity_refs().get(actor_ref)
+            if found is None:
+                return {"success": False, "error": f"actor_ref不是当前参战单位：{actor_ref}"}
+            item_user = found
+            pool = list(getattr(found, "consumables", []) or [])
         item = None
-        for c in self.state.consumables:
+        for c in pool:
             if c.name == item_name and not c.is_depleted:
                 item = c
                 break
@@ -28,7 +41,6 @@ class ItemHandlersMixin:
             return {"success": False, "error": f"找不到可用消耗品: {item_name}"}
 
         # 【操纵】：使用者（玩家/朋友/员工）的这一次行动必须等于施法者指令。
-        item_user = self.state.player
         caozuo_error = self.combat.caozuo_check(item_user, "使用消耗品", item_name)
         if caozuo_error:
             return caozuo_error
@@ -47,16 +59,16 @@ class ItemHandlersMixin:
             self.state._consumable_effect_multiplier = 2
             try:
                 if item.merged_sources:
-                    return self._consume_merged_item(item, params)
-                return self._consume_item_effect(item, params)
+                    return self._consume_merged_item(item, params, actor=item_user)
+                return self._consume_item_effect(item, params, actor=item_user)
             finally:
                 self.state._consumable_effect_multiplier = 1
 
         # 【改造】合成的条目：逐条结算被并入的原始效果，最后只扣它自己的1点耐久。
         if item.merged_sources:
-            return self._consume_merged_item(item, params)
+            return self._consume_merged_item(item, params, actor=item_user)
 
-        return self._consume_item_effect(item, params)
+        return self._consume_item_effect(item, params, actor=item_user)
 
     @ACTION_REGISTRY.action("set_active_relics", group="items")
     def _action_set_active_relics(self, params: dict) -> dict:

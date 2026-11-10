@@ -170,6 +170,12 @@
         <input id="eName" maxlength="12" placeholder="最多 12 字" />
       </div>
 
+      <div class="row" style="margin-bottom:4px">
+        <button id="eFactionPlayer" class="on">轮回者</button>
+        <button id="eFactionMonster">怪物</button>
+      </div>
+      <div class="hintline" id="eFactionHint" style="margin-bottom:8px">轮回者阵营：玩家侧逻辑（施法/消耗品/癌变…）。对决里摆到轮回者侧。</div>
+
       <div class="row" style="margin-bottom:8px">
         <button id="eModeRule" class="on">规则模式（25 点）</button>
         <button id="eModeFree">自由模式</button>
@@ -356,7 +362,8 @@ function limitsOf(sheet){
 function sheetLine(sheet){
   const l = limitsOf(sheet);
   const rolled = (sheet.roll && Object.keys(sheet.roll).length) ? " · 🎲随机" : "";
-  return `血 ${l.blood} / 速 ${l.speed} / 法 ${l.mana}${rolled} · 道纹 ${(sheet.daowen || []).length}`
+  const faction = sheet.faction === "怪物" ? " · ⚔怪物" : "";
+  return `${faction ? "⚔怪物 · " : ""}血 ${l.blood} / 速 ${l.speed} / 法 ${l.mana}${rolled} · 道纹 ${(sheet.daowen || []).length}`
        + ` · 遗物 ${(sheet.relics || []).length} · 消耗品 ${(sheet.consumables || []).length}`
        + ` · 碎片 ${sheet.shards ?? 0}`;
 }
@@ -454,7 +461,7 @@ function renderChars(){
 
 function blankSheet(){
   return {
-    id: "", name: "新角色", mode: "rule",
+    id: "", name: "新角色", mode: "rule", faction: "轮回者",
     blood_points: 15, speed_points: 6, mana_points: 4,
     blood_limit: 90, speed_limit: 3, mana_limit: 2,
     attribute_points: 0, shards: 20, energy: 0, resonance: "转换",
@@ -468,6 +475,7 @@ function openEditor(sheet){
   $("editorTitle").textContent = editing.id ? "修改" : "新建";
   $("deleteChar").hidden = !editing.id;
   $("eName").value = editing.name || "";
+  setEditorFaction(editing.faction === "怪物" ? "怪物" : "轮回者");
   $("eShards").value = editing.shards ?? 20;
   $("eResonance").value = editing.resonance || "转换";
   $("eBloodPts").value = editing.blood_points ?? 15;
@@ -482,6 +490,19 @@ function openEditor(sheet){
   renderEditorChips();
   $("editor").scrollIntoView({behavior: "smooth", block: "start"});
 }
+
+/* 阵营（2026-11-10 用户令）：选了什么阵营，开战就按那个阵营的逻辑运行——
+   对决里自动摆到对应侧，不按 A/B 槽位硬编码。 */
+function setEditorFaction(faction){
+  editing.faction = faction === "怪物" ? "怪物" : "轮回者";
+  $("eFactionPlayer").classList.toggle("on", editing.faction === "轮回者");
+  $("eFactionMonster").classList.toggle("on", editing.faction === "怪物");
+  $("eFactionHint").textContent = editing.faction === "怪物"
+    ? "怪物阵营：怪物侧逻辑（痛苦的偏爱、回始回满法力与异变…）。对决里自动摆到怪物侧（A/B 槽位都行）；单人演武不支持。"
+    : "轮回者阵营：玩家侧逻辑（施法/消耗品/癌变…）。对决里摆到轮回者侧。";
+}
+$("eFactionPlayer").onclick = () => setEditorFaction("轮回者");
+$("eFactionMonster").onclick = () => setEditorFaction("怪物");
 
 let uiMode = "rule";   // rule | free | roll（roll 保存时按自由模式存三维）
 function restoreRollRanges(){

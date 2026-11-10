@@ -91,6 +91,12 @@
     border-bottom:1px dashed #232c36}
   .combatant.dead{opacity:.45;text-decoration:line-through}
   .combatant .hp{color:var(--muted);font-variant-numeric:tabular-nums}
+  /* 阵营徽标（2026-11-10 用户令）：轮回者/怪物跟名字走 */
+  .combatant .name-wrap{display:flex;align-items:center;gap:6px;min-width:0}
+  .faction-badge{font-size:11px;padding:0 6px;border-radius:8px;white-space:nowrap;
+    border:1px solid var(--line);color:var(--muted)}
+  .side-enemy .faction-badge{color:#d98f6a;border-color:#5a4232}
+  .side-player .faction-badge{color:#7fb8a4;border-color:#2f4a41}
   /* 统一行动菜单（2026-11-10）：轮到谁的「行动」按钮展开 */
   .action-menu{border:1px solid var(--line);border-radius:8px;background:var(--panel-2);
     padding:8px;margin:4px 0 6px;gap:6px}
@@ -1341,7 +1347,12 @@ function renderBattle(){
       + (c.alive ? "" : " dead"));
     const combat = (c.attack_count > 0) ? ` · 攻 ${c.attack_count}×${c.attack_power}` : "";
     const left = (c.actions_left !== undefined) ? ` · 余 ${c.actions_left}/${c.action_budget} 手` : "";
-    row.append(el("span","name", c.name),
+    /* 阵营徽标（2026-11-10 用户令）：谁是什么阵营一眼可见；摆位跟阵营走 */
+    const badge = c.faction ? el("span", "faction-badge", c.faction) : null;
+    const nameWrap = el("span", "name-wrap");
+    nameWrap.append(el("span", null, c.name));
+    if (badge) nameWrap.append(badge);
+    row.append(nameWrap,
                el("span","hp", `${c.hp}/${c.hp_limit}${combat}${left}`));
     /* 行动导向：轮到谁，谁的名字旁只有一个「行动」按钮 */
     const myTurn = b.round_started !== false && !b.peaceful && c.alive && c.ref
