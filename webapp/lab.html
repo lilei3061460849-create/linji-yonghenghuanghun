@@ -253,37 +253,29 @@
   </section>
 
   <!-- ============================== 对战 ============================== -->
+  <!-- 2026-11-10 用户令：空白开局，点「＋ 加入单位」从角色库/当前怪物池逐个添；
+       每个单位一行，A/B 侧随手切换。选择窗口统一固定高度+滚动+搜索。 -->
   <section id="tabDuel" hidden>
     <div class="card">
-      <h2>A 方<span>你操作的一方</span></h2>
-      <div class="field">角色
-        <select id="aSelect"></select>
+      <h2>对战单位<span id="duelCount">0 名</span></h2>
+      <div id="duelUnits" class="char-picker"></div>
+      <div class="btnbar">
+        <button id="addUnit" class="primary">＋ 加入单位</button>
+        <button id="clearUnits" hidden>清空</button>
       </div>
-      <div class="hintline" id="aSummary"></div>
-      <div class="hintline" style="margin-top:8px;margin-bottom:4px">怪物队友（可选，最多 3 名，与 [朋友] 同机制：能被选中、能挡刀，不占你的出手）：</div>
-      <div id="aTeammateList"></div>
-    </div>
 
-    <div class="vs">VS</div>
-
-    <div class="card">
-      <h2>B 方<span>对手</span></h2>
-      <div class="row" style="margin-bottom:8px">
-        <button id="bModeChar" class="on">用角色卡</button>
-        <button id="bModeMonster">用副本怪物</button>
-      </div>
-      <div id="bCharBox">
-        <div class="field">角色
-          <select id="bSelect"></select>
+      <div id="unitPicker" class="card" style="margin-top:10px" hidden>
+        <div class="row" style="margin-bottom:6px">
+          <button id="upTabChars" class="on">角色库</button>
+          <button id="upTabMonsters">当前怪物池</button>
+          <button id="upClose" style="margin-left:auto">收起</button>
         </div>
-        <div class="hintline" id="bSummary"></div>
-        <div class="hintline" style="margin-top:8px;margin-bottom:4px">怪物队友（可选，最多 3 名，站在这张卡那侧）：</div>
-        <div id="bTeammateList"></div>
+        <input id="unitSearch" type="search" placeholder="搜索名字…"
+               style="margin-bottom:6px" />
+        <div id="unitPickList" class="picker"></div>
       </div>
-      <div id="bMonsterBox" hidden>
-        <div class="hintline" style="margin-bottom:6px">当前副本的怪物面板，点 ＋ 加入本场（最多 3 只）。</div>
-        <div id="bMonsterList"></div>
-      </div>
+
+      <div class="hintline" id="duelSummary" style="margin-top:8px"></div>
     </div>
 
     <div class="card">
@@ -292,7 +284,7 @@
         <label class="field">怪物池<select id="dRegion"></select></label>
         <label class="field">种子<input id="dSeed" placeholder="留空=随机"></label>
       </div>
-      <div class="hintline" style="margin:2px 0 6px">对手摆好就开打（杀戮尖塔式），没有副本地图要跑。怪物池只在 B 方选「用副本怪物」时决定能挑哪些怪。</div>
+      <div class="hintline" style="margin:2px 0 6px">摆好就开打（杀戮尖塔式），没有副本地图要跑。怪物池决定「当前怪物池」里能挑哪些怪。</div>
       <label class="check" style="display:flex;align-items:center;gap:8px;margin:6px 0">
         <input type="checkbox" id="dManual" checked>
         <span>推演模式：双方都由我操作（B 方回合不用 AI，适合测试）</span>
@@ -338,46 +330,15 @@ let OPTIONS = null;
 let CHARS = [];
 let SYNC = null;
 let editing = null;          // 编辑器里的草稿
-let bMode = "char";          // 对战 B 方：char | monster
-const bMonsters = new Map(); // 怪物 B 方：name -> count
-const MAX_B_MONSTERS = 3;
-const aTeammates = new Map(); // A 方怪物队友：name -> count
-const bTeammates = new Map(); // B 方（角色模式）怪物队友：name -> count
+/* 对战单位（2026-11-10 用户令）：空白开局，点「＋ 加入单位」从角色库/当前
+   怪物池逐个添；每个单位一行，A/B 侧随手切换。选择窗口与角色库/道纹同款：
+   固定高度 + 内部滚动 + 搜索框。 */
+let UNITS = [];              // {kind:"card"|"monster", cardId?, name, side:"A"|"B"}
+let UNIT_TAB = "chars";      // 加入窗口当前页：chars | monsters
+const MAX_SIDE_UNITS = 7;    // 每侧单位上限（B 侧含全部，A 侧含主控）
 
-/* 阵营自选（2026-11-10 用户令）：侧位=A/B 槽位，阵营=单位类型，任意组合都行——
-   轮回者打轮回者、怪物打怪物、轮回者+怪物队友打轮回者。两侧都能带怪物队友。 */
-function renderTeammateList(map, boxId){
-  const box = $(boxId);
-  box.innerHTML = "";
-  for (const monster of regionMonsters()){
-    const row = el("div", "tool-row");
-    const left = el("div");
-    left.append(el("span", null, monster.name),
-      el("span", "eff", `血${monster.blood_limit} 速${monster.speed_limit} 法${monster.mana_limit}`));
-    const right = el("div", "row");
-    const minus = el("button", "mini", "−");
-    minus.onclick = () => {
-      const n = (map.get(monster.name) || 0) - 1;
-      if (n > 0) map.set(monster.name, n); else map.delete(monster.name);
-      renderTeammateList(map, boxId);
-    };
-    const count = el("span", "mono", String(map.get(monster.name) || 0));
-    const plus = el("button", "mini", "＋");
-    plus.onclick = () => {
-      let total = 0;
-      for (const value of map.values()) total += value;
-      if (total >= MAX_B_MONSTERS){ toast(`最多 ${MAX_B_MONSTERS} 名`); return; }
-      map.set(monster.name, (map.get(monster.name) || 0) + 1);
-      renderTeammateList(map, boxId);
-    };
-    right.append(minus, count, plus);
-    row.append(left, right);
-    box.append(row);
-  }
-}
-function renderTeammates(){
-  renderTeammateList(aTeammates, "aTeammateList");
-  renderTeammateList(bTeammates, "bTeammateList");
+function findChar(id){
+  return CHARS.find(sheet => sheet.id === id) || null;
 }
 
 const $ = (id) => document.getElementById(id);
@@ -847,118 +808,145 @@ async function removeChar(sheet){
 
 /* ---------------------------------------------------------------- 对战 */
 
-function fillCharSelect(select, selectedId){
-  select.innerHTML = "";
-  if (!CHARS.length){
-    const opt = el("option", null, "（先去角色库建一个）");
-    opt.value = "";
-    select.append(opt);
-    select.disabled = true;
-    return;
-  }
-  select.disabled = false;
-  for (const sheet of CHARS){
-    const opt = el("option", null, `${sheet.name}（血${limitsOf(sheet).blood}）`);
-    opt.value = sheet.id;
-    select.append(opt);
-  }
-  if (selectedId && CHARS.some(sheet => sheet.id === selectedId)) select.value = selectedId;
-}
-
-function renderDuel(){
-  const prevA = $("aSelect").value;
-  const prevB = $("bSelect").value;
-  fillCharSelect($("aSelect"), prevA);
-  fillCharSelect($("bSelect"), prevB || prevA);
-  updateDuelSummary();
-  renderBMonsters();
-  renderTeammates();
-}
-
-function findChar(id){
-  return CHARS.find(sheet => sheet.id === id) || null;
-}
-
-function updateDuelSummary(){
-  const a = findChar($("aSelect").value);
-  $("aSummary").textContent = a ? sheetLine(a) : "还没有可选角色。";
-  const b = findChar($("bSelect").value);
-  $("bSummary").textContent = b ? sheetLine(b) : "还没有可选角色。";
-}
-
-function setBMode(mode){
-  bMode = mode;
-  $("bModeChar").classList.toggle("on", mode === "char");
-  $("bModeMonster").classList.toggle("on", mode === "monster");
-  $("bCharBox").hidden = mode !== "char";
-  $("bMonsterBox").hidden = mode !== "monster";
-  renderBMonsters();
-}
-
 function regionMonsters(){
   const region = OPTIONS.regions.find(item => item.name === $("dRegion").value);
   return region ? region.monsters : [];
 }
 
-function renderBMonsters(){
-  const box = $("bMonsterList");
+function unitLabel(unit){
+  if (unit.kind === "card"){
+    const sheet = findChar(unit.cardId);
+    const faction = (sheet && sheet.faction === "怪物") ? " ⚔怪物" : "";
+    return `${unit.name}${faction}`;
+  }
+  return `${unit.name}（怪物）`;
+}
+
+function renderDuel(){ renderUnits(); }
+
+function renderUnits(){
+  const box = $("duelUnits");
   box.innerHTML = "";
-  for (const monster of regionMonsters()){
-    const row = el("div", "tool-row");
-    const left = el("div");
-    left.append(el("span", null, monster.name),
-      el("span", "eff", `血${monster.blood_limit} 速${monster.speed_limit} 法${monster.mana_limit}`
-        + (monster.daowen.length ? ` · ${monster.daowen.join("/")}` : "")));
-    const right = el("div", "row");
-    const minus = el("button", "mini", "−");
-    minus.onclick = () => {
-      const n = (bMonsters.get(monster.name) || 0) - 1;
-      if (n > 0) bMonsters.set(monster.name, n); else bMonsters.delete(monster.name);
-      renderBMonsters();
+  $("duelCount").textContent = `${UNITS.length} 名`;
+  $("clearUnits").hidden = !UNITS.length;
+  if (!UNITS.length){
+    box.append(el("div", "empty",
+      "空白开局：点「＋ 加入单位」从角色库或当前怪物池挑人。"));
+    $("duelSummary").textContent = "";
+    return;
+  }
+  UNITS.forEach((unit, index) => {
+    const row = el("div", "char");
+    const top = el("div", "top");
+    const sideBtn = el("button", unit.side === "A" ? "primary" : "", `侧 ${unit.side}`);
+    sideBtn.title = "点击切换 A/B 侧";
+    sideBtn.onclick = () => {
+      const aCount = UNITS.filter(u => u.side === "A").length;
+      if (unit.side === "A" && aCount === 1){
+        toast("A 侧至少要留一张主控角色卡；要移走就先删掉它。");
+        return;
+      }
+      const other = unit.side === "A" ? "B" : "A";
+      if (other === "A" && UNITS.filter(u => u.side === "A" && u.kind === "card").length >= 1
+          && unit.kind === "card"){
+        /* A 侧允许多张卡：第一张是主控，其余自动变队友 */
+      }
+      unit.side = other;
+      renderUnits();
     };
-    const count = el("span", "mono", String(bMonsters.get(monster.name) || 0));
-    const plus = el("button", "mini", "＋");
-    plus.onclick = () => {
-      let total = 0;
-      for (const value of bMonsters.values()) total += value;
-      if (total >= MAX_B_MONSTERS){ toast(`最多 ${MAX_B_MONSTERS} 只`); return; }
-      bMonsters.set(monster.name, (bMonsters.get(monster.name) || 0) + 1);
-      renderBMonsters();
-    };
-    right.append(minus, count, plus);
-    row.append(left, right);
+    const name = el("span", "name", `${index + 1}. ${unitLabel(unit)}`);
+    const ops = el("div", "ops");
+    const del = el("button", "danger", "移除");
+    del.onclick = () => { UNITS.splice(index, 1); renderUnits(); };
+    ops.append(del);
+    top.append(sideBtn, name, ops);
+    row.append(top);
     box.append(row);
+  });
+  const aMain = UNITS.find(u => u.side === "A" && u.kind === "card");
+  const bCards = UNITS.filter(u => u.side === "B" && u.kind === "card").length;
+  $("duelSummary").textContent = aMain
+    ? `主控：${aMain.name}；B 侧 ${UNITS.filter(u => u.side === "B").length} 名单位（其中角色卡 ${bCards} 张）。`
+    : "A 侧还没有角色卡——至少加一张卡并切到 A 侧（它就是主控）。";
+}
+
+function renderUnitPicker(){
+  $("upTabChars").classList.toggle("on", UNIT_TAB === "chars");
+  $("upTabMonsters").classList.toggle("on", UNIT_TAB === "monsters");
+  const box = $("unitPickList");
+  box.innerHTML = "";
+  const q = ($("unitSearch").value || "").trim().toLowerCase();
+  if (UNIT_TAB === "chars"){
+    const list = CHARS.filter(sheet => !q
+      || `${sheet.name} ${sheet.faction || "轮回者"} ${(sheet.daowen || []).join(" ")}`
+         .toLowerCase().includes(q));
+    if (!list.length){
+      box.append(el("div", "picker-empty", q ? `没有匹配「${q}」的角色卡。` : "角色库还是空的。"));
+      return;
+    }
+    for (const sheet of list){
+      const row = el("div", "tool-row");
+      row.append(el("span", null, `${sheet.name}${sheet.faction === "怪物" ? " ⚔怪物" : ""}`),
+        el("span", "eff", sheetLine(sheet)));
+      const add = el("button", "mini", "加入");
+      add.onclick = () => addUnit({kind: "card", cardId: sheet.id, name: sheet.name});
+      row.append(add);
+      box.append(row);
+    }
+  } else {
+    const list = regionMonsters().filter(m => !q || m.name.toLowerCase().includes(q));
+    if (!list.length){
+      box.append(el("div", "picker-empty", "当前怪物池没有匹配的怪物。"));
+      return;
+    }
+    for (const monster of list){
+      const row = el("div", "tool-row");
+      row.append(el("span", null, monster.name),
+        el("span", "eff", `血${monster.blood_limit} 速${monster.speed_limit} 法${monster.mana_limit}`
+          + (monster.daowen.length ? ` · ${monster.daowen.join("/")}` : "")));
+      const add = el("button", "mini", "加入");
+      add.onclick = () => addUnit({kind: "monster", name: monster.name});
+      row.append(add);
+      box.append(row);
+    }
   }
 }
 
+function addUnit(unit){
+  if (UNITS.length >= MAX_SIDE_UNITS * 2){ toast(`总共最多 ${MAX_SIDE_UNITS * 2} 名单位`); return; }
+  // 第一个单位默认 A 侧（主控），之后默认 B 侧；行上随时切换。
+  const side = UNITS.some(u => u.side === "A") ? "B" : "A";
+  UNITS.push({...unit, side});
+  renderUnits();
+  renderUnitPicker();     // 连续添加不关窗
+}
+
 async function startDuel(){
-  const a = findChar($("aSelect").value);
-  if (!a){ toast("先选 A 方角色"); return; }
-  const expand = (map) => {
-    const names = [];
-    for (const [name, count] of map){
-      for (let i = 0; i < count; i++) names.push(name);
-    }
-    return names;
-  };
+  const aMain = UNITS.find(u => u.side === "A" && u.kind === "card");
+  if (!aMain){ toast("A 侧需要一张角色卡当主控（点单位行上的「侧 A/B」切换）"); return; }
+  const bUnits = UNITS.filter(u => u.side === "B");
+  if (!bUnits.length){ toast("B 侧还没有单位"); return; }
+  const expand = (list) => list.map(u => u.name);
   const payload = {
-    a: {id: a.id, teammates: expand(aTeammates)},
+    a: {
+      id: aMain.cardId,
+      teammates: expand(UNITS.filter(u => u.side === "A" && u.kind === "monster")),
+      companions: UNITS.filter(u => u.side === "A" && u.kind === "card" && u !== aMain)
+        .map(u => ({id: u.cardId})),
+    },
     manual_both: !!($("dManual") && $("dManual").checked),
     region: $("dRegion").value,
     direct: true,
     seed: $("dSeed").value.trim(),
   };
-  if (bMode === "monster"){
-    const monsters = [];
-    for (const [name, count] of bMonsters){
-      for (let i = 0; i < count; i++) monsters.push(name);
-    }
-    if (!monsters.length){ toast("B 方还没选怪物"); return; }
-    payload.b = {kind: "monster", monsters};
+  const bCards = bUnits.filter(u => u.kind === "card");
+  const bMons = expand(bUnits.filter(u => u.kind === "monster"));
+  if (bCards.length){
+    payload.b = {id: bCards[0].cardId,
+                 companions: bCards.slice(1).map(u => ({id: u.cardId})),
+                 teammates: bMons};
   } else {
-    const b = findChar($("bSelect").value);
-    if (!b){ toast("先选 B 方角色"); return; }
-    payload.b = {id: b.id, teammates: expand(bTeammates)};
+    payload.b = {kind: "monster", monsters: bMons};
   }
   const btn = $("startDuel"), bar = $("duelProgress");
   btn.disabled = true;
@@ -1032,9 +1020,21 @@ $("bModeMonster").onclick = () => setBMode("monster");
 $("aSelect").onchange = updateDuelSummary;
 $("bSelect").onchange = updateDuelSummary;
 $("charSearch").oninput = () => renderChars();
+$("addUnit").onclick = () => {
+  const picker = $("unitPicker");
+  picker.hidden = !picker.hidden;
+  if (!picker.hidden){ renderUnitPicker(); $("unitSearch").focus(); }
+};
+$("upClose").onclick = () => { $("unitPicker").hidden = true; };
+$("upTabChars").onclick = () => { UNIT_TAB = "chars"; renderUnitPicker(); };
+$("upTabMonsters").onclick = () => { UNIT_TAB = "monsters"; renderUnitPicker(); };
+$("unitSearch").oninput = () => renderUnitPicker();
+$("clearUnits").onclick = () => { UNITS = []; renderUnits(); };
 $("dRegion").onchange = () => {
-  bMonsters.clear(); aTeammates.clear(); bTeammates.clear();
-  renderBMonsters(); renderTeammates();
+  UNITS = UNITS.filter(u => u.kind !== "monster"
+    || regionMonsters().some(m => m.name === u.name));
+  if (!$("unitPicker").hidden) renderUnitPicker();
+  renderUnits();
 };
 $("startDuel").onclick = startDuel;
 $("syncNow").onclick = async () => {

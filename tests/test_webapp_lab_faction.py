@@ -176,12 +176,34 @@ def test_teammate_cap_per_side():
     a = lab.save_sheet(_sheet(name="轮甲"))
     b = lab.save_sheet(_sheet(name="轮乙"))
     too_many = {"teammates": ["窃贼"] * (lab.MAX_ENEMIES + 1)}
-    with pytest.raises(ValueError, match="A方怪物队友最多"):
+    with pytest.raises(ValueError, match="A方队友单位合计最多"):
         lab.duel({"a": {"id": a["id"], **too_many}, "b": {"id": b["id"]},
                   "manual_both": True})
-    with pytest.raises(ValueError, match="B方怪物队友最多"):
+    with pytest.raises(ValueError, match="B方单位合计最多"):
         lab.duel({"a": {"id": a["id"]}, "b": {"id": b["id"], **too_many},
                   "manual_both": True})
+
+
+def test_card_companions_on_both_sides():
+    """队友不限于怪物：角色卡也能做队友（A 侧进 friends，B 侧成额外对手）。"""
+    a = lab.save_sheet(_sheet(name="轮甲"))
+    ally = lab.save_sheet(_sheet(name="轮盟"))
+    b = lab.save_sheet(_sheet(name="轮乙", speed_limit=3, relics=["避风铃"]))
+    mate = lab.save_sheet(_sheet(name="轮援", speed_limit=2))
+    prepared = lab.duel({
+        "a": {"id": a["id"], "companions": [{"id": ally["id"]}]},
+        "b": {"id": b["id"], "companions": [{"id": mate["id"]}]},
+        "manual_both": True, "seed": 4})
+    engine = prepared["engine"]
+    # A 侧卡队友进 friends；B 侧卡队友成第二个对手
+    assert [f.name for f in engine.state.friends] == ["轮盟"]
+    assert engine.state.friends[0].entity_type == "轮回者"
+    assert [e.name for e in engine.state.enemies] == ["轮乙", "轮援"]
+    # 敌方两张轮回者卡的遗物汇总进 opponent_relics 通道
+    assert any(r.name == "避风铃" for r in engine.state.opponent_relics)
+
+    _install(engine)
+    _play_hand(engine, "player:0", "enemy:0")
 
 
 def test_enemy_side_raizhe_rival_uses_own_consumable_in_respond_window():
