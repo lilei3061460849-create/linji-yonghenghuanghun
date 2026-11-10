@@ -161,6 +161,34 @@
       "energy": 0,
       "created_at": "2026-11-10T11:40:44",
       "updated_at": "2026-11-10T11:40:44"
+    },
+    {
+      "mode": "free",
+      "blood_points": 0,
+      "speed_points": 0,
+      "mana_points": 0,
+      "blood_limit": 90,
+      "speed_limit": 6,
+      "mana_limit": 2,
+      "attribute_points": 0,
+      "id": "0040d1832c1f",
+      "name": "甲药",
+      "resonance": "转换",
+      "daowen": [
+        "杀伐"
+      ],
+      "relics": [],
+      "consumables": [
+        {
+          "name": "备用血泵",
+          "uses": 3
+        }
+      ],
+      "shards": 20,
+      "roll": {},
+      "energy": 0,
+      "created_at": "2026-11-10T11:40:48",
+      "updated_at": "2026-11-10T11:40:48"
     }
   ]
 }
