@@ -47,7 +47,7 @@
     -webkit-overflow-scrolling:touch}
   /* 固定高度的选择器：道纹/遗物/消耗品统一一个高度、内部滚动 + 搜索，
      选项再多也不会把编辑器越撑越长。
-     【界面统一格式·2026-11-10 用户令】非弹窗的列表/选择类窗口一律：
+     【界面统一格式·】非弹窗的列表/选择类窗口一律：
      固定高度 + 内部上下滚动（overscroll-behavior:contain）+ 顶部搜索框；
      完整口径见 webapp/README.md「界面统一格式」。 */
   .picker{height:236px;overflow:auto;border:1px solid var(--line);border-radius:10px;
@@ -71,7 +71,7 @@
   .warn{color:#e6b95c}
   .char{border:1px solid var(--line);border-radius:10px;background:var(--panel-2);padding:10px 12px;
     display:flex;flex-direction:column;gap:6px}
-  /* 角色卡列表与道纹选择器同款：固定高度、内部滚动、上方搜索框（2026-11-10 用户令） */
+  /* 角色卡列表与道纹选择器同款：固定高度、内部滚动、上方搜索框（） */
   .char-picker{height:300px;overflow:auto;border:1px solid var(--line);border-radius:10px;
     padding:8px;background:#10151a;display:flex;flex-direction:column;gap:6px;
     -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
@@ -256,7 +256,7 @@
   </section>
 
   <!-- ============================== 对战 ============================== -->
-  <!-- 2026-11-10 用户令：空白开局，点「＋ 加入单位」从角色库/当前怪物池逐个添；
+  <!-- 空白开局，点「＋ 加入单位」从角色库/当前怪物池逐个添；
        每个单位一行，A/B 侧随手切换。选择窗口统一固定高度+滚动+搜索。 -->
   <section id="tabDuel" hidden>
     <div class="card">
@@ -333,7 +333,7 @@ let OPTIONS = null;
 let CHARS = [];
 let SYNC = null;
 let editing = null;          // 编辑器里的草稿
-/* 对战单位（2026-11-10 用户令）：空白开局，点「＋ 加入单位」从角色库/当前
+/* 对战单位（）：空白开局，点「＋ 加入单位」从角色库/当前
    怪物池逐个添；每个单位一行，A/B 侧随手切换。选择窗口与角色库/道纹同款：
    固定高度 + 内部滚动 + 搜索框。 */
 let UNITS = [];              // {kind:"card"|"monster", cardId?, name, side:"A"|"B"}
@@ -362,7 +362,7 @@ function limitsOf(sheet){
   if (sheet.mode === "rule"){
     return {
       blood: (Number(sheet.blood_points) || 0) * 6,
-      speed: Math.floor((Number(sheet.speed_points) || 0) / 2),
+      speed: Number(sheet.speed_points) || 0,
       mana: Math.floor((Number(sheet.mana_points) || 0) / 2),
     };
   }
@@ -521,7 +521,7 @@ function openEditor(sheet){
   $("editor").scrollIntoView({behavior: "smooth", block: "start"});
 }
 
-/* 阵营（2026-11-10 用户令）：选了什么阵营，开战就按那个阵营的逻辑运行——
+/* 阵营（）：选了什么阵营，开战就按那个阵营的逻辑运行——
    对决里自动摆到对应侧，不按 A/B 槽位硬编码。 */
 function setEditorFaction(faction){
   editing.faction = faction === "怪物" ? "怪物" : "轮回者";
@@ -969,7 +969,7 @@ async function startDuel(){
     });
     const data = await res.json();
     if (!data.success){ toast("开战失败：" + (data.error || "未知错误")); finish(); return; }
-    /* 2026-11-10 用户令：开战后直接进战斗界面，不再让用户手动点「进入战斗界面」，
+    /* 开战后直接进战斗界面，不再让用户手动点「进入战斗界面」，
        战斗界面读到 ?autostart=1 会自己「开始本回合」。 */
     toast("开战成功，正在进入战斗界面…");
     setTimeout(() => { location.href = "/?autostart=1"; }, 700);

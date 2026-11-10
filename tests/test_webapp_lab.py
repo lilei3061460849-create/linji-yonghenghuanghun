@@ -19,7 +19,7 @@ from webapp import lab
 
 
 def test_derivative_daowen_can_go_straight_into_a_character_sheet():
-    """2026-11-09 用户令：衍生道纹也能像普通道纹一样直接放进角色卡的道纹栏。
+    """衍生道纹也能像普通道纹一样直接放进角色卡的道纹栏。
 
     角色卡是局外配装，不该被「局内 0 出手衍生」这一条获得途径锁死——衍生道纹
     既是母本的收益置换，也是怪物去同质化的素材，必须先能在卡里选到。
@@ -300,7 +300,7 @@ def test_random_card_keeps_the_window_and_saves_as_free_mode(roster_file):
 
 
 def test_duel_runs_directly_without_a_dungeon_map(roster_file):
-    """用户令 2026-11-09：不需要副本当地图，对手摆好就直接开打。
+    """不需要副本当地图，对手摆好就直接开打。
 
     这条钉住「直接对战」的两半：引擎侧 `inject_enemies` 真的把对手摆上台
     （不是被随机出怪顶掉），界面侧 `direct` 标记让前端隐藏地图卡。
@@ -396,7 +396,7 @@ def test_duel_priority_tie_is_random_then_alternates(roster_file):
 
 
 def test_duel_without_relics_grants_none(roster_file):
-    """2026-11-10 用户令：演武场不入副本——没选遗物就一件都没有，不随机给。
+    """演武场不入副本——没选遗物就一件都没有，不随机给。
 
     「选副本前必须持有一件遗物」是进副本规则；演武场是特殊场景，直接开战，
     开局随机发现只是候选，不显式挑选就不落到角色身上。

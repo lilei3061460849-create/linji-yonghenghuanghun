@@ -88,7 +88,7 @@ def _daowen_groups() -> list[dict[str, Any]]:
         seen.update(picked)
         groups.append({"label": label, "names": picked, "note": note})
 
-    # 2026-11-09 用户令：衍生道纹可以像普通道纹一样直接放进角色卡的道纹栏，
+    # 衍生道纹可以像普通道纹一样直接放进角色卡的道纹栏，
     # 不必非得在局内花【转换】+血限2+碎片3 去发现。这里单独成组，名字与条文
     # 直接从 engine.derivatives 取，避免界面自建一份名单。
     add("衍生道纹（母本衍生）", [spec.name for spec in derivative_rules.DERIVATIVE_SPECS],
@@ -149,7 +149,7 @@ def options(refresh: bool = False) -> dict[str, Any]:
         "attributes": {
             "total_points": 25,
             "blood_per_point": 6,
-            "points_per_speed": 1,   # 2026-11-09 用户令：1属性点=1速限
+            "points_per_speed": 1,   # 1属性点=1速限
             "points_per_mana": 2,
             "limits": {"blood": MAX_BLOOD_LIMIT, "speed": MAX_TIER_LIMIT,
                        "mana": MAX_TIER_LIMIT, "shards": MAX_SHARDS, "uses": MAX_USES},
@@ -335,7 +335,7 @@ ROLL_FIELDS = {
 def roll_limits(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """随机三维：给每个上限在 [min, max] 区间里等概率取一个整数。
 
-    用途是 NPC / 造物这类「懒得想数值」的角色卡（用户令 2026-11-09）。
+    用途是 NPC / 造物这类「懒得想数值」的角色卡（）。
     - `payload["ranges"]` 形如 `{"blood": [30, 120], "speed": [2, 8], "mana": [1, 8]}`；
       省略的项用缺省区间。
     - 端点包含在内；min > max、越界都直接报错，不悄悄改成合法值。
@@ -370,7 +370,7 @@ def roll_limits(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
-# 角色卡可选阵营（2026-11-10 用户令）：轮回者＝玩家侧逻辑；怪物＝怪物侧逻辑。
+# 角色卡可选阵营（）：轮回者＝玩家侧逻辑；怪物＝怪物侧逻辑。
 FACTIONS = ("轮回者", "怪物")
 
 
@@ -384,7 +384,7 @@ def normalize_sheet(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("角色卡必须是对象")
     name = str(payload.get("name") or "轮回者").strip()[:12] or "轮回者"
-    # 2026-11-10 用户令：角色卡自选阵营（轮回者/怪物）。选了什么阵营，开战就按
+    # 角色卡自选阵营（轮回者/怪物）。选了什么阵营，开战就按
     # 那个阵营的逻辑运行——摆位与规则分支都跟阵营走，不按 A/B 槽位硬编码。
     faction = str(payload.get("faction") or "轮回者").strip()
     if faction not in FACTIONS:
@@ -519,7 +519,7 @@ def _apply_loadout(engine: GameEngine, sheet: dict[str, Any], region: str,
     if not setup.get("success"):
         raise ValueError(f"属性分配失败：{setup.get('error')}")
 
-    # 演武场不入副本（2026-11-10 用户令）：没选遗物就一件都没有——
+    # 演武场不入副本（）：没选遗物就一件都没有——
     # 「进副本须持有一件遗物」是副本规则，不适用于演武场；开局随机发现
     # 只是候选（pending_relic_choices），不显式挑选就放弃掉，不落到角色身上。
     relics = list(sheet["relics"])
@@ -538,7 +538,7 @@ def _apply_loadout(engine: GameEngine, sheet: dict[str, Any], region: str,
     if not chosen.get("success"):
         raise ValueError(f"残韵选择失败：{chosen.get('error')}")
 
-    # 演武场是特殊场景，不视为副本（2026-11-10 用户令）：跳过 setup_choose_region
+    # 演武场是特殊场景，不视为副本（）：跳过 setup_choose_region
     # 的进副本门禁（须持遗物/先选残韵等都是副本规则），直接把引擎摆到局外开战相位。
     # region 在这里只决定「怪物池」口径（指定对手/按副本随机时从这里抽怪），
     # 不触发副本流程，也不做过路商人初始化。
@@ -551,7 +551,7 @@ def _apply_loadout(engine: GameEngine, sheet: dict[str, Any], region: str,
     engine.state.shards = int(sheet["shards"])
     engine.state.energy = int(sheet["energy"])
 
-    # 2026-11-10 用户令（阵营自选）：A 方卡是怪物阵营时，你操作的这只实体就按
+    # 阵营自选：A 方卡是怪物阵营时，你操作的这只实体就按
     # 怪物逻辑运行——转换实体类型并补齐怪物出厂不变量（痛苦的偏爱、当前值给满），
     # 与 Entity.__post_init__ 的怪物分支同口径。
     if (sheet_faction(sheet) == "怪物"
@@ -588,7 +588,7 @@ def _monster_entities(engine: GameEngine, names: list[str]) -> list[Any]:
 
 def _entity_from_sheet(engine: GameEngine, sheet: dict[str, Any],
                        *, name_taken: str = "") -> Any:
-    """把一张角色卡造成参战实体，阵营按卡走（2026-11-10 用户令）。
+    """把一张角色卡造成参战实体，阵营按卡走（）。
 
     与轮回者侧共用同一套口径：三维直接写上限，道纹/残韵/消耗品挂在该实体上。
     阵营＝怪物时，实体就是 ``entity_type="怪物"``——引擎的怪物分支（痛苦的偏爱、
@@ -796,7 +796,7 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         b_sheet = _resolve_side(b_side, "B方")
 
-    # 2026-11-10 用户令（阵营自选）：侧位就是 A/B 槽位（A=你操作的轮回者侧，
+    # 阵营自选：侧位就是 A/B 槽位（A=你操作的轮回者侧，
     # B=对面侧），阵营只是**单位类型**，决定该单位按哪套规则逻辑运行——
     # 轮回者打轮回者、怪物打怪物、轮回者+怪物队友打轮回者，任何组合都照摆。
     # 引擎的两侧判定本来就是结构性的（on_player_side），与阵营无关，不做任何换位。
@@ -823,7 +823,7 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
 
     engine = _new_engine(payload)
     notes: list[str] = []
-    # 推演模式（2026-11-09 用户令）：演武场是给自己推演/测试用的，AI 自动打会
+    # 推演模式（）：演武场是给自己推演/测试用的，AI 自动打会
     # 干扰测试，所以允许「双方都手动」——每方行动完由引擎的交替出手自动换边，
     # 敌方回合由用户在下方面板里点选，服务端不再调用 AI 启发式。
     manual_both = bool(payload.get("manual_both"))
@@ -879,7 +879,7 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
         engine.state.opponent_relics = squad
 
     if direct:
-        # 用户令 2026-11-09：不需要副本当地图，直接开打。
+        # 不需要副本当地图，直接开打。
         battle = _start_direct_battle(engine, entities)
     else:
         width = _as_int(payload.get("width", 11), "地图宽", 5, 41)

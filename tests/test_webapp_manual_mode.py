@@ -35,7 +35,7 @@ def _sheet(name, **overrides):
 def _install_duel(roster_file, manual_both=True, **b_overrides):
     a = lab.save_sheet(_sheet("甲"))
     # B 方低 1 点速限：先手按「速限→法限→血限→当前生命」确定性判给 A 方。
-    # （2026-11-10 起演武场不入副本，开局随机序列与旧版不同——原来这里靠
+    # （现口径：演武场不入副本，开局随机序列与旧版不同——原来这里靠
     #  seed 撞平局随机，先手会随引擎随机源位移而翻转，本就不该依赖。）
     b = lab.save_sheet(_sheet("乙", speed_points=5, **b_overrides))
     payload = {"a": {"id": a["id"]}, "b": {"id": b["id"]},

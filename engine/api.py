@@ -608,7 +608,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "cast", "focus", "rest", "skip",
                 "declare_wish", "declare_escape", "deploy_employee",
                 "define_spell", "undefine_spell",
-                # 协力施法（2026-11-10 用户令）：发起/填入/发动都是行动阶段的施法类操作。
+                # 协力施法（）：发起/填入/发动都是行动阶段的施法类操作。
                 "declare_spell", "fill_spell", "release_spell", "cancel_spell",
                 "lianxin_in_battle", "declare_evolution", "activate_duel_relic",
                 "use_black_card", "use_crime_vault", "fire_godfather_revolver",
@@ -3268,7 +3268,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         }
 
     def _item_actor_opponents(self, actor: Entity | None) -> list:
-        """消耗品使用者视角的「对面」名单（2026-11-10 阵营自选：不按 A/B 硬编码）。
+        """消耗品使用者视角的「对面」名单（不按 A/B 硬编码）。
 
         使用者在轮回者侧 → 对面是敌方名单；使用者在怪物侧 → 对面是玩家侧存活单位。
         """
@@ -3282,7 +3282,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                              actor: Entity | None = None) -> dict:
         """单件消耗品的真实结算（改造合成条目也复用这条管线）。
 
-        2026-11-10 阵营自选：``actor`` 是真实使用者（缺省仍是玩家）；效果里的
+        ``actor`` 是真实使用者（缺省仍是玩家）；效果里的
         「自身/对面」都按使用者阵营推，不再硬编码 state.player。
         """
         actor = self.state.player if actor is None else actor
@@ -3411,7 +3411,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
 
     def _consume_named_event_item(self, item: Consumable, params: dict,
                                   actor: Entity | None = None) -> dict:
-        # 2026-11-10 阵营自选：使用者按 actor 结算（缺省玩家）；个别条目涉及的
+        # 使用者按 actor 结算（缺省玩家）；个别条目涉及的
         # 世界侧副作用（逃跑标记、[朋友]、假碎片）仍是全局状态，保持原样。
         refs = self.combat._combat_entity_refs()
         player = self.state.player if actor is None else actor

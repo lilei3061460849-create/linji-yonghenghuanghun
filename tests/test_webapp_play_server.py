@@ -218,7 +218,7 @@ def test_battle_actions_expose_daowen_and_cast_for_panel(tmp_path):
 
 
 def test_battle_view_exposes_coop_spells_and_fill_entries(tmp_path):
-    """协力施法（2026-11-10 用户令）：发起后战斗视图带 coop_spells（摊平槽位/已填），
+    """协力施法（）：发起后战斗视图带 coop_spells（摊平槽位/已填），
     可用行动列出 fill/release/cancel；B 方回合同样能看到填入入口。"""
     engine, _, _ = _battle_engine(tmp_path)
     engine.state.player.dao_wen["杀伐"] = __import__(
@@ -260,7 +260,7 @@ def test_battle_view_exposes_coop_spells_and_fill_entries(tmp_path):
 
 
 def test_battle_save_exit_and_load_roundtrip(tmp_path, monkeypatch):
-    """2026-11-10 用户令：保存当前战斗并退出——存档后对局清空，读取后原样继续
+    """保存当前战斗并退出——存档后对局清空，读取后原样继续
     （回合、双方生命、可用行动都在），不用重开战斗重调三维。"""
     from engine.api import GameEngine
     engine, _, _ = _battle_engine(tmp_path)
@@ -312,7 +312,7 @@ def test_action_menu_entries_are_single_source(tmp_path):
 
 
 def test_dormant_diandang_entry_is_not_a_pending_discovery(tmp_path):
-    """典当弹窗误报的根因（2026-11-10）：引擎在战斗里永远列一条
+    """典当弹窗误报的根因：引擎在战斗里永远列一条
     choose_diandang_daowen 占位（无待领取时 available=False、remaining_groups=0）。
     界面的「待决」弹窗只认 available≠false 的条目——这里钉住引擎契约，防止
     占位条目哪天变成 available 缺省（那会让弹窗每次渲染都弹）。"""

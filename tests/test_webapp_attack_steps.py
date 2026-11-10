@@ -142,7 +142,7 @@ def test_priority_hands_over_only_when_the_hand_is_finished(duel):
     assert engine.state.duel_turn == "opponent_side"     # 这一手打完了才交棒
 
 
-# ==== 消耗品=主动且被动行动（2026-11-10 用户令）====
+# ==== 消耗品=主动且被动行动（）====
 # 被普攻选中时也能先用一件消耗品再选应对：不耗出手、不耗应对，窗口保持开放；
 # 【必中】次数覆盖本击时被动行动整体被锁（规则正文·被动行动定义已加入「使用消耗品」）。
 @pytest.fixture

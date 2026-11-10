@@ -64,7 +64,7 @@ def handle_setup_attributes(engine: Any, params: Dict[str, Any]) -> Dict[str, An
     # 战始快照/深拷贝会剔除弱引用；建号后先给轮回者接回【庇护】/【脆弱】的
     # 失血拦截钩子（不绑完整引擎，避免同时改变封顶与「失去生命后」反应）。
     engine.combat._bind_intercept_hook(player)
-    # DM裁定 2026-09-10：属性点可存储，随时兑换（2点=1速限=1法限）
+    # 属性点可存储，随时兑换（1点=1速限=6血限；2点=1法限）
     engine.state.attribute_points = 25 - total
     engine.state.allocated_blood = blood_limit
     engine.state.shards = 20

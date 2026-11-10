@@ -119,7 +119,7 @@ class CombatHandlersMixin:
         speed = int(getattr(target, "current_speed", 0) or 0)
         index = int(pending.get("hit_index", 0))
         bizhong = int(self.combat.bizhong_remaining(attacker)) if attacker else 0
-        # 2026-11-10 用户令：消耗品改为「主动且被动」行动——被选中时也能先用
+        # 消耗品改为「主动且被动」行动——被选中时也能先用
         # 消耗品再选应对（不耗出手也不耗应对）。必中次数覆盖本击时被动行动被封锁。
         items_pool = (self.state.consumables if target is self.state.player
                       else getattr(target, "consumables", []) or [])
@@ -356,7 +356,7 @@ class CombatHandlersMixin:
         entry = legal.get(ref) or {}
         defender = self._attack_defender_options(pending, ref)
         if choice == "use_item":
-            # 2026-11-10 用户令：消耗品是「主动且被动」行动——被选中时可先用消耗品
+            # 消耗品是「主动且被动」行动——被选中时可先用消耗品
             # 再选应对；不耗出手也不耗应对，本击窗口保持开放。使用者按阵营摆位
             # 定（actor_ref），不硬编码玩家槽位。
             if defender.get("item_locked"):

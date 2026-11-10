@@ -19,7 +19,7 @@ class ItemHandlersMixin:
     def _action_consume_item(self, params: dict) -> dict:
         """使用消耗品（雕塑/普通/扭曲工具库8件，遵守现有消耗品规则，使用不消耗出手）
 
-        2026-11-10 用户令（阵营自选）：使用者由 ``actor_ref`` 决定，不再硬编码
+        阵营自选：使用者由 ``actor_ref`` 决定，不再硬编码
         玩家——轮回者侧、怪物侧的任何参战单位都用**自己携带的**消耗品。
         """
         item_name = params.get("name", "")

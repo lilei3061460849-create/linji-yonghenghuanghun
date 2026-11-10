@@ -114,7 +114,7 @@ def _log(text: str) -> None:
 
 
 # ---------------------------------------------------------------- 存档架
-# 2026-11-10 用户令：「保存当前战斗并退出」——先存档再退出对局，之后随时读取
+# 「保存当前战斗并退出」——先存档再退出对局，之后随时读取
 # 继续，不用重开战斗重调三维。引擎自带 save_game/load_game（state+随机源+战斗
 # 运行态完整往返）；引擎实例暂存在进程内 shelf，同一会话内必可读回；
 # 跨进程重启后，常规开局（save_dir=data/saves）仍可从磁盘读回。
@@ -250,7 +250,7 @@ def _battle_view(engine: GameEngine) -> dict[str, Any] | None:
             "ref": ref_by_id.get(id(entity)),
             "name": entity.name,
             "side": "player" if entity in player_side else "enemy",
-            # 2026-11-10 用户令：阵营自选后界面上要看得见谁是什么阵营。
+            # 阵营自选后界面上要看得见谁是什么阵营。
             "faction": "轮回者" if entity.entity_type == "轮回者" else entity.entity_type,
             "hp": entity.current_hp,
             "hp_limit": entity.blood_limit,
@@ -304,7 +304,7 @@ def _battle_view(engine: GameEngine) -> dict[str, Any] | None:
         }
     if state.world_encounter_id:
         view["world_encounter_id"] = state.world_encounter_id
-    # 协力施法（2026-11-10 用户令）：把未发动的协力法术摊平成界面好渲染的视图。
+    # 协力施法（）：把未发动的协力法术摊平成界面好渲染的视图。
     # 槽位按引擎的深度优先顺序编号（if 分支的格子也连续编号），与 fill_spell.slot 对齐。
     from engine.handlers.coop_spell import _coop_flat_slots
     coop = []
@@ -401,7 +401,7 @@ def _event_view(engine: GameEngine, actions: dict[str, Any]) -> dict[str, Any] |
 def _derivative_view(engine: GameEngine, actions: dict[str, Any]) -> dict[str, Any] | None:
     """局内【衍生】：0 出手行动，界面必须能发起、领取、刷新、放弃。
 
-    2026-11-09 用户令：衍生是战斗内独立行动（不占出手、不结束回合、不耗精力）。
+    衍生是战斗内独立行动（不占出手、不结束回合、不耗精力）。
     引擎侧 action／pending 都已齐备，这里只把它摊平成界面好渲染的一份视图：
     可用的母本、缺什么代价、待领取的三个选项（含《全道纹索引》原文）。
     """
