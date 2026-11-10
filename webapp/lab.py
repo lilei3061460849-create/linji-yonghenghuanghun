@@ -152,7 +152,7 @@ def options(refresh: bool = False) -> dict[str, Any]:
             "points_per_mana": 2,
             "limits": {"blood": MAX_BLOOD_LIMIT, "speed": MAX_TIER_LIMIT,
                        "mana": MAX_TIER_LIMIT, "shards": MAX_SHARDS, "uses": MAX_USES},
-            "note": "规则模式：1 点=6 血限，2 点=1 速限=1 法限，总和不超过 25；"
+            "note": "规则模式：1 点=6 血限=1 速限，2 点=1 法限，总和不超过 25；"
                     "自由模式直接填三个上限，仅用于演武场。",
         },
         "regions": _regions(engine),

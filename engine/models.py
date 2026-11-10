@@ -1151,8 +1151,11 @@ class Entity:
         """
         return math.inf if self.has_status("无限法限") else self.mana_limit
 
-    def heal(self, amount: int) -> dict:
+    def heal(self, amount: int, count_multiplier: int = 1) -> dict:
         """回复生命。
+
+        `count_multiplier` 只影响**记账**（本场累计治疗量），不影响实际回复：
+        【疯长】回 8X 血，但这一发在累计治疗量里按双倍记，更快逼近【癌变】线。
 
         2026-11-01 重构2：删掉 `allow_overflow` 死参数——"能否超过[血限]"
         已经由 `__setattr__` 统一判定（猩红果实 / 【增殖】的无限血限），
@@ -1169,7 +1172,7 @@ class Entity:
         # 癌变追踪：DM裁定删除过量回复双倍计入机制，
         # 受到的全部回复（含过量部分）一律按原值计入累计恢复量。
         self.total_healed += amount
-        self.healed_this_battle += actual
+        self.healed_this_battle += actual * max(1, int(count_multiplier or 1))
         return {
             "heal_amount": amount,
             "actual_heal": actual,
@@ -1731,6 +1734,7 @@ class GameState:
     def apply_heal(
         self, entity: Entity, amount: int,
         ctx: Optional[EffectContext | dict] = None,
+        count_multiplier: int = 1,
     ) -> dict:
         """统一回复入口；玩家侧溢出回复会被【龙血瓶】转为可提取耐久。
 
@@ -1744,12 +1748,14 @@ class GameState:
         with resolution_frame(_heal_engine, KIND_HEAL,
                               getattr(entity, "name", "?"), amount):
             try:
-                return self._apply_heal_inner(entity, amount, ctx)
+                return self._apply_heal_inner(entity, amount, ctx,
+                                              count_multiplier=count_multiplier)
             finally:
                 note_delta(_heal_engine, "hp", _hp_before, entity.current_hp)
 
     def _apply_heal_inner(self, entity: Entity, amount: int,
-                          ctx: Optional[EffectContext | dict] = None) -> dict:
+                          ctx: Optional[EffectContext | dict] = None,
+                          count_multiplier: int = 1) -> dict:
         """回复的实现体（对外契约见 apply_heal）。
 
         【第一杯】：持有者受到的回复翻倍（唯一事实源 `heal_multiplier`）。
@@ -1790,7 +1796,10 @@ class GameState:
         # （溢出量归零，【忘忧香】/【龙血瓶】无溢出可吃——没有溢出，只有实打实的血）。
         # 2026-11-01 重构2：上限判定由 Entity.__setattr__ 统一完成（猩红果实/
         # 无限血限），此处不再传参——`heal` 的 allow_overflow 已删除。
-        detail = entity.heal(amount)
+        detail = entity.heal(amount, count_multiplier=count_multiplier)
+        if count_multiplier != 1:
+            # 让战报/审计看得见「回同样的血，账记两倍」这条特例。
+            detail["heal_count_multiplier"] = count_multiplier
         detail["heal_ctx"] = heal_ctx.to_dict()
         heal_events = getattr(entity, "_heal_events", None)
         if heal_events is None:

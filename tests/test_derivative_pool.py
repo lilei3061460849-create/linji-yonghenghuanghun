@@ -36,6 +36,8 @@ from tests.setup_support import begin_battle, finish_initial_daowen, hand_priori
     ("折年", "cost_blood_limit", 7, "血限"),
     ("搏命", "cost_speed", 7, "速度"),
     ("献锋", "cost_attack", 7, "攻击力"),
+    ("疯长", "cost_mana_cap", 7, "法限"),
+    ("自愈", "cost_speed", 7, "速度"),
 ])
 def test_derivative_has_exactly_one_channel(name, cost_key, amount, cost_type):
     DaoWenEngine.register_all()
@@ -265,3 +267,39 @@ def test_battle_old_name_submission_rejected(tmp_path):
         "daowen_name": "血债", "x": 1, "target": m.name, "dodge": False})
     assert r["success"] is False
     assert m.current_hp == 80
+
+
+# ---------- 再生池：献锋／疯长／自愈 三条 ----------
+
+def test_zaisheng_pool_has_three_entries():
+    assert derivative_rules.pool_of("再生") == ("献锋", "疯长", "自愈")
+
+
+def test_battle_growth_derivative_double_counts_healing(tmp_path):
+    """【疯长】回 8X 血，但计入本场累计治疗量时按双倍记（更快撞癌变线）。"""
+    e, p, m = _setup_battle(tmp_path, "疯长")
+    cap0 = p.mana_limit
+    m.current_hp = 10
+    m.healed_this_battle = 0
+    r = _cast(e, m, "疯长", 2)
+    assert r["success"], r
+    assert p.mana_limit == cap0 - 2, "收法限X"
+    assert m.current_hp == 10 + 16, "8X 实际回血"
+    assert m.healed_this_battle == 32, "记账翻倍：16 的回复按 32 累计"
+    heal = next(fx for fx in r["execution"]["effects"] if fx["type"] == "heal")
+    assert heal.get("heal_count_multiplier") == 2
+
+
+def test_battle_self_heal_derivative_only_heals_caster(tmp_path):
+    """【自愈】只作用于自己：付速度X，回 6X 血；指定别人一律拒绝。"""
+    e, p, m = _setup_battle(tmp_path, "自愈")
+    speed0 = p.current_speed
+    p.current_hp = 10
+    rejected = _cast(e, m, "自愈", 2)
+    assert rejected["success"] is False and "只作用于自身" in rejected["error"]
+    assert p.current_hp == 10 and p.current_speed == speed0
+
+    ok = e.execute_action("use_daowen", {"daowen_name": "自愈", "x": 2, "dodge": False})
+    assert ok["success"], ok
+    assert p.current_speed == speed0 - 2
+    assert p.current_hp == 10 + 12, "6X 自身回复"

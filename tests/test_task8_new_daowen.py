@@ -57,7 +57,7 @@ class TestStructure20261108:
         names = set(DaoWenEngine.list_all())
         # 2026-11-09 第二轮改造：衍生改名，删【竭伐】（枯竭通道）与【伪伐】、增【冲击】，
         # 86 → 85。
-        assert len(names) == 85
+        assert len(names) == 87
         for n in ("脆弱", "连击", "虚耗", "断脉", "买命", "冲击",
                   "燃命", "折年", "搏命", "献锋"):
             assert n in names

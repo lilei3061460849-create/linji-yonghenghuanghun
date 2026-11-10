@@ -178,7 +178,7 @@
 
       <div id="eRuleFields" class="grid3">
         <label class="field">血限点<input id="eBloodPts" type="number" min="0" max="25" step="1" value="15"></label>
-        <label class="field">速限点<input id="eSpeedPts" type="number" min="0" max="25" step="2" value="6"></label>
+        <label class="field">速限点<input id="eSpeedPts" type="number" min="0" max="25" step="1" value="6"></label>
         <label class="field">法限点<input id="eManaPts" type="number" min="0" max="25" step="2" value="4"></label>
       </div>
       <div id="eFreeFields" class="grid3" hidden>
@@ -560,7 +560,7 @@ function updateEditorHint(){
     const total = editing.blood_points + editing.speed_points + editing.mana_points;
     hint = `已用 ${total}/25 点，余 ${25 - total} 点进属性点池。`;
     if (total > 25) hint = `⚠ 已用 ${total} 点，超出 25 点预算。`;
-    else if (editing.speed_points % 2 || editing.mana_points % 2) hint += " ⚠ 速限/法限点数必须为偶数。";
+    else if (editing.mana_points % 2) hint += " ⚠ 法限点数必须为偶数（速限 1 点一档，不限奇偶）。";
   } else if (uiMode === "roll"){
     hint = "随机模式：按上下限掷三个上限（NPC/造物用），只在演武场生效。";
   } else {
@@ -710,7 +710,7 @@ async function saveChar(){
   if (editing.mode === "rule"){
     const total = editing.blood_points + editing.speed_points + editing.mana_points;
     if (total > 25){ toast("规则模式下三项加点之和不能超过 25"); return; }
-    if (editing.speed_points % 2 || editing.mana_points % 2){ toast("速限/法限点数必须是偶数"); return; }
+    if (editing.mana_points % 2){ toast("法限点数必须是偶数（速限不限）"); return; }
   }
   const payload = {...editing};
   if (!payload.id) delete payload.id;

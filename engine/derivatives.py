@@ -61,6 +61,8 @@ _DEFAULT_EFFECT_RATE = {
     "others_life_loss": 5,   # 5X 点
     "mana_gain": 1,          # X 点法力
     "heal": 4,               # 4X 点回复
+    "growth_heal": 8,        # 8X 点回复，且计入累计治疗量时按双倍
+    "self_heal": 6,          # 6X 点自身回复
 }
 
 
@@ -128,6 +130,15 @@ DERIVATIVE_SPECS: tuple[DerivativeSpec, ...] = (
                    "支付：本回合攻击力X", "为[目标]回复X点生命。",
                    "2026-11-09 用户令：攻击力是**本回合**的减益（回终自动复原），"
                    "不是永久失去——否则配上【波及】就完爆【弱化】。费率 1:1（原 4:4）。", 1),
+    # 2026-11-09 用户令（第四轮）：【再生】池加两条，把 100% 的假高选取率拆开。
+    DerivativeSpec("疯长", "再生", "法限", 1, "growth_heal",
+                   "支付：法限X", "为[目标]回复8X点生命；这一发计入本场累计治疗量时按双倍记。",
+                   "母本汇率的两倍产出（8X），代价是同样的回复量按双倍压进【癌变】线——"
+                   "**疯长是真的疯长**，回得猛、也更快把自己推到癌变。收法限：法限是极稀缺刻度。", 8),
+    DerivativeSpec("自愈", "再生", "速度", 1, "self_heal",
+                   "支付：速度X", "你回复6X点生命。",
+                   "只能治自己（少一半适用面），换取比母本更高的 6X 汇率；"
+                   "收速度：拿此刻的攻次换活命，是「现在打不动／先别死」的取舍。", 6),
 )
 
 BY_NAME: dict[str, DerivativeSpec] = {spec.name: spec for spec in DERIVATIVE_SPECS}
@@ -207,6 +218,8 @@ _EFFECT_FIELDS = {
     "others_life_loss": "others_life_loss",
     "mana_gain": "mana_gain",
     "heal": "target_heal",
+    "growth_heal": "target_heal",
+    "self_heal": "target_heal",
 }
 
 
@@ -251,6 +264,16 @@ def calculation(name: str, x: int, target=None) -> dict:
     elif spec.effect_kind == "heal":
         calc["target_heal"] = spec.effect_amount(x)
         effect = f"为{target_name}回复{spec.effect_amount(x)}点生命"
+    elif spec.effect_kind == "growth_heal":
+        calc["target_heal"] = spec.effect_amount(x)
+        # 实际回血照常，只有**记账**翻倍：累计治疗量翻倍会更快撞上【癌变】线。
+        calc["heal_count_multiplier"] = 2
+        effect = (f"为{target_name}回复{spec.effect_amount(x)}点生命"
+                  f"（计入累计治疗量时按双倍记）")
+    elif spec.effect_kind == "self_heal":
+        calc["target_heal"] = spec.effect_amount(x)
+        calc["self_target_only"] = True
+        effect = f"你回复{spec.effect_amount(x)}点生命"
     else:  # pragma: no cover - 事实源自检兜底
         raise ValueError(f"衍生道纹{name}的效果种类非法：{spec.effect_kind}")
     # 摘要里写的是**实际金额**，不是把字面 "X" 替换成 X 值：
@@ -283,7 +306,7 @@ def calculator_for(name: str):
 
     calc.__name__ = f"calculate_{name}"
     calc.__doc__ = docstring_of(name)
-    if spec.effect_kind == "mana_gain":
+    if spec.effect_kind in ("mana_gain", "self_heal"):
         setattr(calc, "__signature__", inspect.Signature([
             inspect.Parameter("x", inspect.Parameter.POSITIONAL_OR_KEYWORD,
                               annotation=int),
@@ -303,7 +326,8 @@ def validate() -> None:
         # 母本与衍生必须同域：杀伐域只产出「失去生命」，透支域只产法力，再生域只回复。
         domain = {"multi_hit": "杀伐", "damage": "杀伐", "ignore_shield": "杀伐",
                   "life_loss": "杀伐", "others_life_loss": "杀伐",
-                  "mana_gain": "透支", "heal": "再生"}[spec.effect_kind]
+                  "mana_gain": "透支", "heal": "再生",
+                  "growth_heal": "再生", "self_heal": "再生"}[spec.effect_kind]
         assert domain == spec.parent, f"{spec.name}的效果越过母本法则领域：{domain}≠{spec.parent}"
     # 旧名一个都不能还留在现役表里，否则改名等于没改。
     for legacy, current in DERIVATIVE_ALIASES.items():

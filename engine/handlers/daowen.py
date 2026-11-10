@@ -135,6 +135,12 @@ class DaowenHandlersMixin:
             if len(matches) != 1:
                 return {"success": False, "error": f"目标名称{target_name}不唯一或不存在，请改用target_ref"}
             target = matches[0]
+        # 【自愈】这类「自身」衍生：效果写死作用于发动者，指定别人必须明确拒绝，
+        # 不能静默改目标（否则「只能治自己」这条限制会被参数绕过）。
+        _spec = derivative_rules.BY_NAME.get(name)
+        if _spec is not None and _spec.effect_kind == "self_heal" and target is not actor:
+            return {"success": False,
+                    "error": f"【{name}】只作用于自身，不能指定其他目标"}
         try:
             target, tamper_rule = self.combat.resolve_tampered_target(actor, target, name, params, refs)
         except ValueError as exc:

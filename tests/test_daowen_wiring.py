@@ -292,11 +292,16 @@ def test_anger_needle_is_purchased_from_black_market_event():
 
 
 def test_retired_healing_runes_are_not_registered():
-    """边界：自愈与滋养已删除，不得通过旧注册表恢复。"""
+    """边界：滋养与眩晕已删除，不得通过旧注册表恢复。
+
+    2026-11-09 用户令：「自愈」这个**名字**重新启用，但它是【再生】衍生道纹
+    （速度X → 自身回复6X，只能作用于发动者），不是当年那条被删的回血道纹；
+    消耗品被动里的「自愈X」（恢复耐久）又是另一套机制，两者只在名字上重合。
+    """
     DaoWenEngine.register_all()
-    assert "自愈" not in DaoWenEngine._registry
     assert "滋养" not in DaoWenEngine._registry
     assert "眩晕" not in DaoWenEngine._registry
+    assert DaoWenEngine.resolve("自愈", 1)["derivative_of"] == "再生"
 
 
 def test_relicized_trigger_daowen_registry_and_flight_is_real_daowen():

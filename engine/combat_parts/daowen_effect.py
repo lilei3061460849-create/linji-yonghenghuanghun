@@ -1391,12 +1391,14 @@ class DaowenEffectMixin:
                     })})
             elif not huaisi_block:
                 heal_amount = calc["target_heal"]
+                # 【疯长】：实际回血照常，但计入本场累计治疗量时按双倍记（更快撞癌变线）。
+                heal_count_mult = int(calc.get("heal_count_multiplier", 1) or 1)
                 result["effects"].append({"type": "heal", "target": target.name, **self.state.apply_heal(target, heal_amount, ctx={
                     "timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
                     "source": name, "source_type": "daowen", "actor": caster, "target": target,
                     "owner": caster, "mechanic": "heal", "subtype": "daowen", "amount": heal_amount,
                     "tags": {"daowen"},
-                })})
+                }, count_multiplier=heal_count_mult)})
         if "heal_percent" in calc:
             if "heal_percent" in wave_pieces:
                 # 波及：总数值=各目标按血限×百分比之和，再平分。
