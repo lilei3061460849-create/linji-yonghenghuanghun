@@ -151,10 +151,23 @@ class AvailableActionsMixin:
             }
         if self.state.pending_monster_phase:
             pending = self.state.pending_monster_phase
+            # 2026-11-10 统一形状：这里原来返回顶层 action_type/params_schema 的旧形状
+            # （没有 actions 数组），网页统一行动菜单读 S.actions.actions 会拿到空——
+            # 表现为「B 方准备行动后：引擎当前没有可选战斗行动」。改回标准形状；
+            # pending["options"]（actors/token 等）仍摊平在顶层供界面展示。
             return {
                 "phase": "怪物阶段待提交",
-                "action_type": "resolve_monster_phase",
-                "params_schema": {"token": pending["token"], "choices": "为全部actors各提交一次"},
+                "actions": [
+                    {"action_type": "resolve_monster_phase",
+                     "params_schema": {"token": pending["token"],
+                                       "choices": "恰好一个actor的一个行动：daowen或attack_actions，不得打包"},
+                     "note": "提交一个行动后统一恢复优先权与施法栈"},
+                    {"action_type": "skip",
+                     "params_schema": {"actor_ref": [
+                         {"ref": entry["actor_ref"], "name": entry.get("monster", entry["actor_ref"])}
+                         for entry in (pending["options"].get("actors") or [])]},
+                     "note": "结束敌方回合，不消耗出手并保留当前出手数量"},
+                ],
                 **pending["options"],
             }
 
@@ -536,6 +549,40 @@ class AvailableActionsMixin:
                 actions.append({"action_type": "skip", "params_schema": {
                     "actor_ref": enemy_actors},
                     "note": "结束敌方回合，不消耗出手并保留当前出手数量"})
+            # 协力施法（2026-11-10 用户令）：B 方回合里同样可以往协力法术空位填道纹
+            # 或（作为施法者的 B 方法术）发动/取消。口径与 A 方回合完全一致。
+            refs_now = self.combat._combat_entity_refs()
+            coop_now = [spell for spell in getattr(self.state, "open_spells", [])
+                        if spell.get("status") == "open"]
+            coop_refs = [{"ref": ref, "name": entity.name}
+                         for ref, entity in refs_now.items() if entity.is_alive]
+            if not coop_now:
+                actions.append({"action_type": "declare_spell", "params_schema": {
+                    "actor_ref": coop_refs, "name": "可选",
+                    "slots": "正整数＝N个道纹空位；或槽位模板列表",
+                    "cast_target_ref": coop_refs},
+                    "note": "协力施法·发起：不花出手；每格由填入者花1次出手；发动时空位＝空白跳过"})
+            for spell in coop_now:
+                from ..handlers.coop_spell import _coop_flat_slots
+                flat = _coop_flat_slots(spell.get("slots") or [])
+                empty = [i for i in range(len(flat)) if str(i) not in (spell.get("fills") or {})]
+                actions.append({"action_type": "fill_spell", "params_schema": {
+                    "spell_id": spell["id"], "slot": empty, "actor_ref": coop_refs,
+                    "daowen_name": "填入者持有的道纹名", "x": "integer≥1",
+                    "target_mode": ["target", "self", "caster", "any"],
+                    "target_ref": coop_refs, "dodge": "boolean"},
+                    "available": bool(empty),
+                    "note": f"协力法术【{spell['name']}】：填入者花1次出手；剩余空位 {len(empty)}/{len(flat)}"})
+                actions.append({"action_type": "release_spell",
+                                "params_schema": {"spell_id": spell["id"]},
+                                "available": bool(spell.get("fills")),
+                                "note": "协力法术【%s】·发动（仅施法者%s）：空白格跳过，不另花出手"
+                                        % (spell.get("name", ""), spell.get("caster_name", ""))})
+                actions.append({"action_type": "cancel_spell",
+                                "params_schema": {"spell_id": spell["id"]},
+                                "available": True,
+                                "note": "协力法术【%s】·取消（仅施法者%s）：已填的出手不退"
+                                        % (spell.get("name", ""), spell.get("caster_name", ""))})
             return {"phase": subphase, "round": self.state.current_round,
                     "duel_turn": self.state.duel_turn, "actions": actions,
                     "ended_turn_sides": sorted(self.combat._ended_turn_sides),
@@ -723,6 +770,63 @@ class AvailableActionsMixin:
                 "note": "瞬发法术的每个实际效果步骤各扣1次出手，步骤间及最后一步后留敌方行动空档；"
                         "触发时机与最后空档不额外扣手，下一步付不起即中断，已结算步骤保留；"
                         "不写入角色法术列表。kind=daowen 为单道纹发动，kind=spell 为统一自定义施法"})
+        # 协力施法（2026-11-10 用户令）：发起开空位；任意存活角色（双方）逐格填道纹，
+        # 每格由填入者花1手；发动时空位＝空白跳过。条件分支用瞬发法术 DSL 句式。
+        coop_open = [spell for spell in getattr(self.state, "open_spells", [])
+                     if spell.get("status") == "open"]
+        coop_actors = [{"ref": ref, "name": entity.name}
+                       for ref, entity in refs.items() if entity.is_alive]
+        if not coop_open:
+            actions.append({
+                "action_type": "declare_spell",
+                "params_schema": {
+                    "actor_ref": coop_actors,
+                    "name": "可选，仅用于识别这条协力法术",
+                    "slots": "正整数＝N个道纹空位；或槽位模板列表 "
+                             "[{kind:'daowen'} 或 {kind:'if', cond:'条件(主语限自身/施法者)', "
+                             "then:[槽位…], else:[槽位…]}]",
+                    "cast_target_ref": target_options,
+                },
+                "available": player.is_alive,
+                "note": "协力施法·发起：不花出手；每格由填入者花1次出手；"
+                        "发动（release_spell）时空位＝空白直接跳过；一名施法者同时只能挂一条"})
+        for spell in coop_open:
+            from ..handlers.coop_spell import _coop_flat_slots
+            flat = _coop_flat_slots(spell.get("slots") or [])
+            empty = [index for index in range(len(flat)) if str(index) not in (spell.get("fills") or {})]
+            filled_desc = [
+                f"槽{i}【{fill['daowen_name']}X={fill['x']}】{fill.get('filled_by_name', '?')}"
+                for i, fill in sorted(((int(k), v) for k, v in (spell.get("fills") or {}).items()))
+            ]
+            actions.append({
+                "action_type": "fill_spell",
+                "params_schema": {
+                    "spell_id": spell["id"], "slot": empty, "actor_ref": coop_actors,
+                    "daowen_name": "填入者自己持有的道纹名", "x": "integer≥1",
+                    "target_mode": ["target", "self", "caster", "any"],
+                    "target_ref": target_options, "dodge": "boolean",
+                    "extra": "可选对象：该步附加决策（结构同瞬发法术 steps 条目）",
+                },
+                "available": bool(empty),
+                "caster": spell.get("caster_name"),
+                "cast_target": spell.get("cast_target_name") or None,
+                "filled": filled_desc,
+                "note": f"协力法术【{spell['name']}】：往空位填入道纹，填入者花1次出手；"
+                        f"剩余空位 {len(empty)}/{len(flat)}；发动前不结算任何效果"})
+            actions.append({
+                "action_type": "release_spell",
+                "params_schema": {"spell_id": spell["id"]},
+                "available": bool(spell.get("fills")),
+                "caster": spell.get("caster_name"),
+                "filled": filled_desc,
+                "note": "协力法术【{name}】·发动（仅施法者）：空白格直接跳过；"
+                        "发动本身不花出手；步骤间照常留敌方行动空档".format(name=spell.get("name", ""))})
+            actions.append({
+                "action_type": "cancel_spell",
+                "params_schema": {"spell_id": spell["id"]},
+                "available": True,
+                "caster": spell.get("caster_name"),
+                "note": "协力法术【%s】·取消（仅施法者）：已填入的出手不退" % spell.get("name", "")})
         if any(value > 0 for value in self.state.resonance.values()):
             actions.append({"action_type": "use_resonance", "params_schema": {
                 "resonance_type": [n for n, v in self.state.resonance.items() if v > 0],

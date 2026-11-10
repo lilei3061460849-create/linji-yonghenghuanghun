@@ -140,3 +140,101 @@ def test_priority_hands_over_only_when_the_hand_is_finished(duel):
         if index < hit_count - 1:
             assert engine.state.duel_turn == "player_side"
     assert engine.state.duel_turn == "opponent_side"     # 这一手打完了才交棒
+
+
+# ==== 消耗品=主动且被动行动（2026-11-10 用户令）====
+# 被普攻选中时也能先用一件消耗品再选应对：不耗出手、不耗应对，窗口保持开放；
+# 【必中】次数覆盖本击时被动行动整体被锁（规则正文·被动行动定义已加入「使用消耗品」）。
+@pytest.fixture
+def duel_with_item(tmp_path, monkeypatch):
+    """同 duel，但甲（玩家）带一件扭曲工具【备用血泵】（3 耐久，自身回复 20）。"""
+    monkeypatch.setenv("LINJI_CHARACTERS_FILE", str(tmp_path / "chars.json"))
+    a = lab.save_sheet({"name": "甲", "mode": "free", "blood_limit": 90,
+                        "speed_limit": 6, "mana_limit": 2,
+                        "daowen": [], "relics": [],
+                        "consumables": [{"name": "备用血泵", "uses": 3}]})
+    b = lab.save_sheet({"name": "乙", "mode": "free", "blood_limit": 200,
+                        "speed_limit": 2, "mana_limit": 2,
+                        "daowen": [], "relics": [], "consumables": []})
+    prepared = lab.duel({"a": {"id": a["id"]}, "b": {"id": b["id"]},
+                         "manual_both": True, "seed": 4})
+    engine = prepared["engine"]
+    server.SESSION["engine"] = engine
+    server.SESSION["log"] = []
+    server.SESSION["last_world"] = None
+    server.SESSION["attack"] = None
+    assert server._execute("round_start", {"relic_choices": {}})["success"]
+    return engine
+
+
+def _finish_this_hand():
+    """余下所有击全部硬扛并结算。"""
+    done = server._ui_attack_auto({})
+    assert done["success"], done
+
+
+def test_defender_consumable_options_surface_in_the_respond_window(duel_with_item):
+    engine = duel_with_item
+    # 甲打乙：乙（敌方）没有消耗品，选项为空且不可用
+    assert server._ui_attack_prepare({})["success"]
+    assert server._ui_attack_declare({"target_ref": "enemy:0", "damage": 1})["success"]
+    cur = server._attack_view(engine)["current"]
+    assert cur["item_options"] == [] and cur["can_use_item"] is False
+    refused = server._ui_attack_respond({"choice": "use_item", "item_name": "备用血泵"})
+    assert refused["success"] is False
+    assert "没有可用消耗品" in refused["error"]
+    assert engine.state.pending_attack          # 拒绝不弄丢窗口
+    _finish_this_hand()
+
+    # 乙打甲：甲的消耗品出现在应对选项里
+    assert server._ui_attack_prepare({"actor_ref": "enemy:0"})["success"]
+    assert server._ui_attack_declare({"target_ref": "player:0", "damage": 1})["success"]
+    cur = server._attack_view(engine)["current"]
+    assert [(i["name"], i["uses"]) for i in cur["item_options"]] == [("备用血泵", 3)]
+    assert cur["can_use_item"] is True and cur["item_locked"] is False
+
+
+def test_defender_can_use_a_consumable_before_choosing_the_response(duel_with_item):
+    engine = duel_with_item
+    # 甲先把这一手打完（伤害 0），轮到乙出手
+    assert server._ui_attack_prepare({})["success"]
+    for _ in range(server._attack_view(engine)["hit_count"]):
+        assert server._ui_attack_declare({"target_ref": "enemy:0", "damage": 0})["success"]
+        assert server._ui_attack_respond({"choice": "tank"})["success"]
+    hands_after_a = engine.state.player.actions_used_this_round
+
+    # 乙第 1 击打甲：甲先吃【备用血泵】再硬扛——不耗应对、不耗出手、窗口保持开放
+    assert server._ui_attack_prepare({"actor_ref": "enemy:0"})["success"]
+    assert server._ui_attack_declare({"target_ref": "player:0", "damage": 1})["success"]
+    engine.state.player.current_hp = 50
+    step = server._ui_attack_respond({"choice": "use_item", "item_name": "备用血泵"})
+    assert step["success"], step
+    assert engine.state.player.current_hp == 70          # 回复 20 真实落地
+    assert engine.state.pending_attack                   # 窗口没关，本击还没结算
+    cur = server._attack_view(engine)["current"]
+    assert [(i["name"], i["uses"]) for i in cur["item_options"]] == [("备用血泵", 2)]
+    step = server._ui_attack_respond({"choice": "tank"})
+    assert step["success"], step
+    assert engine.state.player.actions_used_this_round == hands_after_a   # 出手数没变
+
+
+def test_bizhong_locks_the_respond_window_consumable(duel_with_item):
+    """【必中】次数覆盖本击：被动行动整体被锁，消耗品也用不了。"""
+    engine = duel_with_item
+    assert server._ui_attack_prepare({})["success"]
+    for _ in range(server._attack_view(engine)["hit_count"]):
+        assert server._ui_attack_declare({"target_ref": "enemy:0", "damage": 0})["success"]
+        assert server._ui_attack_respond({"choice": "tank"})["success"]
+
+    # 给乙（攻击方）2 次必中，再让它打甲
+    engine.combat.grant_bizhong(engine.state.enemies[0], 2)
+    assert server._ui_attack_prepare({"actor_ref": "enemy:0"})["success"]
+    assert server._ui_attack_declare({"target_ref": "player:0", "damage": 1})["success"]
+    cur = server._attack_view(engine)["current"]
+    assert cur["item_locked"] is True and cur["can_use_item"] is False
+    assert cur["dodge_locked"] is True
+    refused = server._ui_attack_respond({"choice": "use_item", "item_name": "备用血泵"})
+    assert refused["success"] is False
+    assert "必中" in refused["error"] and "被动行动" in refused["error"]
+    assert engine.state.pending_attack
+    _finish_this_hand()

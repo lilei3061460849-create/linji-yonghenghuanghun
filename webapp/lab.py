@@ -503,14 +503,16 @@ def _apply_loadout(engine: GameEngine, sheet: dict[str, Any], region: str,
     if not setup.get("success"):
         raise ValueError(f"属性分配失败：{setup.get('error')}")
 
+    # 演武场不入副本（2026-11-10 用户令）：没选遗物就一件都没有——
+    # 「进副本须持有一件遗物」是副本规则，不适用于演武场；开局随机发现
+    # 只是候选（pending_relic_choices），不显式挑选就放弃掉，不落到角色身上。
     relics = list(sheet["relics"])
-    if not relics:
-        # 没选就沿用引擎本次开局随机发现的第一件（副本选择要求至少持有一件）。
-        relics = list(engine.state.pending_relic_choices)[:1]
-        if relics:
-            notes.append(f"未选遗物，沿用开局随机发现的第一件：{relics[0]}")
     if relics:
         _replace_relics(engine, relics)
+    else:
+        engine.state.pending_relic_choices = []
+        engine.state.pending_relic_source = ""
+        notes.append("未选遗物：演武场不给随机遗物（开局随机发现已放弃）")
 
     for daowen_name in sheet["daowen"]:
         engine._grant_named_daowen(engine.state.player, daowen_name)
@@ -520,11 +522,14 @@ def _apply_loadout(engine: GameEngine, sheet: dict[str, Any], region: str,
     if not chosen.get("success"):
         raise ValueError(f"残韵选择失败：{chosen.get('error')}")
 
-    # 演武场不推进阶级：把已实现副本全部解锁，省得用户还要先打一场死斗。
+    # 演武场是特殊场景，不视为副本（2026-11-10 用户令）：跳过 setup_choose_region
+    # 的进副本门禁（须持遗物/先选残韵等都是副本规则），直接把引擎摆到局外开战相位。
+    # region 在这里只决定「怪物池」口径（指定对手/按副本随机时从这里抽怪），
+    # 不触发副本流程，也不做过路商人初始化。
     engine.state.unlocked_tier = max(int(REGION_TIERS.get(key, 1)) for key in _regions_by_name())
-    entered = engine.execute_action("setup_choose_region", {"region": region})
-    if not entered.get("success"):
-        raise ValueError(f"进入副本失败：{entered.get('error')}")
+    engine.state.current_region = region
+    engine.state.phase = "pre_battle"
+    notes.append(f"演武场开战（不入副本）：怪物池口径＝{region}")
 
     granted = _grant_consumables(engine, sheet["consumables"])
     engine.state.shards = int(sheet["shards"])

@@ -91,6 +91,14 @@
     border-bottom:1px dashed #232c36}
   .combatant.dead{opacity:.45;text-decoration:line-through}
   .combatant .hp{color:var(--muted);font-variant-numeric:tabular-nums}
+  /* 统一行动菜单（2026-11-10）：轮到谁的「行动」按钮展开 */
+  .action-menu{border:1px solid var(--line);border-radius:8px;background:var(--panel-2);
+    padding:8px;margin:4px 0 6px;gap:6px}
+  .action-menu .menu-sub{padding:2px 8px;font-size:12px}
+  .menu-panel,.menu-form{border-left:2px solid var(--line);padding-left:8px;margin:2px 0 2px 12px}
+  /* 战斗卡单位行内的快捷行动钮（普攻/施法）：小一号，不挤占血量读数 */
+  button.mini{padding:1px 8px;font-size:12px;min-height:0}
+  .spell-slot,.spell-if{border-left:2px solid #232c36;padding-left:8px;margin:2px 0}
   .side-enemy .name{color:var(--enemy)}
   .side-player .name{color:var(--ally)}
   .hits{display:flex;flex-direction:column;gap:4px;margin:8px 0}
@@ -159,6 +167,8 @@
   <div class="stats" id="stats"></div>
   <div class="spacer"></div>
   <a href="/lab" style="text-decoration:none"><button>角色演武场 · 自定义开局</button></a>
+  <button id="savesBtn" title="保存的战斗都在这里，读取后接着打">存档架</button>
+  <button id="pendingChip" style="display:none" title="有待决/发现事项待处理">待决</button>
   <button id="fontBtn" title="切换字号：标准 / 大 / 特大">字 标准</button>
   <span class="vp" id="vpLabel"></span>
   <button id="newBtn">新开一局</button>
@@ -197,11 +207,6 @@
       </div>
     </div>
 
-    <div class="card" id="pendingCard" style="display:none">
-      <h2>待决 <span id="pendingPhase"></span></h2>
-      <div id="pendingBody" class="stack"></div>
-    </div>
-
     <div class="card" id="eventCard" style="display:none">
       <h2>事件 <span id="eventName"></span></h2>
       <div id="eventBody" class="stack"></div>
@@ -234,17 +239,17 @@
       <div id="sheet" class="kv"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="alliesCard" style="display:none">
       <h2>同伴 <span id="allyCount"></span></h2>
-      <div id="allies" class="stack"><div class="hint">暂无同伴</div></div>
+      <div id="allies" class="stack"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="nearCard" style="display:none">
       <h2>附近单位 <span id="nearLabel"></span></h2>
-      <div id="near" class="stack"><div class="hint">相邻格没有可交涉单位</div></div>
+      <div id="near" class="stack"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="locationsCard" style="display:none">
       <h2>已知地点 <span id="locCount"></span></h2>
       <div id="locations" class="kv"></div>
     </div>
@@ -262,8 +267,33 @@
         </div>
       </details>
     </div>
+
+    <div class="card" id="consoleCard">
+      <h2>控制台 <span>调试 · 直接改引擎状态</span></h2>
+      <div class="banner dead">直接改引擎状态，绕过规则结算与代价，仅供调试。</div>
+      <div id="consoleBody" class="stack"><div class="hint">点「刷新读数」加载当前局内变量。</div></div>
+      <div class="row" style="margin-top:8px">
+        <button id="debugRefresh">刷新读数</button>
+      </div>
+    </div>
   </aside>
 </main>
+
+<div class="modal hidden" id="discoverModal">
+    <div class="card">
+      <h2>待决 <span id="discoverPhase"></span></h2>
+      <div id="discoverBody" class="stack"></div>
+      <div class="row"><button onclick="document.getElementById('discoverModal').classList.add('hidden')">关闭</button></div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="savesModal">
+    <div class="card">
+      <h2>存档架<span>保存当前战斗并退出</span></h2>
+      <div id="savesBody" class="stack"></div>
+      <div class="row"><button onclick="document.getElementById('savesModal').classList.add('hidden')">关闭</button></div>
+    </div>
+  </div>
 
 <div class="modal hidden" id="newModal">
   <div class="card">
@@ -333,9 +363,13 @@ async function act(action, params){
     const data = await api("/api/action", {action, params: params || {}});
     const r = data.result || {};
     if (!data.success) toast(`失败：${r.error || "未知错误"}`);
-    else if (r.result && typeof r.result === "object") {
-      const s = summarize(action, r.result);
-      if (s) toast(s);
+    else {
+      /* 提交成功：行动菜单自动收起并刷新（2026-11-10 用户令）。 */
+      OPEN_MENU = null; OPEN_SUB = "";
+      if (r.result && typeof r.result === "object") {
+        const s = summarize(action, r.result);
+        if (s) toast(s);
+      }
     }
   } catch(e){ toast("请求失败：" + e.message); }
   finally { busy = false; }
@@ -361,6 +395,7 @@ function render(){
   if (mapCard) mapCard.style.display = (S && S.direct) ? "none" : "";
   renderHeader(); renderSheet(); renderPending(); renderMap(); renderAllies(); renderNear(); renderLocations();
   renderEvent(); renderBattle(); renderDerivative(); renderDirectDone(); renderLog(); renderFacts(); renderOver();
+  maybeScrollBattle();
 }
 
 function renderDirectDone(){
@@ -497,9 +532,12 @@ function renderSheet(){
 
 function renderAllies(){
   const box = $("allies"); box.innerHTML = "";
+  const card = $("alliesCard");
   const allies = (S && S.world && S.world.allies) || [];
   $("allyCount").textContent = allies.length ? `${allies.length} 人` : "";
-  if (!allies.length){ box.append(el("div","hint","暂无同伴")); return; }
+  /* 2026-11-10 用户令：没有同伴就整卡隐藏，不显示“暂无”占位。 */
+  if (!allies.length){ if (card) card.style.display = "none"; return; }
+  if (card) card.style.display = "";
   const self = S.world && S.world.self;
   const [px, py] = self ? self.position : [0, 0];
   for (const a of allies){
@@ -527,13 +565,16 @@ function renderAllies(){
 
 function renderNear(){
   const box = $("near"); box.innerHTML = "";
+  const card = $("nearCard");
   const w = S && S.world;
   $("nearLabel").textContent = "";
-  if (!w || !w.self) return;
+  if (!w || !w.self){ if (card) card.style.display = "none"; return; }
+  if (card) card.style.display = "";
   const [px, py] = w.self.position;
   const near = (w.visible_actors || []).filter(a =>
     Math.abs(a.position[0]-px) + Math.abs(a.position[1]-py) === 1);
-  if (!near.length){ box.append(el("div","hint","相邻格没有可交涉单位")); return; }
+  /* 相邻没有可交涉单位：整卡隐藏（2026-11-10 用户令）。 */
+  if (!near.length){ if (card) card.style.display = "none"; return; }
   for (const a of near){
     const row = el("div","ally");
     row.append(el("div","name", `${a.name}`), el("div","meta", `${a.kind} · (${a.position[0]}, ${a.position[1]})`));
@@ -551,9 +592,12 @@ function renderNear(){
 
 function renderLocations(){
   const box = $("locations"); box.innerHTML = "";
+  const card = $("locationsCard");
   const locs = (S && S.world && S.world.known_locations) || [];
   $("locCount").textContent = locs.length ? `${locs.length} 处` : "";
-  if (!locs.length){ box.append(el("div","hint","还没发现地点")); return; }
+  /* 还没发现地点：整卡隐藏（2026-11-10 用户令）。 */
+  if (!locs.length){ if (card) card.style.display = "none"; return; }
+  if (card) card.style.display = "";
   for (const loc of locs.slice(0, 12)){
     const d = el("div");
     const where = loc.position && loc.position[0] !== null ? `(${loc.position[0]}, ${loc.position[1]})` : "位置未知";
@@ -606,59 +650,116 @@ function collectFields(container){
   return out;
 }
 
+/* ---- 待决/发现统一走弹窗（2026-11-10 用户令：三选一这类发现不占行动菜单）----
+   衍生领取、遗物/消耗品发现、典当领取、救赎、员工转化道纹：都是 0 出手的
+   待决项，弹窗里直接点；「暂不处理」收起，顶部「待决」按钮可随时再打开。 */
+function discoverEntries(){
+  const acts = (S && S.actions && S.actions.actions) || [];
+  const kinds = ["choose_discovered_relic", "choose_discovered_item",
+                 "choose_derivative_daowen", "choose_diandang_daowen",
+                 "resolve_redemption", "choose_hired_daowen"];
+  /* 只认「真实待决」：引擎在战斗里永远列着一条典当占位
+     （available:false、remaining_groups:0），绝不能把它当成有待决弹窗。 */
+  return acts.filter(a => kinds.includes(a.action_type || a.type)
+    && a.available !== false);
+}
+
 function renderPending(){
-  const card = $("pendingCard"), body = $("pendingBody");
+  const modal = $("discoverModal"), body = $("discoverBody");
+  if (!modal || !body) return;
+  if (!S || !S.started){
+    modal.classList.add("hidden");
+    $("pendingChip").style.display = "none";
+    return;
+  }
+  const acts = (S.actions && S.actions.actions) || [];
+  const phase = (S.actions && S.actions.phase) || "";
+  const entries = discoverEntries();
+  const isPending = entries.length > 0 || /待选/.test(phase);
+  const key = phase + "#" + acts.map(a => a.action_type || a.type || "").join(",");
+  if (!isPending){
+    modal.classList.add("hidden");
+    $("pendingChip").style.display = "none";
+    DISMISS_KEY = null;
+    return;
+  }
+  if (DISMISS_KEY === key){
+    modal.classList.add("hidden");
+    $("pendingChip").style.display = "";
+    return;
+  }
+  DISMISS_KEY = null;
+  $("pendingChip").style.display = "none";
+  $("discoverPhase").textContent = phase || "待决";
   body.innerHTML = "";
-  const actions = (S && S.actions && S.actions.actions) || [];
-  const phase = (S && S.actions && S.actions.phase) || "";
-  const gating = actions.some(a => a.action_type === "resolve_redemption")
-    || /待选/.test(phase);
-  if (!S || !S.started || !gating){ card.style.display = "none"; return; }
-  card.style.display = "";
-  $("pendingPhase").textContent = phase;
-  if (S.actions.pending && S.actions.pending.name){
-    body.append(el("div","kv", `微光者 ${S.actions.pending.name} 等待处置：接纳为待命员工，或直接终结。`));
-  }
-  for (const action of actions){
-    const row = el("div","row");
-    const name = action.action_type;
-    const schema = action.params_schema || {};
-    const inputs = {};
-    for (const [key, hint] of Object.entries(schema)){
-      if (key === "option" || key === "name") continue;
-      const box = el("div","field"); box.style.margin = "0";
-      box.append(el("label", null, key), fieldInput({key, hint}));
-      inputs[key] = box.querySelector("[data-key]");
-      row.append(box);
-    }
-    if (name === "resolve_redemption"){
-      const nameInput = el("input"); nameInput.type = "text"; nameInput.placeholder = "接纳后的名字";
+  for (const entry of entries){
+    const t = entry.action_type || entry.type;
+    const box = el("div", "stack");
+    if (t === "choose_derivative_daowen"){
+      box.append(el("div", "name", "衍生发现：领取其一（0 出手）"));
+      const choices = (entry.params_schema || {}).daowen_name || [];
+      const row = el("div", "row");
+      for (const c of choices){
+        const b = el("button", "primary", c);
+        b.onclick = () => act("choose_derivative_daowen", {daowen_name: c});
+        row.append(b);
+      }
+      const refresh = el("button", "", "刷新（血限2）");
+      refresh.onclick = () => act("refresh_derivative_choices", {});
+      const drop = el("button", "danger", "放弃");
+      drop.onclick = () => act("choose_derivative_daowen", {abandon: true});
+      row.append(refresh, drop);
+      box.append(row);
+    } else if (t === "resolve_redemption"){
+      box.append(el("div", "name", "场上有【救赎】待选：接纳为同伴，或直接终结。"));
+      const nameInput = el("input"); nameInput.type = "text";
       nameInput.value = (S.actions.pending || {}).name || "赎罪者";
-      const accept = el("button","primary","接纳");
-      accept.onclick = () => act("resolve_redemption", {option: "接纳", name: nameInput.value || "赎罪者"});
-      const finish = el("button","danger","终结");
+      const accept = el("button", "primary", "接纳");
+      accept.onclick = () => act("resolve_redemption",
+        {option: "接纳", name: nameInput.value || "赎罪者"});
+      const finish = el("button", "danger", "终结");
       finish.onclick = () => act("resolve_redemption", {option: "终结"});
-      row.append(nameInput, accept, finish);
+      const row = el("div", "row"); row.append(nameInput, accept, finish);
+      box.append(row);
+    } else if (t === "choose_hired_daowen"){
+      const sch = entry.params_schema || {};
+      box.append(el("div", "name", `员工转化道纹：${sch.name || "员工"} 选其一`));
+      const row = el("div", "row");
+      for (const c of (sch.daowen || [])){
+        const b = el("button", "primary", c);
+        b.onclick = () => act("choose_hired_daowen", {name: sch.name, daowen: c});
+        row.append(b);
+      }
+      box.append(row);
+    } else if (t === "choose_discovered_relic" || t === "choose_discovered_item"){
+      const val = entry.relic_name || entry.item_name;
+      const label = t === "choose_discovered_relic" ? "领取遗物：" : "领取消耗品：";
+      const b = el("button", "primary", label + val);
+      b.onclick = () => act(t, t === "choose_discovered_relic"
+        ? {relic_name: val} : {item_name: val});
+      box.append(b);
     } else {
-      const send = el("button","primary", "提交 " + name);
-      send.onclick = () => {
-        const params = collectFields(row);
-        act(name, params);
-      };
-      row.append(send);
+      box.append(el("div", "name", "发现待领取"));
+      box.append(genericActionForm(entry));
     }
-    body.append(row);
+    body.append(box);
   }
+  const later = el("button", "", "暂不处理（收起，点顶部「待决」再打开）");
+  later.onclick = () => { DISMISS_KEY = key; render(); };
+  body.append(later);
+  modal.classList.remove("hidden");
 }
 
 function renderDerivative(){
   /* 2026-11-09 用户令：衍生是**局内**独立 0 出手行动——不占出手、不结束回合、
-     不耗精力。界面必须能发起、领取、刷新、放弃，不能只留高级指令里手敲 action。 */
+     不耗精力。界面必须能发起、领取、刷新、放弃，不能只留高级指令里手敲 action。
+     2026-11-10：待领取的三选一改走「待决」弹窗，卡片只负责发起与状态。 */
   const card = $("derivativeCard"), body = $("derivativeBody");
   if (!card || !body) return;
   body.innerHTML = "";
   const d = S && S.derivative;
   if (!S || !S.started || !d){ card.style.display = "none"; return; }
+  if (d.pending){ card.style.display = "none"; return; }  // 弹窗已接管领取
   card.style.display = "";
   body.append(el("div","hint",
     `代价 ${d.cost}；不满意可再付 ${d.refresh_cost} 刷新。每个衍生道纹独立占 1 张死者之页（空余 ${d.pages_left}）。`));
@@ -747,7 +848,30 @@ function renderEvent(){
   if (S.event.queued) body.append(el("div","hint", `还有 ${S.event.queued} 个事件排队`));
 }
 
-let _battleWasVisible = false;
+/* 战斗卡自动滚动：战斗状态变化时把战斗卡滚进视野（任何宽度都生效）。
+   之前只在窄屏（<680px）滚动，宽屏上战斗卡在地图卡下方，玩家点「进入战斗」
+   后看不到任何变化，以为没反应。状态键：none 无战斗 / pre 遭遇待进入 /
+   combat 进行中 / ended 已结束待结算。 */
+let _battleScrollKey = "none";
+
+function battleScrollKey(){
+  const w = S && S.world, b = S && S.battle;
+  if (w && w.encounter_for_player && S.phase === "pre_battle") return "pre";
+  if (!b) return "none";
+  return b.peaceful ? "ended" : "combat";
+}
+
+function maybeScrollBattle(){
+  const key = battleScrollKey();
+  if (key === _battleScrollKey) return;
+  const prev = _battleScrollKey;
+  _battleScrollKey = key;
+  const target = key === "none" ? $("mapCard") : $("battleCard");
+  /* 回到地图时只在之前确实在战斗里才滚（开局首帧不抢滚动）。 */
+  if (key === "none" && prev === "none") return;
+  if (!target) return;
+  setTimeout(() => { try { target.scrollIntoView({block: "start", behavior: "smooth"}); } catch(e){} }, 80);
+}
 
 /* ---- 逐击普攻（A 分伤害 → B 选应对 → 循环） ---- */
 let ATK = null;   // 服务端草稿的一步快照：{phase, hit_index, hit_count, ...}
@@ -838,6 +962,23 @@ function attackPanel(b){
          c.can_blood_shadow ? "" : "需要【血影】遗物"),
     );
     wrap.append(bar);
+    // 消耗品=主动且被动行动（2026-11-10 用户令）：被选中时可先用一件消耗品，
+    // 再接着选应对；不耗出手也不耗应对。必中覆盖本击时整体锁定。
+    const items = c.item_options || [];
+    if (c.item_locked){
+      wrap.append(el("div","hint","本击被【必中】锁定：被动行动（含使用消耗品）都不可用"));
+    } else if (items.length){
+      const itemSel = el("select");
+      for (const it of items){
+        const o = el("option", null, `${it.name}（剩 ${it.uses} 次）`);
+        o.value = it.name; itemSel.append(o);
+      }
+      const useBtn = el("button","", "先用消耗品（不耗应对，接着选）");
+      useBtn.onclick = () => attackSend("/api/ui_attack_respond",
+        {choice: "use_item", item_name: itemSel.value});
+      const ibar = el("div","row"); ibar.append(itemSel, useBtn);
+      wrap.append(ibar);
+    }
     const fast = el("button","", "余下全部硬扛并结算");
     fast.onclick = () => attackSend("/api/ui_attack_auto", {});
     wrap.append(fast);
@@ -851,6 +992,314 @@ function attackPanel(b){
     wrap.append(log);
   }
   return wrap;
+}
+
+/* ==== 统一行动菜单（2026-11-10 用户令）====
+   轮到谁，谁的名字旁只有一个「行动」按钮；菜单按引擎 available_actions 动态生成，
+   该角色没有的类目整行消失，不显示灰色摆设；每个行动全界面只有一个入口；
+   A 方角色与 B 方角色（推演模式）用完全相同的界面。许愿是叙事行动，不进菜单
+   （真要许愿加东西，走控制台或让 DM 加）。发现/待决类（衍生三选一、遗物发现、
+   救赎、典当领取等）不占行动菜单——统一走「待决」弹窗。 */
+let OPEN_MENU = null;    // 展开行动菜单的单位 ref
+let OPEN_SUB = "";       // 菜单里展开的二级面板 key（spell/items/special）
+let DISMISS_KEY = null;  // 待决弹窗被「暂不处理」后的指纹（同状态不再自动弹）
+
+const MENU_EXCLUDED = new Set([
+  // 流程按钮（底部公共区）
+  "round_start", "round_end", "battle_end",
+  "prepare_monster_phase", "resolve_monster_phase",
+  // 菜单里有专门类目的
+  "prepare_attack", "focus", "skip", "rest",
+  "use_daowen", "cast", "declare_spell", "fill_spell", "release_spell", "cancel_spell",
+  "consume_item", "use_resonance",
+  "resolve_ally_phases", "command_ally", "deploy_employee",
+  // 不进菜单的：危险区单独放、许愿是叙事、发现类走弹窗
+  "restart_battle", "declare_escape", "declare_wish",
+  "choose_discovered_relic", "choose_discovered_item", "choose_derivative_daowen",
+  "refresh_derivative_choices", "choose_diandang_daowen", "resolve_redemption",
+  "choose_hired_daowen",
+]);
+
+function entryRefs(entry){
+  const ar = (entry.params_schema || {}).actor_ref;
+  if (Array.isArray(ar)) return ar.map(x => (typeof x === "string") ? x : (x && x.ref));
+  if (typeof ar === "string") return [ar];
+  return [];  // 无 actor_ref ＝ 默认玩家自己
+}
+function relevantTo(entry, ref){
+  const refs = entryRefs(entry);
+  if (!refs.length) return ref === "player:0";
+  return refs.includes(ref);
+}
+function entryAvailable(entry){ return entry.available !== false; }
+
+function menuItem(label, onclick, active, subtle, cls){
+  const classes = [cls || "", active ? "primary" : "", subtle ? "menu-sub" : ""]
+    .filter(Boolean).join(" ");
+  const b = el("button", classes, label);
+  b.onclick = onclick;
+  return b;
+}
+
+/* 参数字段：优先把 {ref,name} 列表翻成下拉，其余交给 fieldInput */
+function schemaField(key, hint){
+  if (Array.isArray(hint) && hint.length && hint[0] && typeof hint[0] === "object"
+      && "ref" in hint[0]){
+    const sel = el("select"); sel.dataset.key = key; sel.dataset.hint = "string";
+    for (const t of hint){
+      const o = el("option", null, t.name || t.ref); o.value = t.ref; sel.append(o);
+    }
+    return sel;
+  }
+  return fieldInput({key, hint});
+}
+
+/* 特殊行动的通用表单：列出 params_schema 字段 + 执行按钮 */
+function genericActionForm(entry){
+  const box = el("div", "stack menu-form");
+  const name = entry.action_type || entry.type;
+  if (entry.note) box.append(el("div", "hint", entry.note));
+  if (entry.reason) box.append(el("div", "hint", "不可用：" + entry.reason));
+  const row = el("div", "row");
+  for (const [key, hint] of Object.entries(entry.params_schema || {})){
+    const f = el("label", "field"); f.style.margin = "0";
+    f.append(el("span", null, key), schemaField(key, hint));
+    row.append(f);
+  }
+  const go = el("button", "primary", "执行 " + name);
+  go.onclick = () => act(name, collectFields(row));
+  row.append(go);
+  box.append(row);
+  return box;
+}
+
+/* B 方（推演模式）准备好的这一次行动：目标/道纹/闪避逐项点选 */
+function manualEnemyControls(actorRef){
+  const wrap = el("div", "stack menu-panel");
+  const actor = (MANUAL && MANUAL.actors || [])[0];
+  if (!actor){
+    wrap.append(el("div", "hint", "这一手没有可执行的动作，直接结束回合即可。"));
+    return wrap;
+  }
+  wrap.append(el("div", "kv", `轮到 ${actor.monster || actor.actor_ref}：${(actor.attack_target_options || []).length ? `可攻击 ${actor.hit_count} 击、总伤害上限 ${actor.damage_budget}` : "没有攻击目标"}`));
+  let targetSelect = null;
+  const targets = actor.attack_target_options || [];
+  if (targets.length){
+    targetSelect = el("select");
+    for (const t of targets){
+      const o = el("option", null, `${t.name}（${t.ref}）`); o.value = t.ref; targetSelect.append(o);
+    }
+    const trow = el("div", "field"); trow.append(el("label", null, "攻击目标"), targetSelect);
+    wrap.append(trow);
+  }
+  let daowenSelect = el("select");
+  const none = el("option", null, "（不使用道纹，进行普通攻击）"); none.value = "";
+  daowenSelect.append(none);
+  for (const d of (actor.daowen_options || [])){
+    const o = el("option", null, `道纹：${d.name}${d.x ? ` X=${d.x}` : ""}`); o.value = d.name;
+    daowenSelect.append(o);
+  }
+  const draw = el("div", "field"); draw.append(el("label", null, "道纹"), daowenSelect);
+  wrap.append(draw);
+  const dodgeWrap = el("label", "kv"); dodgeWrap.style.margin = "6px 0";
+  const dodge = el("input"); dodge.type = "checkbox";
+  dodgeWrap.append(dodge, document.createTextNode(" 这次攻击尝试闪避"));
+  wrap.append(dodgeWrap);
+  const row = el("div", "row");
+  const go = el("button", "primary", "执行这次行动");
+  go.onclick = () => {
+    const params = {manual: true, dodge: !!dodge.checked};
+    if (targetSelect) params.target_ref = targetSelect.value;
+    if (daowenSelect && daowenSelect.value) params.daowen_name = daowenSelect.value;
+    (async () => {
+      if (busy) return; busy = true;
+      try{
+        const data = await api("/api/ui_monster_phase", params);
+        if (!data.success){ toast("B 方行动失败：" + (data.result && data.result.error)); return; }
+        MANUAL = null; OPEN_MENU = null; OPEN_SUB = ""; render();
+      } catch(e){ toast("请求失败：" + e.message); }
+      finally { busy = false; }
+    })();
+  };
+  const endSide = el("button", "", "结束 B 方回合（保留剩余出手）");
+  endSide.onclick = async () => {
+    if (busy) return; busy = true;
+    try{
+      const data = await api("/api/ui_end_side", {actor_ref: actorRef});
+      if (!data.success) toast("结束回合失败：" + (data.result && data.result.error));
+      else { MANUAL = null; OPEN_MENU = null; OPEN_SUB = ""; }
+    } catch(e){ toast("请求失败：" + e.message); }
+    finally { busy = false; render(); }
+  };
+  row.append(go, endSide);
+  wrap.append(row);
+  return wrap;
+}
+
+async function endEnemySide(actorRef){
+  if (busy) return; busy = true;
+  try{
+    const data = await api("/api/ui_end_side", {actor_ref: actorRef});
+    if (!data.success){ toast("结束回合失败：" + (data.result && data.result.error)); return; }
+    MANUAL = null; OPEN_MENU = null; OPEN_SUB = "";
+  } catch(e){ toast("请求失败：" + e.message); }
+  finally { busy = false; render(); }
+}
+
+async function monsterPrepare(){
+  if (busy) return; busy = true;
+  try{
+    const data = await api("/api/ui_monster_prepare", {});
+    if (!data.success){ toast("准备失败：" + (data.error || "未知错误")); return; }
+    MANUAL = data.prepare || {};
+    const actor = (MANUAL.actors || [])[0];
+    OPEN_MENU = actor && actor.actor_ref ? actor.actor_ref : OPEN_MENU;
+    OPEN_SUB = "";
+    render();
+  } catch(e){ toast("请求失败：" + e.message); }
+  finally { busy = false; }
+}
+
+/* 单位行动菜单 */
+function actionMenuFor(c){
+  const R = c.ref;
+  const acts = (S.actions && S.actions.actions) || [];
+  const rel = (t) => acts.filter(a => (a.action_type || a.type) === t && relevantTo(a, R));
+  const isPlayer = c.side === "player";
+  const menu = el("div", "stack action-menu");
+
+  /* 攻击（全界面唯一普攻入口）。B 方两态：已「准备」→ 直接显示点选面板；
+     未准备 → 「攻击」按钮先准备。 */
+  if (isPlayer){
+    const p = rel("prepare_attack")[0];
+    if (p && entryAvailable(p) && c.attack_count > 0){
+      menu.append(menuItem("攻击（逐击：定目标、分伤害）", () => attackPrepare(R), false, false, "attack-lead"));
+    }
+  } else {
+    const bPending = MANUAL && (MANUAL.actors || [])[0]
+      && MANUAL.actors[0].actor_ref === R;
+    if (bPending){
+      menu.append(manualEnemyControls(R));
+    } else if (S.battle.manual_both
+               && acts.some(a => a.action_type === "prepare_monster_phase")){
+      menu.append(menuItem("攻击（逐击：定目标、分伤害）", () => monsterPrepare(R), false, false, "attack-lead"));
+    }
+  }
+
+  /* 施法：单发 / 组合 / 协力（谁轮到就给谁的道纹；协力谁都能填） */
+  const spellTypes = ["use_daowen", "cast", "declare_spell", "fill_spell",
+                      "release_spell", "cancel_spell"];
+  const spellOk = acts.some(a => spellTypes.includes(a.action_type)
+    && (relevantTo(a, R)
+        || ["declare_spell", "fill_spell", "release_spell", "cancel_spell"].includes(a.action_type)));
+  if (spellOk){
+    menu.append(menuItem(OPEN_SUB === "spell" ? "施法 ▴" : "施法 ▾（单发/组合/协力）",
+      () => { OPEN_SUB = OPEN_SUB === "spell" ? "" : "spell"; OPEN_MENU = R; render(); },
+      OPEN_SUB === "spell", true));
+    if (OPEN_SUB === "spell") menu.append(renderSpellTabs(R));
+  }
+
+  /* 聚能 */
+  const focusEntry = rel("focus")[0];
+  if (focusEntry && entryAvailable(focusEntry)){
+    menu.append(menuItem("聚能（1 手，恢复一半已损法力）",
+      () => act("focus", {actor_ref: R})));
+  }
+
+  /* 消耗品 */
+  const items = rel("consume_item").filter(entryAvailable);
+  if (items.length){
+    menu.append(menuItem(OPEN_SUB === "items" ? "消耗品 ▴" : `消耗品 ▾（${items.length}）`,
+      () => { OPEN_SUB = OPEN_SUB === "items" ? "" : "items"; OPEN_MENU = R; render(); },
+      OPEN_SUB === "items", true));
+    if (OPEN_SUB === "items"){
+      const box = el("div", "stack menu-panel");
+      for (const entry of items){
+        const name = entry.params_schema.name;
+        const row = el("div", "row");
+        row.append(el("span", "hint", `${name}（剩 ${entry.uses_remaining} 次）`));
+        if (Array.isArray(entry.params_schema.target_ref) && entry.params_schema.target_ref.length){
+          const sel = el("select");
+          for (const t of entry.params_schema.target_ref){
+            const o = el("option", null, t.name); o.value = t.ref; sel.append(o);
+          }
+          const use = el("button", "", "使用");
+          use.onclick = () => act("consume_item", {name, target_ref: sel.value});
+          row.append(sel, use);
+        } else {
+          const use = el("button", "", "使用");
+          use.onclick = () => act("consume_item", {name});
+          row.append(use);
+        }
+        box.append(row);
+      }
+      menu.append(box);
+    }
+  }
+
+  /* 残韵（有库存才出现） */
+  const res = rel("use_resonance")[0];
+  if (res && entryAvailable(res)){
+    menu.append(el("div", "hint", "残韵（转化道纹，1 手）："));
+    menu.append(genericActionForm(res));
+  }
+
+  /* 同伴：只在玩家方且场上真有同伴/员工时出现 */
+  const allyEntries = ["resolve_ally_phases", "command_ally", "deploy_employee"]
+    .flatMap(t => rel(t)).filter(entryAvailable);
+  for (const entry of allyEntries){
+    if (entry.action_type === "resolve_ally_phases"){
+      menu.append(menuItem("让同伴自主行动一次", () => act("resolve_ally_phases", {})));
+    } else if (entry.action_type === "command_ally"){
+      menu.append(el("div", "hint", "指挥同伴："));
+      menu.append(genericActionForm(entry));
+    } else if (entry.action_type === "deploy_employee"){
+      menu.append(menuItem(`部署员工：${entry.params_schema.name || entry.params_schema.employee_ref}`,
+        () => act("deploy_employee", {
+          employee_ref: entry.params_schema.employee_ref,
+          name: entry.params_schema.name})));
+    }
+  }
+
+  /* 特殊：引擎列出的其余行动（遗物技、自定义法术、困境进化、衍生发起…） */
+  const special = acts.filter(a => !MENU_EXCLUDED.has(a.action_type) && entryAvailable(a));
+  if (special.length){
+    menu.append(menuItem(OPEN_SUB === "special" ? "特殊 ▴" : `特殊 ▾（${special.length}）`,
+      () => { OPEN_SUB = OPEN_SUB === "special" ? "" : "special"; OPEN_MENU = R; render(); },
+      OPEN_SUB === "special", true));
+    if (OPEN_SUB === "special"){
+      const box = el("div", "stack menu-panel");
+      for (const entry of special) box.append(genericActionForm(entry));
+      menu.append(box);
+    }
+  }
+
+  /* 结束回合。B 方走 /api/ui_end_side：先回滚已「准备」的 pending 再 skip，
+     否则子阶段不符会被引擎拒绝。 */
+  if (acts.some(a => a.action_type === "skip" && relevantTo(a, R))){
+    if (isPlayer){
+      menu.append(menuItem("结束回合（跳过，保留剩余出手）",
+        () => act("skip", {actor_ref: R}), false, false, "danger"));
+    } else {
+      menu.append(menuItem("结束回合（跳过，保留剩余出手）",
+        () => endEnemySide(R), false, false, "danger"));
+    }
+  }
+
+  /* 危险区（仅玩家）：逃跑 / 重来本场 */
+  if (isPlayer){
+    if (acts.some(a => a.action_type === "declare_escape")){
+      menu.append(menuItem("逃跑（一次付清 5 次出手，强制脱离）",
+        () => { if (confirm("确认逃跑？最终死斗与【不离】不可逃。")) act("declare_escape", {}); },
+        false, false, "danger"));
+    }
+    if (acts.some(a => a.action_type === "restart_battle")){
+      menu.append(menuItem("重来本场战斗（不保留本场结果）",
+        () => { if (confirm("确认重来本场战斗？当前结果作废。")) act("restart_battle", {}); },
+        false, false, "danger"));
+    }
+  }
+  return menu;
 }
 
 function renderBattle(){
@@ -870,16 +1319,23 @@ function renderBattle(){
   }
   if (!b){ card.style.display = "none"; return; }
   card.style.display = "";
-  /* 窄屏（预览窗通常只有 320~380px）：战斗刚开始时把战斗卡滚进视野，
-     免得玩家以为「没反应」还要自己往下翻。 */
-  if (!_battleWasVisible && window.innerWidth < 680 && !b.peaceful){
-    setTimeout(() => { try { card.scrollIntoView({block: "start", behavior: "smooth"}); } catch(e){} }, 80);
-  }
-  _battleWasVisible = !b.peaceful;
   $("battlePhase").textContent = b.peaceful ? "战斗结束"
     : `第 ${b.round} 回合 · ${b.subphase}`
       + (b.round_started === false ? " · 出手权未定"
         : (b.actions_left !== undefined ? ` · 余 ${b.actions_left} 次出手` : ""));
+  const avail = ((S.actions && S.actions.actions) || []).map(a => a.action_type || a.type);
+  const has = (name) => avail.includes(name);
+  if (b.manual_both){
+    const foesAlive = b.combatants.filter(c => c.side === "enemy" && c.alive && c.ref);
+    const turnText = b.round_started === false
+      ? "当前行动方：未定（点「开始本回合」后按先手规则判定）"
+      : b.duel_turn === "opponent_side"
+        ? `当前行动方：B 方（${foesAlive.map(c => c.name).join("、") || "无存活单位"}）`
+        : "当前行动方：A 方";
+    body.append(el("div","banner", turnText + " · 推演模式（不用 AI，双方都由你操作）"));
+    body.append(el("div","hint", "先手＝速限→法限→血限→当前生命（大者先）；四项全同则随机首手、之后交替。"
+      + "每名角色每回合基础 1 次出手，攻击的击数＝当前速度。轮到谁就点谁名字旁的「行动」。"));
+  }
   for (const c of b.combatants){
     const row = el("div", "combatant " + (c.side === "enemy" ? "side-enemy" : "side-player")
       + (c.alive ? "" : " dead"));
@@ -887,7 +1343,28 @@ function renderBattle(){
     const left = (c.actions_left !== undefined) ? ` · 余 ${c.actions_left}/${c.action_budget} 手` : "";
     row.append(el("span","name", c.name),
                el("span","hp", `${c.hp}/${c.hp_limit}${combat}${left}`));
+    /* 行动导向：轮到谁，谁的名字旁只有一个「行动」按钮 */
+    const myTurn = b.round_started !== false && !b.peaceful && c.alive && c.ref
+      && c.actions_left > 0
+      && (b.duel_turn === "player_side") === (c.side === "player");
+    const canMenu = has("prepare_attack") || has("use_daowen") || has("cast")
+      || has("declare_spell") || has("fill_spell") || has("focus")
+      || has("consume_item") || has("use_resonance") || has("skip")
+      || has("prepare_monster_phase") || avail.length > 0;
+    if (myTurn && canMenu && (c.side === "player" || b.manual_both)){
+      const btn = el("button", "mini" + (OPEN_MENU === c.ref ? " primary" : ""), "行动");
+      btn.onclick = () => {
+        OPEN_MENU = (OPEN_MENU === c.ref) ? null : c.ref;
+        OPEN_SUB = "";
+        render();
+      };
+      row.append(btn);
+    }
     body.append(row);
+    if (OPEN_MENU === c.ref && myTurn){
+      const menu = actionMenuFor(c);
+      if (menu) body.append(menu);
+    }
     const statuses = c.statuses || [];
     if (statuses.length){
       body.append(el("div","hint",
@@ -901,206 +1378,33 @@ function renderBattle(){
     body.append(el("div","banner dead","你已倒下，这一局的胜负由世界继续写下去。"));
     return;
   }
-  const avail = (S.actions && S.actions.actions || []).map(a => a.action_type);
-  const has = (name) => avail.includes(name);
-  if (b.manual_both){
-    const foesAlive = b.combatants.filter(c => c.side === "enemy" && c.alive && c.ref);
-    const turnText = b.round_started === false
-      ? "当前行动方：未定（点「开始本回合」后按先手规则判定）"
-      : b.duel_turn === "opponent_side"
-        ? `当前行动方：B 方（${foesAlive.map(c => c.name).join("、") || "无存活单位"}）`
-        : "当前行动方：A 方";
-    body.append(el("div","banner", turnText + " · 推演模式（不用 AI，双方都由你操作）"));
-    /* 出手口径说明：每名角色每回合 1 次出手；攻击的「N 击」是当前速度，不是出手次数。 */
-    body.append(el("div","hint", "先手＝速限→法限→血限→当前生命（大者先）；四项全同则随机首手、之后交替。"
-      + "每名角色每回合基础 1 次出手，攻击的击数＝当前速度。"));
-    if (b.duel_turn === "opponent_side" && b.round_started !== false && !b.peaceful && foesAlive.length){
-      /* 逐击是通用规则：B 方出手也走同一套（攻击方定 X → 防守方选应对）。
-         只有单人多角色同侧的旧怪物阶段面板才保留批量提交。 */
-      if (foesAlive.length === 1 && foesAlive[0].ref){
-        const go = el("button","primary", `B 方出手（逐击）：${foesAlive[0].name}`);
-        go.onclick = () => attackPrepare(foesAlive[0].ref);
-        body.append(go);
-        body.append(el("div","hint","这一手同样是一击一问：B 定 X，你替 A 选硬扛/招架/闪避。"));
-      } else {
-        body.append(manualEnemyPanel(foesAlive));
-      }
-    }
-  }
-  const row = el("div","row"); row.style.marginTop = "8px";
-
-  const endBtn = () => {
-    const b2 = el("button","primary", S.direct ? "结算战斗" : "结算战斗，回到地图");
-    b2.onclick = () => act("battle_end", {});
-    return b2;
-  };
-  const roundEndBtn = () => {
-    const b2 = el("button","primary","结算本回合");
-    b2.onclick = () => act("round_end", {});
-    return b2;
-  };
-  const roundStartBtn = () => {
-    const b2 = el("button","primary","开始本回合");
-    b2.onclick = () => act("round_start", {relic_choices: {}});
-    return b2;
-  };
-  const allyBtn = () => {
-    const b2 = el("button","", "让同伴自主行动一次");
-    b2.onclick = () => act("resolve_ally_phases", {});
-    return b2;
-  };
-  const monsterBtn = (dodgeBoxes) => {
-    const b2 = el("button","", "结束我方行动，结算敌方阶段");
-    b2.onclick = async () => {
-      if (busy) return; busy = true;
-      try {
-        const refs = dodgeBoxes.filter(cb => cb.checked).map(cb => cb.dataset.ref);
-        const data = await api("/api/ui_monster_phase", {dodge_refs: refs});
-        if (!data.success) toast("敌方阶段失败：" + (data.result && data.result.error));
-        else toast("敌方阶段已结算");
-      } finally { busy = false; }
-    };
-    return b2;
-  };
-
-
-function manualEnemyPanel(foesAlive){
-  /* 推演模式：B 方回合由用户点选一次真实行动（不用 AI）。
-     提交后引擎按「交替出手」自动换回 A 方，面板随之消失。 */
-  const wrap = el("div","stack");
-  if (!MANUAL){
-    const prep = el("button","primary","① 准备 B 方行动");
-    prep.onclick = async () => {
-      if (busy) return; busy = true;
-      try{
-        const data = await api("/api/ui_monster_prepare", {});
-        if (!data.success){ toast("准备失败：" + (data.error || "未知错误")); return; }
-        MANUAL = data.prepare || {};
-        render();
-      } catch(e){ toast("请求失败：" + e.message); }
-      finally { busy = false; }
-    };
-    wrap.append(prep, el("div","hint","点了之后会列出 B 方这次能做什么：攻击谁、闪不闪、用哪个道纹。"));
-    return wrap;
-  }
-  const actor = (MANUAL.actors || [])[0];
-  const actionRow = el("div","row"); actionRow.style.marginTop = "8px";
-  const finish = (params) => async () => {
-    if (busy) return; busy = true;
-    try{
-      const data = await api("/api/ui_monster_phase", params);
-      if (!data.success){ toast("B 方行动失败：" + (data.result && data.result.error)); return; }
-      MANUAL = null; render();
-    } catch(e){ toast("请求失败：" + e.message); }
-    finally { busy = false; }
-  };
-  const endTurn = async () => {
-    if (busy) return; busy = true;
-    try{
-      const data = await api("/api/ui_end_side", {actor_ref: foesAlive[0].ref});
-      if (!data.success) toast("结束回合失败：" + (data.result && data.result.error));
-      else MANUAL = null;
-    } catch(e){ toast("请求失败：" + e.message); }
-    finally { busy = false; }
-  };
-  if (!actor){
-    wrap.append(el("div","kv","B 方这次没有合法行动。"));
-    const skip = el("button","primary","结束 B 方回合（保留剩余出手）");
-    skip.onclick = endTurn;
-    actionRow.append(skip);
-    wrap.append(actionRow);
-    return wrap;
-  }
-  wrap.append(el("div","kv", `轮到 ${actor.monster || actor.actor_ref}：${(actor.attack_target_options||[]).length ? `可攻击 ${actor.hit_count} 击、总伤害上限 ${actor.damage_budget}` : "没有攻击目标"}`));
-  /* 目标 */
-  let targetSelect = null;
-  const targets = actor.attack_target_options || [];
-  if (targets.length){
-    targetSelect = el("select");
-    for (const t of targets){
-      const o = el("option", null, `${t.name}（${t.ref}）`); o.value = t.ref; targetSelect.append(o);
-    }
-    const trow = el("div","field"); trow.append(el("label",null,"攻击目标"), targetSelect);
-    wrap.append(trow);
-  }
-  /* 道纹（可选） */
-  let daowenSelect = null;
-  const daowens = actor.daowen_options || [];
-  daowenSelect = el("select");
-  const none = el("option", null, "（不使用道纹，进行普通攻击）"); none.value = ""; daowenSelect.append(none);
-  for (const d of daowens){
-    const o = el("option", null, `道纹：${d.name}${d.x ? ` X=${d.x}` : ""}`); o.value = d.name; daowenSelect.append(o);
-  }
-  if (daowens.length){
-    const draw = el("div","field"); draw.append(el("label",null,"道纹"), daowenSelect);
-    wrap.append(draw);
-  }
-  /* 闪避 */
-  const dodgeWrap = el("label","kv"); dodgeWrap.style.margin = "6px 0";
-  const dodge = el("input"); dodge.type = "checkbox";
-  dodgeWrap.append(dodge, document.createTextNode(" 这次攻击尝试闪避"));
-  wrap.append(dodgeWrap);
-  /* 操作 */
-  const go = el("button","primary","执行 B 方行动");
-  go.onclick = () => {
-    const params = {manual: true, dodge: !!dodge.checked};
-    if (targetSelect) params.target_ref = targetSelect.value;
-    if (daowenSelect && daowenSelect.value) params.daowen_name = daowenSelect.value;
-    finish(params)();
-  };
-  const endSide = el("button","","结束 B 方回合（保留剩余出手）");
-  endSide.onclick = endTurn;
-  actionRow.append(go, endSide);
-  wrap.append(actionRow);
-  return wrap;
-}
-
-  if (b.peaceful){
-    row.append(endBtn());
-    body.append(row);
-    return;
-  }
   if (b.pending_attack){
     /* 普攻逐击流程：A 分配本击目标与 X → 切到 B 选应对 → A 还有余击就回到起点，
        否则一次性结算这一次出手。 */
     body.append(attackPanel(b));
-    return;
   }
 
-  if (has("resolve_redemption")){
-    const line = el("div","kv","场上有【救赎】待选：接纳它成为同伴，或直接终结。");
-    const nameInput = el("input"); nameInput.type = "text"; nameInput.value = "赎罪者";
-    const accept = el("button","primary","接纳");
-    accept.onclick = () => act("resolve_redemption", {option: "接纳", name: nameInput.value || "赎罪者"});
-    const finish = el("button","danger","终结");
-    finish.onclick = () => act("resolve_redemption", {option: "终结"});
-    const line2 = el("div","row"); line2.append(nameInput, accept, finish);
-    body.append(line, line2);
+  /* 底部公共区：只放流程按钮，不绑定角色 */
+  const row = el("div","row"); row.style.marginTop = "8px";
+  if (has("round_start")){
+    const b2 = el("button","primary","开始本回合");
+    b2.onclick = () => act("round_start", {relic_choices: {}});
+    row.append(b2);
   }
-  const dodgeBoxes = [];
-  const noActionsLeft = (b.actions_left !== undefined) && b.actions_left <= 0;
-  const noEnemy = b.enemies_alive === 0;
-  if (has("prepare_attack")){
-    const prep = el("button","primary",
-      noEnemy ? "攻击（场上已无存活敌人）"
-        : noActionsLeft ? "准备攻击（本回合出手已用完）"
-        : `准备攻击（余 ${b.actions_left ?? "?"} 次）`);
-    prep.disabled = noActionsLeft || noEnemy;
-    prep.onclick = () => attackPrepare();
-    row.append(prep);
+  if (has("round_end")){
+    const b2 = el("button","primary","结算本回合");
+    b2.onclick = () => act("round_end", {});
+    row.append(b2);
   }
-  if (has("resolve_ally_phases")) row.append(allyBtn());
-  if (!b.manual_both && (has("prepare_monster_phase") || has("resolve_monster_phase"))) {
-    row.append(monsterBtn(dodgeBoxes));
+  if (b.peaceful && has("battle_end")){
+    const b2 = el("button","primary", S.direct ? "结算战斗" : "结算战斗，回到地图");
+    b2.onclick = () => act("battle_end", {});
+    row.append(b2);
   }
-  if (has("round_end")) row.append(roundEndBtn());
-  if (has("round_start")) row.append(roundStartBtn());
-  if (has("battle_end")) row.append(endBtn());
-  body.append(row);
-
   const foes = (b.combatants || []).filter(c => c.side === "enemy" && c.alive && c.ref);
-  if (!b.manual_both && foes.length
+  if (!b.manual_both && !b.peaceful && foes.length
       && (has("prepare_monster_phase") || has("resolve_monster_phase"))){
+    const dodgeBoxes = [];
     const dodgeWrap = el("div","kv");
     dodgeWrap.append(document.createTextNode("敌方阶段尝试闪避："));
     foes.forEach((c) => {
@@ -1111,8 +1415,524 @@ function manualEnemyPanel(foesAlive){
       dodgeWrap.append(lab);
     });
     body.append(dodgeWrap);
+    const b2 = el("button","","结束我方行动，结算敌方阶段");
+    b2.onclick = async () => {
+      if (busy) return; busy = true;
+      try {
+        const refs = dodgeBoxes.filter(cb => cb.checked).map(cb => cb.dataset.ref);
+        const data = await api("/api/ui_monster_phase", {dodge_refs: refs});
+        if (!data.success) toast("敌方阶段失败：" + (data.result && data.result.error));
+        else toast("敌方阶段已结算");
+      } finally { busy = false; }
+    };
+    row.append(b2);
   }
+  const saveBtn = el("button","","保存战斗并退出");
+  saveBtn.title = "存一档并退出对局，之后从顶部「存档架」读取继续";
+  saveBtn.onclick = battleSaveAndExit;
+  row.append(saveBtn);
+  body.append(row);
   if (!avail.length) body.append(el("div","hint","引擎当前没有可选战斗行动"));
+}
+
+/* ==== 存档架：保存当前战斗并退出 / 随时读取继续 ==== */
+async function battleSaveAndExit(){
+  if (!S || !S.started){ toast("当前没有进行中的对局"); return; }
+  const def = S.battle ? `第${S.battle.round}回合` : (S.player && S.player.name) || "存档";
+  const name = prompt("存档名（留空＝自动命名）", def);
+  if (name === null) return;
+  if (busy) return; busy = true;
+  try {
+    const res = await fetch("/api/battle/save", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({slot: name})});
+    const data = await res.json();
+    if (!data.success){ toast("保存失败：" + (data.error || "未知错误")); return; }
+    S = data.snapshot; OPEN_MENU = null; OPEN_SUB = "";
+    render();
+    toast("已保存并退出：「" + data.slot + "」——点顶部「存档架」随时读取继续");
+  } catch(e){ toast("保存失败：" + e.message); }
+  finally { busy = false; }
+}
+
+async function openSaves(){
+  try {
+    const res = await fetch("/api/battle/saves");
+    const data = await res.json();
+    renderSavesList(data.saves || []);
+    $("savesModal").classList.remove("hidden");
+  } catch(e){ toast("读取存档列表失败：" + e.message); }
+}
+
+function renderSavesList(saves){
+  const body = $("savesBody"); body.innerHTML = "";
+  if (!saves.length){
+    body.append(el("div","hint","还没有存档。战斗卡底部「保存战斗并退出」即可存一档。"));
+    return;
+  }
+  for (const s of saves){
+    const row = el("div","row");
+    const desc = s.source === "shelf"
+      ? `${s.slot} · ${s.player || ""} 第${s.battle}场·第${s.round}回合 · ${s.phase}${s.in_combat ? "（战斗中）" : ""}`
+      : `${s.slot}（磁盘存档，本会话暂存已丢失时也能读）`;
+    row.append(el("span","hint",desc));
+    const load = el("button","primary","读取继续");
+    load.onclick = async () => {
+      if (busy) return; busy = true;
+      try {
+        const res = await fetch("/api/battle/load", {method:"POST",
+          headers:{"Content-Type":"application/json"}, body: JSON.stringify({slot: s.slot})});
+        const data = await res.json();
+        if (!data.success){ toast("读取失败：" + (data.error || "未知错误")); return; }
+        S = data.snapshot; OPEN_MENU = null; OPEN_SUB = ""; DISMISS_KEY = null;
+        $("savesModal").classList.add("hidden");
+        render();
+        toast("已读取：「" + s.slot + "」，接着打。");
+      } catch(e){ toast("读取失败：" + e.message); }
+      finally { busy = false; }
+    };
+    const del = el("button","danger","删除");
+    del.onclick = async () => {
+      if (!confirm("删除存档「" + s.slot + "」？")) return;
+      try {
+        const res = await fetch("/api/battle/save/delete", {method:"POST",
+          headers:{"Content-Type":"application/json"}, body: JSON.stringify({slot: s.slot})});
+        const data = await res.json();
+        if (!data.success){ toast("删除失败：" + (data.error || "未知错误")); return; }
+        renderSavesList(data.saves || []);
+      } catch(e){ toast("删除失败：" + e.message); }
+    };
+    row.append(load, del);
+    body.append(row);
+  }
+}
+
+/* ==== 施法子面板（挂在行动菜单里，按角色过滤）====
+   单发：该角色自己的道纹；组合：槽位编辑器（仅玩家本人）；
+   协力：场上所有未发动的协力法术（谁都能填空位）。 */
+let SPELL_TAB = "single";   // single | combo | coop
+let COMBO_SLOTS = [];       // 组合页签的槽位状态（跨 render 保留）
+const MODE_LABEL = {target: "于目标", self: "于自身", caster: "于施法者", any: "于任意目标"};
+
+function targetOptionsFromActions(){
+  const cast = ((S.actions && S.actions.actions) || []).find(a => a.action_type === "cast");
+  return (cast && cast.params_schema && cast.params_schema.target_ref) || [];
+}
+
+function comboNewSlot(){ return {t: "d", name: "", x: 1, mode: "target", ref: "", dodge: false}; }
+function comboNewIf(){
+  return {t: "if", cond: "", then: [comboNewSlot()], else: []};
+}
+
+/* 槽位状态 → (flow 文本, steps 决策, 是否用到“于目标”)。
+   空白格跳过；if 两臂全空整支跳过；只有 else 有内容 → 取反条件（若非(条件)则(…)）。 */
+function comboBuild(){
+  const clauses = [], steps = [];
+  let needsTarget = false;
+  function emit(slot){
+    const mode = slot.mode || "target";
+    clauses.push(`发动${slot.name}X${MODE_LABEL[mode] || "于目标"}`);
+    const step = {x: Number(slot.x) || 1, dodge: !!slot.dodge};
+    if (mode === "any"){ step.target_ref = slot.ref; }
+    if (mode === "target"){ needsTarget = true; }
+    steps.push(step);
+  }
+  function walk(nodes){
+    for (const node of nodes){
+      if (node.t === "d"){
+        if ((node.name || "").trim()) emit(node);
+        continue;
+      }
+      const mark = clauses.length;
+      walk(node.then || []);
+      const endThen = clauses.length;
+      walk(node.else || []);
+      const thenC = clauses.slice(mark, endThen), elseC = clauses.slice(endThen);
+      const cond = (node.cond || "").trim();
+      if (!thenC.length && !elseC.length) continue;
+      clauses.length = mark;
+      if (thenC.length){
+        let clause = `若${cond}则（${thenC.join("；")}）`;
+        if (elseC.length) clause += `否则（${elseC.join("；")}）`;
+        clauses.push(clause);
+      } else {
+        clauses.push(`若非(${cond})则（${elseC.join("；")}）`);
+      }
+    }
+  }
+  walk(COMBO_SLOTS);
+  return {flow: clauses.join("→"), steps, needsTarget};
+}
+
+function comboSlotEditor(node, onChange, removeCb){
+  const box = el("div", "stack spell-slot");
+  const row = el("div", "row");
+  const name = el("input"); name.type = "text"; name.value = node.name || "";
+  name.placeholder = "道纹名（留空＝这个空格跳过）";
+  name.setAttribute("list", "playerDaowenList");
+  name.oninput = () => { node.name = name.value; onChange(); };
+  const xIn = el("input"); xIn.type = "number"; xIn.min = "1"; xIn.value = String(node.x || 1);
+  xIn.style.maxWidth = "64px"; xIn.title = "这一格的 X 值";
+  xIn.oninput = () => { node.x = Number(xIn.value) || 1; onChange(); };
+  const mode = el("select");
+  for (const [key, label] of Object.entries(MODE_LABEL)){
+    const o = el("option", null, label); o.value = key; mode.append(o);
+  }
+  mode.value = node.mode || "target";
+  mode.onchange = () => { node.mode = mode.value; render(); };
+  row.append(name, xIn, mode);
+  if ((node.mode || "target") === "any"){
+    const ref = el("select");
+    for (const t of targetOptionsFromActions()){
+      const o = el("option", null, t.name || t.ref); o.value = t.ref; ref.append(o);
+    }
+    if (!node.ref && ref.firstChild) node.ref = ref.firstChild.value;
+    ref.value = node.ref || "";
+    ref.onchange = () => { node.ref = ref.value; };
+    row.append(ref);
+  }
+  const dodgeLab = el("label"); dodgeLab.style.marginRight = "6px";
+  const dodge = el("input"); dodge.type = "checkbox"; dodge.checked = !!node.dodge;
+  dodge.onchange = () => { node.dodge = dodge.checked; onChange(); };
+  dodgeLab.append(dodge, document.createTextNode(" 闪避"));
+  row.append(dodgeLab);
+  if (removeCb){
+    const del = el("button", "", "×"); del.title = "删掉这一格";
+    del.onclick = () => { removeCb(); render(); };
+    row.append(del);
+  }
+  box.append(row);
+  return box;
+}
+
+function comboIfEditor(node, onChange, removeCb){
+  const box = el("div", "stack spell-if");
+  const cond = el("input"); cond.type = "text"; cond.value = node.cond || "";
+  cond.placeholder = "条件，如：自身 生命 小于 50（主语限自身/施法者，空格分词）";
+  cond.style.width = "100%";
+  cond.oninput = () => { node.cond = cond.value; onChange(); };
+  const head = el("div", "row"); head.append(el("span", "hint", "（"), cond, el("span", "hint", "）"));
+  if (removeCb){
+    const del = el("button", "", "×"); del.title = "删掉这个分支";
+    del.onclick = () => { removeCb(); render(); };
+    head.append(del);
+  }
+  box.append(head);
+  const thenBox = el("div", "stack"); thenBox.style.marginLeft = "14px";
+  thenBox.append(el("div", "hint", "则（满足条件走这里）："));
+  node.then = node.then || [];
+  node.then.forEach((slot, i) => {
+    thenBox.append(comboSlotEditor(slot, onChange, () => node.then.splice(i, 1)));
+  });
+  const addThen = el("button", "", "+ 道纹空格");
+  addThen.onclick = () => { node.then.push(comboNewSlot()); render(); };
+  thenBox.append(addThen);
+  box.append(thenBox);
+  const elseBox = el("div", "stack"); elseBox.style.marginLeft = "14px";
+  elseBox.append(el("div", "hint", "否则（不满足走这里；全空＝整支跳过）："));
+  node.else = node.else || [];
+  node.else.forEach((slot, i) => {
+    elseBox.append(comboSlotEditor(slot, onChange, () => node.else.splice(i, 1)));
+  });
+  const addElse = el("button", "", "+ 道纹空格");
+  addElse.onclick = () => { node.else.push(comboNewSlot()); render(); };
+  elseBox.append(addElse);
+  box.append(elseBox);
+  return box;
+}
+
+function renderComboTab(){
+  const wrap = el("div", "stack");
+  wrap.append(el("div", "hint",
+    "每一格 = 1 次出手（逐步支付）；空格＝空白，施法时直接跳过。"
+    + "「（条件）」分支：满足走「则」，否则走「否则」。"));
+  const editors = el("div", "stack");
+  const onChange = () => {};
+  COMBO_SLOTS.forEach((node, i) => {
+    editors.append(node.t === "if"
+      ? comboIfEditor(node, onChange, () => COMBO_SLOTS.splice(i, 1))
+      : comboSlotEditor(node, onChange, () => COMBO_SLOTS.splice(i, 1)));
+  });
+  wrap.append(editors);
+  const addRow = el("div", "row");
+  const addSlot = el("button", "", "+ 道纹空格");
+  addSlot.onclick = () => { COMBO_SLOTS.push(comboNewSlot()); render(); };
+  const addIf = el("button", "", "+ （条件）分支");
+  addIf.onclick = () => { COMBO_SLOTS.push(comboNewIf()); render(); };
+  addRow.append(addSlot, addIf);
+  wrap.append(addRow);
+  const preview = el("div", "hint"); preview.style.marginTop = "6px";
+  wrap.append(preview);
+
+  const sch = (((S.actions || {}).actions || []).find(a => a.action_type === "cast") || {}).params_schema || {};
+  const row = el("div", "row"); row.style.marginTop = "6px";
+  let targetSelect = null;
+  if (Array.isArray(sch.target_ref) && sch.target_ref.length){
+    targetSelect = el("select");
+    for (const t of sch.target_ref){
+      const o = el("option", null, t.name); o.value = t.ref; targetSelect.append(o);
+    }
+    const box = el("label", "field"); box.style.margin = "0";
+    box.append(el("span", null, "法术的[目标]"), targetSelect);
+    row.append(box);
+  }
+  const go = el("button", "primary", "施放组合法术");
+  go.onclick = () => {
+    const built = comboBuild();
+    if (!built.flow){ toast("没有可施放的道纹：把至少一格填上道纹名"); return; }
+    if (built.needsTarget && !targetSelect){ toast("流程用到「于目标」，但当前没有可选目标"); return; }
+    const params = {flow: built.flow, steps: built.steps, name: "组合法术"};
+    if (built.needsTarget && targetSelect) params.target_ref = targetSelect.value;
+    act("cast", params);
+  };
+  row.append(go);
+  wrap.append(row);
+  const dl = el("datalist"); dl.id = "playerDaowenList";
+  for (const name of ((S.player && S.player.daowen) || [])){
+    const o = el("option"); o.value = name; dl.append(o);
+  }
+  wrap.append(dl);
+  const built = comboBuild();
+  preview.textContent = built.flow
+    ? `流程预览：${built.flow}　（steps ${built.steps.length} 条）`
+    : "（还没有可施放的道纹：名字留空的格子会跳过）";
+  return wrap;
+}
+
+function renderCoopTab(){
+  const wrap = el("div", "stack");
+  const acts = ((S.actions && S.actions.actions) || []);
+  const spells = (S.battle && S.battle.coop_spells) || [];
+  const declareAct = acts.find(a => a.action_type === "declare_spell");
+
+  for (const spell of spells){
+    const card = el("div", "ally");
+    card.append(el("div", "name",
+      `协力法术【${spell.name}】 · ${spell.caster_name}发起`
+      + (spell.cast_target ? ` · 目标 ${spell.cast_target}` : "")
+      + (spell.round ? ` · 第${spell.round}回合发起` : "")));
+    for (const f of spell.fills){
+      card.append(el("div", "kv",
+        `空位${f.slot}：【${f.daowen}X=${f.x}】${MODE_LABEL[f.mode] || f.mode}`
+        + `${f.target ? `（${f.target}）` : ""} —— ${f.by} 填入`));
+    }
+    const fillers = ((S.battle && S.battle.combatants) || []).filter(c => c.alive && c.ref);
+    for (const slotIndex of spell.empty){
+      const row = el("div", "row"); row.style.marginTop = "6px";
+      row.append(el("span", "hint", `空位${slotIndex}`));
+      const filler = el("select");
+      for (const c of fillers){
+        const o = el("option", null, c.name); o.value = c.ref; filler.append(o);
+      }
+      const daowen = el("select");
+      const rebuildDaowen = () => {
+        daowen.innerHTML = "";
+        const who = fillers.find(c => c.ref === filler.value);
+        for (const name of ((who && who.daowen) || [])){
+          const o = el("option", null, name); o.value = name; daowen.append(o);
+        }
+      };
+      filler.onchange = rebuildDaowen; rebuildDaowen();
+      const xIn = el("input"); xIn.type = "number"; xIn.min = "1"; xIn.value = "1";
+      xIn.style.maxWidth = "60px"; xIn.title = "这一格的 X 值";
+      const mode = el("select");
+      for (const [key, label] of Object.entries(MODE_LABEL)){
+        const o = el("option", null, label); o.value = key; mode.append(o);
+      }
+      const ref = el("select"); ref.style.display = "none";
+      for (const c of fillers){
+        const o = el("option", null, c.name); o.value = c.ref; ref.append(o);
+      }
+      mode.onchange = () => { ref.style.display = mode.value === "any" ? "" : "none"; };
+      const fillBtn = el("button", "primary", "填入（花填入者1手）");
+      fillBtn.onclick = () => {
+        const params = {spell_id: spell.spell_id, slot: slotIndex,
+                        actor_ref: filler.value, daowen_name: daowen.value,
+                        x: Number(xIn.value) || 1, target_mode: mode.value};
+        if (mode.value === "any") params.target_ref = ref.value;
+        act("fill_spell", params);
+      };
+      row.append(filler, daowen, xIn, mode, ref, fillBtn);
+      card.append(row);
+    }
+    const btnRow = el("div", "row"); btnRow.style.marginTop = "8px";
+    const release = el("button", "primary",
+      `发动（空位=空白跳过；已填 ${spell.fills.length}/${spell.slots.length}）`);
+    release.disabled = !spell.fills.length;
+    release.onclick = () => act("release_spell", {spell_id: spell.spell_id});
+    const cancel = el("button", "", "取消（已填的出手不退）");
+    cancel.onclick = () => act("cancel_spell", {spell_id: spell.spell_id});
+    btnRow.append(release, cancel);
+    card.append(btnRow);
+    wrap.append(card);
+  }
+
+  if (declareAct){
+    const card = el("div", "ally");
+    card.append(el("div", "name", "发起协力法术"));
+    card.append(el("div", "hint",
+      "开 N 个道纹空位，不花出手；场上任意存活角色（双方都可以）逐格填入道纹，"
+      + "每格花填入者 1 次出手；你随时发动（空白格跳过）或取消。一人同时只能挂一条。"));
+    const row = el("div", "row"); row.style.marginTop = "6px";
+    const n = el("input"); n.type = "number"; n.min = "1"; n.max = "24"; n.value = "2";
+    n.style.maxWidth = "70px"; n.title = "道纹空位数（1~24）";
+    const nameIn = el("input"); nameIn.type = "text"; nameIn.placeholder = "法术名（可选）";
+    nameIn.style.maxWidth = "140px";
+    let targetSelect = null;
+    const schema = declareAct.params_schema || {};
+    if (Array.isArray(schema.cast_target_ref) && schema.cast_target_ref.length){
+      targetSelect = el("select");
+      for (const t of schema.cast_target_ref){
+        const o = el("option", null, t.name); o.value = t.ref; targetSelect.append(o);
+      }
+      const box = el("label", "field"); box.style.margin = "0";
+      box.append(el("span", null, "法术的[目标]"), targetSelect);
+      row.append(box);
+    }
+    const go = el("button", "primary", "发起");
+    go.onclick = () => {
+      const params = {slots: Number(n.value) || 1};
+      if (nameIn.value.trim()) params.name = nameIn.value.trim();
+      if (targetSelect) params.cast_target_ref = targetSelect.value;
+      act("declare_spell", params);
+    };
+    row.append(el("span", null, "空位数"), n, nameIn, go);
+    card.append(row);
+    wrap.append(card);
+  }
+  if (!spells.length && !declareAct){
+    wrap.append(el("div", "hint", "当前阶段没有协力法术可操作。"));
+  }
+  return wrap;
+}
+
+function renderSingleTab(actorRef){
+  const acts = ((S.actions && S.actions.actions) || []).filter(
+    a => a.action_type === "use_daowen" && a.params_schema && a.params_schema.daowen_name
+      && relevantTo(a, actorRef));
+  if (!acts.length) return el("div", "hint", "该角色当前没有可发动的道纹。");
+  const nameByRef = {};
+  for (const c of ((S.battle && S.battle.combatants) || [])) if (c.ref) nameByRef[c.ref] = c.name;
+
+  const wrap = el("div", "stack");
+  const sel = el("select");
+  const byKey = new Map();
+  for (const a of acts){
+    const sch = a.params_schema;
+    const key = (sch.actor_ref || "") + "|" + sch.daowen_name;
+    if (byKey.has(key)) continue;
+    byKey.set(key, a);
+    const actor = sch.actor_ref ? (nameByRef[sch.actor_ref] || sch.actor_ref) : "你";
+    const o = el("option", null,
+      `${sch.daowen_name}（${actor}）${a.available === false ? " · 不可用" : ""}`);
+    o.value = key;
+    if (a.available === false){ o.disabled = true; o.title = a.reason || "当前不可用"; }
+    sel.append(o);
+  }
+  const row1 = el("div", "row");
+  row1.append(el("span", null, "道纹"), sel);
+  wrap.append(row1);
+
+  const dyn = el("div", "stack");
+  wrap.append(dyn);
+
+  function rebuild(){
+    dyn.innerHTML = "";
+    const a = byKey.get(sel.value);
+    if (!a) return;
+    const sch = a.params_schema;
+    const row = el("div", "row");
+    const x = sch.x;
+    let xInput = null;
+    if (typeof x === "number"){
+      row.append(el("span", "hint", `X 固定 ${x}`));
+    } else {
+      xInput = el("input"); xInput.type = "number";
+      const min = (x && typeof x === "object") ? (x.minimum ?? 1) : 1;
+      const max = (x && typeof x === "object") ? (x.maximum ?? 99) : 99;
+      xInput.min = String(min); xInput.max = String(max); xInput.value = String(min);
+      xInput.title = `X 范围 ${min}~${max}`;
+      const box = el("label", "field"); box.style.margin = "0";
+      box.append(el("span", null, "X"), xInput);
+      row.append(box);
+    }
+    let targetSelect = null;
+    if (Array.isArray(sch.target_ref) && sch.target_ref.length){
+      targetSelect = el("select");
+      for (const t of sch.target_ref){
+        const o = el("option", null, t.name); o.value = t.ref; targetSelect.append(o);
+      }
+      const box = el("label", "field"); box.style.margin = "0";
+      box.append(el("span", null, "目标"), targetSelect);
+      row.append(box);
+    }
+    const checks = {};
+    for (const [key, label] of [["dodge", "闪避"], ["blood_shadow", "血影"]]){
+      if (!(key in sch)) continue;
+      const lab = el("label"); lab.style.marginRight = "10px";
+      const cb = el("input"); cb.type = "checkbox";
+      checks[key] = cb;
+      lab.append(cb, document.createTextNode(" " + label));
+      row.append(lab);
+    }
+    dyn.append(row);
+    const extraKeys = Object.keys(sch).filter(k =>
+      !["daowen_name", "x", "target_ref", "dodge", "blood_shadow", "actor_ref"].includes(k));
+    let extraInput = null;
+    if (extraKeys.length){
+      extraInput = el("input"); extraInput.type = "text";
+      extraInput.placeholder = `附加参数 JSON（${extraKeys.join("、")}）`;
+      extraInput.style.width = "100%";
+      dyn.append(extraInput);
+    }
+    const go = el("button", "primary", "发动");
+    go.onclick = () => {
+      const params = {daowen_name: sch.daowen_name};
+      if (sch.actor_ref) params.actor_ref = sch.actor_ref;
+      if (xInput) params.x = Number(xInput.value) || 1;
+      else if (typeof x === "number") params.x = x;
+      if (targetSelect) params.target_ref = targetSelect.value;
+      for (const [key, cb] of Object.entries(checks)) params[key] = !!cb.checked;
+      if (extraInput && extraInput.value.trim()){
+        try { Object.assign(params, JSON.parse(extraInput.value.trim())); }
+        catch(e){ toast("附加参数不是合法 JSON"); return; }
+      }
+      act("use_daowen", params);
+    };
+    dyn.append(go);
+  }
+  sel.onchange = rebuild;
+  rebuild();
+  return wrap;
+}
+
+function renderSpellTabs(actorRef){
+  const acts = ((S.actions && S.actions.actions) || []);
+  const canSingle = acts.some(a => a.action_type === "use_daowen" && relevantTo(a, actorRef));
+  const canCombo = actorRef === "player:0"
+    && acts.some(a => a.action_type === "cast");
+  const canCoop = acts.some(a =>
+    ["declare_spell", "fill_spell", "release_spell", "cancel_spell"].includes(a.action_type))
+    || ((S.battle && S.battle.coop_spells) || []).length > 0;
+  if (!canSingle && !canCombo && !canCoop){
+    return el("div", "hint", "当前没有可用的施法入口。");
+  }
+  if (SPELL_TAB === "combo" && !canCombo) SPELL_TAB = "single";
+  const wrap = el("div", "stack menu-panel");
+  const tabs = el("div", "row");
+  const tabDefs = [["single", `单发${canSingle ? "" : "（暂无）"}`, canSingle],
+                   ["combo", `组合${canCombo ? "" : "（暂无）"}`, canCombo],
+                   ["coop", `协力${canCoop ? "" : "（暂无）"}`, canCoop]];
+  for (const [key, label, enabled] of tabDefs){
+    const btn = el("button", SPELL_TAB === key ? "primary" : "", label);
+    btn.disabled = !enabled;
+    btn.onclick = () => { SPELL_TAB = key; render(); };
+    tabs.append(btn);
+  }
+  wrap.append(tabs);
+  if (SPELL_TAB === "combo") wrap.append(renderComboTab());
+  else if (SPELL_TAB === "coop") wrap.append(renderCoopTab());
+  else wrap.append(renderSingleTab(actorRef));
+  return wrap;
 }
 
 function renderLog(){
@@ -1168,6 +1988,8 @@ document.addEventListener("keydown", (e) => {
 $("waitBtn").onclick = () => act("world_wait", {turns: 1});
 $("wait5Btn").onclick = () => act("world_wait", {turns: 5});
 $("newBtn").onclick = () => $("newModal").classList.remove("hidden");
+$("savesBtn").onclick = openSaves;
+$("pendingChip").onclick = () => { DISMISS_KEY = null; render(); };
 
 /* 字号档位：预览窗窄的时候按钮和字都能放大（存在 localStorage）。 */
 const FONT_STEPS = [["标准", ""], ["大", "big"], ["特大", "huge"]];
@@ -1208,6 +2030,129 @@ $("rawSend").onclick = () => {
   act(action, params);
 };
 
+/* ---- 控制台（调试）：直接读写引擎状态，绕过规则结算 ----
+   读数只在点「刷新读数」或应用修改后更新，不跟随每次 render，
+   免得玩家正在填的数字被冲掉。 */
+let DBG = null;
+let DBG_ENTITY = "";
+
+async function debugLoad(){
+  try {
+    const res = await fetch("/api/debug/state");
+    const data = await res.json();
+    if (!data.success){ toast("控制台读数失败：" + (data.error || "未知错误")); return; }
+    DBG = data;
+    if (!DBG_ENTITY || !DBG.entities.some(e => e.ref === DBG_ENTITY)){
+      DBG_ENTITY = DBG.entities.length ? DBG.entities[0].ref : "";
+    }
+    renderConsole();
+  } catch(e){ toast("控制台读数失败：" + e.message); }
+}
+
+async function debugApply(payload){
+  if (busy) return; busy = true;
+  try {
+    const res = await fetch("/api/debug/set", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(payload)});
+    const data = await res.json();
+    if (!data.success){ toast("控制台写入失败：" + (data.error || "未知错误")); return; }
+    if (data.snapshot) S = data.snapshot;
+    DBG = data.state;
+    toast("已应用：" + (data.applied || []).join("；"));
+    render();
+  } catch(e){ toast("控制台写入失败：" + e.message); }
+  finally { busy = false; }
+}
+
+function renderConsole(){
+  const body = $("consoleBody");
+  if (!body) return;
+  body.innerHTML = "";
+  if (!DBG){ body.append(el("div", "hint", "点「刷新读数」加载当前局内变量。")); return; }
+  /* 全局变量 */
+  const g = DBG.global || {};
+  const gWrap = el("div", "ally");
+  gWrap.append(el("div", "name",
+    `全局（${g.phase || ""}${g.combat_subphase ? " · " + g.combat_subphase : ""}）`));
+  const gInputs = {};
+  const gRow = el("div", "row"); gRow.style.marginTop = "6px";
+  for (const [key, label] of [["current_round", "回合数"], ["current_battle", "场次"],
+                              ["energy", "精力"], ["shards", "碎片"], ["fake_shards", "假碎片"]]){
+    const box = el("label", "field"); box.style.margin = "0";
+    const input = el("input"); input.type = "number"; input.value = String(g[key] ?? 0);
+    input.style.width = "64px";
+    gInputs[key] = input;
+    box.append(el("span", null, label), input);
+    gRow.append(box);
+  }
+  const gBtn = el("button", "primary", "应用全局");
+  gBtn.onclick = () => {
+    const glob = {};
+    for (const [key, input] of Object.entries(gInputs)) glob[key] = Number(input.value) || 0;
+    debugApply({global: glob});
+  };
+  gRow.append(gBtn);
+  gWrap.append(gRow);
+  body.append(gWrap);
+  /* 单位变量 */
+  const eWrap = el("div", "ally");
+  const sel = el("select");
+  for (const e of DBG.entities){
+    const o = el("option", null,
+      `${e.name}（${e.ref}）${e.alive ? "" : " · 已死亡"}${e.departed ? " · 已离场" : ""}`);
+    o.value = e.ref; sel.append(o);
+  }
+  sel.value = DBG_ENTITY;
+  const eRow = el("div", "row"); eRow.style.marginTop = "6px";
+  eRow.append(el("span", null, "单位"), sel);
+  eWrap.append(eRow);
+  const dyn = el("div", "stack"); dyn.style.marginTop = "6px";
+  eWrap.append(dyn);
+  body.append(eWrap);
+  function rebuild(){
+    dyn.innerHTML = "";
+    const e = DBG.entities.find(x => x.ref === sel.value);
+    if (!e) return;
+    const inputs = {};
+    const grid = el("div", "row");
+    for (const [key, label] of [["blood_limit", "血限"], ["current_hp", "当前生命"],
+                                ["mana_limit", "法限"], ["current_mana", "当前法力"],
+                                ["speed_limit", "速限"], ["current_speed", "当前速度"],
+                                ["actions_used_this_round", "已用出手"], ["shield", "格挡"],
+                                ["shards", "碎片"], ["fake_shards", "假碎片"]]){
+      const box = el("label", "field"); box.style.margin = "0";
+      const input = el("input"); input.type = "number"; input.value = String(e[key] ?? 0);
+      input.style.width = "64px";
+      inputs[key] = input;
+      box.append(el("span", null, label), input);
+      grid.append(box);
+    }
+    dyn.append(grid);
+    const checks = {};
+    const crow = el("div", "row");
+    for (const [key, label, val] of [["is_alive", "存活", e.alive], ["is_departed", "已离场", e.departed]]){
+      const lab = el("label"); lab.style.marginRight = "10px";
+      const cb = el("input"); cb.type = "checkbox"; cb.checked = !!val;
+      checks[key] = cb;
+      lab.append(cb, document.createTextNode(" " + label));
+      crow.append(lab);
+    }
+    dyn.append(crow);
+    dyn.append(el("div", "hint", "道纹：" + (e.daowen && e.daowen.length ? e.daowen.join("、") : "无")));
+    const go = el("button", "primary", "应用到该单位");
+    go.onclick = () => {
+      const f = {};
+      for (const [key, input] of Object.entries(inputs)) f[key] = Number(input.value) || 0;
+      for (const [key, cb] of Object.entries(checks)) f[key] = !!cb.checked;
+      debugApply({entity_ref: sel.value, fields: f});
+    };
+    dyn.append(go);
+  }
+  sel.onchange = () => { DBG_ENTITY = sel.value; rebuild(); };
+  rebuild();
+}
+$("debugRefresh").onclick = debugLoad;
+
 async function startGame(){
   const blood = Number($("fBlood").value), speed = Number($("fSpeed").value), mana = Number($("fMana").value);
   if (blood + speed + mana !== 25){ toast(`属性总和必须是 25，当前 ${blood+speed+mana}`); return; }
@@ -1230,12 +2175,25 @@ $("cancelBtn").onclick = () => { $("newModal").classList.add("hidden"); };
 
 (async function boot(){
   /* 开局弹窗只在点「新开一局」时出现，不自动弹（用户：我自己会点，不用它提醒）。 */
+  const autoStart = new URLSearchParams(location.search).get("autostart") === "1";
+  if (autoStart){
+    /* 演武场开战后跳转过来（lab.html 用户令 2026-11-10）：自动「开始本回合」，
+       不再让用户落地后先手点一次按钮；只自动点一次，失败就照常手动。 */
+    history.replaceState(null, "", location.pathname);
+  }
   try {
     const res = await fetch("/api/snapshot");
     S = await res.json();
     $("newModal").classList.add("hidden");
     if (S.started) render();
     else renderEmpty();
+    if (autoStart && S.started && S.battle && S.battle.round_started === false){
+      const canStart = ((S.actions && S.actions.actions) || []).some(a => a.action_type === "round_start");
+      if (canStart){
+        await act("round_start", {relic_choices: {}});
+        toast("已自动开始本回合");
+      }
+    }
   } catch(e){ $("newModal").classList.add("hidden"); }
 })();
 
@@ -1243,7 +2201,12 @@ function renderEmpty(){
   const map = $("map");
   if (map && !map.children.length){
     map.append(el("div", "hint",
-      "还没有开局：点右上角「新开一局」，或去「角色演武场」配一场 A vs B。"));
+      "还没有开局：点右上角「新开一局」，或去「角色演武场」配一场 A vs B。"
+      + "存过档的对局可点顶部「存档架」读取继续。"));
+  }
+  for (const id of ["alliesCard", "nearCard", "locationsCard"]){
+    const card = $(id);
+    if (card) card.style.display = "none";
   }
 }
 </script>

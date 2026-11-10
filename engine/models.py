@@ -1438,6 +1438,10 @@ class GameState:
     current_region: str = ""    # 当前副本
     # 已完成法术的全局完成序号；同条件触发按完成先来后到。
     spell_completion_serial: int = 0
+    # 协力施法（2026-11-10 用户令）：已发起、尚未发动的多人法术。
+    # 只存纯 dict（引用以 "player:0" 等战斗 ref 记录），随 deepcopy 快照自然往返；
+    # 战斗作用域：battle_start 开新战斗时清空。
+    open_spells: list = field(default_factory=list)
     # 过路商人是独立中立角色，不属于轮回者/怪物阵营；库存与世界坐标单独保存。
     merchant: Optional[Entity] = None
     # 开放世界状态采用纯dict快照，避免地图/行动模块与战斗实体模型形成循环依赖。
@@ -2331,6 +2335,7 @@ class GameState:
             "current_round": self.current_round,
             "current_battle": self.current_battle,
             "current_region": self.current_region,
+            "open_spells": [dict(spell) for spell in getattr(self, "open_spells", [])],
             "merchant": self.merchant.to_dict() if getattr(self, "merchant", None) else None,
             "world_state": getattr(self, "world_state", {}),
             "world_enemy_reserve": [e.to_dict() for e in getattr(self, "world_enemy_reserve", [])],

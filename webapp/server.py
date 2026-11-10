@@ -50,7 +50,8 @@ PORT = int(os.environ.get("PORT", "8000"))
 INDEX_PATH = Path(__file__).resolve().parent / "index.html"
 LAB_PATH = Path(__file__).resolve().parent / "lab.html"
 
-SESSION: dict[str, Any] = {"engine": None, "log": [], "last_world": None}
+SESSION: dict[str, Any] = {"engine": None, "log": [], "last_world": None,
+                           "engine_shelf": {}}
 LOCK = threading.Lock()
 
 REGIONS = ("罪孽都市", "扭曲都市", "龙心谷", "乱葬岗")
@@ -112,6 +113,99 @@ def _log(text: str) -> None:
     SESSION["log"] = SESSION["log"][-200:]
 
 
+# ---------------------------------------------------------------- 存档架
+# 2026-11-10 用户令：「保存当前战斗并退出」——先存档再退出对局，之后随时读取
+# 继续，不用重开战斗重调三维。引擎自带 save_game/load_game（state+随机源+战斗
+# 运行态完整往返）；引擎实例暂存在进程内 shelf，同一会话内必可读回；
+# 跨进程重启后，常规开局（save_dir=data/saves）仍可从磁盘读回。
+
+
+def _safe_slot(name: Any) -> str:
+    slot = str(name or "").strip()
+    cleaned = "".join(ch for ch in slot if ch.isalnum() or ch in "-_ ·()（）")[:40]
+    return cleaned
+
+
+def _battle_saves() -> list[dict[str, Any]]:
+    shelf: dict[str, GameEngine] = SESSION.get("engine_shelf") or {}
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for slot, engine in shelf.items():
+        seen.add(slot)
+        state = engine.state
+        out.append({
+            "slot": slot, "source": "shelf",
+            "phase": state.phase, "round": state.current_round,
+            "battle": state.current_battle, "region": state.current_region,
+            "player": (state.player.name if state.player else ""),
+            "in_combat": state.phase == "in_combat",
+        })
+    saves_dir = Path("data/saves")
+    if saves_dir.exists():
+        for path in sorted(saves_dir.glob("save_*.json")):
+            slot = path.stem[len("save_"):]
+            if slot and slot not in seen:
+                out.append({"slot": slot, "source": "file"})
+    return out
+
+
+def _battle_save(payload: dict[str, Any]) -> dict[str, Any]:
+    engine: GameEngine | None = SESSION["engine"]
+    if engine is None:
+        return {"success": False, "error": "当前没有进行中的对局可保存"}
+    slot = _safe_slot(payload.get("slot")) \
+        or f"第{engine.state.current_battle}场·第{engine.state.current_round}回合"
+    saved = engine.save_game(slot)
+    if not saved.get("success"):
+        return saved
+    SESSION.setdefault("engine_shelf", {})[slot] = engine
+    SESSION["engine"] = None
+    _log(f"存档并退出：{slot}")
+    return {"success": True, "slot": slot, "saves": _battle_saves(),
+            "snapshot": _snapshot(None)}
+
+
+def _battle_load(payload: dict[str, Any]) -> dict[str, Any]:
+    slot = _safe_slot(payload.get("slot"))
+    if not slot:
+        return {"success": False, "error": "缺少存档名"}
+    shelf: dict[str, GameEngine] = SESSION.get("engine_shelf") or {}
+    engine = shelf.get(slot)
+    if engine is not None:
+        SESSION["engine"] = engine
+        _log(f"读取存档：{slot}（本会话暂存）")
+        return {"success": True, "slot": slot, "snapshot": _snapshot(engine)}
+    # 跨进程：常规开局的存档落盘在 data/saves，用新引擎实例读回。
+    from engine.api import GameEngine as _Engine
+    engine = _Engine(db_path="data/dm_rulings.db", save_dir="data/saves",
+                     autosave=False)
+    loaded = engine.load_game(slot)
+    if not loaded.get("success"):
+        return loaded
+    SESSION["engine"] = engine
+    _log(f"读取存档：{slot}（磁盘）")
+    return {"success": True, "slot": slot, "snapshot": _snapshot(engine)}
+
+
+def _battle_save_delete(payload: dict[str, Any]) -> dict[str, Any]:
+    slot = _safe_slot(payload.get("slot"))
+    shelf: dict[str, GameEngine] = SESSION.setdefault("engine_shelf", {})
+    engine = shelf.pop(slot, None)
+    if engine is not None:
+        try:
+            os.remove(os.path.join(engine.save_dir, f"save_{slot}.json"))
+        except OSError:
+            pass
+    else:
+        path = Path("data/saves") / f"save_{slot}.json"
+        try:
+            path.unlink()
+        except OSError:
+            return {"success": False, "error": f"存档不存在：{slot}"}
+    _log(f"删除存档：{slot}")
+    return {"success": True, "saves": _battle_saves()}
+
+
 def _player_view(engine: GameEngine) -> dict[str, Any] | None:
     player = engine.state.player
     if player is None:
@@ -163,6 +257,8 @@ def _battle_view(engine: GameEngine) -> dict[str, Any] | None:
             "attack_power": entity.effective_attack_power(),
             "actions_used": entity.actions_used_this_round,
             "action_budget": engine._action_budget_of(entity),
+            # 协力施法填空位时要按角色列道纹；只给名字列表，条文走索引接口。
+            "daowen": sorted(getattr(entity, "dao_wen", {}).keys()),
             # 状态层（含【脆弱】这种「下次失去生命重复X次」次数型状态）必须看得见，
             # 否则玩家没法知道还有几层、什么时候会被翻倍结算。
             "statuses": [
@@ -206,6 +302,33 @@ def _battle_view(engine: GameEngine) -> dict[str, Any] | None:
         }
     if state.world_encounter_id:
         view["world_encounter_id"] = state.world_encounter_id
+    # 协力施法（2026-11-10 用户令）：把未发动的协力法术摊平成界面好渲染的视图。
+    # 槽位按引擎的深度优先顺序编号（if 分支的格子也连续编号），与 fill_spell.slot 对齐。
+    from engine.handlers.coop_spell import _coop_flat_slots
+    coop = []
+    for spell in getattr(state, "open_spells", []):
+        if spell.get("status") != "open":
+            continue
+        flat = _coop_flat_slots(spell.get("slots") or [])
+        fills = spell.get("fills") or {}
+        coop.append({
+            "spell_id": spell["id"],
+            "name": spell.get("name") or "协力法术",
+            "caster_ref": spell.get("caster_ref"),
+            "caster_name": spell.get("caster_name"),
+            "cast_target": spell.get("cast_target_name") or None,
+            "round": spell.get("round"),
+            "slots": [{"slot": index} for index in range(len(flat))],
+            "empty": [index for index in range(len(flat)) if str(index) not in fills],
+            "fills": [
+                {"slot": int(key), "daowen": fill.get("daowen_name"), "x": fill.get("x"),
+                 "mode": fill.get("target_mode"),
+                 "target": fill.get("target_name") or None,
+                 "by": fill.get("filled_by_name"), "by_ref": fill.get("filled_by")}
+                for key, fill in sorted(((int(k), v) for k, v in fills.items()))
+            ],
+        })
+    view["coop_spells"] = coop
     return view
 
 
@@ -479,6 +602,8 @@ def _ui_attack_respond(params: dict[str, Any]) -> dict[str, Any]:
         "choice": params.get("choice") or "tank",
         "cost_share_target_ref": params.get("cost_share_target_ref", ""),
         "dodge_relic_target_ref": params.get("dodge_relic_target_ref", ""),
+        "item_name": params.get("item_name", ""),
+        "item_target_ref": params.get("item_target_ref", ""),
     })
     _log(_describe("attack_respond_hit", params or {}, result))
     if not result.get("success"):
@@ -733,6 +858,107 @@ def _install(prepared: dict[str, Any]) -> dict[str, Any]:
             "snapshot": _snapshot(SESSION["engine"])}
 
 
+# ---------------------------------------------------------------- 控制台（调试）
+
+# 控制台只改「数值面板」字段：不碰道纹/状态/pending 等结构化对象，
+# 避免把引擎内部结构改坏。直接赋值绕过一切规则结算与代价——这是调试工具，
+# 不是规则入口；界面上必须明示。
+_DEBUG_ENTITY_INT_FIELDS = (
+    "blood_limit", "current_hp", "mana_limit", "current_mana",
+    "speed_limit", "current_speed", "actions_used_this_round",
+    "shield", "shards", "fake_shards",
+)
+_DEBUG_ENTITY_BOOL_FIELDS = ("is_alive", "is_departed")
+_DEBUG_GLOBAL_INT_FIELDS = (
+    "current_round", "current_battle", "energy", "shards", "fake_shards",
+)
+
+
+def _debug_entity_pairs(engine: GameEngine) -> list[tuple[str, Entity]]:
+    """控制台实体清单：引用口径与战斗 refs 一致（player:0 / enemy:i …），
+    但**包含已死亡/已离场单位**，否则复活、改死者数值都无从下手。"""
+    state = engine.state
+    pairs: list[tuple[str, Entity]] = []
+    groups = [("player", [state.player] if state.player else []),
+              ("friend", list(state.friends)),
+              ("employee", list(state.employees)),
+              ("temp_friend", list(state.temp_friends)),
+              ("enemy", list(state.enemies))]
+    for prefix, entities in groups:
+        for index, entity in enumerate(entities):
+            if entity is not None:
+                pairs.append((f"{prefix}:{index}", entity))
+    return pairs
+
+
+def _debug_state(engine: GameEngine) -> dict[str, Any]:
+    """控制台读数：全局变量 + 双方全部单位的可调字段当前值。"""
+    state = engine.state
+    entities = []
+    for ref, entity in _debug_entity_pairs(engine):
+        entities.append({
+            "ref": ref,
+            "name": entity.name,
+            "type": entity.entity_type,
+            "side": "player" if state.on_player_side(entity) else "enemy",
+            "alive": bool(entity.is_alive),
+            "departed": bool(entity.is_departed),
+            **{field: int(getattr(entity, field, 0))
+               for field in _DEBUG_ENTITY_INT_FIELDS},
+            "daowen": list(entity.dao_wen),
+        })
+    return {
+        "global": {
+            "phase": state.phase,
+            "combat_subphase": state.combat_subphase,
+            "duel_turn": state.duel_turn or "",
+            **{field: int(getattr(state, field, 0))
+               for field in _DEBUG_GLOBAL_INT_FIELDS},
+        },
+        "entities": entities,
+    }
+
+
+def _debug_set(payload: dict[str, Any]) -> dict[str, Any]:
+    """控制台写操作：直接改引擎状态，绕过规则结算（仅供调试）。
+
+    payload: {"global": {字段: 值}, "entity_ref": "enemy:0", "fields": {字段: 值}}
+    未知字段直接忽略并在返回里说明，不静默吞掉。
+    """
+    engine: GameEngine | None = SESSION["engine"]
+    if engine is None:
+        return {"success": False, "error": "还没有开局"}
+    state = engine.state
+    applied: list[str] = []
+    ignored: list[str] = []
+    for key, value in (payload.get("global") or {}).items():
+        if key not in _DEBUG_GLOBAL_INT_FIELDS:
+            ignored.append(f"全局.{key}")
+            continue
+        setattr(state, key, int(value))
+        applied.append(f"全局.{key}={int(value)}")
+    ref = str(payload.get("entity_ref") or "")
+    fields = payload.get("fields") or {}
+    if ref:
+        entity = next((e for r, e in _debug_entity_pairs(engine) if r == ref), None)
+        if entity is None:
+            return {"success": False, "error": f"找不到单位引用 {ref}",
+                    "applied": applied, "ignored": ignored}
+        for key, value in fields.items():
+            if key in _DEBUG_ENTITY_INT_FIELDS:
+                setattr(entity, key, int(value))
+                applied.append(f"{entity.name}.{key}={int(value)}")
+            elif key in _DEBUG_ENTITY_BOOL_FIELDS:
+                setattr(entity, key, bool(value))
+                applied.append(f"{entity.name}.{key}={bool(value)}")
+            else:
+                ignored.append(f"{entity.name}.{key}")
+    if applied:
+        _log("控制台改动：" + "；".join(applied))
+    return {"success": True, "applied": applied, "ignored": ignored,
+            "state": _debug_state(engine)}
+
+
 # ---------------------------------------------------------------- HTTP
 
 
@@ -794,6 +1020,18 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/snapshot":
             with LOCK:
                 self._json(_snapshot(SESSION["engine"]))
+            return
+        if path == "/api/battle/saves":
+            with LOCK:
+                self._json({"success": True, "saves": _battle_saves()})
+            return
+        if path == "/api/debug/state":
+            with LOCK:
+                engine = SESSION["engine"]
+                if engine is None:
+                    self._json({"success": False, "error": "还没有开局"})
+                else:
+                    self._json({"success": True, **_debug_state(engine)})
             return
         self._send(404, b"not found", "text/plain; charset=utf-8")
 
@@ -904,6 +1142,19 @@ class Handler(BaseHTTPRequestHandler):
                     result = _ui_monster_phase(payload)
                     self._json({"success": bool(result.get("success")), "result": result,
                                 "snapshot": _snapshot(SESSION["engine"])})
+                elif path == "/api/debug/set":
+                    result = _debug_set(payload)
+                    self._json({**result,
+                                "snapshot": _snapshot(SESSION["engine"])})
+                elif path == "/api/battle/save":
+                    result = _battle_save(payload)
+                    self._json(result)
+                elif path == "/api/battle/load":
+                    result = _battle_load(payload)
+                    self._json(result)
+                elif path == "/api/battle/save/delete":
+                    result = _battle_save_delete(payload)
+                    self._json(result)
                 else:
                     self._json({"success": False, "error": "未知接口"}, 404)
         except Exception as exc:  # 引擎异常也要回到前端，而不是留一个空响应

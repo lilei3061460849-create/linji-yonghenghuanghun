@@ -883,13 +883,10 @@ async function startDuel(){
     });
     const data = await res.json();
     if (!data.success){ toast("开战失败：" + (data.error || "未知错误")); finish(); return; }
-    const list = $("resultNotes");
-    list.innerHTML = "";
-    for (const note of data.notes || []) list.append(el("li", null, note));
-    $("result").style.display = "";
-    $("result").scrollIntoView({behavior: "smooth", block: "center"});
-    finish();
-    toast("对战已开始，往下看结果 →");
+    /* 2026-11-10 用户令：开战后直接进战斗界面，不再让用户手动点「进入战斗界面」，
+       战斗界面读到 ?autostart=1 会自己「开始本回合」。 */
+    toast("开战成功，正在进入战斗界面…");
+    setTimeout(() => { location.href = "/?autostart=1"; }, 700);
   } catch (err){
     toast("开战请求失败：" + err.message);
     finish();

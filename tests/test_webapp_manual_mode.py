@@ -34,7 +34,10 @@ def _sheet(name, **overrides):
 
 def _install_duel(roster_file, manual_both=True, **b_overrides):
     a = lab.save_sheet(_sheet("甲"))
-    b = lab.save_sheet(_sheet("乙", **b_overrides))
+    # B 方低 1 点速限：先手按「速限→法限→血限→当前生命」确定性判给 A 方。
+    # （2026-11-10 起演武场不入副本，开局随机序列与旧版不同——原来这里靠
+    #  seed 撞平局随机，先手会随引擎随机源位移而翻转，本就不该依赖。）
+    b = lab.save_sheet(_sheet("乙", speed_points=5, **b_overrides))
     payload = {"a": {"id": a["id"]}, "b": {"id": b["id"]},
                "region": "罪孽都市", "width": 11, "height": 11, "seed": 9}
     if manual_both is not None:
@@ -136,3 +139,26 @@ def test_invalid_daowen_is_a_user_error_and_side_can_be_ended(roster_file):
     assert skip["success"], skip
     assert engine.state.pending_monster_phase == {}
     assert _battle(engine)["duel_turn"] == "player_side"
+
+
+def test_pending_monster_phase_keeps_standard_actions_shape(roster_file):
+    """B 方「准备行动」后引擎必须仍返回标准 actions 数组（2026-11-10 用户报障）。
+
+    旧形状（顶层 action_type、没有 actions 键）让统一行动菜单读到空列表，
+    界面显示「引擎当前没有可选战斗行动」；这里钉住：pending 期间
+    avail=[resolve_monster_phase, skip]，且 B 方仍能结束回合（先清 pending）。"""
+    engine, _ = _install_duel(roster_file)
+    # A 先打一手，交出优先权（_player_attacks 自带 round_start）
+    _player_attacks(engine)
+    assert _battle(engine)["duel_turn"] == "opponent_side"
+
+    # B 准备行动：留下 pending
+    assert server._ui_monster_prepare()["success"]
+    actions = server._snapshot(engine)["actions"]["actions"]
+    names = [a["action_type"] for a in actions]
+    assert "resolve_monster_phase" in names, names
+    assert "skip" in names, "pending 期间 B 方仍要能看到「结束回合」"
+
+    # B 改主意：结束回合（先清 pending 再 skip，不卡死）
+    ended = server._ui_end_side({"actor_ref": "enemy:0"})
+    assert ended["success"], ended

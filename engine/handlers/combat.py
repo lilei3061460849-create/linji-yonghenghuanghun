@@ -119,6 +119,14 @@ class CombatHandlersMixin:
         speed = int(getattr(target, "current_speed", 0) or 0)
         index = int(pending.get("hit_index", 0))
         bizhong = int(self.combat.bizhong_remaining(attacker)) if attacker else 0
+        # 2026-11-10 用户令：消耗品改为「主动且被动」行动——被选中时也能先用
+        # 消耗品再选应对（不耗出手也不耗应对）。必中次数覆盖本击时被动行动被封锁。
+        items_pool = (self.state.consumables if target is self.state.player
+                      else getattr(target, "consumables", []) or [])
+        item_options = [
+            {"name": c.name, "uses": int(c.current_uses), "effect": c.effect}
+            for c in items_pool if not c.is_depleted and c.name != "万钧印"
+        ]
         return {
             "target_ref": ref,
             "target": entry.get("name"),
@@ -131,6 +139,9 @@ class CombatHandlersMixin:
             "speed_left": speed,
             "blood_shadow_cost_share_target_options":
                 entry.get("blood_shadow_cost_share_target_options") or [],
+            "item_options": item_options,
+            "can_use_item": bool(item_options) and bizhong <= index,
+            "item_locked": bizhong > index,
         }
 
     def _attack_pending_view(self, pending: dict) -> dict:
@@ -338,12 +349,42 @@ class CombatHandlersMixin:
             return {"success": False,
                     "error": "先由攻击方分配伤害（声明这一击的目标与 X）"}
         choice = str(params.get("choice") or "")
-        if choice not in {"tank", "parry", "dodge", "blood_shadow"}:
-            return {"success": False, "error": "应对方式只能是 硬扛/招架/闪避/血影"}
+        if choice not in {"tank", "parry", "dodge", "blood_shadow", "use_item"}:
+            return {"success": False, "error": "应对方式只能是 硬扛/招架/闪避/血影/使用消耗品"}
         ref = declared["target_ref"]
         legal = {entry["ref"]: entry for entry in pending["options"]["target_options"]}
         entry = legal.get(ref) or {}
         defender = self._attack_defender_options(pending, ref)
+        if choice == "use_item":
+            # 2026-11-10 用户令：消耗品是「主动且被动」行动——被选中时可先用消耗品
+            # 再选应对；不耗出手也不耗应对，本击窗口保持开放。
+            if defender.get("item_locked"):
+                return {"success": False,
+                        "error": "【必中】次数覆盖本击：目标无法进行被动行动（含使用消耗品）"}
+            if not defender.get("item_options"):
+                return {"success": False,
+                        "error": f"{entry.get('name')}没有可用消耗品（耐久耗尽或未持有）"}
+            if ref != "player:0":
+                return {"success": False,
+                        "error": "消耗品目前只有轮回者（玩家）能使用；"
+                                 "这一击请直接选硬扛/招架/闪避/血影"}
+            item_name = str(params.get("item_name") or "")
+            if not item_name:
+                return {"success": False, "error": "必须提交 item_name（要使用的消耗品名）"}
+            consume_params = {"name": item_name}
+            if params.get("item_target_ref"):
+                consume_params["target_ref"] = params["item_target_ref"]
+            consumed = self._action_consume_item(consume_params)
+            if not consumed.get("success"):
+                return consumed
+            return {
+                "success": True,
+                "action": f"被选中时使用消耗品【{item_name}】（被动行动，不耗应对）",
+                "result": {**consumed.get("result", {}),
+                           "attack_still_pending": True,
+                           "note": "消耗品不耗出手也不耗应对；这一击接着选硬扛/招架/闪避/血影"},
+                "state": self.combat._get_combat_state(),
+            }
         if choice == "dodge" and not defender["can_dodge"]:
             return {"success": False,
                     "error": f"{entry.get('name')}当前不能闪避"
@@ -1080,6 +1121,8 @@ class CombatHandlersMixin:
         self.state.phase = GamePhase.IN_COMBAT.value
         self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_START.value
         self.state.current_battle += 1
+        # 协力法术是战斗作用域：开新战斗时清掉上场残留（正常应在发动/取消时移除）。
+        self.state.open_spells = []
         # 记录[战始]生命，作为[战终]清除"回复"类增益后的生命下限
         for entity in (([self.state.player] if self.state.player else [])
                        + self.state.friends + self.state.employees + self.state.temp_friends):

@@ -2104,11 +2104,13 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """
         # 2026-11-01：【必中】改口径为「目标无法行动」，任何行动都不可用。
         # 【束缚】放行施法；法术由道纹构成，直接发动单个道纹同属施法（基础定义·施法）。
+        # 协力施法（2026-11-10 用户令）的发起/填入/发动同属施法操作，一并放行。
         return (entity.is_alive
                 and not self.state.is_sealed_away(entity)
                 and not self.chenni_round_blocked(entity)
                 and (not entity.has_status("束缚")
-                     or action_type in {"cast", "define_spell", "use_daowen"}))
+                     or action_type in {"cast", "define_spell", "use_daowen",
+                                        "declare_spell", "fill_spell", "release_spell"}))
 
     def yapo_target_lock_holder(self, attacker: Entity, target: Entity) -> Optional[Entity]:
         """返回限制这次选目标的【压迫】持有者；没有压迫限制则返回None。

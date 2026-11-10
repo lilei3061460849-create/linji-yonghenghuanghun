@@ -88,6 +88,7 @@ from .handlers.combat import CombatHandlersMixin
 from .handlers.companions import CompanionHandlersMixin
 from .handlers.endgame import EndgameHandlersMixin
 from .handlers.daowen import DaowenHandlersMixin
+from .handlers.coop_spell import CoopSpellHandlersMixin
 from .handlers.items import ItemHandlersMixin
 from .handlers.opening import OpeningHandlersMixin
 from .handlers.rulings import RulingHandlersMixin
@@ -110,7 +111,7 @@ OUT_OF_COMBAT_DAOWEN = frozenset({"真理", "唤潮", "蜃景"})
 
 
 class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixin,
-                 DaowenHandlersMixin,
+                 DaowenHandlersMixin, CoopSpellHandlersMixin,
                  CombatHandlersMixin,
                  ItemHandlersMixin, OpeningHandlersMixin, EndgameHandlersMixin,
                  CompanionHandlersMixin, RulingHandlersMixin):
@@ -607,6 +608,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "cast", "focus", "rest", "skip",
                 "declare_wish", "declare_escape", "deploy_employee",
                 "define_spell", "undefine_spell",
+                # 协力施法（2026-11-10 用户令）：发起/填入/发动都是行动阶段的施法类操作。
+                "declare_spell", "fill_spell", "release_spell", "cancel_spell",
                 "lianxin_in_battle", "declare_evolution", "activate_duel_relic",
                 "use_black_card", "use_crime_vault", "fire_godfather_revolver",
                 "select_shared_dragon_heart", "declare_fuyuebei_toll",
@@ -2851,7 +2854,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "note": "仅公开已结算步骤；对方可完成1个行动或跳过，随后原法术续跑",
         }
 
-    def _push_spell_frame(self, execution, huangfu_temp_granted=None) -> dict:
+    def _push_spell_frame(self, execution, huangfu_temp_granted=None, coop_temp_granted=None) -> dict:
         self.combat._spell_window_serial += 1
         caster_side = self._spell_side(execution.caster)
         frame = {
@@ -2860,6 +2863,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "awaiting_side": self._other_spell_side(caster_side),
             "token": f"spell-window-{self.combat._spell_window_serial}",
             "huangfu_temp_granted": list(huangfu_temp_granted or []),
+            "coop_temp_granted": list(coop_temp_granted or []),
         }
         self.combat._spell_stack.append(frame)
         self.combat._priority_passes = 0
@@ -2870,6 +2874,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _finish_spell_frame(self, frame: dict) -> None:
         caster = frame["execution"].caster
         for name in frame.get("huangfu_temp_granted", []):
+            caster.dao_wen.pop(name, None)
+        for name in frame.get("coop_temp_granted", []):
             caster.dao_wen.pop(name, None)
 
     def _resume_spell_stack(self) -> list[dict]:
@@ -2990,6 +2996,11 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                         name=daowen, formula="", cost_type="", cost_formula="", effect_formula=""))
                     huangfu_temp_granted.append(daowen)
         spell_name = params.get("name") or huangfu_name or "瞬发法术"
+        # 协力法术发动（release_spell 透传）：出手已在填入时由各填入者付清，
+        # 这里不再逐步扣施法者的出手；其他角色填入的道纹以临时授予支撑校验，
+        # 结算完成/中断后由法术框统一回收（黄符同款口径）。
+        coop_release = params.get("coop_release") if isinstance(params.get("coop_release"), dict) else None
+        coop_temp_granted: list = list(coop_release.get("temp_granted") or []) if coop_release else []
         try:
             execution = self.combat.build_instant_execution(
                 actor, flow_text, cast_target, params.get("steps"), refs,
@@ -3019,7 +3030,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if huangfu_spell is not None:
             huangfu_mana = max(1, huangfu_spell.rank or 1)
             effective_huangfu_mana = actor.mana_cost(huangfu_mana)
-        if actor.actions_used_this_round >= self._action_budget_of(actor):
+        if not coop_release and actor.actions_used_this_round >= self._action_budget_of(actor):
             for daowen in huangfu_temp_granted:
                 actor.dao_wen.pop(daowen, None)
             return {"success": False, "error": f"{actor.name}本回合出手已用完"}
@@ -3037,7 +3048,19 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     actor.dao_wen.pop(daowen, None)
                 return {"success": False, "error": f"【黄符】施法支付失败：{exc}"}
 
-        self._bind_spell_step_payment(execution)
+        if coop_release:
+            # 协力法术：每格出手已由填入者支付；这里只校验施法者仍在场上，
+            # 不再消耗任何人的出手。
+            def _coop_step_payment(caster, _step, _index):
+                if (not caster.is_alive or caster.has_retreated
+                        or self.state.is_sealed_away(caster)):
+                    return {"reason": InterruptReason.CASTER_UNAVAILABLE.value,
+                            "detail": f"{caster.name}已死亡、撤退或暂离，后续步骤中断"}
+                return None
+            execution.before_step = (
+                lambda step, index: _coop_step_payment(execution.caster, step, index))
+        else:
+            self._bind_spell_step_payment(execution)
         execution.run_to_window()
         # 若对方已用【跳过】结束回合，其后续空档自动让过；原法术自己的
         # 后续步骤仍按真实预算逐步支付，不视为新的回合外插队。
@@ -3051,9 +3074,11 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 self.combat._resuming_spell_stack = False
         from .spell_execution import ExecutionStatus
         if execution.is_running:
-            self._push_spell_frame(execution, huangfu_temp_granted)
+            self._push_spell_frame(execution, huangfu_temp_granted, coop_temp_granted)
         else:
             for daowen in huangfu_temp_granted:
+                actor.dao_wen.pop(daowen, None)
+            for daowen in coop_temp_granted:
                 actor.dao_wen.pop(daowen, None)
         status = "awaiting_window" if execution.is_running else execution.status.value
         reason = execution.interrupt_reason.value or None
