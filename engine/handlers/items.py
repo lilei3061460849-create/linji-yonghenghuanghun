@@ -91,7 +91,7 @@ class ItemHandlersMixin:
 
     @ACTION_REGISTRY.action("toggle_relic", group="items")
     def _action_toggle_relic(self, params: dict) -> dict:
-        """切换单件遗物启用/停用（2026-10-22 用户令）。
+        """切换单件遗物启用/停用。
 
         局外行动；与 set_active_relics（整组改选）互补：本行动只翻一件。
         停用不释放页，启用不另限生效数量。
@@ -170,7 +170,7 @@ class ItemHandlersMixin:
 
     @ACTION_REGISTRY.action("discard_discovered_relic", group="items")
     def _action_discard_discovered_relic(self, params: dict) -> dict:
-        """放弃本次遗物发现（2026-10-12 用户裁定③）。
+        """放弃本次遗物发现（③）。
 
         【承载上限】之后，「必须先选1件」的强制发现可能撞上额度已满：选择被拒、
         其他动作又被门禁拦住，形成无法推进的死局。本动作清空待选列表、不取任何遗物，

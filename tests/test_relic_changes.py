@@ -52,19 +52,29 @@ def test_wanjunyin_is_a_three_durability_consumable_not_a_relic():
     state.consumables.append(item)
     combat = CombatEngine(state, DiceEngine())
 
-    first = combat.resolve_attack(attacker, player, allocated_damage=10)
+    # 按物品索引=持有者选择：不显式请求就不改道，也不耗耐久。
+    plain = combat.resolve_attack(attacker, player, allocated_damage=10)
+    assert "wanjunyin" not in plain
+    assert player.current_hp == 90
+    assert item.current_uses == 3
+
+    first = combat.resolve_attack(attacker, player, allocated_damage=10,
+                                  wanjunyin=True)
     assert first["wanjunyin"]["converted_to"] == attacker.name
     assert item.current_uses == 2
 
-    second = combat.resolve_attack(attacker, player, allocated_damage=10)
+    second = combat.resolve_attack(attacker, player, allocated_damage=10,
+                                   wanjunyin=True)
     assert second["wanjunyin"]["converted_to"] == attacker.name
     assert item.current_uses == 1
 
-    third = combat.resolve_attack(attacker, player, allocated_damage=10)
+    third = combat.resolve_attack(attacker, player, allocated_damage=10,
+                                  wanjunyin=True)
     assert third["wanjunyin"]["converted_to"] == attacker.name
     assert item.current_uses == 0
 
-    fourth = combat.resolve_attack(attacker, player, allocated_damage=10)
+    fourth = combat.resolve_attack(attacker, player, allocated_damage=10,
+                                   wanjunyin=True)
     assert "wanjunyin" not in fourth
     assert item.current_uses == 0
 

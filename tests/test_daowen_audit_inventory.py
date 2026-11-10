@@ -74,7 +74,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('普通回合与大梦产生的额外回合均适用', sea)
         self.assertNotIn('沉溺尚未接入', sea)
         self.assertNotIn('沉溺，支付待定', sea)
-        # 2026-11-08 用户令：【长夜】道纹正式删除（不再保留待重做名额）。
+        # 【长夜】道纹正式删除（不再保留待重做名额）。
         self.assertNotIn('长夜', night)
         self.assertNotIn('长夜', {r['name'] for r in self.rows})
         row = next(r for r in self.rows if r['name'] == '沉溺')
@@ -93,7 +93,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertEqual(row['review'], '暂未发现结构违规')
 
     def test_eternal_life_swap_has_no_healing_exemption(self):
-        # 2026-11-08 用户令：互换效果归【逆血】（血限5X），【永生】改新定义
+        # 互换效果归【逆血】（血限5X），【永生】改新定义
         # （冷却X，受到的伤害改为回复等量生命），二者均已转正接入运行时。
         dungeon = (ROOT / '副本/永夜庭.md').read_text(encoding='utf-8')
         self.assertIn('6.逆血X：支付：血限5X。使［目标］的当前生命与已损生命互换（最低保留1点生命），持续X。', dungeon)
@@ -117,7 +117,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         calc = DaoWenEngine.resolve('共罪', 2)
         self.assertEqual(calc['dao_wen'], '共罪')
         self.assertNotIn('mark_targets', calc)
-        # 2026-10-31 用户裁定：生命5X／X个非自身目标／持续∞。
+        # 生命5X／X个非自身目标／持续∞。
         self.assertEqual(calc['cost_type'], '生命')
         self.assertEqual(calc['cost'], 10)
         self.assertEqual(calc['cost_hp'], 10)
@@ -167,7 +167,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
 
     def test_infection_replaces_daowen_and_library_restores_original(self):
         dungeon = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
-        # 2026-11-08 用户令：感染转正（支付异变2X），荒疫满 8 纹。
+        # 感染转正（支付异变2X），荒疫满 8 纹。
         self.assertIn('1.感染X：支付：异变2X。使［目标］的X种道纹变为【感染】，持续∞。', dungeon)
         self.assertIn('后续感染仍须主动发动并支付代价，不会自动传播', dungeon)
         self.assertIn('2.辨认一龛：血限10。选择自身一种被【感染】替换的道纹，使其恢复为被感染前的原版道纹。', dungeon)
@@ -212,7 +212,7 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertTrue(row['runtime'])
 
     def test_origin_has_one_random_target_borrowing_definition(self):
-        # 2026-11-08 用户令：【原初】转正接入运行时（异变5X/借用/持续∞）。
+        # 【原初】转正接入运行时（异变5X/借用/持续∞）。
         definition = '原初X：支付：异变5X。借用[目标]身上自身未拥有的随机X种道纹，持续∞。'
         sea = (ROOT / '副本/荒疫古城.md').read_text(encoding='utf-8')
         book = (ROOT / '死者之书.md').read_text(encoding='utf-8')

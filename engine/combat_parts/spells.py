@@ -278,7 +278,7 @@ class SpellReactionMixin:
         if holder is None or not holder.is_alive:
             return flows
         self._ensure_spell_completion_orders(self._combat_entity_refs())
-        # 2026-10-12 用户令：【必中】X =「你选中的目标无法进行回合外行动，持续X」。
+        # 【必中】X =「你选中的目标无法进行回合外行动，持续X」。
         # 反应型法术就是最典型的回合外行动，故在此统一拦掉——被封锁者连提案都没有，
         # prepare 侧也就不会把它列进可选反应。新增反应窗口自动继承这道闸。
         if self.out_of_turn_blocked(holder):
@@ -675,7 +675,7 @@ class SpellReactionMixin:
 
     def pay_daowen_shard_cost(self, actor: Entity, name: str, calc: dict,
                               x: int) -> Optional[str]:
-        """现役道纹的碎片支付（2026-11-01 用户令的口径）。
+        """现役道纹的碎片支付（的口径）。
 
         - 支付[碎片]的额度 = 真碎片 + 假碎片；实际扣除**先假后真**，
           与"失去碎片"的优先序一致。假碎片因此不再是"支付通道里不存在的钱"。

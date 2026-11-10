@@ -450,9 +450,9 @@ def test_r46_normal_event_relic_battle_start_matrix(tmp_path):
     friend.relics = [Relic("防弹插板", "")]
     heart = Consumable("衰老龙心", "", 3, 3, kind="dragon_heart", dragon_heart_type="衰老")
     engine.state.consumables = [heart]
-    # 2026-10-11 用户令：【苍白之花】改为纯被动（当前法力可超出[法限]），
+    # 【苍白之花】改为纯被动（当前法力可超出[法限]），
     # 不再是战始可选遗物——它从这张矩阵里退场，速度也不再被它的疲惫5 压低。
-    # 2026-10-14 用户令：【猩红果实】同样重做为被动（当前生命可超出[血限]），
+    # 【猩红果实】同样重做为被动（当前生命可超出[血限]），
     # 旧战始流血10 已移交道纹【增殖】——它也退场，生命不再被压到 90。
     names = ["缄默面具", "帮派令", "负岳索", "炉心坠", "烙痕钉"]
     engine.state.relics = [Relic(name, "", tags=["事件"]) for name in names]

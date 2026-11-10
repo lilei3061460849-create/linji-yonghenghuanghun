@@ -44,7 +44,7 @@ def _activate_haoduo(combat, monster):
 def test_haoduo_is_refused_when_caster_cannot_pay_shards():
     """豪夺是「支付5X碎片去夺遗物」，不是抢碎片：自己付不起就是发不动。
 
-    2026-11-01 用户令：支付[碎片]的额度＝真碎片＋假碎片（先扣假碎片）。
+    支付[碎片]的额度＝真碎片＋假碎片（先扣假碎片）。
     所以"付不起"只在这种情况成立——两池合计仍不足。
     负债只由目标侧的失去碎片产生，施法者自己的碎片代价不能透支。
     """
@@ -68,7 +68,7 @@ def test_haoduo_is_skipped_without_stealable_relic():
 
 
 def test_fake_shards_pay_a_real_shard_cost_fake_first():
-    """2026-11-01 用户令：假碎片是真碎片代价的合法支付来源，且优先被扣。
+    """假碎片是真碎片代价的合法支付来源，且优先被扣。
 
     真碎片3＋假碎片100、代价5 → 假碎片扣5，真碎片分文不动。
     """
@@ -82,7 +82,7 @@ def test_fake_shards_pay_a_real_shard_cost_fake_first():
 
 
 def test_buymai_shard_channel_has_no_fake_shard_twin():
-    """2026-11-09 用户令：假碎片途径取消，碎片只留【买命】一条（碎片1X）。
+    """假碎片途径取消，碎片只留【买命】一条（碎片1X）。
 
     旧实现里【碎伐】（只认真碎片）与【伪伐】（只认假碎片）是两条通道；现在只有
     【买命】一条，走通用【碎片】口径：额度＝真＋假、先扣假、真碎片补足。

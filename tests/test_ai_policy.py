@@ -42,7 +42,7 @@ def test_ai_knowledge_base_contains_all_core_sections_and_scenarios():
     ]:
         assert sub in text, f"AI协作规范缺少小节：{sub}"
 
-    # 六大典型场景（2026-10-12 用户令去重后：1-3 正本是本文件，4-6 正本是《法术索引》
+    # 六大典型场景（去重后：1-3 正本是本文件，4-6 正本是《法术索引》
     # 「四、反应型法术战斗流程示例」；本文件只留指针，不得再抄一份回来）
     assert "场景 1：基础攻防" in text
     assert "场景 2：闪避交互" in text

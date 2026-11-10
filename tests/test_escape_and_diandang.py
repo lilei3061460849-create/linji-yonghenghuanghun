@@ -1,5 +1,5 @@
 """
-pytest 风格测试 - 2026-10-13 用户令：【买路财】改制逃跑行动 + 新道纹【典当】+【逼债】删除。
+pytest 风格测试 - 【买路财】改制逃跑行动 + 新道纹【典当】+【逼债】删除。
 
 逃跑：轮回者行动，一次付清5次出手，以当前状态强制脱离本场战斗，
 不再走DM追击裁定；最终死斗/【不离】不可逃跑。
@@ -125,7 +125,7 @@ def test_diandang_x2_forgets_4_and_pends_2_groups_with_capacity_gate():
     engine.state.enemies.append(m)
     engine.state.phase = "in_combat"
 
-    # 2026-11-01 用户令：失忆2X 必须由调用方显式指定要永久销毁的 4 种道纹。
+    # 失忆2X 必须由调用方显式指定要永久销毁的 4 种道纹。
     r = engine.execute_action("use_daowen", {
         "daowen_name": "典当", "x": 2,
         "forget_daowen": ["杀伐", "庇护", "再生", "束缚"]})

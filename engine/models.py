@@ -75,7 +75,7 @@ class DaoWenInstance:
     """道纹实例 - 角色持有的道纹"""
     dao_wen: DaoWen
     x_value: int = 0            # 当前X值（自由控X规则）
-    # 2026-09-16 用户令：面板不再写死 X，改由怪物 AI 在发动时自选，
+    # 面板不再写死 X，改由怪物 AI 在发动时自选，
     # 上限只受[法限]或代价限制。x_free=True 表示面板没写 X、X 待发动时自选；
     # x_free=False 表示面板写了固定 X（兼容旧面板，迁移期两种写法都必须能跑）。
     x_free: bool = False
@@ -517,7 +517,7 @@ class Entity:
     is_deployed: bool = True
     deployed_at_round: int = 0  # 派遣时 state.current_round 的原始值（用于结算"实际出场回合数"）
 
-    # 2026-09-17 用户令：[员工]**出场**（is_deployed 参战）并**存活**满
+    # [员工]**出场**（is_deployed 参战）并**存活**满
     # EMPLOYEE_PROMOTION_BATTLES 场战斗后转为[朋友]。
     # 只统计"本场实际参战且[战终]仍存活"的场次：待命未上场不计，阵亡清零不计。
     survived_battles_as_employee: int = 0
@@ -576,7 +576,7 @@ class Entity:
             self.relics.append(
                 Relic(name=MONSTER_MANA_RELIC, effect=MONSTER_MANA_RELIC_EFFECT,
                       tags=["怪物自带"]))
-        # 2026-11-01 用户令：【透支】移出杀伐闭环，改为任意角色出生自带（X每次自选）。
+        # 【透支】移出杀伐闭环，改为任意角色出生自带（X每次自选）。
         # 造物不是角色，不在此列；任何构造路径（工厂/旧档/旧封存）都补齐同一不变量。
         if self.entity_type != "造物" and "透支" not in self.dao_wen:
             self.dao_wen["透支"] = DaoWenInstance(
@@ -901,7 +901,7 @@ class Entity:
     def enabled_relic_limit(self) -> int:
         """常规可同时启用的遗物件数＝ceil(血限 / 30)（向上取整）。
 
-        2026-11-01 用户令（重构1）：遗物不再占死者之页，改为**启用槽位**限制。
+        （重构1）：遗物不再占死者之页，改为**启用槽位**限制。
         1~30 血限 → 1 件；31~60 → 2 件；61~90 → 3 件，以此类推。
         战斗中的临时突破（【赦免】强制启用、【交易】发现、【豪夺】夺取来的
         已启用遗物）不走本上限；战终再由
@@ -1002,7 +1002,7 @@ class Entity:
                 remaining = max(0, validate_damage_amount(
                     status_adjuster(remaining), "Entity.take_damage.status_adjuster.result"))
             # 兼容直接 Entity.take_damage 的历史调用（没有战斗引擎上下文时）。
-            # 2026-10-11 用户令：固执简化为「每次失去的生命不会超过1」，代价路径同样封顶。
+            # 固执简化为「每次失去的生命不会超过1」，代价路径同样封顶。
             elif remaining > 0 and self.has_status("固执"):
                 remaining = min(remaining, 1)
                 detail["capped_by"] = "固执"
@@ -1060,7 +1060,7 @@ class Entity:
     # 那几十处 `Entity.MUTATION_COLLAPSE_THRESHOLD` 的写法一个都不用改——
     # 改规则现在只动 toml，这里不再是数字的家。
     MUTATION_COLLAPSE_THRESHOLD = lethal_events.threshold("mishi")  # 【迷失】：异变达到 50 层触发
-    # 2026-09-17 用户令：[员工]出场并存活满这么多场战斗即转为[朋友]（唯一事实源）。
+    # [员工]出场并存活满这么多场战斗即转为[朋友]（唯一事实源）。
     EMPLOYEE_PROMOTION_BATTLES = 3
     CANCER_HEAL_MULTIPLIER = lethal_events.threshold_multiplier("aibian")  # 【癌变】：本场累计回复量 ≥ 血限×该系数 即命零
     MEDIOCRITY_ROUNDS = lethal_events.threshold("fanyong")  # 【凡庸】：连续 N 回合未出手、或连续 N 回合未使敌对角色掉血 即命零
@@ -1211,7 +1211,7 @@ class Entity:
         - 2026-08-30 版「持续X回合无法获得法力」：随法力改为一池制
           （不再每[回始]回填）而一度失去作用对象。
         - 2026-09-09 DM裁定：改为**法力消耗翻倍**，在 spend_mana 里乘 2。
-        - 2026-10-08 用户令：恢复「无法获得[法力]」原意，翻倍逻辑撤销。
+        - 恢复「无法获得[法力]」原意，翻倍逻辑撤销。
           此时战斗内已有多个法力来源（聚能/储能电池/守夜灯/承露盏/
           透支/法术），效果重新有对象；判定位统一收敛到
           `can_gain_mana()` / `gain_mana()`，不再散落各处。
@@ -1225,7 +1225,7 @@ class Entity:
     def can_gain_mana(self) -> bool:
         """当前是否允许获得[法力]。
 
-        2026-11-08 用户令：【勾魂】重做为转移道纹，「无法获得[法力]」效果
+        【勾魂】重做为转移道纹，「无法获得[法力]」效果
         整条撤销，本判定不再有封锁来源（保留方法供各法力来源统一调用）。
         """
         return True
@@ -1438,7 +1438,7 @@ class GameState:
     current_region: str = ""    # 当前副本
     # 已完成法术的全局完成序号；同条件触发按完成先来后到。
     spell_completion_serial: int = 0
-    # 协力施法（2026-11-10 用户令）：已发起、尚未发动的多人法术。
+    # 协力施法：已发起、尚未发动的多人法术。
     # 只存纯 dict（引用以 "player:0" 等战斗 ref 记录），随 deepcopy 快照自然往返；
     # 战斗作用域：battle_start 开新战斗时清空。
     open_spells: list = field(default_factory=list)
@@ -1574,7 +1574,7 @@ class GameState:
     # 死者之书
     # 系统记录与玩家遗言分开保存，避免结构化遗言退化为日志字符串。
     # 遗言的事实源是 死者之书.md；death_book_legacies 只是启动/审核后从文件装回的缓存。
-    # 2026-10-05 用户令：癌变不再为【休整】提供永久恢复量加成（原 rest_heal_bonus
+    # 癌变不再为【休整】提供永久恢复量加成（原 rest_heal_bonus
     # 字段已删除），吸收癌变怪物的奖励统一为【无限肉块】（见 规则正文·癌变）。
     death_book_wisdom: list[str] = field(default_factory=list)
     death_book_legacies: list[dict[str, str]] = field(default_factory=list)
@@ -1634,7 +1634,7 @@ class GameState:
     #   {"monster": Entity, "return_round": int, "delay_rounds": int,
     #    "home": str, "index": Optional[int]}
     # 暂离不是死亡/永久离场，仍阻塞战终；到达回合始时把原实体放回它原本所在的容器。
-    # 2026-10-08 用户令：【封印】放开到任意目标（含[朋友]/[员工]/造物与施法者
+    # 【封印】放开到任意目标（含[朋友]/[员工]/造物与施法者
     # 自己），因此队列不再只装怪物，home/index 记录原址——
     #   * "enemies"/"friends"/"employees"/"temp_friends" —— 从对应 list 摘走再插回原下标；
     #   * "player" —— state.player 是单字段，摘不走，改为就地打 `_delayed_by_seal`
@@ -1671,7 +1671,7 @@ class GameState:
     # 炼心在战斗中发动时不消耗出手，改为"下次局外行动多消耗1点精力"，此处累计待结算的额外精力消耗
     pending_energy_penalty: int = 0
 
-    # 熔谷终音"真龙之心"：代价累积账本（2026-10-23 用户令：废除「龙性」货币）。
+    # 熔谷终音"真龙之心"：代价累积账本（废除「龙性」货币）。
     # 不再是可支配资源——玩家实际支付的数值型【代价】自动累加，满 12 点换 1 件
     # 未持有的龙族遗物。已解锁的龙族项目以【遗物】形式存放在 self.relics（tags含"龙族"）。
     dragon_cost_points: int = 0
@@ -1971,7 +1971,7 @@ class GameState:
         - 归属查 `side_has`（玩家＝本局 relics；敌方轮回者＝opponent_relics）；
         - 玩家侧再查 sealed_relics：被【豪夺/封印】封住的遗物不生效（原口径）。
         新遗物（千荆甲等）的触发一律经本函数，避免各处各写一份持有判定。
-        - 启用归类（2026-10-22 用户令）：遗物对象 enabled=False 时不生效，
+        - 启用归类：遗物对象 enabled=False 时不生效，
           与封印并列为「持有但不生效」的第二种状态，不另设名单。
         """
         if entity is None or not self.side_has(entity, name):
@@ -2002,7 +2002,7 @@ class GameState:
     def note_relic_gained(self, relic: Relic) -> None:
         """合法获得遗物的统一归口：默认启用，启用槽位满则**停用入库**。
 
-        2026-11-01 用户令（重构1）：
+        （重构1）：
         - 持有不再受十页限制（遗物已脱离死者之页），所以这里永不报错/回滚；
         - 常规获得（世界事件、地图拾取、商店、开局发现…）按
           `ceil(血限/30)` 的启用槽位归位：满了就 `enabled=False` 入库，
@@ -2043,7 +2043,7 @@ class GameState:
         """把本局遗物的启用集合设为 names（战始/局外自定义启用）。
 
         返回 (True, None) 或 (False, 错误文案)。启用件数不得超过
-        `ceil(血限/30)`（2026-11-01 用户令，重构1）；未列名的已持有遗物
+        `ceil(血限/30)`（，重构1）；未列名的已持有遗物
         一律置为停用（仍持有，不丢弃）。
         """
         player = self.player
@@ -2069,10 +2069,10 @@ class GameState:
         return True, None
 
     def toggle_relic(self, name) -> tuple:
-        """切换单件遗物的启用/停用（2026-10-22 用户令）。
+        """切换单件遗物的启用/停用。
 
         返回 (True, 现在是否启用) 或 (False, 错误文案)。停用永远允许；
-        **启用**受 `ceil(血限/30)` 的启用槽位限制（2026-11-01 用户令，重构1）：
+        **启用**受 `ceil(血限/30)` 的启用槽位限制（，重构1）：
         槽位已满时须先停用另一件，或改用 `set_active_relics` 一次性改选。
         """
         player = self.player
@@ -2143,7 +2143,7 @@ class GameState:
     def hp_overflow_exempt(self, entity: Entity) -> bool:
         """当前生命是否允许超出[血限]（唯一豁免：遗物【猩红果实】）。
 
-        2026-10-14 用户令：【猩红果实】重做为纯被动（`物品索引.md`
+        【猩红果实】重做为纯被动（`物品索引.md`
         「你的当前生命可以超出[血限]。」），旧效果「战始可选流血10、
         战终血限+2」移交道纹【增殖】。与【苍白之花】的法力豁免
         （`CombatEngine.mana_overflow_exempt`）镜像：只豁免玩家本人，
@@ -2167,7 +2167,7 @@ class GameState:
                     or name in self.opponent_first_embrace_traits
                     or name in self.opponent_artifacts_owned
                     or any(r.name == name for r in self.opponent_relics))
-        # 2026-10-25 用户令：怪物也能持有随机遗物——队友与怪物按各自 relics 判定。
+        # 怪物也能持有随机遗物——队友与怪物按各自 relics 判定。
         # （此前这里对所有非「玩家／敌方轮回者」直接返回 False，怪物抽到的遗物一律读不到。）
         return any(r.name == name for r in getattr(entity, "relics", []))
 
@@ -2406,7 +2406,7 @@ class GameState:
         }
     
     # ==================== 【封印】暂离：脱场与回场 ====================
-    # 2026-10-08 用户令：【封印】可作用于任意目标（含自己）。引擎侧唯一的语义是
+    # 【封印】可作用于任意目标（含自己）。引擎侧唯一的语义是
     # "从场上摘走、X 回合后原样放回"，因此脱场/回场必须是**成对**的，且要记住
     # 原址——不能像旧实现那样一律塞回 enemies（否则封印自己的[朋友]会把它变成敌人）。
 

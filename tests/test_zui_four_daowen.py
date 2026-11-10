@@ -93,7 +93,7 @@ def test_retired_daowen_are_gone_from_registry_and_loops():
 
 
 def test_two_tetrahedra_each_with_six_edges():
-    """2026-11-02 用户令：罪孽都市改为两个四面体，各 4 节点 6 边。"""
+    """罪孽都市改为两个四面体，各 4 节点 6 边。"""
     tetra = ResonanceEngine.tetrahedra_of_region("罪孽都市")
     assert set(tetra) == {"罪孽都市·四面体一", "罪孽都市·四面体二"}
     assert set(tetra["罪孽都市·四面体一"]) == {

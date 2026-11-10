@@ -264,7 +264,7 @@ def _resolve_pending_choices(e) -> None:
 
     各 pending 池相互门禁：非空时绝大多数行动被 api.py:824-845 拒绝并退还精力，
     驱动不清理=原地死循环/战斗无法结算。处理：遗物/道具/雇员道纹/煞气取首项；
-    【救赎】固定选【终结】（2026-09-15 用户令：终结取代旧「无视」；两者都不产生
+    【救赎】固定选【终结】（终结取代旧「无视」；两者都不产生
     员工盟友，不污染适应度横向比较，且终结按命零口径给碎片）。事件链单趟上限20，防无限嵌套。
     """
     for _ in range(20):
@@ -1130,7 +1130,7 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
     policy: 局外行动权重 {行动名: 权重}，AI 按权重随机挑选可用行动。
             这样"选择率"是 AI 自己选出来的，而不是脚本写死的。
     telemetry: 传入则累计真实统计（行动选择/成功/失败原因/异常）。
-    spend_shards: 七场局外把碎片尽量花成战力（高阶修行/附煞/共鸣）——用户裁定
+    spend_shards: 七场局外把碎片尽量花成战力（高阶修行/附煞/共鸣）——
             "不花碎片怎么快速提高战力"。False=旧行为，True=新玩法。
     behaviors: 传入 list 则把本局用到的行为标签追加进去（上层统一记 knowledge）。
     attrs: 初始属性分配 {blood_points, speed_points, mana_points}（2026-08-22 加点
@@ -1183,7 +1183,7 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
     e.execute_action("choose_discovered_relic", {"relic_name": starter_relic})
 
     if ai_cls is None:
-        # 用户裁定 2026-09-10 二审：**一切打分机制都用胜负唯一计分**——PvE 战斗
+        # 二审：**一切打分机制都用胜负唯一计分**——PvE 战斗
         # 默认也走 WinOnlyAI（启发式只裁剪提案，出招权归整局推演的 ±1）。
         # LJ_WIN_ONLY=0 或显式传 TacticalAI 可退回启发式口径（千局级扫描用）。
         if os.environ.get("LJ_WIN_ONLY", "1") != "0":
@@ -1687,7 +1687,7 @@ def choose_pre_battle(e, todo, battle_no, rng, policy):
         p = e.state.player
         bl = p.blood_limit if p else 0
         gap = max(0, bl - p.current_hp) if p else 0
-        bonus = 0  # 2026-10-05 用户令：癌变休整加成废止，休整恢复量=档位基础值
+        bonus = 0  # 癌变休整加成废止，休整恢复量=档位基础值
         shards = e.state.shards
         deployed = sum(1 for emp in e.state.employees
                        if emp.is_alive and emp.is_deployed and not emp.is_debt_bound)

@@ -55,7 +55,7 @@ from sim.relic_winrate import BenchmarkAI
 TARGET_RELIC = "承露盏"
 INITIAL_DAOWEN = "杀伐"
 # 一阶怪物面板口径（唯一事实源见 sim/audit_monsters.py）：
-# 2026-09-14 曾试压到 35 点，2026-09-15 用户令改回 60 点并原样恢复 60 点时代的 36 只面板。
+# 2026-09-14 曾试压到 35 点，改回 60 点并原样恢复 60 点时代的 36 只面板。
 # 本文件只做结果标注，不参与战斗结算；跑完请用 `python sim/audit_monsters.py` 复核面板合规。
 TIER1_MONSTER_ATTRIBUTE_BUDGET = 60
 ATTRS = {"blood_points": 7, "speed_points": 6, "mana_points": 12}
@@ -314,7 +314,7 @@ def main() -> None:
             "definition": "valid run; pve7=7场PvE完成；full_win=_play won=True（包含最终死斗）",
             "tier1_panel_budget": TIER1_MONSTER_ATTRIBUTE_BUDGET,
             "tier1_panel_max_cost": top_cost,
-            "tier1_panel_note": ("2026-09-15 用户令恢复60点：原样恢复60点时代的36只面板，"
+            "tier1_panel_note": ("恢复60点：原样恢复60点时代的36只面板，"
                                  "9只单段高攻怪血限-6以合规；口径见 sim/audit_monsters.py"),
         },
         "fixed_config": {

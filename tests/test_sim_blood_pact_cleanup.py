@@ -42,7 +42,7 @@ def test_blood_pact_is_a_daowen_not_a_relic():
     DaoWenEngine.register_all()
     assert "共罪" in DaoWenEngine._registry
     calc = DaoWenEngine.resolve("共罪", 2)
-    # 2026-10-31 用户裁定：共罪改支付生命5X（X=2 → 10），不再走法力通道。
+    # 共罪改支付生命5X（X=2 → 10），不再走法力通道。
     assert calc["cost_type"] == "生命" and calc["cost"] == 10 and calc["cost_hp"] == 10
     # 2026-10-31：期限改为持续∞（-1）；目标数为 X，发动者另占一个支付名额。
     assert calc["duration"] == -1

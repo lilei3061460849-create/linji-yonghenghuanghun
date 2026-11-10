@@ -8,7 +8,7 @@ def test_dianjin_pays_amnesia_not_mana_and_gains_shards():
     p = e.state.player
     mana = p.current_mana
     shards = e.state.shards
-    # 2026-11-01 用户令：失忆X必须显式给出要永久销毁的X种道纹（严禁按顺序代选）。
+    # 失忆X必须显式给出要永久销毁的X种道纹（严禁按顺序代选）。
     r = e.execute_action("use_daowen", {
         "daowen_name": "点金", "x": 2, "forget_daowen": ["杀伐", "庇护"]})
     assert r["success"], r

@@ -311,7 +311,7 @@ class DamageDeathMixin:
     def _fragile_hp_loss(self, entity: Entity, old: int, new: int) -> int:
         """【脆弱】：目标「下次失去生命」重复 X 次 → 本次实际失血按 X+1 份合并落地。
 
-        2026-11-09 用户令。挂在与【庇护】同一个 ``Entity.current_hp`` 写入钩子上，
+        。挂在与【庇护】同一个 ``Entity.current_hp`` 写入钩子上，
         因此攻击伤害、代价失血、直接失血、血限压顶等任何**真实**降血通道都生效；
         被【庇护】整笔免掉（写回 old）时不算失去生命，脆弱不消费。
 
@@ -381,7 +381,7 @@ class DamageDeathMixin:
                           threshold: int) -> list[dict]:
         """一次性【凋零】：按施放当次快照，判死除[目标]外的低生命角色。
 
-        2026-11-02 用户令：**豁免的是"本次发动的全部[目标]"这一个集合**，不是
+        **豁免的是"本次发动的全部[目标]"这一个集合**，不是
         逐个目标分别结算。波及/多目标提交时 {A, B} 同属一个豁免集合——绝不能
         写成 `for t in targets:` 分次执行，否则 A 会把 B 判死、B 再把 A 判死，
         两个本该被豁免的目标互相杀。这里先固定豁免集合，再统一挑出待判死对象，
@@ -553,7 +553,7 @@ class DamageDeathMixin:
     def _heal_blocked(self, entity: Entity) -> bool:
         """目标是否被禁疗：只有【坏死】这一个「无法获得[回复]」的实现。
 
-        2026-10-08 用户令删除【镇尸】（与【坏死】硬重复）后，禁疗的判定点收敛为单一来源。
+        删除【镇尸】（与【坏死】硬重复）后，禁疗的判定点收敛为单一来源。
         """
         return entity is not None and entity.has_status("坏死")
 
@@ -608,7 +608,7 @@ class DamageDeathMixin:
                 target, amount, damage_type, damage_ctx, legacy_ctx,
                 reason="negative_damage_input",
             )
-        # 【永生】（2026-11-08 用户令）：受到的伤害改为回复等量生命。
+        # 【永生】：受到的伤害改为回复等量生命。
         # 只改「伤害」通道：直接失血（_raw_hp_loss）与代价不是伤害，不在此转换；
         # 回复照常过统一回复口（【坏死】等回复封锁照旧生效）。
         if amount > 0 and damage_type != "代价" and target.has_status("永生"):
@@ -616,6 +616,20 @@ class DamageDeathMixin:
             return {"raw_damage": amount, "actual_damage": 0, "shield_absorbed": 0,
                     "hp_after": target.current_hp, "died": False,
                     "converted_to_heal": True, "heal": healed}
+        # 【强光探照灯·蒙蔽】：持有「蒙蔽」状态的施害者接下来N次「造成的伤害」
+        # 无效——统一伤害入口拦截，凡能造成伤害的都算（普攻/道纹/法术步骤/消耗品）。
+        # 每个伤害实例消耗1层；直接失血与代价不是伤害，不在此拦截。
+        if (amount > 0 and damage_type != "代价" and source is not None
+                and source.has_status("蒙蔽")):
+            for s in source.status_effects:
+                if s.name == "蒙蔽" and s.value > 0:
+                    s.value -= 1
+                    if s.value <= 0:
+                        source.status_effects.remove(s)
+                    break
+            return {"raw_damage": amount, "actual_damage": 0, "shield_absorbed": 0,
+                    "hp_after": target.current_hp, "died": False,
+                    "blocked_by": "蒙蔽"}
         # 结算生命周期：深度/预算保险丝与可追踪性统一由 ResolutionContext 记账
         # （见 engine/resolution.py）。阈值 64 与既有 MAX_EFFECT_CHAIN_DEPTH 同义，
         # 实测合法峰值 5，故行为不变——只在真出现 A→B→A 循环时截断成可诊断异常。
@@ -697,7 +711,7 @@ class DamageDeathMixin:
         # 2. 受到伤害前反噬 (千荆甲遗物：受到攻击伤害前，攻击者受等量伤害)
         before_res = self.hook_manager.apply_before_damage(target, amount, damage_type, source, self.state)
         # 千荆甲（通用遗物池，2026-10-03 出自被删【爆裂】道纹）：你受到攻击伤害**前**，
-        # 攻击者失去等量生命（2026-11-01 用户令：条文改「失去等量生命」，避免被读成再打一次伤害）。
+        # 攻击者失去等量生命（条文改「失去等量生命」，避免被读成再打一次伤害）。
         # 只对攻击行动（subtype=attack）生效，非攻击伤害不触发；
         # 反噬本身是"直接失血"，不视为"受到攻击造成的伤害"，因此不会连环触发千荆甲/活血衣。
         # 归因口径沿用 2026-10-03 裁定：这笔失血记【千荆甲】。
@@ -1268,7 +1282,7 @@ class DamageDeathMixin:
     def _item_steal_candidates(self, target: Entity) -> list[tuple[str, str]]:
         """【豪夺】可夺对象 [(种类, 名称)]：遗物在前、消耗品在后。
 
-        2026-11-07 用户令加强后这是唯一的候选定义点：发动前校验、怪物代选与
+        加强后这是唯一的候选定义点：发动前校验、怪物代选与
         实际夺取都读它，避免「校验只认遗物、结算能夺消耗品」的脱节。
         """
         return ([("relic", n) for n in self._relic_steal_candidates(target)]
@@ -1444,7 +1458,7 @@ class DamageDeathMixin:
         夺取期间施法者真正持有该遗物（享受其被动），目标暂时失去；回终递减回合，到期归还。
         返回被夺取的遗物名；目标无遗物可夺返回\"\"。
 
-        2026-11-01 用户令：必须由施法者显式指定夺哪一件（`relic_name`）；
+        必须由施法者显式指定夺哪一件（`relic_name`）；
         旧调用方（怪物阶段/直连 apply）未指定时沿用"取第一件可夺遗物"的兼容口径，
         玩家侧 API 在扣费前已强制要求显式提交，故不会再出现替玩家挑选。
         """

@@ -1,4 +1,4 @@
-"""胜负唯一计分 AI（用户裁定 2026-09-10：胜 +1 / 败 −1，无论什么手段什么战术；
+"""胜负唯一计分 AI（胜 +1 / 败 −1，无论什么手段什么战术；
 二审：**一切打分机制都用这个**，不只死斗——PvE 战斗、死斗、养蛊链全默认）。
 
 与 TacticalAI 的区别只在**选择**：启发式效用分不再做最终裁决，只用来把
@@ -430,7 +430,7 @@ class WinOnlyAI(TacticalAI):
         scored.sort(key=lambda t: (-t[0], t[1].get("label", "")))
         proposals = [c for _, c in scored[:self.PLAYOUT_TOP_N]]
         # 爬梯候选直通推演席（不受启发式排序门槛限制）：改写自己的 kit 沿闭环
-        # 向 透支/封印 推进——「用其他道纹解决」的设计路径（用户裁定 2026-09-10）。
+        # 向 透支/封印 推进——「用其他道纹解决」的设计路径。
         ladder = self._ladder_candidates()
         proposals = _merge_ladder(proposals, ladder)
         if not proposals:

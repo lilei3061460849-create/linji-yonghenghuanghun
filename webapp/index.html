@@ -966,6 +966,9 @@ function attackPanel(b){
       mk("血影（-10 生命）", "blood_shadow",
          !c.can_blood_shadow || c.blood_shadow_needs_target,
          c.can_blood_shadow ? "" : "需要【血影】遗物"),
+      mk(`万钧印改道（耐久-1，剩 ${c.wanjunyin_uses ?? 0}）`, "wanjunyin",
+         !c.can_wanjunyin || c.item_locked,
+         c.can_wanjunyin ? "这一击改为攻击者对自己发动" : "需要持有万钧印"),
     );
     wrap.append(bar);
     // 消耗品=主动且被动行动（）：被选中时可先用一件消耗品，
@@ -992,7 +995,8 @@ function attackPanel(b){
   if (a.hits && a.hits.length){
     const log = el("div","hits");
     for (const h of a.hits){
-      const label = {tank:"硬扛", dodge:"闪避", parry:"招架", blood_shadow:"血影"}[h.choice] || h.choice;
+      const label = {tank:"硬扛", dodge:"闪避", parry:"招架", blood_shadow:"血影",
+                     wanjunyin:"万钧印改道"}[h.choice] || h.choice;
       log.append(el("div","hit", `第 ${h.index} 击 · ${h.target} · X=${h.damage} → ${label}`));
     }
     wrap.append(log);

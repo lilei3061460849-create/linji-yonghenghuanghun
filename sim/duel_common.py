@@ -99,7 +99,7 @@ def _resolve_monster_turn_one(e, skip_refs: set):
     if dao is not None:
         attacks = []
     choice = {"actor_ref": actor["actor_ref"], "daowen": dao, "attack_actions": attacks}
-    # 2026-09-16 用户令（选案 C）：面板不写死 X 时，用预演评分为这只怪挑一个 X。
+    # （选案 C）：面板不写死 X 时，用预演评分为这只怪挑一个 X。
     # 在完整 choice 拼好后评分；道纹选择对应一个空攻击块，与真实1出手提交一致。
     if dao is not None and option.get("x_free"):
         from sim.monster_targets import pick_monster_daowen_x

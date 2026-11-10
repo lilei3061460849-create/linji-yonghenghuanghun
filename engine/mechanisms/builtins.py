@@ -1,6 +1,6 @@
 """已迁移到声明层的机制（以下包含历史迁移说明，已注销的机制以注册表为准：灼罪钉施加的加害状态、龙鳞、帮派令、畸变·结算、
 焦黑发丝、洞察·结算、狂暴·标记、畸变·标记、洗劫·夺碎片、缄默面具、龙爪、
-灾厄轮盘·结算（遗物被动）；清算结算/对账已于2026-10-27随道纹删除；2026-10-13 用户令删【逼债】，
+灾厄轮盘·结算（遗物被动）；清算结算/对账已于2026-10-27随道纹删除；删【逼债】，
 【逼债·结算/对账】与【三相残韵盘·战终】随道纹/遗物删除一并移除；缄默面具现为法限增量翻倍）。
 
 迁移协议（迁移前后必须同时满足）：
@@ -291,7 +291,7 @@ SILENT_MASK = Mechanism(
 
 
 def _dragon_claw_effect(ctx: TriggerContext, targets: list) -> str:
-    """【龙族利爪】（2026-09-17 用户令改版）：攻击力 = 当前法力×2。
+    """【龙族利爪】（改版）：攻击力 = 当前法力×2。
 
     旧版「初始3点攻击次数与1点攻击力；每完成一次行动后，攻击次数+1、攻击力+2」
     写的是遗留字段 attack_power / attack_count。属性模型统一后
@@ -328,7 +328,7 @@ GANGPAILING = Mechanism(
     priority=10,
 )
 
-# 2026-10-11 用户令删除【衰败】道纹 → 其 ROUND_START 机制（priority 20）一并删除。
+# 删除【衰败】道纹 → 其 ROUND_START 机制（priority 20）一并删除。
 # 回始相位机制现为：洞察·结算(30) → 畸变·标记(60)。
 
 def _jiaohheifasi_effect(ctx: TriggerContext, targets: list) -> None:
@@ -410,7 +410,7 @@ def _duming_effect(ctx: TriggerContext, targets: list) -> dict | None:
             "roll": picked["roll"], "of": picked["of"], "damage": rd["lost"], **rd}
 
 
-# 2026-10-13 用户令删【逼债】：BIZHAI_SETTLE（【逼债·结算】）一并移除。
+# 删【逼债】：BIZHAI_SETTLE（【逼债·结算】）一并移除。
 
 DUMING_SETTLE = Mechanism(
     name="灾厄轮盘·结算",
@@ -453,7 +453,7 @@ def _blood_lineage_effect(ctx: TriggerContext, targets: list) -> dict:
             "tags": {"relic", "round_end"}})
         return {"type": "blood_lineage_heal", "entity": entity.name,
                 "amount": detail["actual_heal"], "heal_ctx": detail.get("heal_ctx")}
-    # 2026-10-13 用户裁定：自动生命支付付不起照扣，正常命零，不报错中断回终。
+    # 自动生命支付付不起照扣，正常命零，不报错中断回终。
     payment = apply_verb(ctx.combat, "cost", {
         "payer": entity, "cost_type": "生命", "amount": 20, "forced": True,
         "cost_share_target_ref": (ctx.picks.get("blood_lineage_cost_share_target_ref", "")
@@ -544,7 +544,7 @@ DRAGON_BLOODLINE = Mechanism(
     name="龙族血脉·乘区", when=Trigger.phase(Phase.MULTIPLIER_ADJUST), target=TARGET,
     condition=all_(side_has("龙族血脉", of="source"), not_(entity_type("怪物")), damage_type_not("代价")),
     effect=lambda ctx, targets: {"amount": ctx.amount * 2}, priority=10)
-# 2026-10-13 用户令：【三相残韵盘】遗物删除，SANXIANG_END（【三相残韵盘·战终】）一并移除。
+# 【三相残韵盘】遗物删除，SANXIANG_END（【三相残韵盘·战终】）一并移除。
 
 for _mechanism in (BLOOD_LINEAGE, RED_CURSE, FIRST_ROUND_SHIELD, LEATHER_SHIELD,
                    LEATHER_RECORD, ROUND_TRACKING_RESET, BULLETPROOF, DRAGON_BLOODLINE, SHOUYEDENG):

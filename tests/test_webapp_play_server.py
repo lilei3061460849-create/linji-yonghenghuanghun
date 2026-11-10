@@ -59,7 +59,7 @@ def _battle_engine(tmp_path):
 def test_new_game_keeps_fog_and_no_longer_spawns_a_demo_ally():
     """开局快照：只下发已知地形；且不再凭空送同伴。
 
-    2026-11-04 用户裁定删掉"开局送演示同伴"——旧实现硬塞一个
+    删掉"开局送演示同伴"——旧实现硬塞一个
     `entity_type="朋友"`、攻次/攻力用 speed//3、mana//2 的实体，等于给网页版
     另开一套数值。这里把"不再出现幽灵同伴"钉成回归断言。
     """
@@ -218,7 +218,7 @@ def test_battle_actions_expose_daowen_and_cast_for_panel(tmp_path):
 
 
 def test_battle_view_exposes_coop_spells_and_fill_entries(tmp_path):
-    """协力施法（）：发起后战斗视图带 coop_spells（摊平槽位/已填），
+    """协力施法：发起后战斗视图带 coop_spells（摊平槽位/已填），
     可用行动列出 fill/release/cancel；B 方回合同样能看到填入入口。"""
     engine, _, _ = _battle_engine(tmp_path)
     engine.state.player.dao_wen["杀伐"] = __import__(

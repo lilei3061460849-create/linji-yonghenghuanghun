@@ -6,7 +6,7 @@ BUG-01：【波及X】的X必须受合法目标数量限制——引擎不得给
 DM裁定2026-08-23（取代2026-08-22"不足X即过滤"方案）：面板X超过合法目标数时
         自适应降X（有效X=min(面板X,合法目标数)，见 prepare 的 wave_effective_x），
         与玩家侧 _max_legal_daowen_x 口径一致；仅合法目标数为0时才不提供。
-2026-10-09 用户令：repeal 2026-10-03 的「波及 X≥2 下限」——X=1 合法，
+repeal 2026-10-03 的「波及 X≥2 下限」——X=1 合法，
         标记目标平分施法者道纹效果，单目标时全值落于该目标（X_MIN 装置整套拔除，
         daowen_effect 的分路门槛由「≥2 个目标」统一为「effective 非空即分路」）。
 BUG-02：resolve_monster_phase 提交失败后战斗不得卡在怪物阶段——
@@ -187,7 +187,7 @@ def test_wave_adaptive_clamp_solo(tmp_path):
     规则沿革：
       * DM裁定 2026-08-23（取代 2026-08-22 过滤方案）：【波及】的实际目标数按
         合法目标数自适应降 X（min(面板X, 合法目标数)），不得给出永远无法结算的选项；
-      * 2026-10-09 用户令：repeal 2026-10-03 的「波及 X≥2 下限」——X=1 完全合法，
+      * repeal 2026-10-03 的「波及 X≥2 下限」——X=1 完全合法，
         平分份数=目标数，单目标时全值由该目标承担（X_MIN 装置整套拔除）。
     净结果：solo 场的落地方式是「降 X 到 1 正常结算」——prepare 给出波及选项
     （wave_effective_x=1），怪物可以给唯一合法目标（玩家）种上波及标记。
@@ -366,7 +366,7 @@ def test_stale_token_replay_returns_valid_token(tmp_path):
 def test_user_original_playthrough_no_longer_stucks(tmp_path):
     """用户原流程回归：龙心谷 seed=20260822 熔岩蜥 solo，连续3回合不卡死。
     DM裁定2026-08-23后：波及3降X为1持续可选——每回合都专门发动波及验证可解算。
-    （2026-10-09 用户令 repeal X≥2 下限后，solo 场波及 X=1 正式合法，
+    （repeal X≥2 下限后，solo 场波及 X=1 正式合法，
     每回合发动波及=给玩家种/摘标记，同样不得卡死。）"""
     e = _engine(tmp_path, seed=20260822)
     _full_setup(e)
@@ -406,7 +406,7 @@ def _wave_use_daowen_schema(engine: GameEngine, actor_ref: str = "") -> dict:
 def test_use_daowen_schema_caps_wave_x_by_target_count(tmp_path):
     """玩家侧：schema 的X上限必须受合法目标数封顶——目标不足时不得给出无法发动的X。
 
-    2026-10-09 用户令：波及 X≥2 下限 repealed，X 下限恒为 1——solo 场（1 个合法
+    波及 X≥2 下限 repealed，X 下限恒为 1——solo 场（1 个合法
     目标）X 档位就是 [1,1]，且 available=True（X=1 合法，单目标全值）。
     """
     e = _engine(tmp_path)

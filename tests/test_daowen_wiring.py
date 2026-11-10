@@ -170,7 +170,7 @@ def test_boba_boundary_and_invalid_submissions():
 def test_jiahai_status_consumable_guzhi_and_anger_consumable():
     """灼罪钉施加固定加害状态；固执单次掉1；怒火针使法力消耗减半。
 
-    2026-10-11 用户令：【借力】已删除，原「借力2 → _jieli_boost +20%」段落一并移除。
+    【借力】已删除，原「借力2 → _jieli_boost +20%」段落一并移除。
     """
     engine = _engine("hooks")
     assert "加害" not in DaoWenEngine._registry
@@ -208,7 +208,7 @@ def test_jiahai_status_consumable_guzhi_and_anger_consumable():
     d2 = p.take_damage(20)
     assert d2["actual_damage"] == 1
     assert p.current_hp == 49
-    # 2026-10-11 用户令：固执简化为「你每次失去的生命不会超过1」，代价路径同样封顶。
+    # 固执简化为「你每次失去的生命不会超过1」，代价路径同样封顶。
     # 旧口径下这一击会全额落地 8 点（`damage_type != "代价"` 排除），现已废止。
     d3 = p.take_damage(8, "代价")
     assert d3["actual_damage"] == 1
@@ -238,7 +238,7 @@ def test_huaxiang_dingxing_wushen():
     """定型挡弱化。
 
     2026-10-03：【滑翔/坠落】删除，原「滑翔视同飞行、坠落落地并减半」段落一并移除。
-    2026-10-11 用户令：【无神】删除，原「无神使敌方轮回者的杀伐改打自己」段落一并移除
+    【无神】删除，原「无神使敌方轮回者的杀伐改打自己」段落一并移除
     （引擎里的强制改目标分支同批删除，见 `engine/combat_parts/spells.py`、`api.py`）。
     """
     engine = _engine("ctrl")
@@ -294,7 +294,7 @@ def test_anger_needle_is_purchased_from_black_market_event():
 def test_retired_healing_runes_are_not_registered():
     """边界：滋养与眩晕已删除，不得通过旧注册表恢复。
 
-    2026-11-09 用户令：「自愈」这个**名字**重新启用，但它是【再生】衍生道纹
+    「自愈」这个**名字**重新启用，但它是【再生】衍生道纹
     （速度X → 自身回复6X，只能作用于发动者），不是当年那条被删的回血道纹；
     消耗品被动里的「自愈X」（恢复耐久）又是另一套机制，两者只在名字上重合。
     """

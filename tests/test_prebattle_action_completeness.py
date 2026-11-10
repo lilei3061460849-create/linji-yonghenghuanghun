@@ -39,7 +39,7 @@ def test_available_prebattle_schemas_use_real_executable_parameter_names(tmp_pat
     assert {"allocations", "tier"} <= set(by_sub_action["修行"])
     assert "tier" in by_sub_action["探索"]
     assert {"tier", "names", "target"} <= set(by_sub_action["改造"])
-    assert "维修" not in by_sub_action, "维修已按 2026-11-01 用户令改为【改造】"
+    assert "维修" not in by_sub_action, "维修已按 改为【改造】"
     assert "additional" not in by_sub_action["改造"]
 
 
@@ -195,7 +195,7 @@ def test_training_splits_tier_points_between_speed_and_mana(tmp_path):
     player = engine.state.player
     before = (player.speed_limit, player.mana_limit)
 
-    # 2026-11-09 用户令：1属性点=1[速限]，2属性点=1[法限]
+    # 1属性点=1[速限]，2属性点=1[法限]
     trained = engine.execute_action("pre_battle_action", {
         "sub_action": "修行", "tier": 4,
         "allocations": {"speed_points": 2, "mana_points": 2},
@@ -286,7 +286,7 @@ def test_training_rejects_invalid_split_atomically(tmp_path):
 
 
 def test_training_can_raise_blood_limit(tmp_path):
-    """用户裁定 2026-09-12：局外修行不再与开局初始分配区分，血限同样可以修上去。
+    """局外修行不再与开局初始分配区分，血限同样可以修上去。
 
     正常：1属性点=6血限，当前生命同步抬高；
     边界：存点后用自由动作 redeem_attribute_points 兑血限（血限按1点一档，不受偶数限制）；

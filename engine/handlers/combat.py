@@ -142,6 +142,12 @@ class CombatHandlersMixin:
             "item_options": item_options,
             "can_use_item": bool(item_options) and bizhong <= index,
             "item_locked": bizhong > index,
+            # 万钧印（可选改道）：持有未耗尽的万钧印且攻击者不是自己时可用；
+            # 同样是被选中的响应，【必中】覆盖本击时一并锁死。
+            "can_wanjunyin": (self.combat._wanjunyin_item(target) is not None
+                              and attacker is not target),
+            "wanjunyin_uses": (getattr(self.combat._wanjunyin_item(target),
+                                       "current_uses", 0) or 0),
         }
 
     def _attack_pending_view(self, pending: dict) -> dict:
@@ -276,6 +282,8 @@ class CombatHandlersMixin:
                 spell_choices=hit.get("spell_choices") or {}, entity_refs=refs,
                 dodge_relic_target_ref=hit.get("dodge_relic_target_ref"),
                 cost_share_target_ref=hit.get("cost_share_target_ref", ""),
+                # 万钧印（按物品索引=持有者选择）：应对窗口显式提交才改道。
+                wanjunyin=bool(hit.get("wanjunyin")),
             )
             result["hit_index"] = absolute
             results.append(result)
@@ -349,12 +357,30 @@ class CombatHandlersMixin:
             return {"success": False,
                     "error": "先由攻击方分配伤害（声明这一击的目标与 X）"}
         choice = str(params.get("choice") or "")
-        if choice not in {"tank", "parry", "dodge", "blood_shadow", "use_item"}:
-            return {"success": False, "error": "应对方式只能是 硬扛/招架/闪避/血影/使用消耗品"}
+        if choice not in {"tank", "parry", "dodge", "blood_shadow", "use_item", "wanjunyin"}:
+            return {"success": False,
+                    "error": "应对方式只能是 硬扛/招架/闪避/血影/使用消耗品/万钧印改道"}
         ref = declared["target_ref"]
         legal = {entry["ref"]: entry for entry in pending["options"]["target_options"]}
         entry = legal.get(ref) or {}
         defender = self._attack_defender_options(pending, ref)
+        if choice == "wanjunyin":
+            # 万钧印（按物品索引=持有者选择）：把这一击改为攻击者对自己发动。
+            if defender.get("item_locked"):
+                return {"success": False,
+                        "error": "【必中】次数覆盖本击：目标无法进行被动行动（含万钧印改道）"}
+            if not defender.get("can_wanjunyin"):
+                return {"success": False,
+                        "error": f"{entry.get('name')}没有可用的万钧印（未持有或已耗尽）"}
+            item = self.combat._wanjunyin_item(
+                self.combat._combat_entity_refs().get(ref))
+            if item is None:
+                return {"success": False, "error": "万钧印已不可用（耐久耗尽）"}
+            hit = {"target_ref": ref, "damage": int(declared["damage"]),
+                   "dodge": False, "parry": False, "blood_shadow": False,
+                   "wanjunyin": True,
+                   "spell_choices": {"before": {}, "after": {}}}
+            return self._apply_attack_hits(pending, [hit])
         if choice == "use_item":
             # 消耗品是「主动且被动」行动——被选中时可先用消耗品
             # 再选应对；不耗出手也不耗应对，本击窗口保持开放。使用者按阵营摆位
@@ -1020,7 +1046,7 @@ class CombatHandlersMixin:
         from ..monsters import (make_monster_entity, roll_spawn_plan,
                                scale_monster_def_for_endless, assign_monster_preferences)
         relic_choices = params.get("relic_choices", {})
-        # 自定义启用（2026-10-22 用户令）：[战始]可提交 active_relics 选定
+        # 自定义启用：[战始]可提交 active_relics 选定
         # 本场生效的遗物（持有占页，生效数不另限），必须在战始遗物结算之前先生效。
         if params.get("active_relics") is not None:
             ok, error = self.state.set_active_relics(params.get("active_relics"))
@@ -1495,7 +1521,7 @@ class CombatHandlersMixin:
         _battled_ids = {id(emp) for emp in self.state.employees
                         if emp.is_alive and not emp.is_debt_bound and emp.is_deployed}
 
-        # 2026-09-17 用户令：[员工]**出场**并**存活**满 EMPLOYEE_PROMOTION_BATTLES
+        # [员工]**出场**并**存活**满 EMPLOYEE_PROMOTION_BATTLES
         # 场战斗后转为[朋友]。口径与 _battled_ids 一致——本场确实参战(is_deployed)
         # 且[战终]仍存活；待命未上场不计，阵亡者已被上面的 departed_employees 移除。
         # 还债员工(is_debt_bound)不晋升：其身份是债务约束而非雇佣关系。
@@ -1620,7 +1646,7 @@ class CombatHandlersMixin:
             "player_dead": (not self.state.player.is_alive) if self.state.player else False,
         }
 
-        # 【最终的冠冕】不再由第7场战终强制触发（用户裁定：删除第8场强制死斗）。
+        # 【最终的冠冕】不再由第7场战终强制触发（删除第8场强制死斗）。
         # 它改为世界事件：由 `_resolve_world_crown` 在世界回合推进时按时间随机刷新，
         # 持有者连续存活满 5 个世界回合即自动脱离副本（见 engine/world.py 常量）。
 

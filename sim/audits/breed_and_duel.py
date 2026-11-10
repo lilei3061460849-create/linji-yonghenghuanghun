@@ -102,7 +102,7 @@ def _breed_one(build_name: str, cfg: dict, seed: int, out_dir: str) -> dict | No
     db = tempfile.mktemp(suffix=".db")
     from sim.legacy_mentor import LegacyAwareAI
     from sim.win_only_ai import win_only_cls
-    # 用户裁定 2026-09-10：一切打分=胜负唯一计分。遗言桥降级为提案器——
+    # 一切打分=胜负唯一计分。遗言桥降级为提案器——
     # 遗言偏见仍影响「试什么」（候选裁剪），「选什么」只认整局推演的 ±1。
     bridge = win_only_cls(LegacyAwareAI)
     r = _play(cfg["starter"], cfg["learn"], "扭曲都市", seed=seed, battles=7,
@@ -181,7 +181,7 @@ def _make_breeder_act(e, log):
     减速削弱守擂），再输出；输出用代价型(连击，不耗法)或杀伐的 mana_budget 均摊，
     避免一发打光法力后整回合空转。None 才返回 False（让守擂接管）。"""
     p = e.state.player
-    # 2026-10-11 用户令：【衰败】已删除，防守牌位改用仍存的【减速】
+    # 【衰败】已删除，防守牌位改用仍存的【减速】
     defense = ["庇护", "再生", "封印", "束缚", "减速", "弱化", "蒙蔽", "僵化"]
     attack_off = ["连击", "乱神", "杀伐"]
     # 新回回合：先补一次防御

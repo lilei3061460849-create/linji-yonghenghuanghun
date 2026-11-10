@@ -362,7 +362,7 @@ def test_extreme_blood_limit_one_and_mana_bounds():
     # （衰败是它唯一的驱动机制）。回始相位现为 洞察·结算 → 畸变·标记，
     # 两者都不直接扣血，血限1 的命零边界改由伤害管线用例覆盖。
 
-    # 勾魂（2026-11-08 用户令重做）：「无法获得[法力]」撤销；挂状态/回始都不动已有法力
+    # 勾魂（重做）：「无法获得[法力]」撤销；挂状态/回始都不动已有法力
     state2, combat2 = _arena()
     p2 = state2.player
     p2.current_mana = 7
@@ -377,7 +377,7 @@ def test_extreme_blood_limit_one_and_mana_bounds():
     assert p2.current_mana == 9, f"勾魂不改消耗倍率，实剩 {p2.current_mana}"
 
     # 法力满 + 洞察 pending：
-    #   2026-09-13 用户裁定「所有属性不得超过其上限」全局化后，
+    #   「所有属性不得超过其上限」全局化后，
     #   持不持有【不朽之躯】结果相同——都封顶到[法限]。
     state3, combat3 = _arena()
     p3 = state3.player

@@ -71,7 +71,7 @@ def _apply_monster_daowen(engine, caster, name, x, target=None):
 # 机制**保留**，但已不由道纹发放，只剩【帮派令】在[战始]发放。
 
 
-# 2026-10-11 用户裁定：【点金】才是要的道纹（代价：失忆X；获得80X碎片），
+# 【点金】才是要的道纹（代价：失忆X；获得80X碎片），
 # 2026-09-28 那次「改名为失忆 + 改成消耗8X法力」的裁定作废。原用例
 # `test_normal_shiyi_converts_mana_to_shards` 钉的是作废口径，与
 # `tests/test_dianjin_cost.py::test_dianjin_pays_amnesia_not_mana_and_gains_shards`
@@ -225,7 +225,7 @@ def test_normal_haoduo_steals_relic_for_x_rounds():
 
 
 def test_haoduo_without_stealable_relic_is_refused_before_payment():
-    """2026-11-01 用户令：没有可夺遗物必须在扣费前中止，不许吞掉 5X 碎片空放。"""
+    """没有可夺遗物必须在扣费前中止，不许吞掉 5X 碎片空放。"""
     engine = _setup(); _grant(engine, ["豪夺"])
     m = _add_monster(engine, shards=0)
     m.relics = []
@@ -335,7 +335,7 @@ def test_boundary_jiachao_fake_lost_first():
 
 
 # ==================== 千荆甲（通用遗物；承接已删【爆裂】的反噬口径） ====================
-# 2026-10-03 用户令：【爆裂】道纹删除，反噬语义改由遗物【千荆甲】承接
+# 【爆裂】道纹删除，反噬语义改由遗物【千荆甲】承接
 # （受到攻击伤害前，攻击者失去等量生命）。原爆裂的持续X到期用例随道纹删除一并移除。
 
 def test_normal_qianjingjia_reflects_before_damage():

@@ -99,12 +99,12 @@ from .rollback import EngineSnapshot
 
 
 
-# 自由结晶随机代价池（2026-10-05 用户令）：代价一节中可数值化的八种代价，共计10。
+# 自由结晶随机代价池：代价一节中可数值化的八种代价，共计10。
 # 【唯一】无数值、无法按 X=10 结算，不入池（见 物品索引.md#自由结晶）。
 FREE_CRYSTAL_COST_POOL = ("生命", "血限", "枯竭", "法限", "速度", "失忆", "异变", "冷却")
 FREE_CRYSTAL_COST_AMOUNT = 10
 
-# 局外可发动的道纹白名单（2026-10-23 用户裁定：默认局内，局外须明示）。
+# 局外可发动的道纹白名单（默认局内，局外须明示）。
 # 「明示」＝该道纹条文自己写明可局外发动；没写的一律只能在战斗中发动。
 # 明示项：【真理】、【唤潮】与【蜃景】（鲛族专属开放地图道纹）。
 OUT_OF_COMBAT_DAOWEN = frozenset({"真理", "唤潮", "蜃景"})
@@ -143,7 +143,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         self.state.death_book_legacies = self.death_book.load()
         self._load_progression()  # 阶级推进/无尽模式：与封存槽同文件持久（见 _save_progression）
         # 封存槽是跨轮回持久文件；若进程重启，从中恢复《死者之书》的系统记录。
-        # （2026-10-05 用户令：癌变休整加成 rest_heal_bonus 已废止，旧封存文件里
+        # （癌变休整加成 rest_heal_bonus 已废止，旧封存文件里
         # 的该键直接忽略。）
         if os.path.exists(sealed_candidate_path):
             try:
@@ -608,7 +608,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "cast", "focus", "rest", "skip",
                 "declare_wish", "declare_escape", "deploy_employee",
                 "define_spell", "undefine_spell",
-                # 协力施法（）：发起/填入/发动都是行动阶段的施法类操作。
+                # 协力施法：发起/填入/发动都是行动阶段的施法类操作。
                 "declare_spell", "fill_spell", "release_spell", "cancel_spell",
                 "lianxin_in_battle", "declare_evolution", "activate_duel_relic",
                 "use_black_card", "use_crime_vault", "fire_godfather_revolver",
@@ -723,7 +723,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "error": "必须先结算【救赎】：接纳或终结",
                 "pending": dict(self.state.pending_redemption),
             }
-        # 2026-10-12 用户裁定③：强制遗物发现在额度满时也要能脱困，故「放弃本次发现」
+        # ③：强制遗物发现在额度满时也要能脱困，故「放弃本次发现」
         # 与「选择」一样属于该门禁下的合法动作。少了它，额度满 + 有强制发现 = 死局
         # （两边都不许动，且没有任何动作能清空 pending_relic_choices）。
         if (self.state.pending_relic_choices
@@ -960,7 +960,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         spec = ACTION_REGISTRY.get(action_type)
         if spec is not None:
             return getattr(self, spec.handler)(params)
-        # 2026-09-28 用户令：回合动作重构
+        # 回合动作重构
         #   attack  → 普攻（等价 prepare_attack+resolve_attack 单步封装；或走prepare/resolve两步）
         #   cast    → 施法（=发动道纹或瞬发自定义施法）
         #   focus   → 聚能：消耗1出手，恢复50%已损法力（向上取整）
@@ -1338,7 +1338,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         base_heal = (math.ceil(player.blood_limit * tier_pct[tier] / 100)
                      if player is not None else 0)
         cost = tier_cost[tier]
-        # 2026-10-05 用户令：癌变不再为【休整】提供额外恢复量，恢复额度=档位基础值。
+        # 癌变不再为【休整】提供额外恢复量，恢复额度=档位基础值。
         heal = base_heal
         refs = ({"player:0": self.state.player}
                 if self.state.player and self.state.player.is_alive else {})
@@ -1468,7 +1468,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     }
 
     # 初拥之夜9选1（1~8限选1次，9号可重复触发权）
-    # 2026-10-23 用户令：【鲜血之翼】改名【血翼】并改为消耗品（耐久3/3）。
+    # 【鲜血之翼】改名【血翼】并改为消耗品（耐久3/3）。
     # 选项编号与总数（9选1）不变，只是选项3 从「授予遗物」改为「发放消耗品」。
     FIRST_EMBRACE_OPTIONS = {
         1: ("血族血脉", "[回终]若本回合造成伤害则获得等量[回复]，否则支付生命20"),
@@ -1486,7 +1486,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     FIRST_EMBRACE_RETAIN_CHOICE = 9
 
     # 遗物池定义（27件；【发现】只列候选，效果在对应触发时点应用）
-    # 2026-10-13 用户令：【买路财】改制为轮回者【逃跑】行动，【三相残韵盘】删除
+    # 【买路财】改制为轮回者【逃跑】行动，【三相残韵盘】删除
     # （发现侧由道纹【典当】承接），两件均移出遗物池。
     RELIC_DEFS = [
         ("缓厄沙漏", "你受到的一半伤害转移到下回合承受。"),
@@ -1518,10 +1518,10 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         ("蚀界残钟", "每回终，所有角色各自失去等同于其当前法力×当前速度的血限"),
         ("窥隙法匣", "每次成功闪避后，下回合获得10点法力"),
         ("逐影胫骨", "每累计成功闪避两次，速度+1"),
-        # 2026-10-25 用户令：引擎早有实现（combat_hooks 的造物吸血），此前漏登记，补进遗物池。
+        # 引擎早有实现（combat_hooks 的造物吸血），此前漏登记，补进遗物池。
         ("共生血囊", "由你创造的造物造成伤害时，造物按目标实际减少的生命回复；"
                      "超出造物生命上限的回复量改为回复创造者"),
-        # 2026-10-25 用户令：两条原始怪物道纹遗物化，进通用遗物池。
+        # 两条原始怪物道纹遗物化，进通用遗物池。
         ("疯狂", "所有角色每回合出手次数+1"),
         ("减速", "［战始］所有敌人的当前速度减半"),
     ]
@@ -1880,7 +1880,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _pre_battle_gaizao(self, params: dict) -> dict:
         """改造（扭曲都市专属）：选择2/3/4件不同名消耗品，把全部效果叠加到其中一件。
 
-        口径（2026-11-01 用户令，原【维修】撤销；同日补正：耐久同样叠加、被动效果照常携带）：
+        口径（，原【维修】撤销；同日补正：耐久同样叠加、被动效果照常携带）：
         - 档位＝参与件数：2件（0碎片）／3件（5碎片）／4件（12碎片），另耗1点精力；
         - names 必须互不同名且都在持有中，target 必须是 names 之一；
         - 被并入条目的**当前耐久与耐久上限一并叠加**到目标条目，目标条目成为唯一的耐久池；
@@ -2749,12 +2749,12 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _grant_transformed_daowen(self, player: Entity, dest: str) -> bool:
         """残韵获得变化后道纹。X不从原道纹拷贝；同名不重复。
 
-        2026-10-07 用户令：残韵路径双向 + 完全放开——变化结果是原始怪物道纹时
+        残韵路径双向 + 完全放开——变化结果是原始怪物道纹时
         施法者同样永久获得（旧版在此处直接拒绝授予，与「双向 + 可永久持有」冲突）。
         """
         if dest in player.dao_wen:
             return False
-        # 2026-10-12 用户裁定②：残韵转化补给施法者的这一份是真正的获得，
+        # ②：残韵转化补给施法者的这一份是真正的获得，
         # 同样受【承载上限】约束；超出额度就**不授予**（持有者的一换一照常发生）。
         if len(player.dao_wen) >= player.daowen_capacity:
             return False
@@ -2792,7 +2792,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if need > self.state.attribute_points:
             return {"success": False,
                     "error": f"属性点不足：需要{need}，池内{self.state.attribute_points}"}
-        # 2026-11-09 用户令：1属性点=1速限（放开速限）；法限仍 2 点一档。
+        # 1属性点=1速限（放开速限）；法限仍 2 点一档。
         if vals["mana_points"] % 2:
             return {"success": False,
                     "error": "法限按2属性点一档计价，兑换点数必须是偶数",
@@ -3169,7 +3169,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         return {"note": "本场战斗结束，未击败任何怪物，不产生击杀碎片奖励", "reason": reason}
 
     def _settle_free_crystal_cost(self, target: Entity, cost_type: str, amount: int) -> dict:
-        """自由结晶：强制目标付出指定代价共计 amount（2026-10-05 用户令）。
+        """自由结晶：强制目标付出指定代价共计 amount。
 
         生命/血限/枯竭/法限/速度/异变走统一代价结算入口 _apply_numeric_cost_part
         （含致死判定、不朽之躯免疫、异变迷失等既有口径）；失忆与冷却没有
@@ -3292,7 +3292,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if item.name in TWISTED_TOOL_LIBRARY:
             return self._consume_twisted_tool(item, params, actor=actor)
 
-        # 翼类消耗品（2026-10-23 用户令）：每次使用选一个模式，耗 1 点耐久。
+        # 翼类消耗品：每次使用选一个模式，耗 1 点耐久。
         #   血翼：噬血（本回合你失去的生命改为回复）／飞行1／立刻逃跑
         #   烬翼：熄事（本回合不触发任何特殊事件）／飞行1／立刻逃跑
         if item.kind == "wing" or item.name in WING_MODES:
@@ -3340,7 +3340,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "state": self.combat._get_combat_state(),
             }
 
-        # 自由结晶（2026-10-05 用户令重做，旧口径「对同一怪物喂满3次触发救赎」废止）：
+        # 自由结晶（重做，旧口径「对同一怪物喂满3次触发救赎」废止）：
         # 对[目标]使用→其随机付出一种代价，共计10；若目标是生命≤20%血限的怪物，
         # 代价结算后仍存活的，强制触发救赎。
         if item.name == "自由结晶":
@@ -3376,7 +3376,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "state": self.combat._get_combat_state(),
             }
 
-        # 【无限肉块】：恢复10生命（2026-10-05 用户令：5→10），但本次恢复不计入癌变累计治疗量。
+        # 【无限肉块】：恢复10生命（5→10），但本次恢复不计入癌变累计治疗量。
         if item.kind == "infinite_meat":
             return consume_infinite_meat(self.combat, item, actor)
 
@@ -4062,7 +4062,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         （否则下面 _replace_state_preserving_death_book_progress 会清空 state，
         本次胜者的快照丢失）。开关打开时则由 _save_progression 一并把 slots 重写。
 
-        2026-09-28 用户令：阶级推进总开关 `PROGRESSION_ENABLED` 默认 False；
+        阶级推进总开关 `PROGRESSION_ENABLED` 默认 False；
         关闭时不修改 unlocked_tier/endless_mode、不写 progression 段——
         留作未来五阶全部接入后启用。
         """
@@ -4135,7 +4135,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _trigger_final_crown(self) -> dict:
         """旧入口：封存候选人 / 开启第8场死斗（**只在显式调用时发生**）。
 
-        2026-10-31 用户裁定：死斗不再是强硬规则 —— 第7场战终**不再**自动调用本方法，
+        死斗不再是强硬规则 —— 第7场战终**不再**自动调用本方法，
         收尾条件改由【最终的冠冕】世界事件承载（`_resolve_world_crown`：地图随机刷新 +
         持有存活 5 个世界回合即自动脱离副本）。
 
@@ -4261,7 +4261,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         self.state.phase = GamePhase.IN_COMBAT.value
         self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_START.value
 
-        # 2026-10-13 用户令删【三相残韵盘】后，死斗开场已无可选遗物；
+        # 删【三相残韵盘】后，死斗开场已无可选遗物；
         # optional_relics 键保留（契约稳定），恒为空列表。
         optional = []
 
@@ -4347,7 +4347,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         return migrated
 
     def _migrate_legacy_xuezhai_names(self) -> bool:
-        """旧档【血债】→【连击】（2026-10-22 用户令：改名只发生在读入边界）。
+        """旧档【血债】→【连击】（改名只发生在读入边界）。
 
         遍历状态内全部实体的道纹表：键序不变地改键、实例定义名同步归一。
         引擎注册表不收旧名，迁移完成后旧名提交照常报未知道纹。
@@ -4384,7 +4384,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     ) -> dict:
         """真理X：提出 X 句陈述，要求目标逐句言明真理，否则无法开口。
 
-        2026-10-23 用户裁定：X = 陈述句数（「X 句话」）；X 同时决定无法开口的持续回合。
+        X = 陈述句数（「X 句话」）；X 同时决定无法开口的持续回合。
         局外发动同样允许（【真理】已列入 OUT_OF_COMBAT_DAOWEN 明示项）。
         """
         actor = actor or self.state.player
@@ -4451,7 +4451,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _replace_state_preserving_death_book_progress(self) -> None:
         """开始新轮回者时保留《死者之书》的系统记录。
 
-        2026-10-05 用户令：癌变休整加成已废止，此处不再携带 rest_heal_bonus。"""
+        癌变休整加成已废止，此处不再携带 rest_heal_bonus。"""
         wisdom = list(self.state.death_book_wisdom)
         # 死斗败者先过死者之页（reset）再走resolve_final_duel(defeat)；
         # reset若清空擂主快照，defeat就无声吞掉擂主（r14实战复现）。
@@ -4503,7 +4503,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _queue_death_inheritance_if_needed(self, action_type: str = "") -> Optional[Interrupt]:
         """轮回者命零后只抛一次【死者之页】中断，草稿写入 context 待审核。
 
-        2026-10-24/25 用户令：一页两项——〖生平〗由引擎自动总结（`summarize_life`，
+        2026-10-24/25 一页两项——〖生平〗由引擎自动总结（`summarize_life`，
         含死因这种事实），〖遗言〗由本人自定义（≤20字，也可以不写）。
         死因不是遗言，所以草稿里不带任何死因模板文案；生平不接受改稿。
         """

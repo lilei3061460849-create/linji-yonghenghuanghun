@@ -63,7 +63,7 @@ def test_empty_ambiguous_or_expired_selection_does_not_pay(durations):
 
 
 def test_infinity_status_is_not_a_legal_target_and_never_pays():
-    """2026-11-01 用户令：回响只收"正数持续回合"的状态。
+    """回响只收"正数持续回合"的状态。
 
     ∞/-1（强化/弱化/冰冻/波及/共罪…）、纯次数型（庇护、篡改、出土、沉溺、
     操作、必中）都不可能被"延长"改变任何结算值，因此必须在扣费之前就拒绝，

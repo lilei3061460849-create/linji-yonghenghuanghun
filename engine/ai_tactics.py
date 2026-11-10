@@ -37,7 +37,7 @@ from engine.ai_preview import ActionPreview
 # 单次出手最多预演的候选数（性能护栏；候选按新鲜度与威胁优先）
 MAX_CANDIDATE_PREVIEWS = 26
 
-# 自保时钟（**默认开启**，2026-09-10 用户裁定）：把引擎自己的三条「自爆时钟」接进
+# 自保时钟（**默认开启**，）：把引擎自己的三条「自爆时钟」接进
 # 候选打分。DM 裁定 2026-08-31 曾要求 132 局前后对照再定常开；因擂主农场 0/24 空转
 # 跑不出对照，改按 24 种子养蛊证据裁定（纯AI层 56 → 开 59，+3 零副作用；复验两次
 # 持平）。132 局对照留待擂主农场恢复后补。置 LJ_SELF_PRESERVE=0 可显式关闭复现旧行为。
@@ -405,7 +405,7 @@ class TacticalAI:
         player_name = self.player.name if self.player else ""
         enemy_hp_loss = sum(max(0, e.get("hp_before", 0) - e.get("hp_after", 0))
                             for e in enemies)
-        # ③修复（2026-09-10 用户裁定）：只有「动作前还活着、动作后死亡/消失」
+        # ③修复：只有「动作前还活着、动作后死亡/消失」
         # 的敌人才算 remove。旧口径 any(dead) 把场上的尸体也算进去——多怪局首杀
         # 之后，自指变体靠尸体白得 remove +6.0 向性分压过真输出（实测杀伐X=1
         # 打自己）。alive_before 缺省回退 hp_before>0（兼容手工构造的 diff）。
@@ -810,7 +810,7 @@ class TacticalAI:
         # 凡庸压力：连续未使敌方掉血越久，输出候选越紧迫
         if enemy_hp_loss > 0 and self._rounds_since_damage >= 2:
             score += 1.2 * self._rounds_since_damage
-        # ③修复（2026-09-10 用户裁定批次）：法力=攻力（一池制换算）。每花 1 法力，
+        # ③修复（批次）：法力=攻力（一池制换算）。每花 1 法力，
         # 本场剩余每次普攻都少 1 攻力——按「攻次×0.5」的等价火力折价。旧固定
         # -0.12/点下 盾+1.1/点 ≫ 法力-0.12/点，AI 愿意满法力一手全换盾 → 空手
         # → 回终化雕塑（换席 seed 9/11/12 实锤）。速度 12 时折价 -6.12/点，
@@ -1089,7 +1089,7 @@ class TacticalAI:
 
     @staticmethod
     def _target_worth_dodging(target, per_hit: int, hp_left: int) -> bool:
-        """目标侧的闪避判据——**轮回者与怪物共用同一口径**（2026-09-17 用户令）。
+        """目标侧的闪避判据——**轮回者与怪物共用同一口径**。
 
         闪避要花 1 点当前速度，而[攻击次数]=当前速度，等于用一次出手换一次免伤，
         所以只在两种情形值得闪：
@@ -1131,7 +1131,7 @@ class TacticalAI:
             #   · LJ_AI_DUEL_DODGE=0 关闸复现旧行为（全程 dodge=False）。
             dodge_on = (os.environ.get("LJ_AI_DUEL_DODGE", "1") != "0"
                         and self.engine.state.in_final_duel)
-            # 2026-09-17 用户令：怪物同样享有闪避权（此前只有最终死斗里的轮回者会闪）。
+            # 怪物同样享有闪避权（此前只有最终死斗里的轮回者会闪）。
             # 判据与轮回者完全同口径——见 _target_worth_dodging；怪物"不一定用"，
             # 只在致命击或"闪比反打划算"时才花那 1 点速度。
             # LJ_AI_MONSTER_DODGE=0 关闸复现旧行为（怪物全程不闪）。

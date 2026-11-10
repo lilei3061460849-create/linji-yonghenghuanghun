@@ -193,7 +193,7 @@ def test_sealed_candidate_dungeon_growth_applies():
 
 
 def test_seal_roundtrip_preserves_mutation_count(tmp_path):
-    """④修复（2026-09-10 用户裁定）：异变是已实付的代价，封存→读回必须保真。
+    """④修复：异变是已实付的代价，封存→读回必须保真。
 
     旧格式丢弃 mutation_count → 封存=免费洗白迷失进度，「带伤续战」是假的。
     癌变 total_healed 不随封存走：DM 已裁定它是局内减益、每场归零。

@@ -14,7 +14,7 @@ def handle_setup_attributes(engine: Any, params: Dict[str, Any]) -> Dict[str, An
 
     DM裁定 2026-09-10：轮回者的攻击次数=当前速度、攻击力=当前法力（换算仅限轮回者），
     攻次/攻力不再是可购买的独立面板，两个加点池随之撤销；法限因为兼任攻力而保持昂贵
-    （2点=1法限）。2026-11-09 用户令：放开速限，1点=1速限。25 点总预算不变。
+    （2点=1法限）。放开速限，1点=1速限。25 点总预算不变。
     """
     if engine.state.player is not None:
         return {"success": False, "error": "初始属性已经分配，不能重复开局"}
@@ -30,7 +30,7 @@ def handle_setup_attributes(engine: Any, params: Dict[str, Any]) -> Dict[str, An
             "instruction": "1属性点=1速限／1属性点=6血限／2属性点=1法限；"
                            "没花完的点会存进属性点池，之后随时可兑"
         }
-    # 2026-11-09 用户令：放开速限——**1属性点 = 1速限**（原来 2 点一档）。
+    # 放开速限——**1属性点 = 1速限**（原来 2 点一档）。
     # 法限仍按 2 点一档计价，所以只有法限点数必须为偶数，速限点任何整数都行。
     # DM裁定 2026-09-10：余点不再强塞血限，允许留着（total<25 的部分进属性点池）。
     if mana_points % 2:

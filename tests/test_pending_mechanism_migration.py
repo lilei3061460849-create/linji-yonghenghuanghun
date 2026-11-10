@@ -84,7 +84,7 @@ def test_blood_lineage_reference_sweep(hp, dealt):
     assert canonical({"effects": result, "events": [e.to_dict() for e in state.combat_events]}) == canonical({
         "effects": [expected], "events": [e.to_dict() for e in old_state.combat_events]})
     if dealt == 0 and hp < 20:
-        # 2026-10-13 用户裁定：自动流血付不起照扣，正常命零，不报错。
+        # 自动流血付不起照扣，正常命零，不报错。
         assert player.current_hp == 0 and not player.is_alive
         assert result[0]["cost"]["owner"]["detail"]["died"] is True
     assert (player.current_hp, player.is_alive, player.total_healed) == (

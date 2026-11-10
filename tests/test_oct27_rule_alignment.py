@@ -1,4 +1,4 @@
-"""用户裁定：定型按正文；坏死5X；勾魂不再回始扣法力。"""
+"""定型按正文；坏死5X；勾魂不再回始扣法力。"""
 from pathlib import Path
 from engine.daowen import DaoWenEngine
 from engine.models import Entity

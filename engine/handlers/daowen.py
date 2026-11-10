@@ -24,7 +24,7 @@ class DaowenHandlersMixin:
         发动道纹。
         params.actor 留空时=玩家自行发动道纹(法力制，行为与此前完全一致)。
         params.actor 指定为已部署[朋友]/[员工]时=听从轮回者指令代其发动：
-        1.[朋友]/[员工]**照常支付法力**（2026-09-17 用户令裁定；旧版"不持有法力、
+        1.[朋友]/[员工]**照常支付法力**（裁定；旧版"不持有法力、
           不支付法力"是已废止条文的残留，见 AI_EXPERIENCE.md:278/:1254 微光者持有
           [法限]且为一池制），并额外消耗其出手；
           附带【代价】的道纹仍照常由该实体自身支付代价。
@@ -150,7 +150,7 @@ class DaowenHandlersMixin:
         if is_command and target is actor:
             return {"success": False, "error": "听从指令发动道纹必须指定一个非自身目标"}
         if name == "共罪":
-            # 2026-10-31 用户裁定：共罪选 X 个非自身目标（不再固定 2 个）。
+            # 共罪选 X 个非自身目标（不再固定 2 个）。
             pact_entries = list(params.get("dodge_targets") or [])
             if len(pact_entries) != x:
                 return {"success": False, "error": f"共罪X={x}必须显式选择恰好{x}个目标"}
@@ -239,7 +239,7 @@ class DaowenHandlersMixin:
             if name == "净化":
                 resolve_kw["cost_choices"] = params.get("cost_choices")
             resolve_kw["y"] = daowen_y
-            # 2026-11-09 用户令：【透支】【再生】【连击】都收成单途径，
+            # 【透支】【再生】【连击】都收成单途径，
             # 其余通道改由各自的衍生道纹独立承载；旧参数名（touzhi_cost /
             # lianji_cost / zaisheng_cost）不再接线，提交它们也不改变结算。
             # 2026-10-31：【怜悯】封锁一种支付途径（缺省法力）。
@@ -248,7 +248,7 @@ class DaowenHandlersMixin:
             if name in ("赦免", "贿赂"):
                 resolve_kw["relic_names"] = list(params.get("relic_names") or [])
             if name == "操纵":
-                # 剩余次数＝X（2026-11-02 用户令：由「下一次」改为「下X次」）。
+                # 剩余次数＝X（由「下一次」改为「下X次」）。
                 resolve_kw["order"] = params.get("caozuo_order")
             # 2026-11-08 四副本补齐：带显式选择的道纹把选择透传给计算层。
             if name in ("重铸", "回炉"):
@@ -279,7 +279,7 @@ class DaowenHandlersMixin:
             return {"success": False,
                     "error": f"失忆{calc.get('cost', 0)}无法支付：{actor.name}仅持有{len(actor.dao_wen)}种道纹"}
         if int(calc.get("forget_daowen") or 0) > 0:
-            # 2026-11-01 用户令：失忆必须显式选纹，严禁按持有顺序替玩家代选。
+            # 失忆必须显式选纹，严禁按持有顺序替玩家代选。
             # 校验放在任何支付之前——不合法的选择不扣法力、不扣碎片、不消耗出手。
             try:
                 calc["forget_daowen_names"] = self.combat.resolve_forget_daowen(
@@ -288,7 +288,7 @@ class DaowenHandlersMixin:
                 return {"success": False, "error": str(exc)}
 
         if name == "招魂":
-            # 2026-11-01 用户令（修复6）：场上没有可唤回的怪物尸体时，必须在
+            # （修复6）：场上没有可唤回的怪物尸体时，必须在
             # **扣法力前**拒绝，不能先付3X法力再记一句"没有可唤回的怪物尸体"。
             # 2026-11-01 重构3.1：多具尸体时**允许**调用方用 revive_monster 指定
             # 唤回哪一具；未指定（或只有一具）时默认取最近一具（dead_monsters[-1]）。
@@ -305,7 +305,7 @@ class DaowenHandlersMixin:
             calc["revive_monster_name"] = wanted or corpse_names[-1]
 
         if name == "豪夺":
-            # 2026-11-01 用户令：无可夺遗物必须在**扣费前**中止，禁止吞掉5X碎片空放；
+            # 无可夺遗物必须在**扣费前**中止，禁止吞掉5X碎片空放；
             # 多件可夺时玩家必须显式提交 relic_name（唯一候选才允许省略）。
             if target is actor:
                 return {"success": False,
@@ -467,9 +467,9 @@ class DaowenHandlersMixin:
             return {"success": False, "error": early.detail}
 
         # 检查法力是否足够（代价道纹不消耗法力）
-        # 2026-09-17 用户令裁定：微光者（[朋友]/[员工]）**同样支付法力**。
+        # 裁定：微光者（[朋友]/[员工]）**同样支付法力**。
         # 旧注释称其"不持有法力、发动道纹不支付法力，只消耗出手"，自我论证是
-        # 「与怪物规则一致」——而怪物那条已于 2026-09-16 用户令废止
+        # 「与怪物规则一致」——而怪物那条已于 废止
         # （见 engine/combat.py 同位置）。正文 AI_EXPERIENCE.md:278 明载
         # 「怪物与轮回者、微光者共用同一套面板数据，同样持有[血限]/[法限]/[速限]」，
         # :1254 明载微光者「仍是一池制，[回始]不回填」——不支出就无所谓"一池制"。
@@ -905,7 +905,7 @@ class DaowenHandlersMixin:
 
     # 2026-09-28：_pre_battle_wangyou 已删除（局外【忘忧】被删除，忘忧香效果为溢出回复转格挡）。
 
-    # ==================== 衍生道纹（2026-11-09 用户令） ====================
+    # ==================== 衍生道纹 ====================
 
     def _derivative_recipient(self, ref: str):
         """接收者＝轮回者本人（默认）或现存朋友/员工/临时朋友；按 runtime_id 稳定查找。"""
@@ -951,7 +951,7 @@ class DaowenHandlersMixin:
         """局内【衍生】行动（占0次主动出手，不结束回合）。
 
         母本道纹 → 支付【转换】×1 + 血限2 + 灵魂碎片3 → 【发现】一种衍生道纹。
-        2026-11-09 用户令：衍生改在战斗中使用，作为独立的 0 出手行动；代价不变。
+        衍生改在战斗中使用，作为独立的 0 出手行动；代价不变。
         """
         state = self.state
         if self._pending_derivative(state):

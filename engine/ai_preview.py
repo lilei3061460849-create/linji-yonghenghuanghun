@@ -278,7 +278,7 @@ class ActionPreview:
                 "hp_before": eb.current_hp,
                 "hp_after": ea.current_hp if ea else 0,
                 "dead": not (ea and ea.is_alive),
-                # ③修复（2026-09-10 用户裁定）：动作前已死的敌人不是这一手打死/
+                # ③修复：动作前已死的敌人不是这一手打死/
                 # 移除的。多怪局首杀后场上有尸体，不带 alive_before 时尸体在 diff
                 # 里恒 dead=True → 下游 _digest_diff 把「打自己」误归纳成 remove。
                 "alive_before": bool(eb.is_alive),

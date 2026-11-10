@@ -69,7 +69,7 @@ def test_choose_hired_daowen_attaches_to_employee():
 def test_zhuiqiuzhe_event_option1_hires_real_employee_with_fixed_panel():
     """正常路径：龙心谷"追求者"选项1必须创建真实员工，面板数值完全按文档写死
 
-    道纹不再写死 X（2026-09-17 用户令：面板与怪物同格式，X 由发动时自选，
+    道纹不再写死 X（面板与怪物同格式，X 由发动时自选，
     上限只受[法限]或代价限制），对应 副本/龙心谷.md 的「96/2/8，逆鳞，活血，固执」。
     """
     engine = _new_engine("zqz_hire", region="龙心谷")

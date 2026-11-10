@@ -212,7 +212,7 @@ class WorldHandlersMixin:
     def _exit_dungeon_with_crown(self, world: WorldState, holder) -> dict:
         """持有【最终的冠冕】并活过计时 → 带冠冕脱离副本 = 完整通关（封存）。
 
-        用户裁定（2026-10-31）：拿到冠冕离场就是通关，接上原来"死斗胜利"之后那条
+        拿到冠冕离场就是通关，接上原来"死斗胜利"之后那条
         既有封存链路（领终音法器 → 分层封存槽 → 下一阶级），不再需要死斗。
         """
         from ..world import CROWN_HOLD_WORLD_TURNS, CROWN_NAME
@@ -286,7 +286,7 @@ class WorldHandlersMixin:
     def _leave_world_with_crown(self, world: WorldState, holder) -> dict:
         """非玩家持有者带冠冕离场：冠冕被夺走，副本随之关闭。
 
-        用户裁定（2026-10-31）："谁抢到谁带走，剩下人都死里边"——
+        "谁抢到谁带走，剩下人都死里边"——
         冠冕离场后不再重刷，留在副本里的轮回者出不来（记死因 `crown_lost`，
         不是被谁击杀，故不走击杀/碎片结算）。
         """
@@ -332,7 +332,7 @@ class WorldHandlersMixin:
     def _resolve_world_crown(self, world: WorldState) -> dict | None:
         """【最终的冠冕】世界事件主循环：排期 → 刷新 → 拾取 → 存活计时 → 脱离副本。
 
-        用户裁定：不再有第8场强制死斗。冠冕改为地图上按时间随机刷新的争夺目标，
+        不再有第8场强制死斗。冠冕改为地图上按时间随机刷新的争夺目标，
         持有者连续存活 CROWN_HOLD_WORLD_TURNS 个世界回合就自动离开副本。
         """
         from ..world import CROWN_HOLD_WORLD_TURNS, CROWN_SPAWN_WORLD_TURNS

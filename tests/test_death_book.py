@@ -372,7 +372,7 @@ def test_new_engine_reloads_file_as_source_of_truth(tmp_path):
 
 
 def test_draft_is_life_only_and_never_invents_a_legacy():
-    """草稿只写〖生平〗（含死因）；遗言不代填——2026-10-25 用户令：死因不是遗言。"""
+    """草稿只写〖生平〗（含死因）；遗言不代填——死因不是遗言。"""
     state = GameState()
     state.current_battle = 999
     state.current_region = "扭曲都市"

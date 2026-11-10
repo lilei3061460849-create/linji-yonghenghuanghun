@@ -116,7 +116,7 @@ def _engine_with_branch_spell(suffix, *, mana):
     engine = _new_engine(suffix)
     player = engine.state.player
     engine.state.relics = []   # 同上（承露盏由本夹具显式追加，不受影响）。
-    # 2026-10-25 用户令：法术阶级＝重数。血溅五步 = 失去生命后 + 条件分支两臂各 2 步
+    # 法术阶级＝重数。血溅五步 = 失去生命后 + 条件分支两臂各 2 步
     # = 6 阶，须一次付清 6 次出手；基础预算只有 2 次，故用【蓄锐·增】把预算补足。
     # （action_count 是只读属性，只能走正文的修正项。）
     grant_extra_actions(engine.state.player, 9)

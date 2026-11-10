@@ -327,7 +327,7 @@ class AvailableActionsMixin:
             actions.append({"action_type": "upgrade_doctor",
                             "params_schema": {"mode": ["attack_count", "attack_power"]},
                             "cost": "5碎片，不消耗精力"})
-        # 2026-09-28 用户令：删除局外【忘忧】行动；忘忧香效果为溢出回复转格挡。
+        # 删除局外【忘忧】行动；忘忧香效果为溢出回复转格挡。
         player = self.state.player
         blood_pact_cost_targets = ([
             {"ref": ref, "name": entity.name}
@@ -343,7 +343,7 @@ class AvailableActionsMixin:
                             "remaining_groups": len(self.state.pending_diandang_discoveries),
                             "note": "领取【典当】发现：从当前组3选1里选1种获得，不消耗出手/精力"})
         if "真龙之心" in self.state.artifacts_owned:
-            # 2026-10-23 用户令：龙性货币废除。数值型代价自动入账，
+            # 龙性货币废除。数值型代价自动入账，
             # 满 12 点可直接换 1 件龙族遗物；不再有「换取龙性」这一步。
             actions.append(
                 {"action_type": "unlock_dragon_trait",
@@ -549,7 +549,7 @@ class AvailableActionsMixin:
                 actions.append({"action_type": "skip", "params_schema": {
                     "actor_ref": enemy_actors},
                     "note": "结束敌方回合，不消耗出手并保留当前出手数量"})
-            # 协力施法（2026-11-10 用户令）：B 方回合里同样可以往协力法术空位填道纹
+            # 协力施法：B 方回合里同样可以往协力法术空位填道纹
             # 或（作为施法者的 B 方法术）发动/取消。口径与 A 方回合完全一致。
             refs_now = self.combat._combat_entity_refs()
             coop_now = [spell for spell in getattr(self.state, "open_spells", [])
@@ -612,7 +612,7 @@ class AvailableActionsMixin:
                                 "reason": "冷却中/被封印/【唯一】锁死"})
                 continue
             max_x = self._max_legal_daowen_x(player, name)
-            # 【真理】X=陈述句数（2026-10-23 用户裁定）；只需目标与待裁定陈述，
+            # 【真理】X=陈述句数；只需目标与待裁定陈述，
             # 发动仍沿用初拥旧口径，不消耗主动出手，也不经过普通数值道纹的闪避流程。
             if name == "真理":
                 params_schema = {
@@ -622,7 +622,7 @@ class AvailableActionsMixin:
                     "statement": "string（须正好X句）",
                 }
             else:
-                # 2026-10-09 用户令：波及 X≥2 下限 repealed，X 下限恒为 1（X_MIN 已拔除）。
+                # 波及 X≥2 下限 repealed，X 下限恒为 1（X_MIN 已拔除）。
                 min_x = 1
                 params_schema = {
                     "daowen_name": name,
@@ -673,7 +673,7 @@ class AvailableActionsMixin:
                                   "blood_shadow": "可选布尔值"},
                     }
             if name in ("点金", "典当"):
-                # 失忆代价必须显式选纹（2026-11-01 用户令）：把候选直接公布，
+                # 失忆代价必须显式选纹：把候选直接公布，
                 # 缺失/数量不符会被 use_daowen 在扣费前拒绝。
                 params_schema["forget_daowen"] = {
                     "count": f"{'X' if name == '点金' else '2X'}（随发动X）",
@@ -770,7 +770,7 @@ class AvailableActionsMixin:
                 "note": "瞬发法术的每个实际效果步骤各扣1次出手，步骤间及最后一步后留敌方行动空档；"
                         "触发时机与最后空档不额外扣手，下一步付不起即中断，已结算步骤保留；"
                         "不写入角色法术列表。kind=daowen 为单道纹发动，kind=spell 为统一自定义施法"})
-        # 协力施法（2026-11-10 用户令）：发起开空位；任意存活角色（双方）逐格填道纹，
+        # 协力施法：发起开空位；任意存活角色（双方）逐格填道纹，
         # 每格由填入者花1手；发动时空位＝空白跳过。条件分支用瞬发法术 DSL 句式。
         coop_open = [spell for spell in getattr(self.state, "open_spells", [])
                      if spell.get("status") == "open"]
@@ -918,7 +918,7 @@ class AvailableActionsMixin:
              "available": bool(idle_allies),
              "note": "让一名未出手的[朋友]/[员工]自主完成一个行动（无命令时）"},
         ])
-        # 2026-11-09 用户令：衍生是**局内**的独立 0 出手行动；代价不变。
+        # 衍生是**局内**的独立 0 出手行动；代价不变。
         # 它不占主动出手、不结束回合，也不因本回合出手用尽而不可用。
         derivative_parents = [name for name in derivative_rules.known_parents()
                               if name in player.dao_wen]
@@ -951,7 +951,7 @@ class AvailableActionsMixin:
         """按真实代价口径枚举当前可提交的最大X，不把当前法力直接冒充上限。
 
         y 为预留双参数第二参数；现行【分裂】只有X（造物数量），不读取Y。
-        【真理】的X=陈述句数（2026-10-23 用户裁定）：只受实际写出的句子上限约束，
+        【真理】的X=陈述句数：只受实际写出的句子上限约束，
         这里给出一个宽松上限，最终以提交的陈述句数为准。
         """
         if name == "真理":

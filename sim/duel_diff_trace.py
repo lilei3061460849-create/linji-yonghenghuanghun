@@ -134,7 +134,7 @@ def traced_duel(challenger_path: str, defender_path: str, seed: int,
     # 里「68 盾/法力 51」等假账证据的来源。这里用一个深度计数器把预演排除。
     from engine import ai_preview
     depth = {"n": 0}
-    # ②修复（2026-09-10 用户裁定）：旧计数器只补 `preview`，而预演主入口与
+    # ②修复：旧计数器只补 `preview`，而预演主入口与
     # WinOnlyAI 全走 `preview_sequence`（preview 只是它的委托壳）——推演世界的
     # 出手全部漏记成 [真实]，正是「68 盾/法力 51」假账证据的来源。改补
     # preview_sequence（两个口径都经它），并叠加 WinOnlyAI._swap_world 的

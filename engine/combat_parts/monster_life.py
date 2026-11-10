@@ -81,7 +81,7 @@ class MonsterLifeMixin:
         
         return None
     
-    # 2026-10-13 用户令：逃跑改制——【逃跑】是轮回者行动，一次付清5次出手、
+    # 逃跑改制——【逃跑】是轮回者行动，一次付清5次出手、
     # 以当前状态强制脱离本场战斗，不再走DM追击裁定。原 initiate_escape（追击中断）
     # 随改制删除；declare_escape 的新实现见 engine/api.py。
     # ========== 进化（原初X，引擎直接结算，无需DM中断） ==========
@@ -255,7 +255,7 @@ class MonsterLifeMixin:
         return self._queue_redemption(monster, "free_crystal" if force else "low_hp_no_original")
 
     def _queue_redemption(self, monster: Entity, cause: str) -> dict:
-        """怪物融化离场，等待【接纳】或【终结】（2026-09-15 用户令，终结取代旧「无视」）。
+        """怪物融化离场，等待【接纳】或【终结】（，终结取代旧「无视」）。
 
         离场当时不产碎片；若玩家选【终结】，该怪物会被还原为一次正常[命零]，
         [战终]按普通击杀公式产出[碎片]；选【接纳】则成为待命员工，不产碎片。
@@ -397,7 +397,7 @@ class MonsterLifeMixin:
         这不是命零，也不是 Entity.depart_battle() 意义上的永久离场：对象从场上
         暂时移入专门队列，回场后仍沿用原生命、状态、法力和碎片，并可正常被击杀。
 
-        2026-10-08 用户令：目标不再限于怪物——[朋友]/[员工]/造物/敌对轮回者、
+        目标不再限于怪物——[朋友]/[员工]/造物/敌对轮回者、
         乃至施法者自己都可以被封印。脱场/回场因此统一走 `GameState.detach_from_field`
         与 `GameState.reattach_to_field` 这对接口，由 home/index 记住原址：
         不能一律塞回 enemies，否则封印自己的[朋友]会把它变成敌人、封印自己会把
@@ -497,7 +497,7 @@ class MonsterLifeMixin:
     def _proliferate_monster(self, monster: Entity, ctx: Optional[EffectContext | dict] = None) -> dict:
         """癌变：累计受到恢复量达阈值→吸收进死者之书，获得【无限肉块】（旧名 增生）。
 
-        2026-10-05 用户令：癌变不再为【休整】提供永久恢复量加成（原每只+8），
+        癌变不再为【休整】提供永久恢复量加成（原每只+8），
         奖励仅保留【无限肉块】（1/1）；恢复量 5→10。
         """
         cancer_ctx = normalize_context(ctx)

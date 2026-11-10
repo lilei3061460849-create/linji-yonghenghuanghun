@@ -1,7 +1,7 @@
 """
 pytest 风格测试 - 里程碑4a：出怪系统(战始抽怪)
 
-规则变更记录：出怪数量 2026-09-28 用户令改为**配方式**（N=随机(1,上界)，S=随机(1,N)，
+规则变更记录：出怪数量 改为**配方式**（N=随机(1,上界)，S=随机(1,N)，
 R_i/T_i 随机），按阶级递增——一阶上界沿用旧"battle_number-3"（旧"确定值"口径已废止），
 二阶及以上上界为怪物池规模 12。事实源 `engine/monsters.py::roll_spawn_plan`。
 
@@ -57,9 +57,9 @@ def _new_engine(db_suffix: str, region: str) -> GameEngine:
 def test_draw_cap_tier1_follows_battle_sequence():
     """正常路径：一阶 N 的上界 = max(2, 战斗场数-3)，七场为 2/2/2/2/2/3/4
 
-    2026-09-28 用户令改配方式出怪后，这串数字的语义从"确定值"变成"随机上界"
+    改配方式出怪后，这串数字的语义从"确定值"变成"随机上界"
     （N=随机(1,上界)）；旧"数量=战斗场数-3"精确口径已废止。
-    2026-10-12 用户令「不再像现在这样固定数量，而是全随机」，按其选定的最小改动
+    「不再像现在这样固定数量，而是全随机」，按其选定的最小改动
     口径：只去掉前四场「恒为1只」的确定段（下界 1→2），第 6 场起的梯度不变。
     """
     expected = [2, 2, 2, 2, 2, 3, 4]
@@ -127,7 +127,7 @@ def test_battle_start_actually_populates_enemies_from_correct_region_pool():
     pool_names = {m["name"] for m in engine.monster_pool["扭曲都市"]}
     r = engine.execute_action("battle_start", {})
     assert r["success"] is True
-    # 2026-10-12 用户令：一阶上界下界 1→2，第1场总数由恒为 1 变成 随机(1,2)
+    # 一阶上界下界 1→2，第1场总数由恒为 1 变成 随机(1,2)
     assert r["draw_count"] in (1, 2), f"第1场 N 应为 随机(1,2)：{r['draw_count']}"
     assert len(engine.state.enemies) == r["first_wave_count"]
     assert 1 <= len(engine.state.enemies) <= r["draw_count"]
@@ -138,7 +138,7 @@ def test_battle_start_actually_populates_enemies_from_correct_region_pool():
 def test_drawn_monster_panel_matches_readme_exactly():
     """正常路径：抽到的怪物面板(攻击次数/攻击力/血限)与道纹集合必须与独立副本文档定义完全一致
 
-    2026-09-16 用户令：面板不再写死 X，道纹段解析为 None（发动时自选），
+    面板不再写死 X，道纹段解析为 None（发动时自选），
     因此本处只校验道纹**集合**与三围是否与副本文档一致；
     X 值的自选与封顶校验见 tests/test_monster_daowen_x_free.py。
     """
@@ -219,7 +219,7 @@ def test_forced_monster_from_event_appears_extra_next_battle():
 # ========================================================================
 
 def test_draw_cap_floors_at_two_for_small_battle_numbers():
-    """边界：上界在场次很小时不能算出0或负数，必须floor在2（2026-10-12 用户令）
+    """边界：上界在场次很小时不能算出0或负数，必须floor在2
 
     下界从 1 抬到 2 之后，前四场不再是「N=1、S=1、无增援」的确定局，
     而是 N=随机(1,2)。上界为 1 才不掷骰；上界为 2 时 N 与 S 都各占一次随机流。

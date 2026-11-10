@@ -1,6 +1,6 @@
-"""协力施法（2026-11-10 用户令）：一条法术开 N 个空位，场上角色逐格填道纹。
+"""协力施法：一条法术开 N 个空位，场上角色逐格填道纹。
 
-规则口径（用户令原文「出手数=空格数，填 X 个道纹消耗 X 次出手构成法术；
+规则口径（原文「出手数=空格数，填 X 个道纹消耗 X 次出手构成法术；
 法术生效前其他角色可在空位填道纹」）：
 
 * **发起（declare_spell）**：施法者声明法术的槽位模板——若干道纹空位，可在
@@ -275,7 +275,7 @@ class CoopSpellHandlersMixin:
         if not isinstance(extra, dict):
             return {"success": False, "error": "extra 必须是对象（该步的附加决策，结构同瞬发法术 steps）"}
 
-        # 填入就是一次主动出手：由填入者支付（2026-11-10 用户令：谁填谁付）。
+        # 填入就是一次主动出手：由填入者支付（谁填谁付）。
         error = self._consume_actions_or_error(actor, 1, action_label="填入协力法术空位",
                                                action_type="fill_spell")
         if error:

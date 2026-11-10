@@ -123,7 +123,7 @@ def pick_monster_daowen_option(cands: list[dict], *, player_low: bool = False,
             return mech_cands[0]
     return min(cands, key=lambda o: monster_daowen_group(o["name"]))
 def pick_monster_daowen_x(engine, monster, option, choice_tpl: dict, token: str) -> int:
-    """x_free 道纹：用**战术预演评分**为怪物挑一个 X（2026-09-16 用户令，选案 C）。
+    """x_free 道纹：用**战术预演评分**为怪物挑一个 X（，选案 C）。
     面板不写死 X，能开多大只受[法限]或代价限制——但"能开多大"不等于"该开多大"。
     X 越大代价越高（法力即[攻击力]，异变更是会把自己推向【崩解】），
     因此逐个候选档位真实预演一遍，按后果评分取最优。

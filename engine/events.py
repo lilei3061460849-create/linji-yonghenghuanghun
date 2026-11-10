@@ -17,9 +17,9 @@ from .resolution import KIND_EFFECT, resolution_frame
 
 # 各池事件名（与规则正文一致）
 EVENT_RELICS = {
-    # 2026-10-14 用户令重做：旧「战始可选流血10 → 战终血限+2」移交道纹【增殖】，改为被动。
+    # 重做：旧「战始可选流血10 → 战终血限+2」移交道纹【增殖】，改为被动。
     "猩红果实": "你的当前生命可以超出[血限]",
-    # 2026-10-11 用户令重做：旧「战始可选疲惫5 → 战终精力+1」废止，改为被动。
+    # 重做：旧「战始可选疲惫5 → 战终精力+1」废止，改为被动。
     "苍白之花": "你的当前法力可以超出[法限]",
     "缄默面具": "无法再使用任何附带「代价」的道纹，每场[战终][法限]+X",
     "焦黑发丝": "每当场上有一个怪物死亡时，你的速度+2",
@@ -29,7 +29,7 @@ EVENT_RELICS = {
     "负岳索": "[战始]选择一名[朋友]或[员工]；其首次受到伤害时，你[回复]等量生命",
     "炉心坠": "[战始]选择一枚自身拥有的龙心，使其当前耐久+10",
     "烙痕钉": "[战始]必中，选择一个[目标]；你每付出一次代价，其失去10生命",
-    # 2026-10-14 用户令：【余火印】整段删除（原 extra 并入方案废弃，龙心只走通用抵扣）。
+    # 【余火印】整段删除（原 extra 并入方案废弃，龙心只走通用抵扣）。
 }
 
 # 扭曲都市废墟设施工具库（9件：名→(耐久, 效果文本逐字)）
@@ -260,7 +260,7 @@ def _event_preflight(text: str, engine, params: dict) -> Optional[str]:
                 return "过路商人当前没有这件遗物；售出后不会自动补货"
             if price > engine.state.shards:
                 return f"你没有足够碎片购买该遗物：需要{price}，当前{engine.state.shards}"
-            # 2026-10-22 用户令：遗物持有不再受承载拦截，可照常买入；
+            # 遗物持有不再受承载拦截，可照常买入；
             # 生效数超承载时先不生效，[战始]用 active_relics 自定义启用。
         else:
             if not any(r.name == relic_name for r in engine.state.relics):
@@ -433,7 +433,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
 
     # ---- 龙族起源事件：埋骨之地（龙心谷专属） ----
     # 结算覆盖：记入12点代价累积（选项1）/ 获得龙心资源（选项2）/ 拒绝（选项3）。
-    # 2026-10-23 用户令：龙性货币废除；选项1 改为直接记入真龙之心的兑换门槛。
+    # 龙性货币废除；选项1 改为直接记入真龙之心的兑换门槛。
     if event_name == "埋骨之地":
         if text.startswith("继承龙骨"):
             engine.state.dragon_cost_points += 12
@@ -550,7 +550,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         if text.startswith("上前续香"):
             _pay_numeric("血限", 6)
             applied.append("血限6")
-            # 2026-11-07 用户令：【三香通冥】由遗物改消耗品（耐久3/3）。
+            # 【三香通冥】由遗物改消耗品（耐久3/3）。
             engine.state.consumables.append(Consumable(
                 name="三香通冥", effect="当你处于负数生命时不会死亡，[回终]耐久-1",
                 current_uses=3, max_uses=3))
@@ -605,7 +605,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             ally = next((a for a in engine.state.friends + engine.state.employees if a.is_alive), None)
             if ally is not None:
                 from .models import Relic
-                # 2026-11-07 用户令：【重甲兵躯】新版为「无法闪避，招架不再消耗速度」，
+                # 【重甲兵躯】新版为「无法闪避，招架不再消耗速度」，
                 # 不再附带[血限]+15，故此处只发放遗物本体，不改面板。
                 ally.relics.append(Relic(name="重甲兵躯", effect="你无法闪避，招架不再消耗速度"))
                 applied.append(f"{ally.name}获得重甲兵躯")

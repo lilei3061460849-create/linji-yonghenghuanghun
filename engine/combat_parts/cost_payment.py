@@ -65,7 +65,7 @@ class CostPaymentMixin:
     def caozuo_check(self, entity: Entity, kind: str, payload=None):
         """【操纵】生效时，目标接下来 X 次非施法行动都必须等于施法者给出的指令。
 
-        （2026-11-02 用户令：【操作】改名【操纵】，作用范围由「下一次」改为「下X次」。）
+        （【操作】改名【操纵】，作用范围由「下一次」改为「下X次」。）
         每次通过校验消耗 1 次名额，名额用完状态消失。
         返回 None＝放行（含作废/消费两种情形）；返回 dict＝拒绝本次行动。
         施法（`cast` 系列）不在【操纵】管辖内，调用方不经过本函数。
@@ -222,7 +222,7 @@ class CostPaymentMixin:
     def _blood_pact_group(self, payer: Optional[Entity]) -> list[Entity]:
         """返回存活的共罪支付名额。
 
-        2026-11-02 用户令：**每个角色严格只占 1 份名额**。目标组由【共罪X】的
+        **每个角色严格只占 1 份名额**。目标组由【共罪X】的
         X 个非自身目标 + 发动者本身组成（X+1 人 = X+1 份），同一实体不得因为
         "发动者追加名额"再占第二份，否则它会替全组多摊一份代价。
         """
@@ -293,7 +293,7 @@ class CostPaymentMixin:
             "法限": entity.effective_mana_limit(),
             "速度": entity.current_speed,
             "速限": entity.speed_limit,
-            # 2026-11-01 用户令：支付[碎片]的可用额度＝真碎片＋假碎片。
+            # 支付[碎片]的可用额度＝真碎片＋假碎片。
             # 实际扣除仍先假后真（与"失去碎片"同一优先序），但"能不能付得起"
             # 必须按两池合计判定，否则假碎片在支付通道里等于不存在。
             "碎片": (
@@ -335,7 +335,7 @@ class CostPaymentMixin:
         if pact_group:
             if cost_share_target_ref:
                 raise ValueError("共罪持续期间由绑定目标组自动平分，不接受单目标分担引用")
-            # 共罪：N 份各扣 ceil(M/N)，绝不随机分配余数（2026-11-02 用户令）。
+            # 共罪：N 份各扣 ceil(M/N)，绝不随机分配余数。
             parts = self._divide_flat(amount, len(pact_group)) if pact_group else []
             required = {}
             for entity, part in zip(pact_group, parts):
@@ -444,7 +444,7 @@ class CostPaymentMixin:
         elif cost_type in {"碎片", "假碎片"}:
             pool = self.state if payer is self.state.player else payer
             if cost_type == "碎片":
-                # 2026-11-01 用户令：支付[碎片]时先扣[假碎片]，不足部分再扣真[碎片]。
+                # 支付[碎片]时先扣[假碎片]，不足部分再扣真[碎片]。
                 fake_before = max(0, int(getattr(pool, "fake_shards", 0) or 0))
                 real_before = max(0, int(getattr(pool, "shards", 0) or 0))
                 use_fake = min(fake_before, amount)
@@ -543,7 +543,7 @@ class CostPaymentMixin:
             parent_event_id=norm.event_id if norm else None,
         )
 
-    # 几个【迷失】的事件描述例子（写入 battle log，"注重变异成怪物的过程"——用户令 2026-09-28）：
+    # 几个【迷失】的事件描述例子（写入 battle log，"注重变异成怪物的过程"——）：
     _LOST_TRANSFORM_FLAVORS = [
         "皮肤一寸寸龟裂，黑液从缝隙里涌出，{name}的脊椎发出不属人类的弯折声——"
         "眼珠在眼眶里融化、重生为复眼，他/她抬起头时已不再认得队友。",
@@ -585,7 +585,7 @@ class CostPaymentMixin:
     def _resolve_mutation_lost(
         self, entity: Entity, parent: Optional[EffectContext | dict] = None,
     ) -> dict:
-        """非怪物角色异变达到阈值后的【迷失】处理（2026-09-28 用户令）。
+        """非怪物角色异变达到阈值后的【迷失】处理。
 
         判定：
           * 己方还有其他存活角色（轮回者/朋友/员工/造物）→ 该角色异变为怪物：
@@ -662,7 +662,7 @@ class CostPaymentMixin:
                         f"{flavor} {entity.name}已异变为怪物，与原队伍开战"}
 
     def _divide_flat(self, total: int, count: int) -> list[int]:
-        """平分规则的唯一实现（2026-11-02 用户令）：**每一份一律向上取整（ceil）**。
+        """平分规则的唯一实现：**每一份一律向上取整（ceil）**。
 
         `ceil(M / N) = (M + N - 1) // N`，负数按绝对值取整后还原符号。
         余数不再随机落到某一个人头上——随机分配会让"1 点生命由 2 人共罪分担"
@@ -956,7 +956,7 @@ class CostPaymentMixin:
                 and trigger_blood_pact):
             ally_detail["blood_pact_effects"] = self._trigger_xueqi_payment(
                 ally, cost_type, ally_amount, normalized_ctx)
-        # 2026-10-23 用户令：真龙之心改为「实际支付的数值型代价自动记门槛」，
+        # 真龙之心改为「实际支付的数值型代价自动记门槛」，
         # 不再有龙性货币。只记玩家本人承担的份额（朋友/员工代付不计）。
         _paid_here = int(owner_detail.get("paid", 0) or 0)
         if (_paid_here > 0 and payer is self.state.player

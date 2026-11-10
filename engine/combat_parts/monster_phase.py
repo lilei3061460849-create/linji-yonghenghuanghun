@@ -48,7 +48,7 @@ class MonsterPhaseMixin:
 
         DM裁定（2026-08-18）：怪物可在不同回合重复发动同一
         道纹（冷却类由 can_use 管辖），每回合每道纹至多一次。
-        2026-09-16 用户令：原「重复发动则 X 累加 +2×副本阶级」的递增机制已废止，
+        原「重复发动则 X 累加 +2×副本阶级」的递增机制已废止，
         重复发动按同一 X 计费。
         _monster_activated 保留为持续激活口径，不再作发动门禁。
         """
@@ -122,7 +122,7 @@ class MonsterPhaseMixin:
             if self.state.on_player_side(e)
         ]
         all_targets = [{"ref": ref, "name": e.name} for ref, e in refs.items()]
-        # 白板回合已于 2026-09-15 用户令删除：怪物（含[战始]首发、波次增援、[封印]回场）
+        # 白板回合已于 删除：怪物（含[战始]首发、波次增援、[封印]回场）
         # 进场当回合即可发动道纹，不再有"登场回合只能普攻"的限制。
         actors = []
         skipped = []
@@ -144,7 +144,7 @@ class MonsterPhaseMixin:
             activated = self._monster_activated.get(id(monster), set())
             round_used = self._monster_round_used(monster)
             daowen_options = []
-            # 2026-09-15 用户令：删除白板限制——增援怪/回场怪进场当回合即可发动道纹
+            # 删除白板限制——增援怪/回场怪进场当回合即可发动道纹
             # （R1 首发怪同理）。spawned_round 仍作为出生回合的记录字段保留，但不再
             # 参与任何"当回合不能发动道纹"的判定。
             # 养蛊场：怪物互斗时，道纹与普攻的合法目标都是「除自己以外的其它存活怪物」
@@ -218,11 +218,11 @@ class MonsterPhaseMixin:
                             continue
                     # 过滤当前付不起数值代价的候选（改写后代价可能超出怪物资源）
                     preview_target = (refs[legal_targets[0]["ref"]] if legal_targets else monster)
-                    # 2026-09-16 用户令：面板不写死 X 时，X 由发动方自选，
+                    # 面板不写死 X 时，X 由发动方自选，
                     # 「上限只受法限或者代价限制」。这里探出可负担上限，
                     # 连 X=1 都付不起 → 本道纹此刻不可发动，prepare 过滤。
                     # 探测只用 X 取代价类型（冷却与否与 X 无关），X=1 即可
-                    # （2026-10-09 用户令：波及 X≥2 下限 repealed，X=1 合法，X_MIN 已拔除）。
+                    # （波及 X≥2 下限 repealed，X=1 合法，X_MIN 已拔除）。
                     _probe_x = 1
                     cooldown_limited = (
                         DaoWenEngine.resolve(effective_name, _probe_x,
@@ -230,7 +230,7 @@ class MonsterPhaseMixin:
                         .get("cost_type") == "冷却")
                     if cooldown_limited:
                         # 怪物不得把冷却型道纹的 X 调大来延长战斗控制效果。
-                        # 2026-10-05 用户令成文（规则正文·怪物准则·共用面板）：怪物使用
+                        # 成文（规则正文·怪物准则·共用面板）：怪物使用
                         # 冷却代价类的道纹 X 值只能≤1，一律按 X=1 结算。
                         max_x = 1
                         effective_x = 1
@@ -238,7 +238,7 @@ class MonsterPhaseMixin:
                         max_x = self._monster_max_daowen_x(
                             monster, effective_name, preview_target,
                             hard_cap=len(dodge_target_options) if effective_name == "波及" else None)
-                        # 2026-10-09 用户令：波及 X 下限 repealed，X=1 合法——
+                        # 波及 X 下限 repealed，X=1 合法——
                         # 合法目标只有 1 个时波及降 X 到 1 照常给出（单目标全值）。
                         if max_x < 1:
                             continue
@@ -255,7 +255,7 @@ class MonsterPhaseMixin:
                     if not isinstance(effective_x, int) or effective_x < 1:
                         continue
                     # 【波及】实际标得到的目标数 = min(面板X, 合法目标数)（DM裁定
-                    # 2026-08-23 自适应降 X）。2026-10-09 用户令：X 下限 repealed——
+                    # 2026-08-23 自适应降 X）。X 下限 repealed——
                     # 降到 X=1 仍可发动（单目标全值），0 个合法目标时上面
                     # `if not dodge_target_options: continue` 已拦截，故此处无需再过滤。
                     # 面板 x 仍是展示口径，wave_effective_x 才是实际标数。
@@ -287,7 +287,7 @@ class MonsterPhaseMixin:
                     daowen_options.append({
                         "name": name,
                         "resolves_as": effective_name,
-                        # 2026-09-16 用户令：x_free 时面板没有 X，改由发动方在
+                        # x_free 时面板没有 X，改由发动方在
                         # [1, max_x] 内自选；x 字段保留为上限值以便旧调用方读取。
                         "x": effective_x,
                         "x_free": bool(getattr(inst, "x_free", False)),
@@ -312,7 +312,7 @@ class MonsterPhaseMixin:
             for target_option in attack_targets:
                 entity = refs[target_option["ref"]]
                 blood_pact_options = self.blood_shadow_cost_share_options(entity)
-                # 2026-10-25 用户令：怪物攻击与玩家攻击同一套逐击契约，
+                # 怪物攻击与玩家攻击同一套逐击契约，
                 # 目标侧可选防御也照同一套字段暴露（闪避/招架都要付当前速度）。
                 target_option["can_dodge"] = entity.current_speed > 0
                 target_option["can_parry"] = entity.current_speed > 0
@@ -334,7 +334,7 @@ class MonsterPhaseMixin:
                 skipped.append({"actor_ref": actor_ref, "monster": monster.name,
                                 "reason": "没有可支付的道纹或合法攻击目标"})
                 continue
-            # 2026-10-25 用户令：怪物攻击并入玩家同一套攻击机制——
+            # 怪物攻击并入玩家同一套攻击机制——
             # 击数＝当前速度（[攻击次数]＝[当前速度]，对全体同口径），
             # 每击伤害由攻击者在 damage_budget 内自由分配，目标可逐击闪避或招架。
             hit_count = max(0, monster.effective_attack_count())
@@ -400,7 +400,7 @@ class MonsterPhaseMixin:
                     return False
         return True
 
-    # 2026-09-16 用户令：面板不再写死 X，改由怪物 AI 在发动时自选，
+    # 面板不再写死 X，改由怪物 AI 在发动时自选，
     # 「上限只受法限或者代价限制」。试探上限时逐个 X 递增，取第一个付不起的 X 之前的值。
     # 代价随 X 单调递增（杀伐 X² 之类的超线性亦然），故首次失败即可停止，不必二分。
     _DAOWEN_X_PROBE_CAP = 30
@@ -410,7 +410,7 @@ class MonsterPhaseMixin:
         """求该道纹此刻可负担的最大 X。返回 0 表示连 X=1 都付不起（prepare 应过滤掉）。"""
         cap = hard_cap if hard_cap is not None else self._DAOWEN_X_PROBE_CAP
         best = 0
-        # 探测从 X=1 起步（2026-10-09 用户令：波及 X≥2 下限 repealed，X=1 合法，
+        # 探测从 X=1 起步（波及 X≥2 下限 repealed，X=1 合法，
         # X_MIN 装置已整套拔除；上限若连 X=1 都够不到则直接判不可发动）。
         x_floor = 1
         if cap < x_floor:
@@ -461,11 +461,11 @@ class MonsterPhaseMixin:
 
         target, tamper_rule = self.resolve_tampered_target(monster, target, effective_name, choice, refs)
 
-        # 2026-09-16 用户令：面板未写死 X（x_free）时，X 由发动方在提交里自选，
+        # 面板未写死 X（x_free）时，X 由发动方在提交里自选，
         # 「上限只受法限或者代价限制」——这里按 prepare 同一口径重新探一次上限并校验，
         # 防止提交方给出此刻已付不起的 X（资源在 prepare 之后可能已被消耗）。
         # 探测只用 X 取代价类型（冷却与否与 X 无关），X=1 即可
-        # （2026-10-09 用户令：波及 X≥2 下限 repealed，X=1 合法，X_MIN 已拔除，
+        # （波及 X≥2 下限 repealed，X=1 合法，X_MIN 已拔除，
         #  探测再也不会撞「X=1低于下限」守卫）。
         _probe_x = 1
         cooldown_limited = (
@@ -561,7 +561,7 @@ class MonsterPhaseMixin:
                 calc["haoduo_item_kind"] = next(k for k, n in pool if n == wanted)
             else:
                 calc["haoduo_item_kind"], calc["haoduo_relic_name"] = pool[0]
-        # 2026-09-16 用户令：怪物支付法力（旧条文"不支付法力"已废止）。
+        # 怪物支付法力（旧条文"不支付法力"已废止）。
         # 付不起的情况已由上一闸门挡掉，这里只做实际支付。
         # 注意：法力同时就是[攻击力]，此刻支付会削弱本回合**之后**的普攻——
         # 攻击与道纹的先后顺序由提交方（AI/操作者）决定，这正是"先攻后纹还是先纹后攻"的取舍。
@@ -683,7 +683,7 @@ class MonsterPhaseMixin:
         if not rewritten_as:
             activated.add(name)
             self._monster_round_used(monster).add(name)
-            # 2026-09-16 用户令：道纹递增（升级）机制已废止。X 恒为面板/借用时写定的值，
+            # 道纹递增（升级）机制已废止。X 恒为面板/借用时写定的值，
             # 重复发动按同一 X 计费，不再随发动次数累加。
         monster.mark_daowen_used(effective_name)
         monster.actions_used_this_round += 1
@@ -1016,7 +1016,7 @@ class MonsterPhaseMixin:
         """校验全部通过后的怪物阶段执行（原 resolve_monster_phase 执行体，语义不变）。"""
         refs = self._combat_entity_refs()
         results: list[dict] = []
-        # 守夜灯：用户裁定 2026-09-13 改为[回始]授予且不再清空，
+        # 守夜灯：改为[回始]授予且不再清空，
         # 故怪物阶段不再有「[敌回始]授予 / [敌回终]清空」这一对动作。
         # 2026-10-03：【爆裂】删除后不再有敌回终专属递减拍（_tick_baolie 已移除）。
         results.extend(prepared["skipped"])
@@ -1115,7 +1115,7 @@ class MonsterPhaseMixin:
                 for hit_index, hit in enumerate(hits):
                     if not isinstance(hit, dict):
                         raise ValueError("每次攻击必须是包含target_ref的对象")
-                    # 2026-10-25 用户令：与玩家攻击同一套逐击字段——
+                    # 与玩家攻击同一套逐击字段——
                     # 每击显式提交 damage（伤害分配）与 parry（目标招架）。
                     # 旧推演稿未带这两项时按「等伤一刀、不招架」补齐（与玩家侧同口径）。
                     hit.setdefault("damage", monster.effective_attack_power())

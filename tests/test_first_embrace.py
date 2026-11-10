@@ -410,7 +410,7 @@ def test_option5_truth_is_a_daowen_and_raises_dm_interrupt_without_spending_acti
                         and action.get("params_schema", {}).get("daowen_name") == "真理")
     assert "target_ref" in truth_action["params_schema"]
     assert "statement" in truth_action["params_schema"]
-    # 2026-10-23 用户裁定：X = 陈述句数，不再是固定1
+    # X = 陈述句数，不再是固定1
     assert "x" in truth_action["params_schema"]
     assert not any(action.get("action_type") == "use_truth_eye" for action in available)
 

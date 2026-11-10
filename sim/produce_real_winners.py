@@ -366,7 +366,7 @@ def play_first_tier(seed: int, region: str, sealed_path: str,
     （2026-10-13：【逼债】删除，债务武器换成赎金抽碎片）。
     spend_shards=True（默认）：七场局外把碎片尽量花成战力（高阶修行/附煞/
     共鸣遗物），封存带"已转化战力"而非"剩余碎片"——不花碎片怎么快速提高战力？
-    不提高战力怎么通过战斗？（用户裁定：花碎片是正常玩法，设为默认）"""
+    不提高战力怎么通过战斗？（花碎片是正常玩法，设为默认）"""
     rng = random.Random(seed)
     db_path = db_path or f"/tmp/winner_{seed}_{os.getpid()}_{random.random():.6f}.db"
     e = GameEngine(db_path=db_path, rng_seed=seed,

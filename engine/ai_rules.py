@@ -100,7 +100,7 @@ def battle_start_relic_choices(engine) -> dict:
     """战始可选遗物显式决策。
 
     - 猩红果实：流血10 → [战终]血限+2（永久成长）。付得起就用。
-    （2026-10-13 用户令：【三相残韵盘】遗物删除，决策分支一并移除。）
+    （【三相残韵盘】遗物删除，决策分支一并移除。）
     """
     active = {r.name for r in engine.state.relics
               if getattr(r, "enabled", True) and engine.state.sealed_relics.get(r.name, 0) <= 0}
@@ -127,7 +127,7 @@ def round_start_relic_choices(engine) -> dict:
       （战中"当前速度实际变化即 5 点伤害"是引擎自动结算的被动句，不进决策。）
     - 余火印：消耗龙心耐久X → +2X法力。有可用龙心且法力有缺口时用（X≤2）。
 
-    2026-10-12 用户令：【共罪】删掉与【透支】重合的「流血4X换X法力」后不再是回始
+    【共罪】删掉与【透支】重合的「流血4X换X法力」后不再是回始
     主动遗物，`共罪`/`对手共罪` 决策一并移除；它的平分功能不需要回始决策。
     """
     choices: dict = {}

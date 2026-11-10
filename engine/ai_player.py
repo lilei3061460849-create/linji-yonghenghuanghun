@@ -742,7 +742,7 @@ def create_ai_backend(provider: str = "placeholder", **kwargs) -> AIBackend:
 class AIPlayer:
     """第四宇宙的统一 AI 入口 —— **正式决策路径全部由 LLM 后端完成**。
 
-    2026-09-29 用户令：不用规则型 AI，全部决策交给 LLM。
+    不用规则型 AI，全部决策交给 LLM。
     2026-10-02 架构收口：本类**不再继承** ``TacticalAI``，也不再有规则战术
     兜底——旧的 ``tactical_combat=True`` 分支已删除。规则 AI（``engine/ai_tactics.py``）
     保留为隔离的实验/模拟工具，只能由 sim、probes 与测试直接实例化，永远不参与

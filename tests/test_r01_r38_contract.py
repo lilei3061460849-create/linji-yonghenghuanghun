@@ -553,7 +553,7 @@ def test_r25_r31_illegal_sculpture_and_live_battle_end(tmp_path):
 # R32-R38：持续语义与死斗
 
 def test_r32_r38_normal_deform_burn_and_transform_restore(tmp_path):
-    """2026-10-11 用户令：【衰败】删除，原「衰败发动不立即掉血、回始扣10%」段落移除。"""
+    """【衰败】删除，原「衰败发动不立即掉血、回始扣10%」段落移除。"""
     engine = _engine(tmp_path)
     player, monster = _controlled_combat(engine)
 
@@ -577,7 +577,7 @@ def test_r32_r38_normal_deform_burn_and_transform_restore(tmp_path):
     assert monster.current_speed == 4, "烁金不再附带失速"
     assert engine.state.shards == 0
 
-    # 【变形】2026-09-17 用户令重做：互换**当前速度 ↔ 当前法力**
+    # 【变形】重做：互换**当前速度 ↔ 当前法力**
     # （旧版写遗留字段 attack_power / attack_count，属性统一后对轮回者无效）
     # 本夹具 speed_limit=9 / mana_limit=100，故 5↔2 互换不会被上限钳掉。
     player.current_speed, player.current_mana = 5, 2

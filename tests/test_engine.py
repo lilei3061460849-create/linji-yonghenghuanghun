@@ -119,7 +119,7 @@ def test_daowen_calculations():
     # 测试庇护
     result = DaoWenEngine.resolve("庇护", 5, target=target)
     assert result["cost"] == 5
-    # 2026-11-01 用户令：庇护是纯次数型——只有"下X次"，没有回合倒计时。
+    # 庇护是纯次数型——只有"下X次"，没有回合倒计时。
     assert result["shelter_charges"] == 5 and "duration" not in result
     print("  ✓ 庇护X=5: 消耗5，免疫非[目标]来源的下5次失去生命（无回合倒计时）")
     
@@ -157,7 +157,7 @@ def test_resonance():
     assert result["target"] == "再生"
     print("  ✓ 杀伐 --反转--> 再生")
 
-    # 路径双向：再生 --反转--> 杀伐 同样成立（2026-10-07 用户令）
+    # 路径双向：再生 --反转--> 杀伐 同样成立
     result = ResonanceEngine.apply_resonance("再生", "反转", False, True, target_daowen="杀伐")
     assert result["success"], f"残韵失败: {result}"
     assert result["target"] == "杀伐"
@@ -478,7 +478,7 @@ def test_sculpture_and_proliferation():
     paths2 = combat2.settle_victory_paths()
     assert any(p["type"] == "proliferation" for p in paths2), "应触发癌变"
     assert m2.is_proliferated and not m2.is_alive
-    # 2026-10-05 用户令：癌变不再加成休整，奖励统一为【无限肉块】（1/1）
+    # 癌变不再加成休整，奖励统一为【无限肉块】（1/1）
     meats = [c for c in state2.consumables if c.kind == "infinite_meat"]
     assert len(meats) == 1 and meats[0].name == "无限肉块"
     assert meats[0].current_uses == 1 and meats[0].max_uses == 1
@@ -638,7 +638,7 @@ def test_relic_effects():
     assert m2.current_hp < 120, f"回锋刀应造伤，实HP{m2.current_hp}"
     print(f"  ✓ 回锋刀：回始造伤(失速3→9伤)，靶HP120→{m2.current_hp}")
 
-    # 第一杯（2026-09-23 用户令重做）：你受到的[回复]与失去的生命翻倍；
+    # 第一杯（重做）：你受到的[回复]与失去的生命翻倍；
     # 旧「免疫癌变」（原钱袋效果）条款已废止 → 持有者照样癌变。
     engine = GameEngine(db_path="/tmp/linji_tests/test_rulings.db")
     engine.execute_action("setup_attributes", {"name":"测试","blood_points": 11, "speed_points": 8, "mana_points": 6})
@@ -671,10 +671,10 @@ def test_monster_phase_engine():
     st.enemies.append(m)
     combat = CombatEngine(st, DiceEngine()); combat.reset_monster_activation()
 
-    # 第1回合：2026-09-15 用户令删除白板限制，怪物首回合即可发动道纹
+    # 第1回合：删除白板限制，怪物首回合即可发动道纹
     combat.round_start()  # current_round→1
     r1 = resolve_monster_phase(combat, {"打手": "全力"}, target_refs={"打手": "enemy:0"})
-    # 【全力】2026-09-17 用户令重做：攻击力锁定为其[法限]，持续X（旧版"攻击力+X，持续∞"已废止）
+    # 【全力】重做：攻击力锁定为其[法限]，持续X（旧版"攻击力+X，持续∞"已废止）
     assert m.has_status("全力"), "强化应作为状态生效"
     assert m.effective_attack_power() == m.mana_limit, \
         f"强化后攻击力应锁定为法限{m.mana_limit}，实{m.effective_attack_power()}"
@@ -1020,7 +1020,7 @@ def test_evolution_yuanchu():
     total1 = m_b.mutation_count
     assert total1 == 20 + 2 * m_b.mana_limit, "进化10 + 发动10 + 两次偏爱回始异变"
     assert m_b.is_alive, "20层应存活"
-    # 2026-09-16 用户令：道纹递增（每次发动 X+2×副本阶级）已废止，
+    # 道纹递增（每次发动 X+2×副本阶级）已废止，
     # X 保持借用时写定的数值不变，重复发动按同一个 X 计费。
     assert m_b.dao_wen["必中"].x_value == 2, "递增已废止，X应保持借用的2"
     combat3.round_start()

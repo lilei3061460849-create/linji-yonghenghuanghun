@@ -97,7 +97,7 @@ def test_bizhong_self_buff_makes_all_your_targets_unable_to_dodge():
     engine.combat.round_start()
     # 玩家对自己施必中2（self-buff，不需要target）
     calc = DaoWenEngine.resolve("必中", 2)
-    # 2026-11-01 用户令：必中＝发动者侧「接下来X次选中」，不做目标 debuff。
+    # 必中＝发动者侧「接下来X次选中」，不做目标 debuff。
     assert "bizhong_gain" in calc and calc["cost_mutation"] == 2
     engine.combat.apply_daowen_effect("必中", calc, player, target=None)
     assert engine.combat.bizhong_remaining(player) == 2

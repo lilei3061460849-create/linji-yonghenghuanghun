@@ -31,7 +31,7 @@ class DaowenEffectMixin:
                               requested) -> list[str]:
         """校验并返回失忆代价要永久销毁的道纹名（严禁代选）。
 
-        规则（2026-11-01 用户令）：
+        规则：
         - 必须显式给出 count 个**互不重复**且施法者当前持有的道纹名；
         - 未给出/数量不符/名字不存在/重复 → 直接报错，不扣任何代价；
         - 选中本次正在发动的道纹是合法的（代价先于结算，标记"已发动"只记名字）。
@@ -884,7 +884,7 @@ class DaowenEffectMixin:
     ) -> dict:
         """应用道纹效果；aoe_targets_override用于绑定两阶段决策的目标快照。"""
         if name == "豪夺":
-            # 2026-11-01 用户令：夺取对象必须确定，且**在任何代价支付之前**判定。
+            # 夺取对象必须确定，且**在任何代价支付之前**判定。
             # 无可夺遗物 → 报错中止（不扣碎片、不消耗出手）；目标有多件可夺遗物
             # 时玩家侧必须显式指定 relic_name，只有唯一候选才允许省略。
             # 2026-11-07 加强：候选扩为遗物/消耗品（_item_steal_candidates）。
@@ -1097,10 +1097,10 @@ class DaowenEffectMixin:
 
         # ---- 波及X（2026-08-21）：你发动的道纹同时作用于所有拥有波及效果的目标 ----
         # 数值型效果的总数值在所有目标（本次[目标]+波及目标，均排除施法者自身）间平分，
-        # 无法整除时每份向上取整（2026-11-02 用户令，ceil）；
+        # 无法整除时每份向上取整（，ceil）；
         # 状态类效果对波及目标原样生效。
         # 目标可选的道纹（如【变形】）未指定目标时兜底为施法者，避免 [None]
-        # 2026-10-09 用户令：波及 X≥2 下限 repealed——effective 非空即走分路，
+        # 波及 X≥2 下限 repealed——effective 非空即走分路，
         # 不再有「不足 2 个不分」的特判：平分份数=目标数，单目标时 _divide_flat(v,1)=[v]，
         # 全值落于该目标，与多目标完全同一条链路。
         wave_status_targets: list[Entity] = [target if target else caster]
@@ -1135,18 +1135,8 @@ class DaowenEffectMixin:
         # 导致 固执/束缚/畸变/全速 可在同一场里无限重复发动（束缚因此支配全局）。
         result.update(self.pay_daowen_cooldown(name,calc,caster))
 
-        # 蒙蔽(施法者伤害类道纹归零) / 坏死(目标禁疗)
-        # 强光探照灯（原【蒙蔽】）：使目标「造成的伤害」无效——伤害类输入；
-        # 只造成[失去生命]的效果（如杀伐的生命-X²）不属于伤害，因此不被挡。
-        mengbi_blocked = caster.has_status("蒙蔽") and any(
-            key in calc for key in ("target_damage", "aoe_damage", "total_damage", "hits"))
-        if mengbi_blocked:
-            for s in caster.status_effects:
-                if s.name == "蒙蔽" and s.value > 0:
-                    s.value -= 1
-                    if s.value <= 0: caster.status_effects.remove(s)
-                    break
-            result["mengbi_blocked"] = True
+        # 蒙蔽已在统一伤害入口拦截（damage_death._apply_hostile_damage）：
+        # 每个伤害实例耗1层，这里只按结果回填 mengbi_blocked 标记供战报/测试读取。
         huaisi_block = self._heal_blocked(target) and "target_heal" in calc
 
         # ---- 逆鳞加成（F2）：施法者若有层数，下次伤害+层数后清空 ----
@@ -1173,7 +1163,7 @@ class DaowenEffectMixin:
                                           "requested": amount, **loss})
         if "others_life_loss" in calc:
             # 【冲击】：除目标外**所有角色**失去生命——连自己和友方一起算，
-            # 这是这条道纹的代价之一，不做阵营筛选（用户令 2026-11-09）。
+            # 这是这条道纹的代价之一，不做阵营筛选。
             amount = calc["others_life_loss"]
             for other in list(self.state.get_all_player_side()) + list(self.state.get_all_enemy_side()):
                 if other is target or other is None or not other.is_alive:
@@ -1185,13 +1175,13 @@ class DaowenEffectMixin:
                                           "requested": amount, "aoe": "others", **loss})
         if "target_damage" in calc:
             base = calc["target_damage"] + (nilin_bonus if nilin_bonus else 0)
-            dmg_amount = 0 if mengbi_blocked else base
+            dmg_amount = base
             if "target_damage" in wave_pieces:
                 # 波及：修正后总数值平分（余数随机分配），逆鳞已计入首段总值。
                 pieces = self._divide_flat(dmg_amount, len(wave_status_targets))
                 wave_pieces["target_damage"] = pieces
                 for wt, piece in zip(wave_status_targets, pieces):
-                    piece = 0 if mengbi_blocked else piece
+                    piece = piece
                     dmg = self._apply_hostile_damage(
                         wt, piece, source=caster,
                         ctx={"timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
@@ -1213,6 +1203,7 @@ class DaowenEffectMixin:
                          "source": name, "source_type": "daowen", "actor": caster, "target": target,
                          "mechanic": "damage", "subtype": "daowen", "amount": dmg_amount,
                          "tags": {"daowen"}})
+            if isinstance(dmg, dict) and dmg.get("blocked_by") == "蒙蔽":
                 result["effects"].append({"type": "damage", "target": target.name, **dmg})
                 if dmg.get("actual_damage", 0) > 0:
                     caster.damage_dealt_this_round += dmg["actual_damage"]
@@ -1226,7 +1217,7 @@ class DaowenEffectMixin:
                     for _ in range(piece):
                         if not wt.is_alive:
                             break
-                        hit_amount = 0 if mengbi_blocked else 1
+                        hit_amount = 1
                         dmg_i = self._apply_hostile_damage(
                             wt, hit_amount, source=caster,
                             ctx={"timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
@@ -1236,7 +1227,8 @@ class DaowenEffectMixin:
                         total_act += dmg_i.get("actual_damage", 0)
                         total_abs += dmg_i.get("shield_absorbed", 0)
                     dmg = {"raw_damage": piece, "actual_damage": total_act, "shield_absorbed": total_abs,
-                           "hp_after": wt.current_hp, "died": not wt.is_alive}
+                           "hp_after": wt.current_hp, "died": not wt.is_alive,
+                           **({"blocked_by": "蒙蔽"} if dmg_i.get("blocked_by") == "蒙蔽" else {})}
                     result["effects"].append({"type": "damage", "target": wt.name, **dmg})
                     if total_act > 0:
                         caster.damage_dealt_this_round += total_act
@@ -1246,7 +1238,7 @@ class DaowenEffectMixin:
                 for _ in range(hits):
                     if not target.is_alive:
                         break
-                    hit_amount = 0 if mengbi_blocked else 1
+                    hit_amount = 1
                     dmg_i = self._apply_hostile_damage(
                         target, hit_amount, source=caster,
                         ctx={"timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
@@ -1256,7 +1248,8 @@ class DaowenEffectMixin:
                     total_act += dmg_i.get("actual_damage", 0)
                     total_abs += dmg_i.get("shield_absorbed", 0)
                 dmg = {"raw_damage": hits, "actual_damage": total_act, "shield_absorbed": total_abs,
-                       "hp_after": target.current_hp, "died": not target.is_alive}
+                       "hp_after": target.current_hp, "died": not target.is_alive,
+                       **({"blocked_by": "蒙蔽"} if dmg_i.get("blocked_by") == "蒙蔽" else {})}
                 result["effects"].append({"type": "damage", "target": target.name, **dmg})
                 if total_act > 0:
                     caster.damage_dealt_this_round += total_act
@@ -1264,12 +1257,12 @@ class DaowenEffectMixin:
             add = nilin_bonus
             nilin_bonus = 0
             chunk = calc["total_damage"] + add
-            dmg_amount = 0 if mengbi_blocked else chunk
+            dmg_amount = chunk
             if "total_damage" in wave_pieces:
                 pieces = self._divide_flat(dmg_amount, len(wave_status_targets))
                 wave_pieces["total_damage"] = pieces
                 for wt, piece in zip(wave_status_targets, pieces):
-                    piece = 0 if mengbi_blocked else piece
+                    piece = piece
                     dmg = self._apply_hostile_damage(wt, piece, source=caster, ctx={
                         "timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
                         "source": name, "source_type": "daowen", "actor": caster, "target": wt,
@@ -1290,12 +1283,12 @@ class DaowenEffectMixin:
                 })
                 if add:
                     dmg["nilin_bonus"] = add
-                result["effects"].append({"type": "damage", "target": target.name, **dmg})
+                    result["effects"].append({"type": "damage", "target": target.name, **dmg})
                 if dmg.get("actual_damage", 0) > 0:
                     caster.damage_dealt_this_round += dmg["actual_damage"]
 
         if "aoe_damage" in calc:
-            a = 0 if mengbi_blocked else calc["aoe_damage"]
+            a = calc["aoe_damage"]
             # 逆鳞加成仅作用于首个目标的首段伤害
             if nilin_bonus:
                 a += nilin_bonus
@@ -1357,7 +1350,7 @@ class DaowenEffectMixin:
                     caster.damage_dealt_this_round += dmg["actual_damage"]
 
         # ---- 攻击力代价（【再生衍生·献锋】）：**本回合**的攻击力减益 ----
-        # 2026-11-09 用户令：不是永久失去攻击力，否则配上【波及】就完爆【弱化】。
+        # 不是永久失去攻击力，否则配上【波及】就完爆【弱化】。
         # 走状态层（同名「献锋」），回终由 tick_status_effects 递减到期后自动复原；
         # 攻击力本身对轮回者由 current_mana 换算，面板字段不能直接扣。
         if calc.get("cost_type") == "攻击力" and calc.get("cost_attack", 0) > 0:
@@ -1620,7 +1613,7 @@ class DaowenEffectMixin:
                     name, EffectPolarity.BUFF.value)
                 result["effects"].append({"type": "attack_boost", "target": panel_target.name,
                                           "attack_power": panel_target.attack_power})
-            # 【全力】2026-09-17 用户令重做：攻击力锁定 = [法限]，持续X。
+            # 【全力】重做：攻击力锁定 = [法限]，持续X。
             # 走状态层（models.py::effective_attack_power 读取），不再写遗留字段
             # attack_power——那样对不写穿的轮回者无效。
             if (not panel_locked) and calc.get("attack_power_to_mana_limit"):
@@ -1654,7 +1647,7 @@ class DaowenEffectMixin:
                     name, EffectPolarity.NEUTRAL.value)
                 result["effects"].append({"type": "attack_fixed", "target": panel_target.name,
                                           "attack_power": panel_target.attack_power})
-            # 【全速】2026-09-17 用户令（原名【迟滞】）：攻击次数锁定 = [速限]，持续X。
+            # 【全速】（原名【迟滞】）：攻击次数锁定 = [速限]，持续X。
             # 走状态层（models.py::effective_attack_count 读取），不再写遗留字段
             # attack_count——那样对不写穿的轮回者无效。
             if (not panel_locked) and calc.get("attack_count_to_speed_limit"):
@@ -1673,7 +1666,7 @@ class DaowenEffectMixin:
                                           "attack_count": panel_target.attack_count})
         bianxing_blocked = False
         if name == "变形":
-            # 2026-09-17 用户令：变形改为可选目标，不指定时作用于施法者。
+            # 变形改为可选目标，不指定时作用于施法者。
             # 【定型】的判定对象随之改为**被变形者**（旧版固定查施法者，
             # 在"目标是别人"的场景下会误判）。
             _bx_target = target if target else caster
@@ -1681,7 +1674,7 @@ class DaowenEffectMixin:
                 bianxing_blocked = True
                 result["effects"].append({"type": "dingxing_block", "target": _bx_target.name})
             else:
-                # 2026-09-17 用户令重做：改为**[目标]当前速度 ↔ 当前法力互换**，
+                # 重做：改为**[目标]当前速度 ↔ 当前法力互换**，
                 # 互换后各自被上限钳制（clamp_immortal_body：当前速度≤[速限]、
                 # 当前法力≤[法限]），被钳掉的部分**凭空消失**，不返还。
                 #   例：敌方 20/3/10（血限/速度/法力，速限3）→ 互换得 速度10、法力3
@@ -1747,7 +1740,7 @@ class DaowenEffectMixin:
                                       "lost": calc["speed_penalty"], "speed": target.current_speed})
 
         # 【点金】/【典当】的失忆代价：永久失去施法者自选的X（典当为2X）种道纹。
-        # 2026-11-01 用户令：**严禁按持有顺序替玩家挑**。要销毁哪几种必须由调用方
+        # **严禁按持有顺序替玩家挑**。要销毁哪几种必须由调用方
         # 经 forget_daowen 显式给出；缺失/数量不符/重复/未持有/选中本次道纹一律报错，
         # 且本函数在代价结算最前段，报错时一处代价都还没付。
         if "forget_daowen" in calc and int(calc.get("forget_daowen") or 0) > 0:
@@ -1885,10 +1878,10 @@ class DaowenEffectMixin:
                                       "mana_declared": calc["mana_gain"]})
 
         # ---- 乱葬岗（二阶）专属道纹效果 ----
-        # 2026-10-08 用户令删除【镇尸】：与【坏死】是同一效果的两套实现，
+        # 删除【镇尸】：与【坏死】是同一效果的两套实现，
         # 保留【坏死】为「无法获得[回复]」的唯一入口。
         if name == "勾魂" and calc.get("transfer_daowen_count"):
-            # 【勾魂】（2026-11-08 用户令重做）：把[目标]的 X 种道纹整只转移
+            # 【勾魂】（重做）：把[目标]的 X 种道纹整只转移
             # 到 1 个[造物]身上，持续∞（本场内不自动返回）。旧「无法获得
             # [法力]」效果整条撤销。造物已持有同名时该种不转移、留在目标身上；
             # [目标]有【出土】余次时按次保留原纹、改为复制。
@@ -1958,7 +1951,7 @@ class DaowenEffectMixin:
         if name == "招魂" and calc.get("revive_temp_friend"):
             # 唤回1具已击灭的怪物尸体作造物（生命20X）
             dead = [e for e in self.state.dead_monsters if e.entity_type == "怪物"]
-            # 2026-11-01 用户令：无尸体必须报错且不吞代价；有尸体时按调用方
+            # 无尸体必须报错且不吞代价；有尸体时按调用方
             # 显式指定的那一具（revive_monster_name），不再默认取最后一具。
             if not dead:
                 raise ValueError(
@@ -2011,7 +2004,7 @@ class DaowenEffectMixin:
             # 【封印X】：目标由 use_daowen 的显式 target_ref/target 绑定，进入暂离队列。
             # 暂离不写离场/死亡上下文，也不产生碎片分类。
             #
-            # 2026-10-08 用户令：**任意目标**都可以被封印——敌人、[朋友]、[员工]、
+            # **任意目标**都可以被封印——敌人、[朋友]、[员工]、
             # 造物、敌对轮回者，以及施法者自己（延后 X 回合再入场）。
             # 校验随之放开：只要"还活着、还在场上、没处于暂离中"即可，
             # 不再要求 entity_type == "怪物"，也不再要求属于 enemies。
@@ -2043,7 +2036,7 @@ class DaowenEffectMixin:
             result["effects"].append({"type": "bizhong", "target": caster.name,
                                       "count": calc["guaranteed_hits"],
                                       "remaining": self.bizhong_remaining(caster)})
-        # 必中X（2026-11-01 用户令）：攻击者侧次数资源，不做目标 debuff。
+        # 必中X：攻击者侧次数资源，不做目标 debuff。
         # 「你接下来的X次选中，[目标]无法进行被动行动」——每次选中扣1次，
         # 扣减与判定统一走 CombatEngine.consume_bizhong()。
         if "bizhong_gain" in calc:
@@ -2097,10 +2090,10 @@ class DaowenEffectMixin:
             # 自身作用型道纹（变形/超频等）作用于施法者
             # 【点金】即时结算失忆代价与碎片收益，不挂持续状态。
             # 故从自身作用名单移除；状态【洗劫】本身保留，仍由【帮派令】发放。
-            # 2026-09-17 用户令：【超频】改为自由选择目标（选到谁给谁加速），不再属于
+            # 【超频】改为自由选择目标（选到谁给谁加速），不再属于
             # "自身作用型"。它原本留在本名单里也无效——其 calc 无 duration 键，
             # 进不了本状态块，实际效果一直是下方数值段给 target 加速。
-            # 2026-09-17 用户令：【变形】改为可自由选择目标（不指定时默认自身），
+            # 【变形】改为可自由选择目标（不指定时默认自身），
             # 故移出"自身作用型"名单，状态随之挂到目标身上（到期还原也落在目标）。
             # 【压迫】挂在本次显式[目标]身上，不再强制挂回施法者。
             self_targeted = name in ("飞行", "必中", "固执", "贯穿")
@@ -2201,7 +2194,7 @@ class DaowenEffectMixin:
                                       "penalty": penalty, "duration": duration})
 
         if name == "操纵":
-            # 【操纵】（2026-11-02 用户令，旧【操作】改名）：把目标接下来 **X 次**
+            # 【操纵】（，旧【操作】改名）：把目标接下来 **X 次**
             # 非施法行动交给施法者控制。指令由状态记录，每执行一次扣 1 次名额。
             # 未给指令时 order=None——到目标该行动时作废，代价不退。
             if target is None:
@@ -2221,7 +2214,7 @@ class DaowenEffectMixin:
                                       "uses": uses})
 
         if name == "饥饿":
-            # 【饥饿】（2026-11-02 用户令，补回漏项）：使[目标]的[血限]等同其当前
+            # 【饥饿】（，补回漏项）：使[目标]的[血限]等同其当前
             # 生命，持续X；到期把施加前的[血限]还原。血限下降走统一入口，压到当前
             # 生命以下才会产生"失去生命"窗口——这里恰好压到当前生命，不会掉血。
             if target is None:
@@ -2250,7 +2243,7 @@ class DaowenEffectMixin:
                 "duration": duration})
 
         if name == "扭曲":
-            # 【扭曲】（2026-11-02 用户令新增）：目标累积治疗量翻倍X次（×2^X）。
+            # 【扭曲】（新增）：目标累积治疗量翻倍X次（×2^X）。
             # 累积治疗量就是[癌变]用的 total_healed；翻倍后立即按阈值复核一次，
             # 否则"把对手推过癌变线"这条唯一意义会被拖到下一次回复才兑现。
             if target is None:
@@ -2267,7 +2260,7 @@ class DaowenEffectMixin:
                 result["effects"].append({"type": "cancer_check", "result": cancer})
 
         if name == "淬火":
-            # 【淬火】（2026-11-02 用户令新增）：目标所有消耗品当前耐久 +X。
+            # 【淬火】（新增）：目标所有消耗品当前耐久 +X。
             # 满耐久的条目按同样数值抬耐久上限，避免"对完好消耗品毫无收益"。
             if target is None:
                 raise ValueError("淬火需要显式目标")
@@ -2287,7 +2280,7 @@ class DaowenEffectMixin:
                 "gain": gain, "items": touched})
 
         if name in ("炽热", "熔化"):
-            # 【炽热】【熔化】（2026-11-02 用户令实装）：
+            # 【炽热】【熔化】（实装）：
             #   炽热：目标所有消耗品当前耐久 -X，最低 0，条目保留（0 耐久只是不能用）。
             #   熔化：直接销毁目标当前耐久 ≤ X 的条目（含 0 耐久），切断后续恢复/同名合并。
             if target is None:
@@ -2322,7 +2315,7 @@ class DaowenEffectMixin:
                     "threshold": threshold, "items": destroyed})
 
         if name == "锻造":
-            # 【锻造】（2026-11-02 用户令实装）：发现一个既有固定规格消耗品，
+            # 【锻造】（实装）：发现一个既有固定规格消耗品，
             # 给予其 X 点耐久（当前耐久与上限同取 max(基准上限, X)）。不接受自定义名称/效果。
             uses = max(1, int(calc.get("consumable_forge_uses") or x))
             self._offer_forge_discovery(caster, uses, result)
@@ -2617,8 +2610,7 @@ class DaowenEffectMixin:
                 "from": src, "to": dst, "layers": layers})
 
         if name == "共罪":
-            # X 个非自身目标 + 发动者本身 = X+1 份名额；2026-11-02 用户令：
-            # 每个角色严格只占 1 份，同一 runtime_id 不得重复占位。
+            # X 个非自身目标 + 发动者本身 = X+1 份名额；# 每个角色严格只占 1 份，同一 runtime_id 不得重复占位。
             import json
             targets = list(calc.get("targets") or [])
             expected = int(calc.get("x", 0) or 0)
@@ -2715,6 +2707,11 @@ class DaowenEffectMixin:
                             "type": "eternal_preference", "target": entity.name,
                             "status": status.name, "remaining_rounds": "∞",
                         })
+
+        # 蒙蔽标记回填：统一伤害入口拦截的结果（blocked_by=蒙蔽）向上暴露为 mengbi_blocked
+        if any(isinstance(e, dict) and e.get("blocked_by") == "蒙蔽"
+               for e in result.get("effects", [])):
+            result["mengbi_blocked"] = True
 
         return result
 

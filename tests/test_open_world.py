@@ -2140,7 +2140,7 @@ from sim.run_open_world_replay import run_playthrough, validate_complete_playthr
 def test_seeded_open_world_run_reaches_crown_ending_and_exports_engine_events():
     """整局跑完并导出事件账本：收尾条件现在是【最终的冠冕】。
 
-    2026-10-31 用户裁定：删除"最后两名幸存者强制会合死斗"，收尾改为
+    删除"最后两名幸存者强制会合死斗"，收尾改为
     「谁抢到冠冕谁带走」。本用例钉一个玩家真把冠冕带出副本的种子，
     验证终局事实、账本与战斗实录三者口径一致（并演示同 seed 可复现）。
     """

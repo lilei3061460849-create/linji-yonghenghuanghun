@@ -63,7 +63,7 @@ def test_dungeon_resonance_tetrahedron_complete():
 def test_reserved_slot_not_obtainable():
     """边界：闭环上的空占位符查得到，但**不能获得**——残韵走到它=无事发生。
 
-    不消耗残韵、不改写目标牌面、不授予施法者（2026-10-08 用户令）。
+    不消耗残韵、不改写目标牌面、不授予施法者。
     """
     DaoWenEngine.register_all()
     stock = {"转换": 3, "曲解": 3}
@@ -160,7 +160,7 @@ def test_huaisi_is_the_only_heal_block():
 
 
 def test_gouhun_transfers_daowen_to_creation():
-    """正常路径（2026-11-08 用户令重做）：勾魂X=法力5X，把[目标]X种道纹
+    """正常路径（重做）：勾魂X=法力5X，把[目标]X种道纹
     转移至1个[造物]身上，持续∞。旧「无法获得[法力]」整条撤销：
     不挂状态、不压制法力增益。"""
     st = GameState()

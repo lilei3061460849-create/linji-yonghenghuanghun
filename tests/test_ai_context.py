@@ -2,7 +2,7 @@
 
 外部 AI 常只会读取一个 GitHub raw URL，不能保证继续抓 README 的相对链接。AI_CONTEXT.md
 优先保留世界观、角色名单、角色扮演约束与外部推演守则，并附机制速查：道纹／遗物／
-法术／已实现副本各取名称与一行效果（2026-10-14 用户令——外部 AI 不知道具体道纹与
+法术／已实现副本各取名称与一行效果（——外部 AI 不知道具体道纹与
 遗物就会胡说八道）。通用规则正文、完整推演规范、副本机制细节与战报仍按需查询，
 不成为新的规则正本。
 
@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / README_FILE
 
 REQUIRED_SOURCES = {"故事文档.md", "AI_EXPERIENCE.md"}
-# 2026-10-24 用户令：AI 上下文必须能回答「这一手怎么打」。
+# AI 上下文必须能回答「这一手怎么打」。
 # 规则正文只以「战斗行动」节的整段摘录进入（见 extract_actions），
 # 其余机制原文照旧按需查询，因此它从 EXCLUDED_MECHANICS_SOURCES 移入速查。
 DIGEST_SOURCES = {"规则正文.md", "全道纹索引.md", "物品索引.md", "法术索引.md", "副本索引.md", "角色记忆"}

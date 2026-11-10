@@ -38,7 +38,7 @@ DaoWenEngine.register_all()
 
 # 纯草案节点只收录定义，不进入DaoWenEngine运行时注册表。
 # 流动与遗忘已于2026-10-29接入运行时，改从DaoWenEngine docstring取正本。
-# 2026-11-02 用户令：龙心谷【炽热】【熔化】【锻造】已实装，草案字典清空。
+# 龙心谷【炽热】【熔化】【锻造】已实装，草案字典清空。
 # 这里只预留给未来的纯草案节点（未注册进 DaoWenEngine 的候选），实装后必须移出。
 DRAFT_DAOWEN = {}
 
@@ -100,7 +100,7 @@ for region, text in sorted(dungeon_documents.items()):
                 if entry not in carriers[mm.group(1)]:
                     carriers[mm.group(1)].append(entry)
 
-# 残韵边（双向：2026-10-07 用户令——同一条边正反两向都走，同一种残韵、同样消耗一次）
+# 残韵边（双向：——同一条边正反两向都走，同一种残韵、同样消耗一次）
 out_edges = defaultdict(list)
 for _name in (list(DaoWenEngine._registry) + list(DRAFT_DAOWEN)):
     for _p in ResonanceEngine.get_available_resonance(_name):
@@ -125,7 +125,7 @@ def target_label(name):
     if "target" in p:
         return "需显式选定"
     # 【必中】的结算函数签名是 calculate_bizhong(x)，没有 target 形参，会被下面的
-    # 兜底判成「自身」——那是 2026-09-28 的 self-buff 旧口径。2026-10-12 用户令增强后
+    # 兜底判成「自身」——那是 2026-09-28 的 self-buff 旧口径。增强后
     # 它是「你选中的[目标]无法进行回合外行动」，按规则文必须显式选定目标。
     if name == "必中":
         return "需显式选定"
@@ -160,7 +160,7 @@ CATEGORY["共罪"] = "unimpl"
 CATEGORY["怜悯"] = "unimpl"      # 2026-11-02：怜悯随永夜庭四面体移入永夜庭
 # 2026-11-02：【操纵】【迟滞】随通用四面体二进通用核心；【透支】出生自带、【篡改】
 # 由荒疫古城移入通用，二者不属于杀伐发现池，列「其他通用」。
-# 2026-11-07 曾互换【封印】/【篡改】的四面体位置；2026-11-08 用户令再次调换：
+# 2026-11-07 曾互换【封印】/【篡改】的四面体位置；再次调换：
 # 【封印】回四面体二（随 SHAFA_LOOP_DAOWEN 标 shaifa），【篡改】回四面体四，列「其他通用」。
 CATEGORY["透支"] = "other"
 CATEGORY["篡改"] = "other"
