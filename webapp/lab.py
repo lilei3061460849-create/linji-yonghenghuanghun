@@ -148,7 +148,7 @@ def options(refresh: bool = False) -> dict[str, Any]:
         "attributes": {
             "total_points": 25,
             "blood_per_point": 6,
-            "points_per_speed": 2,
+            "points_per_speed": 1,   # 2026-11-09 用户令：1属性点=1速限
             "points_per_mana": 2,
             "limits": {"blood": MAX_BLOOD_LIMIT, "speed": MAX_TIER_LIMIT,
                        "mana": MAX_TIER_LIMIT, "shards": MAX_SHARDS, "uses": MAX_USES},
