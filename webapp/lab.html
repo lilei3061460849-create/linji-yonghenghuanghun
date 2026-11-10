@@ -253,6 +253,8 @@
         <select id="aSelect"></select>
       </div>
       <div class="hintline" id="aSummary"></div>
+      <div class="hintline" style="margin-top:8px;margin-bottom:4px">怪物队友（可选，最多 3 名，与 [朋友] 同机制：能被选中、能挡刀，不占你的出手）：</div>
+      <div id="aTeammateList"></div>
     </div>
 
     <div class="vs">VS</div>
@@ -268,6 +270,8 @@
           <select id="bSelect"></select>
         </div>
         <div class="hintline" id="bSummary"></div>
+        <div class="hintline" style="margin-top:8px;margin-bottom:4px">怪物队友（可选，最多 3 名，站在这张卡那侧）：</div>
+        <div id="bTeammateList"></div>
       </div>
       <div id="bMonsterBox" hidden>
         <div class="hintline" style="margin-bottom:6px">当前副本的怪物面板，点 ＋ 加入本场（最多 3 只）。</div>
@@ -330,6 +334,44 @@ let editing = null;          // 编辑器里的草稿
 let bMode = "char";          // 对战 B 方：char | monster
 const bMonsters = new Map(); // 怪物 B 方：name -> count
 const MAX_B_MONSTERS = 3;
+const aTeammates = new Map(); // A 方怪物队友：name -> count
+const bTeammates = new Map(); // B 方（角色模式）怪物队友：name -> count
+
+/* 阵营自选（2026-11-10 用户令）：侧位=A/B 槽位，阵营=单位类型，任意组合都行——
+   轮回者打轮回者、怪物打怪物、轮回者+怪物队友打轮回者。两侧都能带怪物队友。 */
+function renderTeammateList(map, boxId){
+  const box = $(boxId);
+  box.innerHTML = "";
+  for (const monster of regionMonsters()){
+    const row = el("div", "tool-row");
+    const left = el("div");
+    left.append(el("span", null, monster.name),
+      el("span", "eff", `血${monster.blood_limit} 速${monster.speed_limit} 法${monster.mana_limit}`));
+    const right = el("div", "row");
+    const minus = el("button", "mini", "−");
+    minus.onclick = () => {
+      const n = (map.get(monster.name) || 0) - 1;
+      if (n > 0) map.set(monster.name, n); else map.delete(monster.name);
+      renderTeammateList(map, boxId);
+    };
+    const count = el("span", "mono", String(map.get(monster.name) || 0));
+    const plus = el("button", "mini", "＋");
+    plus.onclick = () => {
+      let total = 0;
+      for (const value of map.values()) total += value;
+      if (total >= MAX_B_MONSTERS){ toast(`最多 ${MAX_B_MONSTERS} 名`); return; }
+      map.set(monster.name, (map.get(monster.name) || 0) + 1);
+      renderTeammateList(map, boxId);
+    };
+    right.append(minus, count, plus);
+    row.append(left, right);
+    box.append(row);
+  }
+}
+function renderTeammates(){
+  renderTeammateList(aTeammates, "aTeammateList");
+  renderTeammateList(bTeammates, "bTeammateList");
+}
 
 const $ = (id) => document.getElementById(id);
 function toast(text){
@@ -806,6 +848,7 @@ function renderDuel(){
   fillCharSelect($("bSelect"), prevB || prevA);
   updateDuelSummary();
   renderBMonsters();
+  renderTeammates();
 }
 
 function findChar(id){
@@ -867,8 +910,15 @@ function renderBMonsters(){
 async function startDuel(){
   const a = findChar($("aSelect").value);
   if (!a){ toast("先选 A 方角色"); return; }
+  const expand = (map) => {
+    const names = [];
+    for (const [name, count] of map){
+      for (let i = 0; i < count; i++) names.push(name);
+    }
+    return names;
+  };
   const payload = {
-    a: {id: a.id},
+    a: {id: a.id, teammates: expand(aTeammates)},
     manual_both: !!($("dManual") && $("dManual").checked),
     region: $("dRegion").value,
     direct: true,
@@ -884,7 +934,7 @@ async function startDuel(){
   } else {
     const b = findChar($("bSelect").value);
     if (!b){ toast("先选 B 方角色"); return; }
-    payload.b = {id: b.id};
+    payload.b = {id: b.id, teammates: expand(bTeammates)};
   }
   const btn = $("startDuel"), bar = $("duelProgress");
   btn.disabled = true;
@@ -957,7 +1007,10 @@ $("bModeChar").onclick = () => setBMode("char");
 $("bModeMonster").onclick = () => setBMode("monster");
 $("aSelect").onchange = updateDuelSummary;
 $("bSelect").onchange = updateDuelSummary;
-$("dRegion").onchange = () => { bMonsters.clear(); renderBMonsters(); };
+$("dRegion").onchange = () => {
+  bMonsters.clear(); aTeammates.clear(); bTeammates.clear();
+  renderBMonsters(); renderTeammates();
+};
 $("startDuel").onclick = startDuel;
 $("syncNow").onclick = async () => {
   $("syncNow").disabled = true;

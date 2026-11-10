@@ -29,6 +29,7 @@ from engine.daowen import DaoWenEngine
 from engine.daowen_text import daowen_effects
 from engine import derivatives as derivative_rules
 from engine.events import EVENT_CONSUMABLES, TWISTED_TOOL_LIBRARY
+from engine.models import MONSTER_MANA_RELIC, MONSTER_MANA_RELIC_EFFECT
 from engine.gamedata import (
     FIRST_EMBRACE_DAOWEN,
     MONSTER_TRANSFORM_DAOWEN,
@@ -549,6 +550,25 @@ def _apply_loadout(engine: GameEngine, sheet: dict[str, Any], region: str,
     granted = _grant_consumables(engine, sheet["consumables"])
     engine.state.shards = int(sheet["shards"])
     engine.state.energy = int(sheet["energy"])
+
+    # 2026-11-10 用户令（阵营自选）：A 方卡是怪物阵营时，你操作的这只实体就按
+    # 怪物逻辑运行——转换实体类型并补齐怪物出厂不变量（痛苦的偏爱、当前值给满），
+    # 与 Entity.__post_init__ 的怪物分支同口径。
+    if (sheet_faction(sheet) == "怪物"
+            and engine.state.player.entity_type != "怪物"):
+        player = engine.state.player
+        player.entity_type = "怪物"
+        if not any(r.name == MONSTER_MANA_RELIC for r in player.relics):
+            player.relics.append(Relic(
+                name=MONSTER_MANA_RELIC, effect=MONSTER_MANA_RELIC_EFFECT,
+                tags=["怪物自带"]))
+        if player.current_mana == 0 and player.mana_limit > 0:
+            player.current_mana = player.mana_limit
+        if player.current_speed == 0 and player.speed_limit > 0:
+            player.current_speed = player.speed_limit
+        engine.combat.init_monster_shards(player)
+        notes.append(f"阵营：A方卡【{name}】是怪物阵营——轮回者侧由你操作的这只"
+                     "单位按怪物逻辑运行（痛苦的偏爱、怪物道纹判定等同口径）")
     return granted
 
 
@@ -727,9 +747,6 @@ def start(payload: dict[str, Any]) -> dict[str, Any]:
     抛 ``ValueError`` 表示是用户输入问题（界面直接显示）；其它异常按 500 处理。
     """
     sheet = normalize_sheet(payload)
-    if sheet_faction(sheet) == "怪物":
-        raise ValueError("单人演武由你亲自扮演轮回者；怪物阵营卡请放进 A/B 对决"
-                         "（任意槽位都可以，会自动摆到怪物侧）")
     regions = _regions_by_name()
     region = str(payload.get("region") or "")
     if region not in regions:
@@ -785,18 +802,20 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         b_sheet = _resolve_side(b_side, "B方")
 
-    # 2026-11-10 用户令：阵营决定摆位，不按 A/B 槽位硬编码。
-    # 引擎的战斗结构是「轮回者侧 vs 怪物侧」，所以谁当轮回者由卡的阵营说了算：
-    # A 卡是怪物、B 卡是轮回者时，B 卡驱动轮回者侧、A 卡造成怪物对手——
-    # 单位完全按自己的阵营逻辑运行，与它填在哪个槽位无关。
-    swapped = (sheet_faction(a_sheet) == "怪物")
-    if swapped and b_sheet is None:
-        raise ValueError("A 方卡是怪物阵营时，B 方必须选一张轮回者阵营的角色卡"
-                         "（两边都是怪物侧，引擎摆不下）")
-    if swapped and sheet_faction(b_sheet) == "怪物":
-        raise ValueError("双方都是怪物阵营：演武场对决需要恰好一名轮回者")
-    player_sheet = b_sheet if swapped else a_sheet
-    rival_sheet = a_sheet if swapped else b_sheet
+    # 2026-11-10 用户令（阵营自选）：侧位就是 A/B 槽位（A=你操作的轮回者侧，
+    # B=对面侧），阵营只是**单位类型**，决定该单位按哪套规则逻辑运行——
+    # 轮回者打轮回者、怪物打怪物、轮回者+怪物队友打轮回者，任何组合都照摆。
+    # 引擎的两侧判定本来就是结构性的（on_player_side），与阵营无关，不做任何换位。
+    a_raw = payload.get("a") if isinstance(payload.get("a"), dict) else {}
+    a_teammates = _as_name_list(a_raw.get("teammates"), "A方怪物队友")
+    if len(a_teammates) > MAX_ENEMIES:
+        raise ValueError(f"A方怪物队友最多 {MAX_ENEMIES} 名")
+    b_teammates: list[str] = []
+    if b_sheet is not None:
+        b_raw = b_side if isinstance(b_side, dict) else {}
+        b_teammates = _as_name_list(b_raw.get("teammates"), "B方怪物队友")
+        if len(b_teammates) > MAX_ENEMIES:
+            raise ValueError(f"B方怪物队友最多 {MAX_ENEMIES} 名")
 
     engine = _new_engine(payload)
     notes: list[str] = []
@@ -809,18 +828,23 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
     # 演武场不再需要任何开关：A 方不会白拿先手，也不需要给 B 方开特权。
     if manual_both:
         notes.append("推演模式：双方都由你操作，B 方回合不使用 AI。")
-    _apply_loadout(engine, player_sheet, region, notes)
+    _apply_loadout(engine, a_sheet, region, notes)
 
+    # A 方怪物队友：进 state.friends（轮回者侧的队友），与 [朋友] 同机制——
+    # 可被选中为攻击目标、可挡刀，不占用玩家自己的出手。
+    if a_teammates:
+        engine.state.friends.extend(_monster_entities(engine, a_teammates))
+        notes.append(f"A方怪物队友（轮回者侧）：{'、'.join(a_teammates)}")
+
+    entities: list[Any] = []
     if b_is_monster:
         entities = _monster_entities(engine, b_names)
     else:
-        assert rival_sheet is not None
-        entities = [_make_rival(engine, rival_sheet, player_sheet["name"])]
-        if swapped:
-            notes.append(
-                f"阵营摆位（2026-11-10 用户令）：A方卡【{a_sheet['name']}】是怪物阵营"
-                f"→ 怪物侧；B方卡【{b_sheet['name']}】是轮回者阵营 → 轮回者侧。"
-                "单位各自按阵营逻辑运行，与槽位无关。")
+        assert b_sheet is not None
+        entities.append(_make_rival(engine, b_sheet, a_sheet["name"]))
+        if b_teammates:
+            entities.extend(_monster_entities(engine, b_teammates))
+            notes.append(f"B方怪物队友（对面侧）：{'、'.join(b_teammates)}")
 
     if direct:
         # 用户令 2026-11-09：不需要副本当地图，直接开打。
@@ -839,7 +863,7 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
         b_blood, b_speed, b_mana = _sheet_limits(b_sheet)
         notes.append(f"B方 {b_sheet['name']}（{sheet_faction(b_sheet)}）："
                      f"{b_blood}/{b_speed}/{b_mana}")
-        if b_sheet["relics"] and sheet_faction(b_sheet) == "轮回者" and not swapped:
+        if b_sheet["relics"] and sheet_faction(b_sheet) == "轮回者":
             enabled = min(len(b_sheet["relics"]), max(0, (b_blood + 29) // 30))
             notes.append(
                 f"B方遗物按敌方轮回者通道（opponent_relics）生效："
