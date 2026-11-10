@@ -340,6 +340,30 @@
       "energy": 0,
       "created_at": "2026-11-10T12:05:44",
       "updated_at": "2026-11-10T12:05:44"
+    },
+    {
+      "mode": "free",
+      "blood_points": 0,
+      "speed_points": 0,
+      "mana_points": 0,
+      "blood_limit": 150,
+      "speed_limit": 4,
+      "mana_limit": 3,
+      "attribute_points": 0,
+      "id": "6a5a0c3a720b",
+      "name": "怪A",
+      "faction": "怪物",
+      "resonance": "转换",
+      "daowen": [
+        "杀伐"
+      ],
+      "relics": [],
+      "consumables": [],
+      "shards": 20,
+      "roll": {},
+      "energy": 0,
+      "created_at": "2026-11-10T12:19:19",
+      "updated_at": "2026-11-10T12:19:19"
     }
   ]
 }
