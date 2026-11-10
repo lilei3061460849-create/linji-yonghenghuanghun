@@ -9,7 +9,6 @@ from __future__ import annotations
 from .. import custom_resources
 from .. import derivatives as derivative_rules
 from ..action_registry import ACTION_REGISTRY
-from ..consumables import note_action_targets
 from ..daowen import DaoWenEngine, ResonanceEngine
 from ..enums import CombatSubphase, GamePhase
 from ..gamedata import learnability_error
@@ -206,14 +205,6 @@ class DaowenHandlersMixin:
                 return {"success": False,
                         "error": f"【压迫】生效中：{actor.name}只能以自身为[目标]（豁免目标：{locked_by.name}）"}
             return {"success": False, "error": f"{target.name}处于飞行，无法被选中"}
-        # 自愈X「目标死亡时」：显式目标（默认自身不算选中；波及X 记全部已提交目标）。
-        _dw_selected = [target] if (target_ref or target_name) else []
-        for _dt in params.get("dodge_targets") or []:
-            if isinstance(_dt, dict) and _dt.get("target_ref"):
-                _ent = refs.get(_dt["target_ref"])
-                if _ent is not None:
-                    _dw_selected.append(_ent)
-
         duel_error = self._check_duel_turn_or_error(actor)
         if duel_error:
             return duel_error
@@ -470,7 +461,6 @@ class DaowenHandlersMixin:
             policy=self.combat.CAST_STEP_POLICY)
         if early is not None:
             if early.reason in (_IR.CASTER_DEAD,_IR.CASTER_UNAVAILABLE):
-                note_action_targets(self.state, actor, _dw_selected)
                 return {"success": True, "action": (f"{actor.name}发动道纹前被反应法术命零" if early.reason==_IR.CASTER_DEAD
                                                      else f"{actor.name}发动道纹前被反应法术移出战场"),
                         "result": {"trigger_spell_logs": trigger_logs, "daowen_resolved": False}}
@@ -545,7 +535,6 @@ class DaowenHandlersMixin:
             actor.mark_daowen_used(name)
             if self.state.in_final_duel and not self._duel_side_can_act("player_side") and not self._duel_side_can_act("opponent_side"):
                 self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
-            note_action_targets(self.state, actor, _dw_selected)
             return {
                 "success": True,
                 "action": f"发动道纹【{name}X={x}】" + (f"（{actor.name}听从指令发动）" if is_command else ""),
@@ -594,7 +583,6 @@ class DaowenHandlersMixin:
             execution["dodged"] = dodge_log
         if self.state.in_final_duel and not self._duel_side_can_act("player_side") and not self._duel_side_can_act("opponent_side"):
             self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_END.value
-        note_action_targets(self.state, actor, _dw_selected)
 
         return {
             "success": True,

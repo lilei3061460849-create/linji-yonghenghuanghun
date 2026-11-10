@@ -508,7 +508,7 @@ class MonsterLifeMixin:
         absorbed = monster.total_healed
         meat = Consumable(
             name="无限肉块",
-            effect="使用后恢复10生命，不计入癌变累计治疗量；战终自愈80%已损耐久",
+            effect="使用后恢复10生命，不计入癌变累计治疗量；战终恢复80%已损耐久，向上取整",
             current_uses=1,
             max_uses=1,
             kind="infinite_meat",

@@ -12,7 +12,7 @@ import uuid
 
 from ..action_registry import ACTION_REGISTRY
 from ..combat_events import register_combat_event_observer
-from ..consumables import ZIYU_TRIGGER_BATTLE_END, apply_zi_yu_trigger, note_action_targets
+from ..consumables import apply_battle_end_durability_recovery
 from ..effect_context import make_context, normalize_context
 from ..enums import (CombatSubphase, EffectPolarity, EffectScope, GamePhase,
                      TriggerTiming)
@@ -252,10 +252,6 @@ class CombatHandlersMixin:
                 return budget_error
             pending["action_spent"] = True
             spent_now = True
-        # 「目标死亡时」按是否被选中判定，而不是是否命中；必须在结算前记账，
-        # 否则首击击杀目标时，死亡钩子先于此处记账执行，会漏掉自愈触发。
-        note_action_targets(self.state, attacker,
-                            [refs.get(hit["target_ref"]) for hit in hits])
         results = []
         for index, hit in enumerate(hits):
             target = refs.get(hit["target_ref"])
@@ -1108,8 +1104,6 @@ class CombatHandlersMixin:
         pool = self._monster_pool_for_battle()
         endless_cycle = int(getattr(self.state, "endless_cycle", 0) or 0)
         self.state.enemies.clear()
-        # 自愈X「目标死亡时」：新战斗选中集合清零（上场选过的死了不算）。
-        self.state.player_selected_targets.clear()
         self.state.monster_reinforcements = []
         self.state.delayed_monster_reentries = []
         drawn_names = []
@@ -1369,8 +1363,8 @@ class CombatHandlersMixin:
         modifiers.pop("huifeng_target_ref", None)
         modifiers.pop("huifeng_target_ref_opponent", None)
 
-        # 【自愈X】战终结算（2026-10-14 用户令通用化：无限肉块 80% 迁入时机表）。
-        zi_yu_logs = apply_zi_yu_trigger(self.state.consumables, ZIYU_TRIGGER_BATTLE_END)
+        # [战终]耐久恢复：只结物品种类声明表里写明的条目（无限肉块 80%已损耐久）。
+        zi_yu_logs = apply_battle_end_durability_recovery(self.state.consumables)
 
         # [战终]对所有角色统一清除局内回复、格挡与状态；不得只清轮回者。
         all_characters = (([self.state.player] if self.state.player else [])
