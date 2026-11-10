@@ -508,6 +508,30 @@
       "energy": 0,
       "created_at": "2026-11-10T12:19:35",
       "updated_at": "2026-11-10T12:19:35"
+    },
+    {
+      "mode": "free",
+      "blood_points": 0,
+      "speed_points": 0,
+      "mana_points": 0,
+      "blood_limit": 90,
+      "speed_limit": 3,
+      "mana_limit": 2,
+      "attribute_points": 0,
+      "id": "444355accb0d",
+      "name": "轮E",
+      "faction": "轮回者",
+      "resonance": "转换",
+      "daowen": [
+        "杀伐"
+      ],
+      "relics": [],
+      "consumables": [],
+      "shards": 20,
+      "roll": {},
+      "energy": 0,
+      "created_at": "2026-11-10T12:19:36",
+      "updated_at": "2026-11-10T12:19:36"
     }
   ]
 }
