@@ -40,33 +40,33 @@ def test_repeated_one_damage_never_accumulates_into_hp_loss():
 
 
 def test_real_lianji_is_blocked_per_hit():
-    """【连击】生命5X 换 5X 段各 1 点：逐笔减伤把 50 段全吃掉，目标毫发无损。"""
+    """【连击】生命10X 换 5X 段各 1 点：逐笔减伤把 25 段全吃掉，目标毫发无损。"""
     e = _engine("longlin_lianji")
     p = e.state.player
     _give(p, "连击")
     target = _monster(e, "鳞甲靶", hp=100)
     target.relics.append(Relic("叠鳞甲", ""))
     hp0 = p.current_hp
-    r = e.execute_action("use_daowen", {"daowen_name": "连击", "x": 10,
+    r = e.execute_action("use_daowen", {"daowen_name": "连击", "x": 5,
         "target": target.name, "dodge": False, "blood_shadow": False})
     assert r["success"], r
     assert target.current_hp == 100
-    assert p.current_hp == hp0 - 50  # 【连击】生命5X＝50
+    assert p.current_hp == hp0 - 50  # 【连击】生命10X＝50
 
 
 def test_single_hit_derivative_is_not_blocked_into_zero():
-    """同一条遗物挡不住单段 5X：【虚耗】照常打出，只被减 1 点。"""
+    """同一条遗物挡不住单段大额：【虚耗】照常打出，只被减 1 点。"""
     e = _engine("longlin_big_hit")
     p = e.state.player
     _give(p, "虚耗")
     target = _monster(e, "鳞甲靶", hp=100)
     target.relics.append(Relic("叠鳞甲", ""))
     mana_cap0 = p.mana_limit
-    r = e.execute_action("use_daowen", {"daowen_name": "虚耗", "x": 10,
+    r = e.execute_action("use_daowen", {"daowen_name": "虚耗", "x": 1,
         "target": target.name, "dodge": False, "blood_shadow": False})
     assert r["success"], r
-    assert target.current_hp == 100 - 49   # 50 点整笔，龙鳞减 1
-    assert p.mana_limit == mana_cap0 - 10  # 法限X
+    assert target.current_hp == 100 - 11   # 12 点整笔，龙鳞减 1
+    assert p.mana_limit == mana_cap0 - 1   # 法限X
 
 
 def test_enabled_and_sealed_relic_rules_are_respected():

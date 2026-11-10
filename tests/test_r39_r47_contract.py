@@ -246,8 +246,9 @@ def test_r42_target_daowen_trigger_is_explicit(tmp_path):
         ]}}},
     })
     assert result["success"] and result["trigger_spell_logs"]
-    # 玩家受反应杀伐1（1）＋连击1（5×1）共6；对手受玩家杀伐1（1）并另付连击生命5，也为6。
-    assert player.current_hp == 94 and opponent.current_hp == 94
+    # 玩家受反应杀伐1（1）＋连击1（5×1）共 6；对手受玩家杀伐1（1）并另付连击生命 10，共 11。
+    # 2026-11-09：连击代价抬到生命10X，伤害仍是 5X。
+    assert player.current_hp == 94 and opponent.current_hp == 89
 
 
 # R43：确定性事件

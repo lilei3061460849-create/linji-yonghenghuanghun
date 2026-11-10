@@ -176,12 +176,12 @@ def test_ranxue_derivative_costs_life():
 
 
 def test_zheshou_derivative_costs_blood_limit():
-    """【折年】血限2X → X法力。"""
+    """【折年】血限2X → 2X 法力（2026-11-09 抬汇率：效果量 X→2X）。"""
     engine, player, snap, r = _cast_touzhi("折年")
     assert r["success"], r
     assert player.blood_limit == snap["bl"] - 2
     assert player.current_hp == snap["bl"] - 2
-    assert player.current_mana == 1
+    assert player.current_mana == 2
 
 
 def test_jidai_derivative_costs_speed():
@@ -211,7 +211,7 @@ def test_zheshou_heart_offsets_same_channel_cost():
     assert fx["dragon_heart_offset"] == 1
     assert player.blood_limit == bl0 - 1, "2点代价被抵消1点，实付1点"
     assert engine.state.consumables[0].current_uses == 4
-    assert player.current_mana == 1
+    assert player.current_mana == 2
 
 
 def test_touzhi_legacy_channel_param_is_ignored():

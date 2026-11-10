@@ -89,10 +89,11 @@ def test_blood_oath_ring_grants_shield_on_first_bleed_cost():
     _start_with_enemy(engine, Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100))
 
     hp_before = engine.state.player.current_hp
-    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 5, "target": "靶怪"})
+    # 2026-11-09：连击代价抬到生命10X → X=2 付 20，拿到等量 20 格挡。
+    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 2, "target": "靶怪"})
     assert r["success"] is True
-    assert engine.state.player.shield == 25
-    assert engine.state.player.current_hp == hp_before - 25
+    assert engine.state.player.shield == 20
+    assert engine.state.player.current_hp == hp_before - 20
 
 
 def test_blood_oath_ring_grants_life_instead_when_low_hp():
@@ -100,13 +101,14 @@ def test_blood_oath_ring_grants_life_instead_when_low_hp():
     engine = _new_engine("oath_life", daowen="连击")
     engine.state.relics.append(Relic(name="血誓戒", effect=""))
     _give_daowen(engine.state.player, "连击", cost_type="生命")
-    engine.state.player.current_hp = 20  # blood_limit=60, 支付后20-15=5 <= 30%*60=18
+    engine.state.player.current_hp = 20  # blood_limit=60, 支付后20-30≤0 → 由引擎按 0 处理
     _start_with_enemy(engine, Entity(name="靶怪", entity_type="怪物", blood_limit=100, current_hp=100))
 
-    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 3, "target": "靶怪"})  # 生命价5X=15
+    # 2026-11-09：连击生命价 10X。X=1 付 10：20-10=10 ≤ 30%*60=18 → 触发生命返还。
+    r = engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 1, "target": "靶怪"})
     assert r["success"] is True
     assert engine.state.player.shield == 0, "低血量时不应给格挡"
-    assert engine.state.player.current_hp == 5 + 15, "应改为获得等量生命(15)"
+    assert engine.state.player.current_hp == 10 + 10, "应改为获得等量生命(10)"
 
 
 def test_blood_oath_ring_only_once_per_round():

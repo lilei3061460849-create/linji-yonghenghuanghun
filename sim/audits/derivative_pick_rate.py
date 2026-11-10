@@ -145,42 +145,55 @@ def _multi_hit(hits: int, per_hit: float, shield: float, reduce: float) -> tuple
     return total, shield
 
 
+def _hp_loss(ent: dict, amount: float) -> float:
+    return min(ent["hp"], amount)
+
+
 def output_of(name: str, state: dict) -> float:
     """把一条衍生道纹的产出折成「生命等价」，按敌/友两侧净额计。"""
+    spec = derivative_rules.spec_of(name)
     x = state["x"]
+    amount = spec.effect_amount(x)      # 效果量跟着 engine/derivatives.py 的 effect_rate 走
     enemies, allies = state["enemies"], state["allies"]
+    kind = spec.effect_kind
     value = 0.0
 
-    if name == "连击":
-        for e in enemies:  # 玩家会挑「打得最实」的那个，但只结算 5X 段
-            dealt, _ = _multi_hit(5 * x, 1.0, e["shield"], e["reduce"])
-            value = max(value, dealt)
-    elif name in ("虚耗", "断脉"):
-        pierce = name == "断脉"
+    if kind == "multi_hit":
+        per_hit = amount / (5.0 * x) if x else 1.0     # 每段伤害（默认 1 点）
         for e in enemies:
-            if pierce:
-                # 无视格挡只跳过护盾；龙鳞类逐笔减伤照常生效（2026-11-09 抽检确认）。
-                dealt, _ = _through_shield(5.0 * x, 0.0, e["reduce"])
-            else:
-                dealt, _ = _through_shield(5.0 * x, e["shield"], e["reduce"])
+            dealt, _ = _multi_hit(5 * x, per_hit, e["shield"], e["reduce"])
             value = max(value, dealt)
-    elif name == "买命":
+    elif kind == "damage":
         for e in enemies:
-            value = max(value, min(e["hp"], 5.0 * x))   # 裸失血，不吃护盾/减伤
-    elif name == "冲击":
-        # 除[目标]外所有角色：其余敌人 + 自己 + 友方全部失血。目标被排除。
-        target = max(range(len(enemies)), key=lambda i: enemies[i]["hp"])
-        for i, e in enumerate(enemies):
-            if i != target:
-                value += min(e["hp"], 5.0 * x)
-        if not OVERRIDES.get(name, {}).get("no_self"):
-            value -= 5.0 * x                    # 自己
-        value -= sum(min(a["hp"], 5.0 * x) for a in allies)
-    elif name == "燃命" or name == "折年" or name == "搏命":
-        value = x * MANA_TO_HP                  # 获得 X 法力
-    elif name == "献锋":
+            dealt, _ = _through_shield(amount, e["shield"], e["reduce"])
+            value = max(value, dealt)
+    elif kind == "ignore_shield":
+        for e in enemies:
+            # 无视格挡只跳过护盾；龙鳞类逐笔减伤照常生效（2026-11-09 引擎抽检确认）。
+            dealt, _ = _through_shield(amount, 0.0, e["reduce"])
+            value = max(value, dealt)
+    elif kind == "life_loss":
+        for e in enemies:
+            value = max(value, _hp_loss(e, amount))    # 裸失血，不吃护盾/减伤
+    elif kind == "others_life_loss":
+        # 除[目标]外所有角色失血；[目标]由玩家挑，取最优解：
+        #   选自己 → 全体敌人 + 友方失血，自己不失血
+        #   选某个敌人 → 其余敌人 + 自己 + 友方失血
+        allow_self = OVERRIDES.get(name, {}).get("self_target", True)
+        best_self = -1e9
+        if allow_self:   # 目标选自己：全体敌人 + 友方失血，自己不失血
+            best_self = sum(_hp_loss(e, amount) for e in enemies) \
+                - sum(_hp_loss(a, amount) for a in allies)
+        for i in range(len(enemies)):
+            cand = sum(_hp_loss(e, amount) for j, e in enumerate(enemies) if j != i) \
+                - amount - sum(_hp_loss(a, amount) for a in allies)
+            best_self = max(best_self, cand)
+        value = best_self
+    elif kind == "mana_gain":
+        value = amount * MANA_TO_HP
+    elif kind == "heal":
         missing = max(0.0, state["stock"]["血限"] - state["hp"])
-        value = min(4.0 * x, missing)
+        value = min(amount, missing)
     else:  # pragma: no cover
         raise SystemExit(f"未知衍生道纹: {name}")
     return value * OVERRIDES.get(name, {}).get("output", 1.0)
@@ -189,10 +202,12 @@ def output_of(name: str, state: dict) -> float:
 def cost_of(name: str, state: dict) -> float:
     """代价＝库存占比×不可逆权重。"""
     spec = derivative_rules.spec_of(name)
-    rate = OVERRIDES.get(name, {}).get("rate", spec.rate)
+    ov = OVERRIDES.get(name, {})
+    rate = ov.get("rate", spec.rate)
+    kind = ov.get("cost_kind", spec.cost_kind)
     amount = rate * state["x"]
-    stock = max(1.0, state["stock"].get(spec.cost_kind, 1.0))
-    return (amount / stock) * ACTIVE_IRREVERSIBLE[spec.cost_kind]
+    stock = max(1.0, state["stock"].get(kind, 1.0))
+    return (amount / stock) * ACTIVE_IRREVERSIBLE[kind]
 
 
 def score_of(name: str, state: dict) -> float:
@@ -253,7 +268,7 @@ def run(trials: int, seed: int = 20261109, profile: str = "基准") -> dict:
             rows.append({
                 "母本": parent,
                 "名": n,
-                "支付": f"{spec.cost_kind}{rate}X",
+                "支付": f"{OVERRIDES.get(n, {}).get('cost_kind', spec.cost_kind)}{rate}X",
                 "平均产出": sum(outputs[n]) / len(outputs[n]),
                 "平均代价占比": sum(costs[n]) / len(costs[n]),
                 "效率得分": sum(scores[n]) / len(scores[n]),
@@ -342,7 +357,7 @@ def render(base: dict, profiles: dict[str, dict], tuned: dict[str, dict]) -> str
     lines.append("**模型不是规则**：产出按生命等价（对方失血 1:1、回复 1:1、"
                  f"1 法力 = {MANA_TO_HP:.0f} 生命）；代价按「库存占比×不可逆权重」"
                  "（本场可回复 0.5／本局永久刻度 2.0／局外碎片 1.0）。"
-                 "参数改动后结论若不变才算稳，见下文三档对照。")
+                 "效果量与倍率直接读 `engine/derivatives.py`，不在这里另写一份。")
     lines.append("")
     lines += _table(rows)
 
@@ -351,41 +366,32 @@ def render(base: dict, profiles: dict[str, dict], tuned: dict[str, dict]) -> str
     lines.append("")
     lines.append("| 名 | " + " | ".join(profiles) + " |")
     lines.append("|---" * (len(profiles) + 1) + "|")
-    by_name = {r["名"]: r for r in rows}
     for name in derivative_rules.DERIVED_DAOWEN:
         cells = []
-        for prof, rep in profiles.items():
+        for _prof, rep in profiles.items():
             rate = next(r["选取率"] for r in rep["rows"] if r["名"] == name)
             cells.append(f"{rate:.1%}")
         lines.append(f"| {name} | " + " | ".join(cells) + " |")
 
     lines.append("")
-    lines.append("## 结构性发现")
+    lines.append("## 结构性说明")
     lines.append("")
-    lines.append("1. **【断脉】一家独大**：血限库存 40–90，付 1 点占比极小，"
-                 "效果又无视格挡，效率分是池内中位数的 5 倍以上。")
-    lines.append("2. **【虚耗】抬不动**：法限库存只有 2–14，付 1 点就是一大截库存；"
-                 "倍率已经到 1X，没法再降，只能加产出。")
-    lines.append("3. **【冲击】在单挑恒为负**：除目标外所有角色含自己，1v1 时"
-                 "伤敌为零、自伤 5X，任何倍率都救不回来。")
-    lines.append("4. **【燃命】结构性必选**：【透支】池的 4:1 是【再生】闭环净值归零的"
-                 "硬约束，倍率不能抬；同效果下【折年】【搏命】永远差一截。")
-    lines.append("5. **【献锋】恒 100%**：再生池只有它一条，没有对手，选取率没有信息量。")
+    lines.append("1. **【断脉】已从 96% 压回 36%**：倍率血限X→5X 之后与池内中位齐平。")
+    lines.append("2. **【虚耗】抬产出而不是降倍率**：法限库存只有 2–14，付 1 点就是一大截库存，"
+                 "倍率到 1X 已经到底，只能把 5X 伤害抬到 12X。")
+    lines.append("3. **【冲击】现在是池内第一**：把[目标]选成自己 → 「除目标外所有角色」退化成"
+                 "「所有敌人（＋友方）」，单挑里就是「法力X 打 5X」。它与母本【杀伐】"
+                 "（法力X 打 X²）在 X=5 处交叉：X<5 冲击更划算，X≥5 母本更强，"
+                 "所以它是低 X 群体牌，不是无脑上位。")
+    lines.append("4. **【搏命】仍然垫底（8%）**：速度库存只有 2–10、不可逆权重 2.0，"
+                 "付 1 点等于交掉一大截先手；要拉平得改成「速度X → 12X 法力」，"
+                 "2026-11-09 用户令：暂不动。")
+    lines.append("5. **【献锋】恒 100%**：再生池只有它一条，没有对手，选取率没有信息量；"
+                 "要让这个数字有意义得先给【再生】加第二条衍生。")
     lines.append("")
 
-    lines.append("## 调参预演（模型内推演，未改引擎）")
-    lines.append("")
-    lines.append("| 场景 | 说明 |")
-    lines.append("|---|---|")
-    lines.append("| 现状 | 当前 9 条 |")
-    lines.append("| 杀伐调参 | 连击 生命10X／虚耗 法限X→12X 伤害／断脉 血限5X／"
-                 "买命 碎片5X 不动／冲击 改为不含自己 |")
-    lines.append("| 透支调参（折年×2／搏命×6） | 燃命 生命4X→X法力 不动（闭环约束）／"
-                 "折年 血限2X→2X 法力／搏命 速度X→6X 法力 |")
-    lines.append("| 透支调参（只抬折年×2） | 只把折年补到与燃命同档，搏命不动 |")
-    lines.append("")
     for label, rep in tuned.items():
-        lines.append(f"### {label} 的预测选取率")
+        lines.append(f"## {label}的选取率（对照）")
         lines.append("")
         lines += _table(rep["rows"])
         lines.append("")
@@ -393,38 +399,25 @@ def render(base: dict, profiles: dict[str, dict], tuned: dict[str, dict]) -> str
 
 
 def compare(trials: int, seed: int = 20261109) -> tuple[dict, dict, dict]:
-    """基准表 + 三档参数对照 + 调参预演。"""
+    """现状表 + 三档参数对照 + 「调整前」回放（2026-11-09 第一版汇率）。"""
     reset_overrides()
     base = run(trials, seed, "基准")
-    profiles = {}
-    for prof in PROFILES:
-        profiles[prof] = run(trials, seed, prof)
+    profiles = {prof: run(trials, seed, prof) for prof in PROFILES}
 
-    tuned = {}
-    # 杀伐：把选取率拉到接近；冲击改口径（不含自己）单独看效果
+    # 调整前那一版：连击生命5X、虚耗5X 伤害、断脉血限X、冲击速度X、
+    # 折年 X 法力。用来回答「不改会怎样」。
     reset_overrides()
-    OVERRIDES.update({
-        "连击": {"rate": 10},
-        "虚耗": {"output": 12 / 5},      # 法限X → 12X 伤害（原 5X）
-        "断脉": {"rate": 5},
-        "冲击": {"no_self": True},
-    })
-    tuned["杀伐调参"] = run(trials, seed, "基准")
-
-    # 透支：燃命 受 4:1 闭环约束不动，抬折年/搏命的产出（两档看边际）
+    before = {
+        "连击": {"rate": 5},
+        "虚耗": {"output": 5 / 12},
+        "断脉": {"rate": 1},
+        "冲击": {"cost_kind": "速度", "self_target": False},
+        "折年": {"output": 0.5},
+    }
+    OVERRIDES.update(before)
+    snapshot = run(trials, seed, "基准")
     reset_overrides()
-    OVERRIDES.update({
-        "折年": {"output": 2.0},         # 血限2X → 2X 法力（原 X）
-        "搏命": {"output": 6.0},         # 速度X → 6X 法力（原 X）
-    })
-    tuned["透支调参（折年×2／搏命×6）"] = run(trials, seed, "基准")
-
-    reset_overrides()
-    OVERRIDES.update({"折年": {"output": 2.0}})
-    tuned["透支调参（只抬折年×2）"] = run(trials, seed, "基准")
-
-    reset_overrides()
-    return base, profiles, tuned
+    return base, profiles, {"调整前（第一版汇率）": snapshot}
 
 
 # ---------------------------------------------------------------- 口径抽检
@@ -452,8 +445,8 @@ def verify() -> None:
         ("连击", 1, 10, False, 0),    # 5 段各 1 点，10 护盾全吃
         ("连击", 2, 3, False, 7),     # 10 段：3 段吃盾，7 段落血
         ("连击", 1, 0, True, 0),      # 龙鳞每笔 −1 → 0 伤
-        ("虚耗", 1, 10, False, 0),    # 单笔 5 点被 10 护盾吃掉
-        ("虚耗", 2, 3, True, 6),      # 单笔 10 点：−1 龙鳞 → 9，再被 3 护盾吃 → 6
+        ("虚耗", 1, 10, False, 2),    # 单笔 12 点（12X）先被 10 护盾吃 → 2
+        ("虚耗", 2, 3, True, 20),     # 单笔 24 点：−1 龙鳞 → 23，再被 3 护盾吃 → 20
         ("断脉", 2, 20, True, 9),     # 吃龙鳞 −1、不吃护盾
         ("买命", 2, 20, True, 10),    # 裸失血
     ]

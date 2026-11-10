@@ -44,6 +44,24 @@ class DerivativeSpec:
     cost_text: str          # 条文「支付：…」的原样短句（X 保留字面）
     effect_text: str        # 条文效果句（X 保留字面）
     note: str = ""          # 汇率裁定理由（只进注释/索引，不进结算）
+    effect_rate: int = 0    # 效果量 = effect_rate × X；0 表示按种类取默认（见 _DEFAULT_EFFECT_RATE）
+
+    def effect_amount(self, x: int) -> int:
+        """这条衍生道纹在 X 下的效果量（段数／伤害／法力／回复同理）。"""
+        rate = self.effect_rate or _DEFAULT_EFFECT_RATE[self.effect_kind]
+        return rate * x
+
+
+# 各效果种类的默认每 X 效果量（没写 effect_rate 时用它）。
+_DEFAULT_EFFECT_RATE = {
+    "multi_hit": 5,          # 5X 段
+    "damage": 5,             # 5X 点
+    "ignore_shield": 5,      # 5X 点
+    "life_loss": 5,          # 5X 点
+    "others_life_loss": 5,   # 5X 点
+    "mana_gain": 1,          # X 点法力
+    "heal": 4,               # 4X 点回复
+}
 
 
 # ---- 杀伐衍生：效果同在「让目标失去生命」这一法则领域内，形态各不相同 ----
@@ -54,7 +72,7 @@ class DerivativeSpec:
 #   ③ 只保留一条多段低伤（【连击】），其余改伤害表现：
 #      单段／无视格挡／直接失去生命／除目标外全体。
 _SHAFA_MULTI_HIT = "选择[目标]5X次，每次对其造成1点伤害。"
-_SHAFA_DAMAGE = "对[目标]造成5X点伤害。"
+_SHAFA_DAMAGE = "对[目标]造成12X点伤害。"
 _SHAFA_PIERCE = "对[目标]造成5X点伤害，无视格挡。"
 _SHAFA_LIFE_LOSS = "使[目标]直接失去5X点生命。"
 _SHAFA_OTHERS = "除[目标]外，所有角色失去5X点生命。"
@@ -63,6 +81,7 @@ _SHAFA_OTHERS = "除[目标]外，所有角色失去5X点生命。"
 # 生命4X、血限2X、速度X 三条沿用原倍率：4:1 是【再生】闭环净值归零的硬约束，
 # 速度 k=1 是「卖速买速」不永动的硬约束，均不可抬汇率。
 _TOZHI_GAIN = "你获得X点法力。"
+_TOZHI_GAIN_2X = "你获得2X点法力。"
 
 # ---- 再生衍生：母本只留【法力X】一条途径 ----
 # 攻击力4X 沿用原倍率：与【透支】生命4X⇄X法力构成严格 4:1 闭环，净值归零。
@@ -70,34 +89,41 @@ _ZAISHENG_HEAL = "为[目标]回复4X点生命。"
 
 
 DERIVATIVE_SPECS: tuple[DerivativeSpec, ...] = (
-    DerivativeSpec("连击", "杀伐", "生命", 5, "multi_hit",
-                   "支付：生命5X", _SHAFA_MULTI_HIT,
-                   "杀伐池里唯一的低伤多段：单次 1 点，格挡/闪避按段结算。"),
+    # 2026-11-09 第二轮调参（选取率实测后抬汇率）：连击 生命5X→10X、
+    # 虚耗 效果 5X→12X、断脉 血限X→5X、买命 不动、冲击 改收法力X。
+    DerivativeSpec("连击", "杀伐", "生命", 10, "multi_hit",
+                   "支付：生命10X", "选择[目标]5X次，每次对其造成1点伤害。",
+                   "杀伐池里唯一的低伤多段：单次 1 点，格挡/闪避按段结算。"
+                   "选取率实测 41%，相对池内中位偏强，倍率 5X→10X。"),
     DerivativeSpec("虚耗", "杀伐", "法限", 1, "damage",
                    "支付：法限X", _SHAFA_DAMAGE,
-                   "原「法力通道」改收法限：法力已是母本杀伐的途径，衍生再收就重复了；"
-                   "上限类资源稀缺，1 点法限换 5 点伤害。"),
-    DerivativeSpec("断脉", "杀伐", "血限", 1, "ignore_shield",
-                   "支付：血限X", _SHAFA_PIERCE,
-                   "单段伤害但无视格挡：换形态不换总量，对付护盾型目标更稳。"),
+                   "原「法力通道」改收法限：法力已是母本杀伐的途径，衍生再收就重复了。"
+                   "法限库存极薄（初始 3），倍率已到 1X 不能再降，只能抬产出：5X→12X。", 12),
+    DerivativeSpec("断脉", "杀伐", "血限", 5, "ignore_shield",
+                   "支付：血限5X", _SHAFA_PIERCE,
+                   "单段伤害但无视格挡：换形态不换总量。血限库存厚（60+），"
+                   "选取率实测 96% 一家独大，倍率 1X→5X。"),
     DerivativeSpec("买命", "杀伐", "碎片", 5, "life_loss",
                    "支付：碎片5X", _SHAFA_LIFE_LOSS,
-                   "碎片是全池唯一的局外资源，汇率拉到 1:1（原 4X 太便宜）；"
-                   "直接失去生命不吃格挡，是杀伐池里最狠的一条。"),
-    DerivativeSpec("冲击", "杀伐", "速度", 1, "others_life_loss",
-                   "支付：速度X", _SHAFA_OTHERS,
-                   "2026-11-09 用户令新增：除目标外所有角色（含自己与友方）失去生命，"
-                   "群体收益用自伤与速度消耗来换。"),
+                   "碎片是全池唯一的局外资源，汇率 1:1；直接失去生命不吃格挡。"
+                   "选取率实测 40%，正对池内中位，不动。"),
+    DerivativeSpec("冲击", "杀伐", "法力", 1, "others_life_loss",
+                   "支付：法力X", _SHAFA_OTHERS,
+                   "2026-11-09 用户令：代价是法力X（不是速度）。除目标外所有角色失去生命；"
+                   "把目标选成自己就是「敌方与友方全体失血、你不失血」，"
+                   "所以它并不恒为亏本买卖。"),
     DerivativeSpec("燃命", "透支", "生命", 4, "mana_gain",
                    "支付：生命4X", _TOZHI_GAIN,
                    "生命通道：4:1 与【再生】闭环守恒，不可抬汇率。"),
     DerivativeSpec("折年", "透支", "血限", 2, "mana_gain",
-                   "支付：血限2X", _TOZHI_GAIN,
-                   "血限通道：上限类按 2X 计价，不另抬倍率。"),
+                   "支付：血限2X", _TOZHI_GAIN_2X,
+                   "血限通道：上限类按 2X 计价。选取率实测 17.5%，效果抬到 2X 法力"
+                   "（2026-11-09 用户令），与【燃命】同档。", 2),
     DerivativeSpec("搏命", "透支", "速度", 1, "mana_gain",
                    "支付：速度X", _TOZHI_GAIN,
                    "速度通道：k=1，卖 X 速度得 X 法力，避免与【超频】永动。"
-                   "2026-11-09 用户令：名字由【夺步】回退为【搏命】。"),
+                   "2026-11-09 用户令：名字由【夺步】回退为【搏命】；"
+                   "选取率偏低（8%）但速度库存太薄，抬倍率会过量，暂不动。"),
     DerivativeSpec("献锋", "再生", "攻击力", 4, "heal",
                    "支付：攻击力4X", _ZAISHENG_HEAL,
                    "攻击力通道：4:1 与【透支】闭环守恒，不可抬汇率。"),
@@ -199,31 +225,31 @@ def calculation(name: str, x: int, target=None) -> dict:
     kind = spec.effect_kind
     assert kind in _EFFECT_FIELDS, f"衍生道纹{name}的效果种类非法：{kind}"
     if kind == "multi_hit":
-        hits = 5 * x
+        hits = spec.effect_amount(x)
         calc["hits"] = hits
         calc["damage_per_hit"] = 1
         calc["total_damage"] = hits
         effect = f"选择{target_name}{hits}次，每次造成1点伤害"
     elif kind == "damage":
-        calc["target_damage"] = 5 * x
-        effect = f"对{target_name}造成{5 * x}点伤害"
+        calc["target_damage"] = spec.effect_amount(x)
+        effect = f"对{target_name}造成{spec.effect_amount(x)}点伤害"
     elif kind == "ignore_shield":
-        calc["target_damage"] = 5 * x
+        calc["target_damage"] = spec.effect_amount(x)
         # 引擎按 damage_type 判定格挡：这一条走「无视格挡」，规则正文同步写明。
         calc["ignore_shield"] = True
-        effect = f"对{target_name}造成{5 * x}点伤害（无视格挡）"
+        effect = f"对{target_name}造成{spec.effect_amount(x)}点伤害（无视格挡）"
     elif kind == "life_loss":
-        calc["target_life_loss"] = 5 * x
-        effect = f"使{target_name}直接失去{5 * x}点生命"
+        calc["target_life_loss"] = spec.effect_amount(x)
+        effect = f"使{target_name}直接失去{spec.effect_amount(x)}点生命"
     elif kind == "others_life_loss":
-        calc["others_life_loss"] = 5 * x
-        effect = f"除{target_name}外，所有角色失去{5 * x}点生命"
+        calc["others_life_loss"] = spec.effect_amount(x)
+        effect = f"除{target_name}外，所有角色失去{spec.effect_amount(x)}点生命"
     elif kind == "mana_gain":
-        calc["mana_gain"] = x
-        effect = f"获得{x}点法力"
+        calc["mana_gain"] = spec.effect_amount(x)
+        effect = f"获得{spec.effect_amount(x)}点法力"
     elif spec.effect_kind == "heal":
-        calc["target_heal"] = 4 * x
-        effect = f"为{target_name}回复{4 * x}点生命"
+        calc["target_heal"] = spec.effect_amount(x)
+        effect = f"为{target_name}回复{spec.effect_amount(x)}点生命"
     else:  # pragma: no cover - 事实源自检兜底
         raise ValueError(f"衍生道纹{name}的效果种类非法：{spec.effect_kind}")
     # 摘要里写的是**实际金额**，不是把字面 "X" 替换成 X 值：

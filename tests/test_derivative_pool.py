@@ -27,11 +27,11 @@ from tests.setup_support import begin_battle, finish_initial_daowen, hand_priori
 # ---------- 计算层：每条衍生只有一条途径 ----------
 
 @pytest.mark.parametrize("name,cost_key,amount,cost_type", [
-    ("连击", "cost_hp", 35, "生命"),
+    ("连击", "cost_hp", 70, "生命"),
     ("虚耗", "cost_mana_cap", 7, "法限"),
-    ("断脉", "cost_blood_limit", 7, "血限"),
+    ("断脉", "cost_blood_limit", 35, "血限"),
     ("买命", "cost_shards", 35, "碎片"),
-    ("冲击", "cost_speed", 7, "速度"),
+    ("冲击", "cost", 7, "消耗"),
     ("燃命", "cost_hp", 28, "生命"),
     ("折年", "cost_blood_limit", 14, "血限"),
     ("搏命", "cost_speed", 7, "速度"),
@@ -55,7 +55,7 @@ def test_shafa_pool_is_one_pool_with_five_forms():
 
 @pytest.mark.parametrize("name,key,value", [
     ("连击", "hits", 35),
-    ("虚耗", "target_damage", 35),
+    ("虚耗", "target_damage", 84),      # 12X
     ("断脉", "target_damage", 35),
     ("买命", "target_life_loss", 35),
     ("冲击", "others_life_loss", 35),
@@ -74,9 +74,10 @@ def test_shafa_derivatives_have_distinct_damage_forms(name, key, value):
         assert not calc.get("ignore_shield")
 
 
-@pytest.mark.parametrize("name", ["燃命", "折年", "搏命"])
-def test_touzhi_derivatives_share_the_same_effect(name):
-    assert DaoWenEngine.resolve(name, 7)["mana_gain"] == 7
+@pytest.mark.parametrize("name,mana", [("燃命", 7), ("折年", 14), ("搏命", 7)])
+def test_touzhi_derivatives_gain_mana(name, mana):
+    """透支域都换成法力；【折年】在 2026-11-09 抬到 2X（血限2X → 2X 法力）。"""
+    assert DaoWenEngine.resolve(name, 7)["mana_gain"] == mana
 
 
 def test_zaisheng_derivative_heals_4x():
@@ -189,7 +190,7 @@ def test_battle_mana_limit_channel_derivative(tmp_path):
     # 收的是**上限**，不是法力：当前法力只因上限变低被夹到新上限。
     assert p.current_mana == min(mana0, mana_cap0 - 2)
     assert p.current_hp == hp0
-    assert m.current_hp == 80 - 10
+    assert m.current_hp == 80 - 24     # 12X
 
 
 def test_battle_shard_derivative_spends_fake_first(tmp_path):
@@ -240,7 +241,7 @@ def test_battle_multi_hit_derivative_is_split_across_hits(tmp_path):
     assert r["success"], r
     assert m.shield == 0
     assert m.current_hp == 80 - 7          # 10 段里 3 段被格挡吃掉
-    assert p.current_hp == hp0 - 10        # 生命5X
+    assert p.current_hp == hp0 - 20        # 生命10X
 
 
 def test_battle_impact_derivative_hits_everyone_but_the_target(tmp_path):

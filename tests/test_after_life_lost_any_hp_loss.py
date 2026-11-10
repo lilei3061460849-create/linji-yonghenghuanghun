@@ -141,7 +141,7 @@ def test_after_life_lost_blood_debt_fires_at_zero_mana():
     assert fired, "0 法力时连击类‘失去生命后’反应应照常触发（连击=流血代价，不耗法力）"
     # 连击 X=1：玩家自流 5 血并对敌方造成 5 击×1 点；敌方仍存活。
     assert enemy.current_hp == 100 - 5
-    assert player.current_hp == 100 - 6 - 5  # 6伤 + 连击自流5
+    assert player.current_hp == 100 - 6 - 10  # 6伤 + 连击自流10（生命10X）
 
 
 def test_after_life_lost_fires_on_blood_limit_pressure():
