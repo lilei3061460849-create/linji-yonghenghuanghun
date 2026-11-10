@@ -68,6 +68,11 @@
   .warn{color:#e6b95c}
   .char{border:1px solid var(--line);border-radius:10px;background:var(--panel-2);padding:10px 12px;
     display:flex;flex-direction:column;gap:6px}
+  /* 角色卡列表与道纹选择器同款：固定高度、内部滚动、上方搜索框（2026-11-10 用户令） */
+  .char-picker{height:300px;overflow:auto;border:1px solid var(--line);border-radius:10px;
+    padding:8px;background:#10151a;display:flex;flex-direction:column;gap:6px;
+    -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+  .char-picker .empty{border:none;background:none}
   .char .top{display:flex;align-items:center;gap:8px}
   .char .name{font-weight:600;color:#fff;font-size:15px}
   .char .meta{font-size:12px;color:var(--muted)}
@@ -150,7 +155,9 @@
   <section id="tabChars">
     <div class="card">
       <h2>我的角色<span id="charCount">0 张</span></h2>
-      <div id="charList"></div>
+      <input id="charSearch" type="search" placeholder="搜索角色名 / 阵营 / 道纹…"
+             style="margin-bottom:6px" />
+      <div id="charList" class="char-picker"></div>
       <div class="btnbar">
         <button id="newChar" class="primary">＋ 新建角色</button>
       </div>
@@ -475,15 +482,32 @@ function syncMessage(sync, prefix){
 }
 
 
+function charMatches(sheet, q){
+  if (!q) return true;
+  const hay = [sheet.name, sheet.faction || "轮回者",
+               ...(sheet.daowen || []), ...(sheet.relics || []),
+               ...((sheet.consumables || []).map(item => item.name || item))]
+    .join(" ").toLowerCase();
+  return q.toLowerCase().split(/\s+/).filter(Boolean)
+    .every(token => hay.includes(token));
+}
+
 function renderChars(){
   const box = $("charList");
   box.innerHTML = "";
-  $("charCount").textContent = `${CHARS.length} 张`;
+  const q = (($("charSearch") && $("charSearch").value) || "").trim();
+  const visible = CHARS.filter(sheet => charMatches(sheet, q));
+  $("charCount").textContent = q ? `${visible.length}/${CHARS.length} 张`
+                                 : `${CHARS.length} 张`;
   if (!CHARS.length){
     box.append(el("div", "empty", "还没有角色卡。点下面的「新建角色」捏第一个。"));
     return;
   }
-  for (const sheet of CHARS){
+  if (!visible.length){
+    box.append(el("div", "empty", `没有匹配「${q}」的角色卡。`));
+    return;
+  }
+  for (const sheet of visible){
     const card = el("div", "char");
     const top = el("div", "top");
     top.append(el("span", "name", sheet.name));
@@ -1007,6 +1031,7 @@ $("bModeChar").onclick = () => setBMode("char");
 $("bModeMonster").onclick = () => setBMode("monster");
 $("aSelect").onchange = updateDuelSummary;
 $("bSelect").onchange = updateDuelSummary;
+$("charSearch").oninput = () => renderChars();
 $("dRegion").onchange = () => {
   bMonsters.clear(); aTeammates.clear(); bTeammates.clear();
   renderBMonsters(); renderTeammates();
