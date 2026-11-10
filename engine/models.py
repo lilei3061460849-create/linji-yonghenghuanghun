@@ -45,8 +45,16 @@ class DaoWen:
         # 别名表单一出处 engine/daowen.py LEGACY_DAOWEN_ALIASES）：
         # 任何构造路径（旧面板/旧封存/旧档）拿到的定义名都归一为现名，
         # 引擎注册表与发动提交仍不收旧名。
-        if self.name == "血债":
-            self.name = "连击"
+        if self.name:
+            # 别名表单一出处 engine/daowen.py LEGACY_DAOWEN_ALIASES（含 2026-11-09
+            # 第二轮衍生改名）；函数内懒导入避免 models↔daowen 循环依赖。
+            try:
+                from engine.daowen import normalize_daowen_name
+            except Exception:  # pragma: no cover - 仅在部分沙箱缺依赖时退化
+                if self.name == "血债":
+                    self.name = "连击"
+            else:
+                self.name = normalize_daowen_name(self.name)
 
     def to_dict(self) -> dict:
         return {

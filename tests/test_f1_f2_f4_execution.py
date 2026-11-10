@@ -4,7 +4,7 @@
   （增殖X → 目标无限血限持续X；代价原衰老X，2026-11-07 改冷却X）。
 - F2：【余火印】删除（extra 整段删，不并入）；【搏命】删除，疲惫换法力并入【透支】。
   2026-11-09 单途径收束：母本【透支】只留枯竭X；流血4X／衰老2X／疲惫X 三条
-  同效果途径拆为衍生道纹【燃血】【折寿】【疾贷】，不再有 touzhi_cost 通道参数。
+  同效果途径拆为衍生道纹【燃命】【折年】【搏命】，不再有 touzhi_cost 通道参数。
 - F4：镇魂铁钉/替死鬼/赶尸铃/黄符 处理器补齐。
 """
 import os
@@ -138,7 +138,7 @@ def test_scarlet_relic_has_no_battle_start_decision():
 
 # ==================== F2：透支单途径 + 三条衍生 ====================
 # 2026-11-09 用户令：多途径道纹一律收成一条途径；【透支】母本只留枯竭X→X法力，
-# 生命4X／血限2X／速度X 三条同效果途径改为衍生道纹【燃血】【折寿】【疾贷】。
+# 生命4X／血限2X／速度X 三条同效果途径改为衍生道纹【燃命】【折年】【搏命】。
 
 def _cast_touzhi(name="透支", x=1, extra=None):
     engine = _setup()
@@ -167,8 +167,8 @@ def test_touzhi_only_exhaust_channel():
 
 
 def test_ranxue_derivative_costs_life():
-    """【燃血】生命4X → X法力（原透支生命通道，汇率不变）。"""
-    engine, player, snap, r = _cast_touzhi("燃血")
+    """【燃命】生命4X → X法力（原透支生命通道，汇率不变）。"""
+    engine, player, snap, r = _cast_touzhi("燃命")
     assert r["success"], r
     assert player.current_hp == snap["hp"] - 4
     assert player.current_mana == 1
@@ -176,8 +176,8 @@ def test_ranxue_derivative_costs_life():
 
 
 def test_zheshou_derivative_costs_blood_limit():
-    """【折寿】血限2X → X法力。"""
-    engine, player, snap, r = _cast_touzhi("折寿")
+    """【折年】血限2X → X法力。"""
+    engine, player, snap, r = _cast_touzhi("折年")
     assert r["success"], r
     assert player.blood_limit == snap["bl"] - 2
     assert player.current_hp == snap["bl"] - 2
@@ -185,8 +185,8 @@ def test_zheshou_derivative_costs_blood_limit():
 
 
 def test_jidai_derivative_costs_speed():
-    """【疾贷】速度X → X法力，1:1。"""
-    engine, player, snap, r = _cast_touzhi("疾贷")
+    """【搏命】速度X → X法力，1:1。"""
+    engine, player, snap, r = _cast_touzhi("搏命")
     assert r["success"], r
     assert player.current_speed == snap["sp"] - 1
     assert player.current_mana == 1
@@ -195,16 +195,16 @@ def test_jidai_derivative_costs_speed():
 
 
 def test_zheshou_heart_offsets_same_channel_cost():
-    """龙心通用抵扣同类代价（衰老龙心抵【折寿】的血限代价）。"""
+    """龙心通用抵扣同类代价（衰老龙心抵【折年】的血限代价）。"""
     engine = _setup()
     player = engine.state.player
-    _grant(engine, ["折寿"])
+    _grant(engine, ["折年"])
     player.current_mana = 0
     engine.state.consumables = [
         Consumable("衰老龙心", "", 5, 5, kind="dragon_heart", dragon_heart_type="衰老")]
     _add_monster(engine)
     bl0 = player.blood_limit
-    r = engine.execute_action("use_daowen", {"daowen_name": "折寿", "x": 1,
+    r = engine.execute_action("use_daowen", {"daowen_name": "折年", "x": 1,
                                              "dragon_heart_use": 1})
     assert r["success"], r
     fx = next(e for e in r["execution"]["effects"] if e["type"] == "aging_cost")
@@ -224,7 +224,7 @@ def test_touzhi_legacy_channel_param_is_ignored():
 
 
 def test_jidai_cannot_outpace_chaopin():
-    """核心约束（原【搏命】永动护栏）：疾贷 + 超频的闭环必须净亏速度。
+    """核心约束（原【搏命】永动护栏）：搏命 + 超频的闭环必须净亏速度。
 
     倍率 k=1（速度X→X法力）：卖 X 速度得 X 法力，经超频买回 X/2 速度，
     净变化恒负，不得永动。改倍率前先看这条。
@@ -232,7 +232,7 @@ def test_jidai_cannot_outpace_chaopin():
     from engine.daowen import DaoWenEngine
     DaoWenEngine.register_all()
     for x in (1, 2, 4, 8):
-        sold = DaoWenEngine.resolve("疾贷", x, target=None, caster=None)
+        sold = DaoWenEngine.resolve("搏命", x, target=None, caster=None)
         assert sold["cost_type"] == "速度" and sold["cost_speed"] == x
         assert sold["mana_gain"] == x
         mana = sold["mana_gain"]
@@ -241,7 +241,7 @@ def test_jidai_cannot_outpace_chaopin():
                                    caster=None)["cost"] <= mana:
             bought += 1
         net = bought - sold["cost_speed"]
-        assert net < 0, (f"疾贷{x}卖{sold['cost_speed']}速度换{mana}法力，"
+        assert net < 0, (f"搏命{x}卖{sold['cost_speed']}速度换{mana}法力，"
                          f"经超频买回{bought}速度，净{net:+d}——非负即可无限永动")
 
 

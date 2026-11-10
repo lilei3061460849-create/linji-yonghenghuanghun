@@ -53,12 +53,16 @@ class TestStructure20261108:
     def setup_method(self):
         DaoWenEngine.register_all()
 
-    def test_registry_is_86_and_new_names_registered(self):
+    def test_registry_is_85_and_new_names_registered(self):
         names = set(DaoWenEngine.list_all())
-        assert len(names) == 86  # 2026-11-09：+10条衍生道纹
-        for n in ("脆弱", "连击", "连珠", "血伐", "竭伐", "碎伐", "伪伐",
-                  "燃血", "折寿", "疾贷", "舍力"):
+        # 2026-11-09 第二轮改造：衍生改名，删【竭伐】（枯竭通道）与【伪伐】、增【冲击】，
+        # 86 → 85。
+        assert len(names) == 85
+        for n in ("脆弱", "连击", "虚耗", "断脉", "买命", "冲击",
+                  "燃命", "折年", "搏命", "献锋"):
             assert n in names
+        for n in ("血伐", "竭伐", "碎伐", "伪伐", "燃血", "折寿", "疾贷", "舍力", "连珠"):
+            assert n not in names, f"{n} 是已改名的旧道纹，不得留在现役表"
         for n in ("百炼", "锈蚀", "重铸", "回炉", "合体", "化尸", "立冢", "借尸",
                   "索取", "逆血", "永生", "初拥", "感染", "重演", "原初", "病变"):
             assert n in names

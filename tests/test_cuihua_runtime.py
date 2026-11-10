@@ -167,9 +167,9 @@ def test_monster_prepare_exposes_same_catalysis_and_control_submission_contract(
 
 def test_nested_legacy_channel_extra_cannot_reopen_a_second_channel():
     """2026-11-09：单途径收束后，催化步骤里残留的 cost_channel 只是被透传的旧键，
-    不得为【燃血】改出第二条支付途径（仍按生命4X落账）。"""
-    e,p,a=setup('nested_extra');_give(p,'燃血');p.dao_wen['燃血'].cooldown_remaining=3
+    不得为【燃命】改出第二条支付途径（仍按生命4X落账）。"""
+    e,p,a=setup('nested_extra');_give(p,'燃命');p.dao_wen['燃命'].cooldown_remaining=3
     hp=p.current_hp
-    result=call(e,[step('燃血',x=1,extra={'cost_channel':'血限'})])
+    result=call(e,[step('燃命',x=1,extra={'cost_channel':'血限'})])
     assert result['success'],result
     assert p.current_hp==hp-4

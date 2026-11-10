@@ -37,19 +37,27 @@ class DerivativeSpec:
 
     name: str
     parent: str
-    cost_kind: str          # 生命／法力／血限／枯竭／速度／碎片／假碎片／攻击力
+    cost_kind: str          # 生命／法限／血限／速度／碎片／攻击力
     rate: int               # 代价 = rate × X
-    effect_kind: str        # multi_hit / mana_gain / heal
+    effect_kind: str        # multi_hit / damage / ignore_shield / life_loss /
+                            # others_life_loss / mana_gain / heal
     cost_text: str          # 条文「支付：…」的原样短句（X 保留字面）
     effect_text: str        # 条文效果句（X 保留字面）
     note: str = ""          # 汇率裁定理由（只进注释/索引，不进结算）
 
 
-# ---- 杀伐衍生：原【连击】六通道拆散，效果恒同（5X 次各 1 点伤害）----
-# 生命／血限／枯竭三条沿用原通道倍率：生命⇄法力闭环（透支4X⇄再生4X）与
-# 上限类整数 X 计价都不能再抬；法力／碎片／假碎片三条因「只能走一条途径」
-# 牺牲了灵活性，按汇率看情况调整各降一档（5→4、5→4、50→40）。
-_SHAFA_HITS = "选择[目标]5X次，每次对其造成1点伤害。"
+# ---- 杀伐衍生：效果同在「让目标失去生命」这一法则领域内，形态各不相同 ----
+# 2026-11-09 用户令（第二轮）：
+#   ① 取消假碎片途径，碎片途径只留一条，名为【买命】；
+#   ② 原「法力通道」改成【法限】——法力本身已经是母本【杀伐】的支付途径，
+#      衍生再收法力就等于照抄母本；
+#   ③ 只保留一条多段低伤（【连击】），其余改伤害表现：
+#      单段／无视格挡／直接失去生命／除目标外全体。
+_SHAFA_MULTI_HIT = "选择[目标]5X次，每次对其造成1点伤害。"
+_SHAFA_DAMAGE = "对[目标]造成5X点伤害。"
+_SHAFA_PIERCE = "对[目标]造成5X点伤害，无视格挡。"
+_SHAFA_LIFE_LOSS = "使[目标]直接失去5X点生命。"
+_SHAFA_OTHERS = "除[目标]外，所有角色失去5X点生命。"
 
 # ---- 透支衍生：母本只留【枯竭X】一条途径 ----
 # 生命4X、血限2X、速度X 三条沿用原倍率：4:1 是【再生】闭环净值归零的硬约束，
@@ -63,33 +71,34 @@ _ZAISHENG_HEAL = "为[目标]回复4X点生命。"
 
 DERIVATIVE_SPECS: tuple[DerivativeSpec, ...] = (
     DerivativeSpec("连击", "杀伐", "生命", 5, "multi_hit",
-                   "支付：生命5X", _SHAFA_HITS,
-                   "原多途径【连击】的生命通道，保留旧名与旧汇率；旧档【血债】仍映射到它。"),
-    DerivativeSpec("连珠", "杀伐", "法力", 4, "multi_hit",
-                   "支付：法力4X", _SHAFA_HITS,
-                   "法力通道：牺牲多途径灵活性，5X→4X。"),
-    DerivativeSpec("血伐", "杀伐", "血限", 1, "multi_hit",
-                   "支付：血限X", _SHAFA_HITS,
-                   "血限通道：上限类按整 X 计价，不另抬倍率。"),
-    DerivativeSpec("竭伐", "杀伐", "枯竭", 1, "multi_hit",
-                   "支付：枯竭X", _SHAFA_HITS,
-                   "枯竭通道：登记 X 点待结算枯竭，计价不变。"),
-    DerivativeSpec("碎伐", "杀伐", "碎片", 4, "multi_hit",
-                   "支付：碎片4X", _SHAFA_HITS,
-                   "真碎片通道：5X→4X；按通用【碎片】代价口径，假碎片优先、真碎片补足。"),
-    DerivativeSpec("伪伐", "杀伐", "假碎片", 40, "multi_hit",
-                   "支付：假碎片40X", _SHAFA_HITS,
-                   "假碎片通道：50X→40X，只扣假碎片池。"),
-    DerivativeSpec("燃血", "透支", "生命", 4, "mana_gain",
+                   "支付：生命5X", _SHAFA_MULTI_HIT,
+                   "杀伐池里唯一的低伤多段：单次 1 点，格挡/闪避按段结算。"),
+    DerivativeSpec("虚耗", "杀伐", "法限", 1, "damage",
+                   "支付：法限X", _SHAFA_DAMAGE,
+                   "原「法力通道」改收法限：法力已是母本杀伐的途径，衍生再收就重复了；"
+                   "上限类资源稀缺，1 点法限换 5 点伤害。"),
+    DerivativeSpec("断脉", "杀伐", "血限", 1, "ignore_shield",
+                   "支付：血限X", _SHAFA_PIERCE,
+                   "单段伤害但无视格挡：换形态不换总量，对付护盾型目标更稳。"),
+    DerivativeSpec("买命", "杀伐", "碎片", 5, "life_loss",
+                   "支付：碎片5X", _SHAFA_LIFE_LOSS,
+                   "碎片是全池唯一的局外资源，汇率拉到 1:1（原 4X 太便宜）；"
+                   "直接失去生命不吃格挡，是杀伐池里最狠的一条。"),
+    DerivativeSpec("冲击", "杀伐", "速度", 1, "others_life_loss",
+                   "支付：速度X", _SHAFA_OTHERS,
+                   "2026-11-09 用户令新增：除目标外所有角色（含自己与友方）失去生命，"
+                   "群体收益用自伤与速度消耗来换。"),
+    DerivativeSpec("燃命", "透支", "生命", 4, "mana_gain",
                    "支付：生命4X", _TOZHI_GAIN,
                    "生命通道：4:1 与【再生】闭环守恒，不可抬汇率。"),
-    DerivativeSpec("折寿", "透支", "血限", 2, "mana_gain",
+    DerivativeSpec("折年", "透支", "血限", 2, "mana_gain",
                    "支付：血限2X", _TOZHI_GAIN,
                    "血限通道：上限类按 2X 计价，不另抬倍率。"),
-    DerivativeSpec("疾贷", "透支", "速度", 1, "mana_gain",
+    DerivativeSpec("搏命", "透支", "速度", 1, "mana_gain",
                    "支付：速度X", _TOZHI_GAIN,
-                   "速度通道：k=1，卖 X 速度得 X 法力，避免与【超频】永动。"),
-    DerivativeSpec("舍力", "再生", "攻击力", 4, "heal",
+                   "速度通道：k=1，卖 X 速度得 X 法力，避免与【超频】永动。"
+                   "2026-11-09 用户令：名字由【夺步】回退为【搏命】。"),
+    DerivativeSpec("献锋", "再生", "攻击力", 4, "heal",
                    "支付：攻击力4X", _ZAISHENG_HEAL,
                    "攻击力通道：4:1 与【透支】闭环守恒，不可抬汇率。"),
 )
@@ -97,6 +106,22 @@ DERIVATIVE_SPECS: tuple[DerivativeSpec, ...] = (
 BY_NAME: dict[str, DerivativeSpec] = {spec.name: spec for spec in DERIVATIVE_SPECS}
 DERIVED_DAOWEN: frozenset[str] = frozenset(BY_NAME)
 DERIVATIVE_PARENTS: tuple[str, ...] = tuple(dict.fromkeys(spec.parent for spec in DERIVATIVE_SPECS))
+
+# 旧名字 → 现名（只用于读档/授予/怪物面板的读入边界，不用于发动提交）。
+# 2026-11-09 第二轮改名：连珠→虚耗（并改收法限）、血伐→断脉、碎伐／伪伐→买命、
+# 燃血→燃命、折寿→折年、疾贷→搏命、舍力→献锋；竭伐（枯竭通道）与伪伐（假碎片
+# 通道）两条途径被用户取消，旧档按「最接近的现役条目」落地：竭伐→连击、伪伐→买命。
+DERIVATIVE_ALIASES: dict[str, str] = {
+    "连珠": "虚耗",
+    "血伐": "断脉",
+    "竭伐": "连击",
+    "碎伐": "买命",
+    "伪伐": "买命",
+    "燃血": "燃命",
+    "折寿": "折年",
+    "疾贷": "搏命",
+    "舍力": "献锋",
+}
 
 
 def is_derivative(name: str) -> bool:
@@ -129,12 +154,32 @@ def spec_of(name: str) -> DerivativeSpec:
 _COST_FIELDS = {
     "生命": (CostType.BLEED.value, "cost_hp"),
     "法力": (CostType.MANA.value, "cost"),
+    "法限": (CostType.SHRINK.value, "cost_mana_cap"),
     "血限": (CostType.AGING.value, "cost_blood_limit"),
     "枯竭": (CostType.EXHAUST.value, "cost_mana_limit"),
     "速度": (CostType.FATIGUE.value, "cost_speed"),
-    "碎片": ("碎片", "cost_real_shards"),
+    # 【买命】走通用【碎片】代价口径（假碎片优先、真碎片补足），不再像旧【碎伐】
+    # 那样只认真碎片、也不再保留单独的假碎片途径。
+    "碎片": ("碎片", "cost_shards"),
     "假碎片": ("碎片", "cost_fake_shards"),
     "攻击力": ("攻击力", "cost_attack"),
+}
+
+# 效果形态 → calc 键。每种形态都给引擎一份**唯一**的伤害表达，不能靠名字硬编码：
+#   multi_hit       多段低伤（5X 次各 1 点）
+#   damage          单段伤害
+#   ignore_shield   单段伤害、无视格挡（走 damage_type="无视格挡"）
+#   life_loss       直接失去生命（不吃格挡，走 target_life_loss）
+#   others_life_loss  除目标外所有角色失去生命（群体，含自己与友方）
+#   mana_gain / heal  同母本同域收益
+_EFFECT_FIELDS = {
+    "multi_hit": "hits",
+    "damage": "target_damage",
+    "ignore_shield": "target_damage",
+    "life_loss": "target_life_loss",
+    "others_life_loss": "others_life_loss",
+    "mana_gain": "mana_gain",
+    "heal": "target_heal",
 }
 
 
@@ -151,13 +196,29 @@ def calculation(name: str, x: int, target=None) -> dict:
         cost_key: amount,
         "derivative_of": spec.parent,
     }
-    if spec.effect_kind == "multi_hit":
+    kind = spec.effect_kind
+    assert kind in _EFFECT_FIELDS, f"衍生道纹{name}的效果种类非法：{kind}"
+    if kind == "multi_hit":
         hits = 5 * x
         calc["hits"] = hits
         calc["damage_per_hit"] = 1
         calc["total_damage"] = hits
         effect = f"选择{target_name}{hits}次，每次造成1点伤害"
-    elif spec.effect_kind == "mana_gain":
+    elif kind == "damage":
+        calc["target_damage"] = 5 * x
+        effect = f"对{target_name}造成{5 * x}点伤害"
+    elif kind == "ignore_shield":
+        calc["target_damage"] = 5 * x
+        # 引擎按 damage_type 判定格挡：这一条走「无视格挡」，规则正文同步写明。
+        calc["ignore_shield"] = True
+        effect = f"对{target_name}造成{5 * x}点伤害（无视格挡）"
+    elif kind == "life_loss":
+        calc["target_life_loss"] = 5 * x
+        effect = f"使{target_name}直接失去{5 * x}点生命"
+    elif kind == "others_life_loss":
+        calc["others_life_loss"] = 5 * x
+        effect = f"除{target_name}外，所有角色失去{5 * x}点生命"
+    elif kind == "mana_gain":
         calc["mana_gain"] = x
         effect = f"获得{x}点法力"
     elif spec.effect_kind == "heal":
@@ -207,8 +268,18 @@ def validate() -> None:
     for spec in DERIVATIVE_SPECS:
         assert len(spec.name) == 2, f"衍生道纹名必须二字：{spec.name}"
         assert spec.cost_kind in _COST_FIELDS, f"非法支付途径：{spec.name}"
+        assert spec.effect_kind in _EFFECT_FIELDS, f"非法效果形态：{spec.name}"
         assert not is_derivative(spec.parent), f"母本不得是衍生道纹：{spec.parent}"
         assert spec.rate >= 1, f"汇率必须为正整数：{spec.name}"
+        # 母本与衍生必须同域：杀伐域只产出「失去生命」，透支域只产法力，再生域只回复。
+        domain = {"multi_hit": "杀伐", "damage": "杀伐", "ignore_shield": "杀伐",
+                  "life_loss": "杀伐", "others_life_loss": "杀伐",
+                  "mana_gain": "透支", "heal": "再生"}[spec.effect_kind]
+        assert domain == spec.parent, f"{spec.name}的效果越过母本法则领域：{domain}≠{spec.parent}"
+    # 旧名一个都不能还留在现役表里，否则改名等于没改。
+    for legacy, current in DERIVATIVE_ALIASES.items():
+        assert legacy not in BY_NAME, f"旧名仍在现役表：{legacy}"
+        assert current in BY_NAME, f"旧名映射到不存在的道纹：{legacy}→{current}"
 
 
 validate()

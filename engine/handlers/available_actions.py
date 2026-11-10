@@ -877,7 +877,7 @@ class AvailableActionsMixin:
             except Exception:
                 continue
             ctype = calc.get("cost_type")
-            # 2026-11-09：多途径收成单途径后，【再生】只看法力，【舍力】只看攻击力。
+            # 2026-11-09：多途径收成单途径后，【再生】只看法力，【献锋】只看攻击力。
             if ctype == "攻击力" and calc.get("cost_attack", 0) > actor.effective_attack_power():
                 continue
             elif ctype == "消耗" and calc.get("cost", 0) > actor.current_mana:

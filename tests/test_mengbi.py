@@ -30,7 +30,7 @@ def test_retired_daowen_entry_is_rejected_without_cost():
 
 
 def test_lamp_blocks_two_damage_instances_then_damage_returns():
-    """物品固定施加两层；伤害类衍生道纹（连珠）连吃两次无效，第三次恢复。"""
+    """物品固定施加两层；伤害类衍生道纹（虚耗）连吃两次无效，第三次恢复。"""
     engine, player, monster, item = _ready_with_lamp()
     result = engine.execute_action("consume_item", {
         "name": item.name, "target_ref": "enemy:0",
@@ -40,8 +40,8 @@ def test_lamp_blocks_two_damage_instances_then_damage_returns():
     monster.current_mana = monster.mana_limit = 60
 
     def _lianji():
-        calc = DaoWenEngine.resolve("连珠", 1, target=player, caster=monster)
-        return engine.combat.apply_daowen_effect("连珠", calc, monster, player)
+        calc = DaoWenEngine.resolve("虚耗", 1, target=player, caster=monster)
+        return engine.combat.apply_daowen_effect("虚耗", calc, monster, player)
 
     first = _lianji()
     assert first.get("mengbi_blocked") is True

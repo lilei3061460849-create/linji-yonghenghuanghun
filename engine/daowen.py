@@ -86,7 +86,10 @@ def is_reserved_slot(name) -> bool:
 
 # 道纹改名别名（旧档/旧面板读入时映射；引擎注册表只收新名，旧名提交照常报未知道纹）。
 # 2026-10-22 用户令：【血债】改名【连击】并扩为多支付道纹，旧名只许在读入边界被映射。
-LEGACY_DAOWEN_ALIASES = {"血债": "连击", "操作": "操纵"}
+# 【血债】→【连击】是 2026-10-22 的改名；2026-11-09 第二轮的衍生道纹改名
+# （连珠→虚耗等）同样只在读入边界生效，别名表以 engine/derivatives.py 为唯一事实源。
+LEGACY_DAOWEN_ALIASES = {"血债": "连击", "操作": "操纵",
+                         **derivative_rules.DERIVATIVE_ALIASES}
 
 
 def normalize_daowen_name(name):
@@ -186,7 +189,7 @@ class DaoWenEngine:
         """再生X：支付：法力X。为[目标]回复4X点生命。
 
         2026-11-09 用户令：多途径道纹收成一条途径。【攻击力4X】通道改由
-        【再生衍生·舍力】独立承载（见 engine/derivatives.py），母本不再接受通道参数。
+        【再生衍生·献锋】独立承载（见 engine/derivatives.py），母本不再接受通道参数。
         """
         target_name = target.name if target is not None else "未选定目标"
         heal = 4 * x
@@ -232,24 +235,6 @@ class DaoWenEngine:
             "summary": f"支付：法力{2 * x}，使{target_name}下次失去生命重复{x}次",
         }
 
-    @staticmethod
-    def calculate_lianji(x: int, target: Entity = None) -> dict:
-        """连击X：支付：生命5X。选择[目标]5X次，每次对其造成1点伤害。
-
-        2026-11-09 用户令：原【连击】六通道拆散，改为【杀伐】的衍生道纹池；
-        本条只保留生命通道（缺省、旧档与怪物面板沿用）。其余五条途径由
-        【连珠】【血伐】【竭伐】【碎伐】【伪伐】各自单途径承载，见 engine/derivatives.py。
-        """
-        target_name = target.name if target is not None else "未选定目标"
-        hits = 5 * x
-        return {
-            "dao_wen": "连击", "x": x,
-            "cost_type": CostType.BLEED.value, "cost_hp": 5 * x,
-            "derivative_of": "杀伐",
-            "hits": hits, "damage_per_hit": 1, "total_damage": hits,
-            "summary": f"支付：生命{5 * x}，选择{target_name} {hits}次，每次造成1点伤害",
-        }
-    
     @staticmethod
     def calculate_boba(x: int) -> dict:
         """波及X：支付：法力2X。选择X个目标，目标组彼此平分道纹效果，持续∞。"""
@@ -373,7 +358,7 @@ class DaoWenEngine:
         用户裁定 2026-09-13：3X→4X。与【再生X】(支付：法力X→回复4X生命) 对齐为
         严格 4:1 双向汇率，闭环净值归零，不再每轮白赚生命。
         2026-11-09 用户令：多途径道纹收成一条途径，母本只留【枯竭X】；
-        生命4X／血限2X／速度X 三条改由【透支衍生·燃血／折寿／疾贷】独立承载。
+        生命4X／血限2X／速度X 三条改由【透支衍生·燃命／折年／搏命】独立承载。
         （速度通道的 k=1 结论继续沿用：卖X速度得kX法力可经【超频】买回 kX/2 速度，
         k≥2 即永动，故取 k=1。）
         """
@@ -1431,9 +1416,9 @@ class DaoWenEngine:
             "再生": cls.calculate_zaisheng,
             "庇护": cls.calculate_bihu,
             # 2026-11-09：【连击】退出通用四面体，其格由【脆弱】承接；
-            # 【连击】本身改作【杀伐衍生】保留在注册表里（旧档/旧面板照常读入）。
+            # 【连击】本身改作【杀伐衍生】，与其余衍生道纹一起由
+            # engine/derivatives.py 统一注册（见下方 DERIVED_DAOWEN 循环）。
             "脆弱": cls.calculate_cuiruo,
-            "连击": cls.calculate_lianji,
             "波及": cls.calculate_boba,
             "共罪": cls.calculate_gongzui,
             "血契": cls.calculate_xueqi,
@@ -1522,8 +1507,6 @@ class DaoWenEngine:
         # 衍生道纹不是四面体节点，也不进学习/开局发现池；但它们是正常可发动的
         # 道纹，公式由 engine/derivatives.py 的单途径汇率表生成，避免第二份实现。
         for derived_name in derivative_rules.DERIVED_DAOWEN:
-            if derived_name == "连击":
-                continue  # 旧名沿用上面的人工实现（旧档/怪物面板兼容）
             cls._registry[derived_name] = derivative_rules.calculator_for(derived_name)
     
     @staticmethod

@@ -32,7 +32,7 @@ class SupplyOutputAuditTests(unittest.TestCase):
         c = arena('不朽之躯');p = c.state.player;t = c.state.enemies[0]
         before = p.current_hp, p.blood_limit, p.current_mana
         for _ in range(12):
-            cast_paid(c, '折寿', 2)
+            cast_paid(c, '折年', 2)
             cast_paid(c, '杀伐', 2, t)
         self.assertEqual((p.current_hp, p.blood_limit, p.current_mana), before)
         self.assertEqual(t.current_hp, 100000 - 12 * 4)
@@ -43,9 +43,9 @@ class SupplyOutputAuditTests(unittest.TestCase):
         before = p.current_speed, p.current_mana, p.speed_limit, p.current_hp
         for _ in range(12):
             cast_paid(c, '超频', 1)
-            cast_paid(c, '疾贷', 2)
+            cast_paid(c, '搏命', 2)
         self.assertEqual((p.current_speed, p.current_mana, p.speed_limit, p.current_hp), before)
-        # 2026-11-02：回锋刀双向触发，每轮"超频(加速) + 疾贷(失速)"各 5 点 → 10 点。
+        # 2026-11-02：回锋刀双向触发，每轮"超频(加速) + 搏命(失速)"各 5 点 → 10 点。
         self.assertEqual(t.current_hp, 100000 - 12 * 10)
 
     def test_unbounded_hp_regen_overdraft_cup_can_feed_shaifa(self):
@@ -54,7 +54,7 @@ class SupplyOutputAuditTests(unittest.TestCase):
         before = p.current_hp, p.current_mana
         for _ in range(12):
             cast_paid(c, '再生', 5)
-            cast_paid(c, '燃血', 5)
+            cast_paid(c, '燃命', 5)
             cast_paid(c, '杀伐', 2, t)
             self.assertIsNone(c.check_cancer(p))
         self.assertEqual((p.current_hp, p.current_mana), before)

@@ -231,11 +231,11 @@ def test_option2_immortal_body_halves_blood_limit_and_blocks_growth():
     assert player.current_mana == player.mana_limit, \
         f"守夜灯回增加叠的法力也被钳到法限：当前{player.current_mana} 法限{player.mana_limit}"
 
-    # 免疫衰老代价（2026-11-09：衰老通道已拆为衍生【折寿】，血限2X）
-    engine.state.player.dao_wen["折寿"] = DaoWenInstance(
-        DaoWen(name="折寿", formula="", cost_type="代价", cost_formula="X", effect_formula=""))
+    # 免疫衰老代价（2026-11-09：衰老通道已拆为衍生【折年】，血限2X）
+    engine.state.player.dao_wen["折年"] = DaoWenInstance(
+        DaoWen(name="折年", formula="", cost_type="代价", cost_formula="X", effect_formula=""))
     bl_before = player.blood_limit
-    r_dw = engine.execute_action("use_daowen", {"daowen_name": "折寿", "x": 5})
+    r_dw = engine.execute_action("use_daowen", {"daowen_name": "折年", "x": 5})
     assert r_dw["success"] is True
     assert player.blood_limit == bl_before, "不朽之躯应免疫衰老代价"
 

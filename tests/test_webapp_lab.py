@@ -28,14 +28,14 @@ def test_derivative_daowen_can_go_straight_into_a_character_sheet():
 
     groups = {g["label"]: g["names"] for g in lab.options(refresh=True)["daowen_groups"]}
     label = next(name for name in groups if name.startswith("衍生道纹"))
-    assert set(groups[label]) >= {"连击", "连珠", "血伐", "舍力", "疾贷"}
+    assert set(groups[label]) >= {"连击", "虚耗", "断脉", "献锋", "搏命"}
 
     sheet = lab.normalize_sheet({
         "name": "衍生测试", "mode": "free", "blood_limit": 40,
         "speed_limit": 6, "mana_limit": 8, "resonance": "转换",
-        "daowen": ["杀伐", "连击", "血伐"],
+        "daowen": ["杀伐", "连击", "断脉"],
     })
-    assert sheet["daowen"] == ["杀伐", "连击", "血伐"]
+    assert sheet["daowen"] == ["杀伐", "连击", "断脉"]
 
 
 def test_options_only_expose_runtime_entries():
