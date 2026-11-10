@@ -78,7 +78,7 @@
   .modal{position:fixed;inset:0;background:rgba(6,9,12,.82);display:flex;align-items:center;
     justify-content:center;z-index:20;padding:18px}
   .modal.hidden{display:none}
-  .modal .card{width:min(520px,100%);background:var(--panel)}
+  .modal .card{width:min(520px,100%);background:var(--panel);max-height:92dvh;overflow:auto}
   .field{display:flex;align-items:center;gap:8px;margin:7px 0}
   .field label{width:82px;color:var(--muted);font-size:13px}
   .field input[type=number]{width:74px}
@@ -105,6 +105,52 @@
   .banner{border:1px solid #6d5a2a;background:#241f14;color:#f2d99a;border-radius:8px;padding:8px 10px;
     font-size:13px;margin-bottom:10px}
   .banner.dead{border-color:#5c2b27;background:#241716;color:#f0a49c}
+  /* 横屏（手机横过来 / 桌面）：地图与右侧面板并排，把一屏用满 */
+  @media (orientation: landscape){
+    header{padding:6px 12px;gap:10px;position:sticky;top:0}
+    header h1{font-size:13px;letter-spacing:.08em}
+    .stats{gap:10px;font-size:12px}
+    .bar{width:78px;height:7px}
+    main{grid-template-columns:minmax(0,1.2fr) minmax(300px,.8fr);gap:10px;
+      padding:8px 12px 20px;max-width:none;align-items:start}
+    .card{padding:9px}
+    .card h2{margin-bottom:7px}
+    .log{max-height:150px}
+    #map{padding:5px;gap:1px}
+    .legend{font-size:11px;gap:10px}
+    .hint{font-size:11px}
+  }
+  /* 横屏且够宽（手机桌面版≈980px）：左段自己再分两栏 —— 地图 | 战斗/事件 */
+  @media (orientation: landscape) and (min-width: 860px){
+    main{grid-template-columns:minmax(0,1fr) minmax(290px,.52fr)}
+    main > section.stack{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
+      gap:10px;align-items:start}
+    main > section.stack > .card{margin:0}
+  }
+  /* 横屏但很窄（老手机 640×360）：右栏收窄，别把地图挤没 */
+  @media (orientation: landscape) and (max-width: 859px){
+    main{grid-template-columns:minmax(0,1fr) minmax(230px,.62fr)}
+  }
+  .vp{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  /* 字号档位（预览窗很窄时用「字」按钮放大） */
+  html.big body{font-size:16px}
+  html.big .hint,html.big .kv,html.big .card h2,html.big .legend{font-size:13.5px}
+  html.big button{font-size:15px;padding:8px 12px}
+  html.big .log{font-size:14px}
+  html.big .combatant{font-size:15px}
+  html.huge body{font-size:18px}
+  html.huge .hint,html.huge .kv,html.huge .card h2,html.huge .legend{font-size:15px}
+  html.huge button{font-size:17px;padding:10px 14px}
+  html.huge .log{font-size:15.5px}
+  html.huge .combatant{font-size:17px}
+  /* 窄屏（预览窗通常只有 320~380px 宽）：按钮加大、留白收紧 */
+  @media (max-width: 639px){
+    button{min-height:40px}
+    main{padding:10px 10px 28px;gap:10px}
+    .card{padding:10px}
+    #map{padding:6px}
+    .field label{width:64px}
+  }
 </style>
 </head>
 <body>
@@ -113,12 +159,14 @@
   <div class="stats" id="stats"></div>
   <div class="spacer"></div>
   <a href="/lab" style="text-decoration:none"><button>角色演武场 · 自定义开局</button></a>
+  <button id="fontBtn" title="切换字号：标准 / 大 / 特大">字 标准</button>
+  <span class="vp" id="vpLabel"></span>
   <button id="newBtn">新开一局</button>
 </header>
 
 <main>
   <section class="stack">
-    <div class="card">
+    <div class="card" id="mapCard">
       <h2>地图 <span id="turnLabel"></span></h2>
       <div class="mapwrap">
         <div id="map"></div>
@@ -140,6 +188,15 @@
       </div>
     </div>
 
+    <div class="card" id="directDoneCard" style="display:none">
+      <h2>本场结束 <span>演武场 · 直接对战</span></h2>
+      <div class="kv">对手倒下、结算完毕。这一局没有副本地图要跑。</div>
+      <div class="row">
+        <button class="primary" onclick="location.href='/lab'">回演武场再来一局</button>
+        <button id="directMapBtn">继续：生成地图（可选）</button>
+      </div>
+    </div>
+
     <div class="card" id="pendingCard" style="display:none">
       <h2>待决 <span id="pendingPhase"></span></h2>
       <div id="pendingBody" class="stack"></div>
@@ -153,6 +210,11 @@
     <div class="card" id="battleCard" style="display:none">
       <h2>战斗 <span id="battlePhase"></span></h2>
       <div id="battleBody" class="stack"></div>
+    </div>
+
+    <div class="card" id="derivativeCard" style="display:none">
+      <h2>衍生道纹 <span>局内 0 出手</span></h2>
+      <div id="derivativeBody" class="stack"></div>
     </div>
 
     <div class="card">
@@ -203,7 +265,7 @@
   </aside>
 </main>
 
-<div class="modal" id="newModal">
+<div class="modal hidden" id="newModal">
   <div class="card">
     <h2>开局 <span>25 点属性自由分配</span></h2>
     <div class="field"><label>名字</label><input id="fName" type="text" value="轮回者" maxlength="12" /></div>
@@ -246,6 +308,7 @@ const SUGGESTIONS = [
 ];
 let S = null;
 let busy = false;
+let MANUAL = null;   // 推演模式：B 方待点选的行动（prepare_monster_phase 结果）
 
 const $ = (id) => document.getElementById(id);
 function el(tag, cls, text){ const n = document.createElement(tag); if(cls) n.className = cls;
@@ -294,8 +357,19 @@ function summarize(action, result){
 }
 
 function render(){
+  const mapCard = $("mapCard");
+  if (mapCard) mapCard.style.display = (S && S.direct) ? "none" : "";
   renderHeader(); renderSheet(); renderPending(); renderMap(); renderAllies(); renderNear(); renderLocations();
-  renderEvent(); renderBattle(); renderLog(); renderFacts(); renderOver();
+  renderEvent(); renderBattle(); renderDerivative(); renderDirectDone(); renderLog(); renderFacts(); renderOver();
+}
+
+function renderDirectDone(){
+  /* 直接对战（无地图）：战斗结算完就没有下一步了，给一个明确的落点。 */
+  const card = $("directDoneCard");
+  if (!card) return;
+  card.style.display = (S && S.started && S.direct && !S.battle) ? "" : "none";
+  const btn = $("directMapBtn");
+  if (btn && !btn.onclick) btn.onclick = () => act("world_initialize", {});
 }
 
 function renderHeader(){
@@ -311,7 +385,6 @@ function renderHeader(){
       d.append(b, el("b", null, ` ${p.mana}/${p.mana_limit}`)); return d;})(),
     el("span","stat", `速 ${p.speed}/${p.speed_limit}`),
     el("span","stat", `碎片 ${p.shards}`),
-    el("span","stat", `精力 ${p.energy}`),
     el("span","stat", `遗物 ${p.relics.length} · 道纹 ${p.daowen.length}`),
     el("span","stat", `副本 ${p.region || ""}`),
   );
@@ -335,7 +408,12 @@ function renderMap(){
   const map = $("map"); map.innerHTML = "";
   const w = S && S.world;
   if (!w || !w.self) return;
-  const size = Math.max(16, Math.min(28, Math.floor(620 / Math.max(w.map_size.width, w.map_size.height))));
+  const span = Math.max(w.map_size.width, w.map_size.height, 1);
+  const wide = window.matchMedia("(orientation: landscape)").matches
+    || window.innerWidth >= 960;
+  const budgetW = Math.max(240, window.innerWidth - (wide ? 430 : 60));
+  const budgetH = Math.max(180, window.innerHeight - (wide ? 170 : 420));
+  const size = Math.max(12, Math.min(28, Math.floor(Math.min(budgetW / span, budgetH / span))));
   map.style.gridTemplateColumns = `repeat(${w.map_size.width}, ${size}px)`;
   const terrain = new Map((w.known_terrain||[]).map(t => [`${t.x},${t.y}`, t.terrain]));
   const visible = new Set((w.visible_cells||[]).map(c => `${c[0]},${c[1]}`));
@@ -573,6 +651,61 @@ function renderPending(){
   }
 }
 
+function renderDerivative(){
+  /* 2026-11-09 用户令：衍生是**局内**独立 0 出手行动——不占出手、不结束回合、
+     不耗精力。界面必须能发起、领取、刷新、放弃，不能只留高级指令里手敲 action。 */
+  const card = $("derivativeCard"), body = $("derivativeBody");
+  if (!card || !body) return;
+  body.innerHTML = "";
+  const d = S && S.derivative;
+  if (!S || !S.started || !d){ card.style.display = "none"; return; }
+  card.style.display = "";
+  body.append(el("div","hint",
+    `代价 ${d.cost}；不满意可再付 ${d.refresh_cost} 刷新。每个衍生道纹独立占 1 张死者之页（空余 ${d.pages_left}）。`));
+
+  if (d.pending){
+    body.append(el("div","kv", `母本【${d.pending.parent}】发现结果——点一种领取：`));
+    for (const c of d.pending.choices){
+      const row = el("div","row");
+      row.style.alignItems = "flex-start";
+      const btn = el("button","primary", c.name);
+      btn.onclick = () => act("choose_derivative_daowen", {daowen_name: c.name});
+      row.append(btn, el("div","hint", c.effect || "（索引里没有条文）"));
+      body.append(row);
+    }
+    const ops = el("div","row");
+    const refresh = el("button", null, `刷新（${d.refresh_cost}）`);
+    refresh.disabled = !d.refresh_affordable;
+    refresh.onclick = () => act("refresh_derivative_choices", {});
+    const abandon = el("button","danger","放弃本次");
+    abandon.onclick = () => act("choose_derivative_daowen", {abandon: true});
+    ops.append(refresh, abandon);
+    body.append(ops);
+    body.append(el("div","hint","已付代价不退；放弃后可重新支付完整代价再衍生。"));
+    return;
+  }
+
+  if (!d.parents.length){
+    body.append(el("div","hint","还没有母本道纹（杀伐／透支／再生）：持有母本才能在战斗中衍生。"));
+    return;
+  }
+  const row = el("div","row");
+  const sel = el("select");
+  for (const name of d.parents){
+    const opt = el("option", null, name); opt.value = name; sel.append(opt);
+  }
+  const btn = el("button","primary","发现（占 0 出手）");
+  btn.disabled = !d.available;
+  btn.onclick = () => act("derive_daowen", {source_daowen: sel.value});
+  row.append(sel, btn);
+  body.append(row);
+  if (d.blockers.length){
+    body.append(el("div","hint","现在不能发起：" + d.blockers.join("；")));
+  } else {
+    body.append(el("div","hint","点「发现」后从该母本池的 3 个未持有选项里选 1 种。"));
+  }
+}
+
 function renderEvent(){
   const card = $("eventCard"), body = $("eventBody");
   body.innerHTML = "";
@@ -614,6 +747,112 @@ function renderEvent(){
   if (S.event.queued) body.append(el("div","hint", `还有 ${S.event.queued} 个事件排队`));
 }
 
+let _battleWasVisible = false;
+
+/* ---- 逐击普攻（A 分伤害 → B 选应对 → 循环） ---- */
+let ATK = null;   // 服务端草稿的一步快照：{phase, hit_index, hit_count, ...}
+
+async function attackPrepare(actorRef){
+  if (busy) return; busy = true;
+  ATK = null;
+  try {
+    const data = await api("/api/ui_attack_prepare", {actor_ref: actorRef || "player:0"});
+    if (!data.success){ toast("准备攻击失败：" + (data.error || "未知错误")); return; }
+    ATK = data.attack || null;
+    render();
+  } catch(e){ toast("请求失败：" + e.message); }
+  finally { busy = false; }
+}
+
+async function attackSend(path, body){
+  if (busy) return; busy = true;
+  try {
+    const data = await api(path, body || {});
+    if (!data.success){ toast("失败：" + (data.error || "未知错误")); return; }
+    if (data.attack){ ATK = data.attack; }
+    else {
+      ATK = null;
+      const r = (data.result && (data.result.result || data.result)) || {};
+      const hits = r.hits || [];
+      if (hits.length){
+        toast("这一手打完了：" + hits.map(h => h.skipped ? "（目标已命零）"
+          : `${h.target || ""} ${h.damage_dealt ?? 0}`).join(" / "));
+      }
+      const snap = await fetch("/api/snapshot").then(r2 => r2.json()).catch(() => null);
+      if (snap){ S = snap; }
+    }
+    render();
+  } catch(e){ toast("请求失败：" + e.message); }
+  finally { busy = false; }
+}
+
+function attackPanel(b){
+  const wrap = el("div","stack");
+  if (!ATK){
+    const again = el("button","primary","继续这次出手（逐击）");
+    again.onclick = () => attackPrepare(ATK && ATK.actor_ref);
+    wrap.append(el("div","banner","这次出手还没打完：按「逐击」重新列出当前这一击。"), again);
+    return wrap;
+  }
+  const a = ATK;
+  const head = a.phase === "respond"
+    ? `第 ${a.hit_index}/${a.hit_count} 击 · ${a.actor} 打 ${a.current.target} ${a.current.damage} 点：轮到 ${a.current.target} 选应对`
+    : `第 ${a.hit_index}/${a.hit_count} 击 · ${a.actor} 分配本击伤害（预算 ${a.damage_budget}，已分配 ${a.damage_used}，剩 ${a.damage_left}）`;
+  wrap.append(el("div","banner", head));
+
+  if (a.phase === "declare"){
+    const targetSelect = el("select");
+    for (const t of a.target_options){
+      const o = el("option", null, t.name); o.value = t.ref; targetSelect.append(o);
+    }
+    const remain = Math.max(1, a.hit_count - a.hit_index + 1);
+    const input = el("input"); input.type = "number"; input.min = "0"; input.step = "1";
+    input.value = Math.max(0, Math.floor(a.damage_left / remain));
+    const tbox = el("label","field"); tbox.append(el("span",null,"目标"), targetSelect);
+    const dbox = el("label","field"); dbox.append(el("span",null,"X（本击伤害）"), input);
+    const go = el("button","primary","确定 → 交给对方应对");
+    go.onclick = () => attackSend("/api/ui_attack_declare",
+      {target_ref: targetSelect.value, damage: Number(input.value) || 0});
+    const bar = el("div","row"); bar.append(tbox, dbox, go);
+    wrap.append(bar);
+  } else {
+    const c = a.current;
+    wrap.append(el("div","hint", `剩余速度 ${c.speed_left}（闪避/招架各占 1 点）`
+      + (c.dodge_locked ? " · 本击被【必中】锁定，闪避无效" : "")));
+    const bar = el("div","row");
+    const mk = (label, choice, disabled, hint) => {
+      const btn = el("button", choice === "tank" ? "primary" : "", label);
+      btn.disabled = !!disabled;
+      if (hint) btn.title = hint;
+      btn.onclick = () => attackSend("/api/ui_attack_respond", {choice});
+      return btn;
+    };
+    bar.append(
+      mk("硬扛（不吃速度）", "tank", false),
+      mk("招架（-1 速度）", "parry", !c.can_parry || c.speed_left <= 0,
+         c.can_parry ? "" : "当前不能招架"),
+      mk("闪避（-1 速度）", "dodge", !c.can_dodge || c.speed_left <= 0,
+         c.can_dodge ? "" : "当前不能闪避"),
+      mk("血影（-10 生命）", "blood_shadow",
+         !c.can_blood_shadow || c.blood_shadow_needs_target,
+         c.can_blood_shadow ? "" : "需要【血影】遗物"),
+    );
+    wrap.append(bar);
+    const fast = el("button","", "余下全部硬扛并结算");
+    fast.onclick = () => attackSend("/api/ui_attack_auto", {});
+    wrap.append(fast);
+  }
+  if (a.hits && a.hits.length){
+    const log = el("div","hits");
+    for (const h of a.hits){
+      const label = {tank:"硬扛", dodge:"闪避", parry:"招架", blood_shadow:"血影"}[h.choice] || h.choice;
+      log.append(el("div","hit", `第 ${h.index} 击 · ${h.target} · X=${h.damage} → ${label}`));
+    }
+    wrap.append(log);
+  }
+  return wrap;
+}
+
 function renderBattle(){
   const card = $("battleCard"), body = $("battleBody");
   body.innerHTML = "";
@@ -631,14 +870,32 @@ function renderBattle(){
   }
   if (!b){ card.style.display = "none"; return; }
   card.style.display = "";
+  /* 窄屏（预览窗通常只有 320~380px）：战斗刚开始时把战斗卡滚进视野，
+     免得玩家以为「没反应」还要自己往下翻。 */
+  if (!_battleWasVisible && window.innerWidth < 680 && !b.peaceful){
+    setTimeout(() => { try { card.scrollIntoView({block: "start", behavior: "smooth"}); } catch(e){} }, 80);
+  }
+  _battleWasVisible = !b.peaceful;
   $("battlePhase").textContent = b.peaceful ? "战斗结束"
-    : `第 ${b.round} 回合 · ${b.subphase}${b.actions_left !== undefined ? ` · 余 ${b.actions_left} 次出手` : ""}`;
+    : `第 ${b.round} 回合 · ${b.subphase}`
+      + (b.round_started === false ? " · 出手权未定"
+        : (b.actions_left !== undefined ? ` · 余 ${b.actions_left} 次出手` : ""));
   for (const c of b.combatants){
     const row = el("div", "combatant " + (c.side === "enemy" ? "side-enemy" : "side-player")
       + (c.alive ? "" : " dead"));
     const combat = (c.attack_count > 0) ? ` · 攻 ${c.attack_count}×${c.attack_power}` : "";
-    row.append(el("span","name", c.name), el("span","hp", `${c.hp}/${c.hp_limit}${combat}`));
+    const left = (c.actions_left !== undefined) ? ` · 余 ${c.actions_left}/${c.action_budget} 手` : "";
+    row.append(el("span","name", c.name),
+               el("span","hp", `${c.hp}/${c.hp_limit}${combat}${left}`));
     body.append(row);
+    const statuses = c.statuses || [];
+    if (statuses.length){
+      body.append(el("div","hint",
+        "状态：" + statuses.map(st => {
+          const span = st.rounds > 0 ? `（${st.rounds}回合）` : (st.rounds < 0 ? "（持续∞）" : "");
+          return `${st.name}${st.value ? ` ${st.value}` : ""}${span}`;
+        }).join("、")));
+    }
   }
   if (!S.player || !S.player.alive){
     body.append(el("div","banner dead","你已倒下，这一局的胜负由世界继续写下去。"));
@@ -646,10 +903,34 @@ function renderBattle(){
   }
   const avail = (S.actions && S.actions.actions || []).map(a => a.action_type);
   const has = (name) => avail.includes(name);
+  if (b.manual_both){
+    const foesAlive = b.combatants.filter(c => c.side === "enemy" && c.alive && c.ref);
+    const turnText = b.round_started === false
+      ? "当前行动方：未定（点「开始本回合」后按先手规则判定）"
+      : b.duel_turn === "opponent_side"
+        ? `当前行动方：B 方（${foesAlive.map(c => c.name).join("、") || "无存活单位"}）`
+        : "当前行动方：A 方";
+    body.append(el("div","banner", turnText + " · 推演模式（不用 AI，双方都由你操作）"));
+    /* 出手口径说明：每名角色每回合 1 次出手；攻击的「N 击」是当前速度，不是出手次数。 */
+    body.append(el("div","hint", "先手＝速限→法限→血限→当前生命（大者先）；四项全同则随机首手、之后交替。"
+      + "每名角色每回合基础 1 次出手，攻击的击数＝当前速度。"));
+    if (b.duel_turn === "opponent_side" && b.round_started !== false && !b.peaceful && foesAlive.length){
+      /* 逐击是通用规则：B 方出手也走同一套（攻击方定 X → 防守方选应对）。
+         只有单人多角色同侧的旧怪物阶段面板才保留批量提交。 */
+      if (foesAlive.length === 1 && foesAlive[0].ref){
+        const go = el("button","primary", `B 方出手（逐击）：${foesAlive[0].name}`);
+        go.onclick = () => attackPrepare(foesAlive[0].ref);
+        body.append(go);
+        body.append(el("div","hint","这一手同样是一击一问：B 定 X，你替 A 选硬扛/招架/闪避。"));
+      } else {
+        body.append(manualEnemyPanel(foesAlive));
+      }
+    }
+  }
   const row = el("div","row"); row.style.marginTop = "8px";
 
   const endBtn = () => {
-    const b2 = el("button","primary","结算战斗，回到地图");
+    const b2 = el("button","primary", S.direct ? "结算战斗" : "结算战斗，回到地图");
     b2.onclick = () => act("battle_end", {});
     return b2;
   };
@@ -682,42 +963,107 @@ function renderBattle(){
     return b2;
   };
 
+
+function manualEnemyPanel(foesAlive){
+  /* 推演模式：B 方回合由用户点选一次真实行动（不用 AI）。
+     提交后引擎按「交替出手」自动换回 A 方，面板随之消失。 */
+  const wrap = el("div","stack");
+  if (!MANUAL){
+    const prep = el("button","primary","① 准备 B 方行动");
+    prep.onclick = async () => {
+      if (busy) return; busy = true;
+      try{
+        const data = await api("/api/ui_monster_prepare", {});
+        if (!data.success){ toast("准备失败：" + (data.error || "未知错误")); return; }
+        MANUAL = data.prepare || {};
+        render();
+      } catch(e){ toast("请求失败：" + e.message); }
+      finally { busy = false; }
+    };
+    wrap.append(prep, el("div","hint","点了之后会列出 B 方这次能做什么：攻击谁、闪不闪、用哪个道纹。"));
+    return wrap;
+  }
+  const actor = (MANUAL.actors || [])[0];
+  const actionRow = el("div","row"); actionRow.style.marginTop = "8px";
+  const finish = (params) => async () => {
+    if (busy) return; busy = true;
+    try{
+      const data = await api("/api/ui_monster_phase", params);
+      if (!data.success){ toast("B 方行动失败：" + (data.result && data.result.error)); return; }
+      MANUAL = null; render();
+    } catch(e){ toast("请求失败：" + e.message); }
+    finally { busy = false; }
+  };
+  const endTurn = async () => {
+    if (busy) return; busy = true;
+    try{
+      const data = await api("/api/ui_end_side", {actor_ref: foesAlive[0].ref});
+      if (!data.success) toast("结束回合失败：" + (data.result && data.result.error));
+      else MANUAL = null;
+    } catch(e){ toast("请求失败：" + e.message); }
+    finally { busy = false; }
+  };
+  if (!actor){
+    wrap.append(el("div","kv","B 方这次没有合法行动。"));
+    const skip = el("button","primary","结束 B 方回合（保留剩余出手）");
+    skip.onclick = endTurn;
+    actionRow.append(skip);
+    wrap.append(actionRow);
+    return wrap;
+  }
+  wrap.append(el("div","kv", `轮到 ${actor.monster || actor.actor_ref}：${(actor.attack_target_options||[]).length ? `可攻击 ${actor.hit_count} 击、总伤害上限 ${actor.damage_budget}` : "没有攻击目标"}`));
+  /* 目标 */
+  let targetSelect = null;
+  const targets = actor.attack_target_options || [];
+  if (targets.length){
+    targetSelect = el("select");
+    for (const t of targets){
+      const o = el("option", null, `${t.name}（${t.ref}）`); o.value = t.ref; targetSelect.append(o);
+    }
+    const trow = el("div","field"); trow.append(el("label",null,"攻击目标"), targetSelect);
+    wrap.append(trow);
+  }
+  /* 道纹（可选） */
+  let daowenSelect = null;
+  const daowens = actor.daowen_options || [];
+  daowenSelect = el("select");
+  const none = el("option", null, "（不使用道纹，进行普通攻击）"); none.value = ""; daowenSelect.append(none);
+  for (const d of daowens){
+    const o = el("option", null, `道纹：${d.name}${d.x ? ` X=${d.x}` : ""}`); o.value = d.name; daowenSelect.append(o);
+  }
+  if (daowens.length){
+    const draw = el("div","field"); draw.append(el("label",null,"道纹"), daowenSelect);
+    wrap.append(draw);
+  }
+  /* 闪避 */
+  const dodgeWrap = el("label","kv"); dodgeWrap.style.margin = "6px 0";
+  const dodge = el("input"); dodge.type = "checkbox";
+  dodgeWrap.append(dodge, document.createTextNode(" 这次攻击尝试闪避"));
+  wrap.append(dodgeWrap);
+  /* 操作 */
+  const go = el("button","primary","执行 B 方行动");
+  go.onclick = () => {
+    const params = {manual: true, dodge: !!dodge.checked};
+    if (targetSelect) params.target_ref = targetSelect.value;
+    if (daowenSelect && daowenSelect.value) params.daowen_name = daowenSelect.value;
+    finish(params)();
+  };
+  const endSide = el("button","","结束 B 方回合（保留剩余出手）");
+  endSide.onclick = endTurn;
+  actionRow.append(go, endSide);
+  wrap.append(actionRow);
+  return wrap;
+}
+
   if (b.peaceful){
     row.append(endBtn());
     body.append(row);
     return;
   }
   if (b.pending_attack){
-    const pa = b.pending_attack;
-    const targetSelect = el("select");
-    for (const t of pa.target_options){
-      const o = el("option", null, `${t.name}（${t.ref}）`); o.value = t.ref; targetSelect.append(o);
-    }
-    const trow = el("div","field"); trow.append(el("label",null,"目标"), targetSelect);
-    body.append(trow);
-    const hitsBox = el("div","hits");
-    const per = Math.floor(pa.damage_budget / Math.max(1, pa.hit_count));
-    const inputs = [];
-    for (let i = 0; i < pa.hit_count; i++){
-      const line = el("div","hit");
-      line.append(el("span",null,`第 ${i+1} 击`));
-      const input = el("input"); input.type = "number"; input.min = "0"; input.step = "1";
-      input.value = i === pa.hit_count - 1 ? pa.damage_budget - per * (pa.hit_count - 1) : per;
-      line.append(input); inputs.push(input); hitsBox.append(line);
-    }
-    const go = el("button","primary","提交攻击");
-    go.onclick = async () => {
-      if (busy) return; busy = true;
-      try {
-        const data = await api("/api/ui_attack", {target_ref: targetSelect.value,
-          damages: inputs.map(i => Number(i.value) || 0)});
-        if (!data.success) toast("攻击失败：" + (data.result && data.result.error));
-        else toast("攻击已结算");
-      } finally { busy = false; }
-    };
-    body.append(hitsBox, el("div","kv", `总伤害上限 ${pa.damage_budget} · ${pa.hit_count} 击`));
-    row.append(go);
-    body.append(row);
+    /* 普攻逐击流程：A 分配本击目标与 X → 切到 B 选应对 → A 还有余击就回到起点，
+       否则一次性结算这一次出手。 */
+    body.append(attackPanel(b));
     return;
   }
 
@@ -740,18 +1086,21 @@ function renderBattle(){
         : noActionsLeft ? "准备攻击（本回合出手已用完）"
         : `准备攻击（余 ${b.actions_left ?? "?"} 次）`);
     prep.disabled = noActionsLeft || noEnemy;
-    prep.onclick = () => act("prepare_attack", {actor_ref: "player:0"});
+    prep.onclick = () => attackPrepare();
     row.append(prep);
   }
   if (has("resolve_ally_phases")) row.append(allyBtn());
-  if (has("prepare_monster_phase") || has("resolve_monster_phase")) row.append(monsterBtn(dodgeBoxes));
+  if (!b.manual_both && (has("prepare_monster_phase") || has("resolve_monster_phase"))) {
+    row.append(monsterBtn(dodgeBoxes));
+  }
   if (has("round_end")) row.append(roundEndBtn());
   if (has("round_start")) row.append(roundStartBtn());
   if (has("battle_end")) row.append(endBtn());
   body.append(row);
 
   const foes = (b.combatants || []).filter(c => c.side === "enemy" && c.alive && c.ref);
-  if (foes.length && (has("prepare_monster_phase") || has("resolve_monster_phase"))){
+  if (!b.manual_both && foes.length
+      && (has("prepare_monster_phase") || has("resolve_monster_phase"))){
     const dodgeWrap = el("div","kv");
     dodgeWrap.append(document.createTextNode("敌方阶段尝试闪避："));
     foes.forEach((c) => {
@@ -819,6 +1168,37 @@ document.addEventListener("keydown", (e) => {
 $("waitBtn").onclick = () => act("world_wait", {turns: 1});
 $("wait5Btn").onclick = () => act("world_wait", {turns: 5});
 $("newBtn").onclick = () => $("newModal").classList.remove("hidden");
+
+/* 字号档位：预览窗窄的时候按钮和字都能放大（存在 localStorage）。 */
+const FONT_STEPS = [["标准", ""], ["大", "big"], ["特大", "huge"]];
+let fontIdx = Number(localStorage.getItem("linjiFont") || 0) % FONT_STEPS.length;
+function applyFont(){
+  document.documentElement.classList.remove("big", "huge");
+  const step = FONT_STEPS[fontIdx];
+  if (step[1]) document.documentElement.classList.add(step[1]);
+  $("fontBtn").textContent = "字 " + step[0];
+  localStorage.setItem("linjiFont", String(fontIdx));
+}
+$("fontBtn").onclick = () => {
+  fontIdx = (fontIdx + 1) % FONT_STEPS.length;
+  applyFont();
+  if (S) render();
+};
+applyFont();
+
+/* 视口读数：用来确认预览 iframe 实际有多宽，好按真实宽度排版。 */
+function updateVp(){
+  const label = $("vpLabel");
+  if (label) label.textContent =
+    `视口 ${window.innerWidth}×${window.innerHeight} @${window.devicePixelRatio || 1}x`;
+}
+updateVp();
+let _resizeTimer = null;
+window.addEventListener("resize", () => {
+  updateVp();
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => { if (S) renderMap(); }, 150);
+});
 $("rawSend").onclick = () => {
   let params = {};
   try { params = JSON.parse($("rawParams").value || "{}"); }
@@ -846,18 +1226,26 @@ async function startGame(){
   finally { $("startBtn").disabled = false; }
 }
 $("startBtn").onclick = startGame;
-$("cancelBtn").onclick = () => {
-  if (S && S.started) $("newModal").classList.add("hidden");
-  else toast("先开一局吧");
-};
+$("cancelBtn").onclick = () => { $("newModal").classList.add("hidden"); };
 
 (async function boot(){
+  /* 开局弹窗只在点「新开一局」时出现，不自动弹（用户：我自己会点，不用它提醒）。 */
   try {
     const res = await fetch("/api/snapshot");
     S = await res.json();
-    if (S.started) { $("newModal").classList.add("hidden"); render(); }
-  } catch(e){ /* 首屏失败时保留开局弹窗 */ }
+    $("newModal").classList.add("hidden");
+    if (S.started) render();
+    else renderEmpty();
+  } catch(e){ $("newModal").classList.add("hidden"); }
 })();
+
+function renderEmpty(){
+  const map = $("map");
+  if (map && !map.children.length){
+    map.append(el("div", "hint",
+      "还没有开局：点右上角「新开一局」，或去「角色演武场」配一场 A vs B。"));
+  }
+}
 </script>
 </body>
 </html>

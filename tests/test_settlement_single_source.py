@@ -384,13 +384,13 @@ def test_resonance_converts_holder_daowen_and_grants_one_copy(tmp_path):
     assert e.state.resonance.get("曲解", 0) >= 1
 
     r = e.execute_action("use_resonance", {
-        "source_daowen": "再生", "resonance_type": "曲解", "target_daowen": "连击", "target_ref": _ref(e, foe)})
+        "source_daowen": "再生", "resonance_type": "曲解", "target_daowen": "脆弱", "target_ref": _ref(e, foe)})
     assert r["success"], r
     dest = r["result"]["target"]
-    assert dest == "连击"
+    assert dest == "脆弱"
     assert "再生" not in foe.dao_wen, "源道纹必须消失"
-    assert "连击" in foe.dao_wen, "持有者变为转化后的道纹"
-    assert "连击" in p.dao_wen, "施法者同时获得转化后的道纹"
+    assert "脆弱" in foe.dao_wen, "持有者变为转化后的道纹"
+    assert "脆弱" in p.dao_wen, "施法者同时获得转化后的道纹"
     assert r["granted_daowen"] == dest
 
 
@@ -398,22 +398,22 @@ def test_resonance_never_creates_a_duplicate_name(tmp_path):
     """边界：施法者已持有同名道纹时，只消耗残韵、不重复授予。"""
     e = _battle_engine(tmp_path, "reso_dup")
     p, foe = e.state.player, e.state.enemies[0]
-    _give(p, "连击")
+    _give(p, "脆弱")
     _give(foe, "再生")
     e.state.resonance["曲解"] = 2
 
     r = e.execute_action("use_resonance", {
-        "source_daowen": "再生", "resonance_type": "曲解", "target_daowen": "连击", "target_ref": _ref(e, foe)})
+        "source_daowen": "再生", "resonance_type": "曲解", "target_daowen": "脆弱", "target_ref": _ref(e, foe)})
     assert r["success"], r
     assert r["granted_daowen"] is None, "已持有同名道纹时不得重复授予"
-    assert list(p.dao_wen).count("连击") == 1
+    assert list(p.dao_wen).count("脆弱") == 1
 
     # 再转一次：持有者侧同样不得出现两份同名
     _give(foe, "再生")
     r2 = e.execute_action("use_resonance", {
-        "source_daowen": "再生", "resonance_type": "曲解", "target_daowen": "连击", "target_ref": _ref(e, foe)})
+        "source_daowen": "再生", "resonance_type": "曲解", "target_daowen": "脆弱", "target_ref": _ref(e, foe)})
     assert r2["success"], r2
-    assert list(foe.dao_wen).count("连击") == 1, "持有者侧同名只保留一份"
+    assert list(foe.dao_wen).count("脆弱") == 1, "持有者侧同名只保留一份"
     assert "再生" not in foe.dao_wen
 
 

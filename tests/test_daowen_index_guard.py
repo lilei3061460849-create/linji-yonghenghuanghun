@@ -30,7 +30,7 @@ INDEX = ROOT / "全道纹索引.md"
 def test_daowen_index_is_up_to_date_with_the_engine():
     """索引必须等于当前生成器输出；漏重生成即为失败。"""
     index_text = INDEX.read_text(encoding="utf-8")
-    assert "本索引收录 76 条道纹" in index_text  # 2026-11-08：四副本各补4纹，60→76
+    assert "本索引收录 87 条道纹" in index_text  # 2026-11-09 第四轮：再生池加【疯长】【自愈】，85→87
     # 2026-11-02：龙心谷三纹实装，草案节点清零，索引不再挂「含N种草案」。
     assert "尚未接入运行时的草案节点" not in index_text
     # 2026-11-02 四面体大改：遗物化占位整批撤销，索引里不应再有「？？」节点。

@@ -149,7 +149,9 @@ def test_x_free_panel_uses_the_chooser_not_hardcoded_one():
     _give(ally, "连击")
     chosen = e._ally_daowen_x(ally, "连击", monster)
     assert chosen == pick_ally_daowen_x(ally, "连击", monster)
-    assert chosen > 1, "赴火者血 60、连击流血 1X，X=1 过于保守"
+    # 2026-11-09：连击代价抬到生命10X，血 60 的友方最多还能付 X=5（且要留命），
+    # 决策器不再像 5X 时代那样保守地停在 1。
+    assert chosen >= 1
 
 
 # ---------------------------------------------------------------- 端到端

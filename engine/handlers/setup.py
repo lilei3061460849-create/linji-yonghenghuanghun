@@ -10,11 +10,11 @@ from ..gamedata import SHAFA_LOOP_DAOWEN
 
 
 def handle_setup_attributes(engine: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """分配初始属性点：2属性点 = 1速限 = 1法限；1属性点 = 6血限
+    """分配初始属性点：1属性点 = 1速限 = 6血限；2属性点 = 1法限
 
     DM裁定 2026-09-10：轮回者的攻击次数=当前速度、攻击力=当前法力（换算仅限轮回者），
-    攻次/攻力不再是可购买的独立面板，两个加点池随之撤销；速限/法限因为兼任攻次/攻力
-    而变贵（原 1点=1速限=2法限 → 现 2点=1速限=1法限）。25 点总预算不变。
+    攻次/攻力不再是可购买的独立面板，两个加点池随之撤销；法限因为兼任攻力而保持昂贵
+    （2点=1法限）。2026-11-09 用户令：放开速限，1点=1速限。25 点总预算不变。
     """
     if engine.state.player is not None:
         return {"success": False, "error": "初始属性已经分配，不能重复开局"}
@@ -27,19 +27,22 @@ def handle_setup_attributes(engine: Any, params: Dict[str, Any]) -> Dict[str, An
         return {
             "success": False,
             "error": f"属性点总和不能超过25，当前为{total}",
-            "instruction": "2属性点=1速限=1法限；1属性点=6血限；没花完的点会存进属性点池，之后随时可兑"
+            "instruction": "1属性点=1速限／1属性点=6血限／2属性点=1法限；"
+                           "没花完的点会存进属性点池，之后随时可兑"
         }
-    # 速限/法限按 2 点一档计价，买不出半档 → 点数须为偶数。
+    # 2026-11-09 用户令：放开速限——**1属性点 = 1速限**（原来 2 点一档）。
+    # 法限仍按 2 点一档计价，所以只有法限点数必须为偶数，速限点任何整数都行。
     # DM裁定 2026-09-10：余点不再强塞血限，允许留着（total<25 的部分进属性点池）。
-    if speed_points % 2 or mana_points % 2:
+    if mana_points % 2:
         return {
             "success": False,
-            "error": f"速限/法限按2属性点一档计价，点数必须是偶数（当前 速{speed_points}/法{mana_points}）",
-            "instruction": "改成偶数即可；剩下的点会存进属性点池，攒够2点随时再兑"
+            "error": f"法限按2属性点一档计价，点数必须是偶数（当前 法{mana_points}）",
+            "instruction": "法限点数改成偶数即可；速限是 1属性点=1速限、不限奇偶。"
+                           "没花完的点会留在属性点池里，攒着之后随时兑"
         }
 
     blood_limit = blood_points * 6
-    speed_limit = speed_points // 2
+    speed_limit = speed_points
     mana_limit = mana_points // 2
 
     player = Entity(
@@ -58,6 +61,9 @@ def handle_setup_attributes(engine: Any, params: Dict[str, Any]) -> Dict[str, An
     )
 
     engine.state.player = player
+    # 战始快照/深拷贝会剔除弱引用；建号后先给轮回者接回【庇护】/【脆弱】的
+    # 失血拦截钩子（不绑完整引擎，避免同时改变封顶与「失去生命后」反应）。
+    engine.combat._bind_intercept_hook(player)
     # DM裁定 2026-09-10：属性点可存储，随时兑换（2点=1速限=1法限）
     engine.state.attribute_points = 25 - total
     engine.state.allocated_blood = blood_limit

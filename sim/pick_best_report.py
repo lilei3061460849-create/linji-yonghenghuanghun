@@ -239,6 +239,9 @@ def play_and_record(region: str, seed: int, battles: int = 7):
                     break
                 monster_phase = _resolve_monster_turn(engine)
                 if not monster_phase.get("success"):
+                    # 玩家在怪物阶段命零 → 死者之页中断属正常结局，交给外层死亡分支。
+                    if not engine.state.player or not engine.state.player.is_alive:
+                        break
                     return {"invalid": True, "reason": f"monster_phase:{monster_phase.get('error')}"}
             result = engine.execute_action("round_end", {})
             if not result.get("success"):
@@ -367,6 +370,9 @@ def play_and_record(region: str, seed: int, battles: int = 7):
                         break
                     mp = _resolve_monster_turn(engine)
                     if not mp.get("success"):
+                        # 同上：命零后的死者之页中断不是 bug，跳出怪物阶段走死亡结算。
+                        if not engine.state.player or not engine.state.player.is_alive:
+                            break
                         return {"invalid": True,
                                 "reason": f"monster_phase:{mp.get('error')}"}
                     details.extend(mp.get("result", {}).get("details", []))

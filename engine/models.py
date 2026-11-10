@@ -45,8 +45,16 @@ class DaoWen:
         # 别名表单一出处 engine/daowen.py LEGACY_DAOWEN_ALIASES）：
         # 任何构造路径（旧面板/旧封存/旧档）拿到的定义名都归一为现名，
         # 引擎注册表与发动提交仍不收旧名。
-        if self.name == "血债":
-            self.name = "连击"
+        if self.name:
+            # 别名表单一出处 engine/daowen.py LEGACY_DAOWEN_ALIASES（含 2026-11-09
+            # 第二轮衍生改名）；函数内懒导入避免 models↔daowen 循环依赖。
+            try:
+                from engine.daowen import normalize_daowen_name
+            except Exception:  # pragma: no cover - 仅在部分沙箱缺依赖时退化
+                if self.name == "血债":
+                    self.name = "连击"
+            else:
+                self.name = normalize_daowen_name(self.name)
 
     def to_dict(self) -> dict:
         return {
@@ -693,12 +701,18 @@ class Entity:
                 and any(status.name == "不死" and not status.is_expired
                         for status in self.__dict__.get("status_effects", ()))):
             value = 1
-        # 庇护统一拦截实际生命写入；只有战斗绑定实体具有该判定位。
+        # 庇护／脆弱统一拦截实际生命写入。2026-11-09：轮回者在正式流程里
+        # 只绑「拦截钩子」`_hp_intercept_ref`（不绑完整的 `_hp_engine_ref`），
+        # 因此本块要兼容两种弱引用；完整绑定仍以 `_hp_engine_ref` 为准。
         if name == "current_hp" and old is not None and value < old:
-            eng = self.__dict__.get("_hp_engine_ref")
+            eng = (self.__dict__.get("_hp_intercept_ref")
+                   or self.__dict__.get("_hp_engine_ref"))
             owner = eng() if eng is not None else None
             if owner is not None:
                 value = owner._shelter_hp_loss(self, old, value)
+                # 2026-11-09：【脆弱】的重复在【庇护】之后结算——被整笔免掉的
+                # 失血（value 回到 old）不算「失去生命」，脆弱不消费。
+                value = owner._fragile_hp_loss(self, old, value)
         # 萎缩：任何来源都不能使当前速度增加；下降、封顶与速限变化不受影响。
         if (name == "current_speed" and isinstance(old, int) and value > old
                 and any(status.name == "萎缩" and not status.is_expired
@@ -759,6 +773,7 @@ class Entity:
         """存档/快照序列化时剔除战斗期引擎弱引用（不可 pickle）。"""
         state = self.__dict__.copy()
         state.pop("_hp_engine_ref", None)
+        state.pop("_hp_intercept_ref", None)
         state.pop("_hp_state_ref", None)
         return state
 
@@ -768,6 +783,7 @@ class Entity:
         self.__dict__["entity_type"] = normalize_entity_type(
             self.__dict__.get("entity_type", ""))
         self.__dict__["_hp_engine_ref"] = None
+        self.__dict__["_hp_intercept_ref"] = None
         # `_hp_state_ref` 不回填：反序列化后若写入 None 会被沙盒污染检查
         # 判成新状态（见 engine/pollution_guard.py）；读取端一律用 __dict__.get。
         self.__dict__.setdefault("daowen_use_history", set())
@@ -857,6 +873,8 @@ class Entity:
             "全力": lambda status, old: self.mana_limit,
             "强化": lambda status, old: old + status.value,
             "弱化": lambda status, old: old - status.value,
+            # 2026-11-09：【献锋】的攻击力代价是**本回合**减益（状态随回终到期复原）。
+            "献锋": lambda status, old: old - status.value,
             "定型": lambda status, old: status.effect_data.setdefault("attack_power", old),
         })
         return max(0, power)
@@ -1133,8 +1151,11 @@ class Entity:
         """
         return math.inf if self.has_status("无限法限") else self.mana_limit
 
-    def heal(self, amount: int) -> dict:
+    def heal(self, amount: int, count_multiplier: int = 1) -> dict:
         """回复生命。
+
+        `count_multiplier` 只影响**记账**（本场累计治疗量），不影响实际回复：
+        【疯长】回 8X 血，但这一发在累计治疗量里按双倍记，更快逼近【癌变】线。
 
         2026-11-01 重构2：删掉 `allow_overflow` 死参数——"能否超过[血限]"
         已经由 `__setattr__` 统一判定（猩红果实 / 【增殖】的无限血限），
@@ -1151,7 +1172,7 @@ class Entity:
         # 癌变追踪：DM裁定删除过量回复双倍计入机制，
         # 受到的全部回复（含过量部分）一律按原值计入累计恢复量。
         self.total_healed += amount
-        self.healed_this_battle += actual
+        self.healed_this_battle += actual * max(1, int(count_multiplier or 1))
         return {
             "heal_amount": amount,
             "actual_heal": actual,
@@ -1275,7 +1296,8 @@ class Entity:
             debuffs = {
                 "弱化", "无力", "减速", "全速", "束缚", "封印", "冰冻",
                 "坏死", "退化", "定型", "畸变", "加害", "伤痕", "沉溺",
-                "寄生", "蒙蔽", "手雷减攻", "被背负",   # 2026-10-11 删【衰败】
+                "寄生", "蒙蔽", "手雷减攻", "被背负", "脆弱",  # 2026-10-11 删【衰败】
+                "献锋",  # 2026-11-09：本回合攻击力减益（代价）
             }
             if effect.name in buffs:
                 effect.polarity = EffectPolarity.BUFF.value
@@ -1487,6 +1509,12 @@ class GameState:
     pending_initial_daowen_source: str = ""
     # 【典当】：轮回者发动后待领取的发现（每组3选1，choose_diandang_daowen 逐组领取）。
     pending_diandang_discoveries: list[list[str]] = field(default_factory=list)
+    # 【衍生道纹】（2026-11-09）：一次衍生发现待选的 3 个未持有衍生道纹、母本与接收者。
+    # 三项都是纯 list/str，随 deepcopy 快照 / pickle 存档自然往返；旧档缺字段时
+    # 各 handler 一律用 getattr 兜底。
+    pending_derivative_choices: list[str] = field(default_factory=list)
+    pending_derivative_parent: str = ""
+    pending_derivative_recipient: str = ""
     # 救赎：怪物融化后等待接纳/无视。
     pending_redemption: dict = field(default_factory=dict)
     # 消耗品【发现】候选（如扭曲都市完成事件后的工具发现）。
@@ -1706,6 +1734,7 @@ class GameState:
     def apply_heal(
         self, entity: Entity, amount: int,
         ctx: Optional[EffectContext | dict] = None,
+        count_multiplier: int = 1,
     ) -> dict:
         """统一回复入口；玩家侧溢出回复会被【龙血瓶】转为可提取耐久。
 
@@ -1719,12 +1748,14 @@ class GameState:
         with resolution_frame(_heal_engine, KIND_HEAL,
                               getattr(entity, "name", "?"), amount):
             try:
-                return self._apply_heal_inner(entity, amount, ctx)
+                return self._apply_heal_inner(entity, amount, ctx,
+                                              count_multiplier=count_multiplier)
             finally:
                 note_delta(_heal_engine, "hp", _hp_before, entity.current_hp)
 
     def _apply_heal_inner(self, entity: Entity, amount: int,
-                          ctx: Optional[EffectContext | dict] = None) -> dict:
+                          ctx: Optional[EffectContext | dict] = None,
+                          count_multiplier: int = 1) -> dict:
         """回复的实现体（对外契约见 apply_heal）。
 
         【第一杯】：持有者受到的回复翻倍（唯一事实源 `heal_multiplier`）。
@@ -1765,7 +1796,10 @@ class GameState:
         # （溢出量归零，【忘忧香】/【龙血瓶】无溢出可吃——没有溢出，只有实打实的血）。
         # 2026-11-01 重构2：上限判定由 Entity.__setattr__ 统一完成（猩红果实/
         # 无限血限），此处不再传参——`heal` 的 allow_overflow 已删除。
-        detail = entity.heal(amount)
+        detail = entity.heal(amount, count_multiplier=count_multiplier)
+        if count_multiplier != 1:
+            # 让战报/审计看得见「回同样的血，账记两倍」这条特例。
+            detail["heal_count_multiplier"] = count_multiplier
         detail["heal_ctx"] = heal_ctx.to_dict()
         heal_events = getattr(entity, "_heal_events", None)
         if heal_events is None:
@@ -1775,20 +1809,29 @@ class GameState:
         if legacy:
             detail["context_warning"] = "回复缺少EffectContext；已按legacy来源兼容记录"
         overheal = detail.get("overheal", 0)
+        # 【忘忧香】按**持有者阵营**结算（不只看玩家）：
+        #   · 玩家侧实体（含朋友/员工）→ 看本局玩家遗物池；
+        #   · 敌方轮回者 → 看 opponent_relics；
+        #   · 其他实体 → 看自身 relics。
+        wangyou_holder = None
+        if self.on_player_side(entity):
+            wangyou_holder = self.player
+        elif self.on_enemy_side(entity) and entity.entity_type == "轮回者":
+            wangyou_holder = entity
+        elif any(r.name == "忘忧香" for r in getattr(entity, "relics", ()) or ()):
+            wangyou_holder = entity
+        if overheal > 0 and wangyou_holder is not None and self._relic_active(wangyou_holder, "忘忧香"):
+            entity.gain_shield(overheal)
+            detail["wangyouxiang_block"] = overheal
+            detail["wangyouxiang_ctx"] = make_context(
+                timing=heal_ctx.timing, source="忘忧香", source_type="relic",
+                actor=entity, target=entity, owner=entity,
+                mechanic="shield", subtype="overheal_to_block", amount=overheal,
+                tags={"overheal", "block", "wangyouxiang"},
+                parent_event_id=heal_ctx.event_id,
+            ).to_dict()
+        # 【龙血瓶】是玩家的消耗品，只有玩家侧溢出才进瓶。
         if overheal > 0 and self.on_player_side(entity):
-            # 【忘忧香】：战斗被动。受到溢出回复时将其转化为等量格挡。
-            # 这是遗物级被动：只要持有者（己方实体/轮回者阵营）持有忘忧香，溢出回复1:1转格挡。
-            wangyou = next((r for r in self.relics if r.name == "忘忧香"), None)
-            if wangyou is not None and getattr(wangyou, "enabled", True):
-                entity.gain_shield(overheal)
-                detail["wangyouxiang_block"] = overheal
-                detail["wangyouxiang_ctx"] = make_context(
-                    timing=heal_ctx.timing, source="忘忧香", source_type="relic",
-                    actor=entity, target=entity, owner=entity,
-                    mechanic="shield", subtype="overheal_to_block", amount=overheal,
-                    tags={"overheal", "block", "wangyouxiang"},
-                    parent_event_id=heal_ctx.event_id,
-                ).to_dict()
             bottle = next((item for item in self.consumables if item.name == "龙血瓶"), None)
             if bottle is not None:
                 # 忘忧香先转化格挡，剩余溢出再进龙血瓶；两者同时存在时忘忧香优先。
@@ -2310,6 +2353,9 @@ class GameState:
             "pending_initial_daowen_choices": list(self.pending_initial_daowen_choices),
             "pending_initial_daowen_source": self.pending_initial_daowen_source,
             "pending_diandang_discoveries": [list(g) for g in self.pending_diandang_discoveries],
+            "pending_derivative_choices": list(getattr(self, "pending_derivative_choices", [])),
+            "pending_derivative_parent": getattr(self, "pending_derivative_parent", ""),
+            "pending_derivative_recipient": getattr(self, "pending_derivative_recipient", ""),
             "pending_redemption": dict(self.pending_redemption),
             "pending_item_choices": list(self.pending_item_choices),
             "pending_item_source": self.pending_item_source,

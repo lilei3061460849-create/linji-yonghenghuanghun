@@ -83,7 +83,7 @@ python3 sim/duels/manual_handplay.py              # 例：手动死斗
 | `victory_path_tournament.py` | 胜利路径锦标赛（2026-08-22 DM裁定：把各种胜利方法的利弊和胜率都列出来）。 |
 | `wage_settlement.py` | 共享员工工资结算助手。 |
 
-## `sim/audits/` —— 审计与实验（跑数据找异常、A/B 对照）（13 个）
+## `sim/audits/` —— 审计与实验（跑数据找异常、A/B 对照）（14 个）
 
 | 文件 | 说明 |
 | --- | --- |
@@ -92,6 +92,7 @@ python3 sim/duels/manual_handplay.py              # 例：手动死斗
 | `breed_cohort_profile.py` | 养蛊胜者档案器：静态快照事实 + 参考死斗性格 + 循环赛战术/战绩（报告.md 表格的数据源）。 |
 | `breed_parallel_scan.py` | 并行养蛊扫描器（2026-09-10）：当前引擎下 7 通关变稀有，单进程顺序扫描太慢。 |
 | `combo_loop_audit.py` | 一阶逆天组合与隐藏循环审计。 |
+| `derivative_pick_rate.py` | 衍生道纹选取率审计（2026-11-09）：池内≤3 项择一的被选概率 + 抬汇率建议；`--verify` 与真实引擎核对产出口径。 |
 | `design_intent_audit.py` | 设计意图符合性审计（2026-08-23 续「还债路径断点」教训）。 |
 | `dominance_test.py` | 支配性检验：判断游戏是否存在"固定最优解公式化打法"。 |
 | `effect_chain_audit.py` | 效果链审计工具：静态调用图 + 运行时嵌套深度实测。 |

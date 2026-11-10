@@ -24,7 +24,8 @@ import pytest  # noqa: E402
 from engine.ai_tactics import TacticalAI  # noqa: E402
 from engine.api import GameEngine  # noqa: E402
 from tests.setup_support import (  # noqa: E402
-    begin_battle, begin_round, finish_initial_daowen, strip_monster_relics,
+    begin_battle, begin_round, finish_initial_daowen, hand_priority_to_player,
+    strip_monster_relics,
 )
 
 FLAG = "LJ_AI_BASIC_ATTACK"
@@ -42,6 +43,9 @@ def engine(tmp_path):
     e.execute_action("setup_choose_region", {"region": "乱葬岗"})
     begin_battle(e)
     begin_round(e)
+    # 先手已是通用规则（速限→法限→血限→当前生命）：本夹具的面板下怪物速限更高，
+    # [回始]优先权会归怪物。本文件只验 AI 的普攻候选与预演，故声明轮到轮回者。
+    hand_priority_to_player(e)
     return e
 
 
@@ -51,8 +55,8 @@ def test_flag_zero_disables_basic_attack_candidate(engine, monkeypatch):
     ai = TacticalAI(engine)
     assert ai._basic_attack_candidates() == []
     p = engine.state.player
-    assert (p.speed_limit, p.mana_limit) == (4, 8)
-    assert (p.effective_attack_count(), p.effective_attack_power()) == (4, 8)
+    assert (p.speed_limit, p.mana_limit) == (8, 8)
+    assert (p.effective_attack_count(), p.effective_attack_power()) == (8, 8)
 
 
 def test_flag_default_enabled(engine, monkeypatch):
@@ -74,7 +78,7 @@ def test_flag_on_yields_one_candidate_per_live_enemy(engine, monkeypatch):
 
 
 def test_preview_sequence_sees_real_attack_damage(engine, monkeypatch):
-    """正常路径：预演整串跑完，打分看见真实伤害（当前速度4×当前法力8=32，未被闪避时）。"""
+    """正常路径：预演整串跑完，打分看见真实伤害（当前速度8×当前法力8=64，未被闪避时）。"""
     monkeypatch.setenv(FLAG, "1")
     ai = TacticalAI(engine)
     foe = ai.alive_enemies()[0]
@@ -85,7 +89,7 @@ def test_preview_sequence_sees_real_attack_damage(engine, monkeypatch):
     hp = next(e for e in pv["diff"]["enemies"] if e["name"] == foe.name)
     p = engine.state.player
     assert hp["hp_before"] - hp["hp_after"] == \
-        p.effective_attack_count() * p.effective_attack_power() == 32, hp
+        p.effective_attack_count() * p.effective_attack_power() == 64, hp
     # 真实状态分毫不动（预演是副本执行）
     assert foe.current_hp == hp["hp_before"]
 

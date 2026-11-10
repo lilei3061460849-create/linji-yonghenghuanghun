@@ -195,17 +195,17 @@ def test_training_splits_tier_points_between_speed_and_mana(tmp_path):
     player = engine.state.player
     before = (player.speed_limit, player.mana_limit)
 
-    # DM裁定 2026-09-10：2属性点=1[速限]=1[法限]，兑换点数须为偶数
+    # 2026-11-09 用户令：1属性点=1[速限]，2属性点=1[法限]
     trained = engine.execute_action("pre_battle_action", {
         "sub_action": "修行", "tier": 4,
         "allocations": {"speed_points": 2, "mana_points": 2},
     })
 
     assert trained["success"], trained
-    assert (player.speed_limit, player.mana_limit) == (before[0] + 1, before[1] + 1)
+    assert (player.speed_limit, player.mana_limit) == (before[0] + 2, before[1] + 1)
     assert (player.current_speed, player.current_mana) == (player.speed_limit, player.mana_limit)
     assert trained["result"]["allocations"] == {"blood_points": 0, "speed_points": 2, "mana_points": 2}
-    assert trained["result"]["gained"] == {"blood": 0, "speed": 1, "mana": 1}
+    assert trained["result"]["gained"] == {"blood": 0, "speed": 2, "mana": 1}
     assert engine.state.shards == 35
 
 
@@ -232,20 +232,25 @@ def test_training_banks_points_when_no_allocations(tmp_path):
     d = engine.execute_action("redeem_attribute_points",
                               {"allocations": {"speed_points": 2, "mana_points": 0}})
     assert d["success"], d
-    assert player.speed_limit == panel_before[0] + 1
+    assert player.speed_limit == panel_before[0] + 2
     assert engine.state.attribute_points == bank_before
     assert (engine.state.energy, engine.state.shards) == (energy_before, shards_before), \
         "兑换不该消耗精力或碎片"
 
 
-def test_redeem_rejects_odd_and_overspend_and_in_combat(tmp_path):
-    """边界：奇数点数买不出半档；超额拒绝；战斗内拒绝（会连带补满当前资源=重置一池）。"""
+def test_redeem_rejects_odd_mana_and_overspend_and_in_combat(tmp_path):
+    """边界：法限奇数点买不出半档（速限 1 点一档合法）；超额拒绝；战斗内拒绝。"""
     engine = _engine(tmp_path)
     engine.state.attribute_points = 3
 
     odd = engine.execute_action("redeem_attribute_points",
-                                {"allocations": {"speed_points": 1, "mana_points": 0}})
+                                {"allocations": {"speed_points": 0, "mana_points": 1}})
     assert not odd["success"] and "偶数" in odd["error"]
+
+    one_speed = engine.execute_action("redeem_attribute_points",
+                                      {"allocations": {"speed_points": 1, "mana_points": 0}})
+    assert one_speed["success"] and engine.state.attribute_points == 2, \
+        "1 属性点正好兑 1 速限"
 
     over = engine.execute_action("redeem_attribute_points",
                                  {"allocations": {"speed_points": 4, "mana_points": 0}})
@@ -298,7 +303,7 @@ def test_training_can_raise_blood_limit(tmp_path):
     assert player.blood_limit == bl_before + 18
     assert player.current_hp == hp_before + 18
 
-    # 边界：奇数点也能兑血限（1点一档），速限/法限仍须偶数
+    # 边界：奇数点也能兑血限（1点一档）；速限同样是 1 点一档，只有法限须偶数
     engine.state.attribute_points += 1
     redeemed = engine.execute_action("redeem_attribute_points",
                                      {"allocations": {"blood_points": 1}})

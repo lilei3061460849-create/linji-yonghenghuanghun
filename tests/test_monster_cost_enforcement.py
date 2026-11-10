@@ -125,7 +125,7 @@ def test_monster_bleed_cost_daowen_deducts_monster_hp(tmp_path):
     # 第2回合：怪物获得连击后发动（删除白板后，持有即可发动）
     m.dao_wen["连击"] = DaoWenInstance(
         DaoWen(name="连击", formula="", cost_type="流血", cost_formula="X", effect_formula=""),
-        x_value=5
+        x_value=2
     )
     e.execute_action("round_start", {"relic_choices": {}})
     e.execute_action("use_daowen", {"daowen_name": "杀伐", "x": 1, "target": m.name})
@@ -144,8 +144,8 @@ def test_monster_bleed_cost_daowen_deducts_monster_hp(tmp_path):
         }]
     })
 
-    # 验证：怪物生命真实扣除了连击5的代价（2026-10-22 连击流血价5X：5击=25点）
-    assert m.current_hp == hp_after_player_hit - 25, f"怪物发动连击5应扣25生命，实扣{hp_after_player_hit - m.current_hp}"
+    # 验证：怪物生命真实扣除了连击2的代价（2026-11-09 最简比 生命2X：2×2=4点）
+    assert m.current_hp == hp_after_player_hit - 4, f"怪物发动连击2应扣4生命，实扣{hp_after_player_hit - m.current_hp}"
 
 
 def test_monster_cannot_cast_when_hp_insufficient_for_cost(tmp_path):

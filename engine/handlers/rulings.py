@@ -81,7 +81,7 @@ class RulingHandlersMixin:
             self.state.attribute_points += 1
             res["applied"].append(
                 f"无所求：+1属性点（属性点池 {self.state.attribute_points}；"
-                "按正文 2点=1速限=1法限、1点=6血限，兑换仅限战前）")
+                "按正文 1点=1速限、2点=1法限、1点=6血限，兑换仅限战前）")
         # 过路商人交易是一个持续会话：同次遭遇可连续买卖多件遗物，直到选择其他选项离开。
         keep_merchant_open = (name == "过路商人" and text.startswith("遗物交易")
                               and bool(res.get("trade")))

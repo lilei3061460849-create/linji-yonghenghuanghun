@@ -29,8 +29,8 @@ def _tier(trigger, flow):
 # ---------------------------------------------------------------- 正常路径
 
 def test_blood_loop_spell_is_three_tier():
-    """血炼周天＝失去生命后（1）＋再生（2）＋透支（3）＝3 阶。"""
-    assert _tier("失去生命后", "发动再生X于自身→发动透支X于自身→循环") == 3
+    """血炼周天＝失去生命后（1）＋再生（2）＋燃命（3）＝3 阶。"""
+    assert _tier("失去生命后", "发动再生X于自身→发动燃命X于自身→循环") == 3
 
 
 def test_single_step_instant_spell_is_one_tier():
@@ -74,7 +74,7 @@ def test_definition_rejected_when_actions_insufficient(tmp_path):
                                               "speed_points": 8, "mana_points": 6})
     finish_initial_daowen(engine)
     player = engine.state.player
-    for name in ("再生", "透支"):
+    for name in ("再生", "燃命"):
         player.dao_wen[name] = DaoWenInstance(
             DaoWen(name=name, formula="", cost_type="", cost_formula="X", effect_formula=""))
     engine.state.phase = "in_combat"
@@ -85,9 +85,9 @@ def test_definition_rejected_when_actions_insufficient(tmp_path):
     used = player.actions_used_this_round
 
     result = engine.execute_action("define_spell", {"spell": {
-        "name": "血炼周天·自定", "required_daowen": ["再生", "透支"],
+        "name": "血炼周天·自定", "required_daowen": ["再生", "燃命"],
         "trigger_condition": "失去生命后",
-        "effect_flow": "发动再生X于自身→发动透支X于自身→循环"}})
+        "effect_flow": "发动再生X于自身→发动燃命X于自身→循环"}})
 
     assert not result["success"], result
     assert "仅剩0次" in result["error"], result
@@ -103,7 +103,7 @@ def test_definition_charges_one_action_per_tier(tmp_path):
                                               "speed_points": 8, "mana_points": 6})
     finish_initial_daowen(engine)
     player = engine.state.player
-    for name in ("再生", "透支"):
+    for name in ("再生", "燃命"):
         player.dao_wen[name] = DaoWenInstance(
             DaoWen(name=name, formula="", cost_type="", cost_formula="X", effect_formula=""))
     engine.state.phase = "in_combat"
@@ -114,9 +114,9 @@ def test_definition_charges_one_action_per_tier(tmp_path):
     used = player.actions_used_this_round
 
     result = engine.execute_action("define_spell", {"spell": {
-        "name": "血炼周天·自定", "required_daowen": ["再生", "透支"],
+        "name": "血炼周天·自定", "required_daowen": ["再生", "燃命"],
         "trigger_condition": "失去生命后",
-        "effect_flow": "发动再生X于自身→发动透支X于自身→循环"}})
+        "effect_flow": "发动再生X于自身→发动燃命X于自身→循环"}})
 
     assert result["success"], result
     assert result["result"]["tier"] == 3

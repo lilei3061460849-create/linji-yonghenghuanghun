@@ -595,6 +595,10 @@ def test_duel_leftover_actions_continue_when_other_exhausted():
     # 「对手出手用尽后余手连动」，因此用【疯狂】+3 制造出手差（2+3=5），
     # 而不是靠加点堆速限——那条路已经不存在了。
     player.add_status(StatusEffect(name="疯狂", value=3, remaining_rounds=-1, source="test"))
+    # 2026-11-09 放开速限后攻次翻倍，原伤害会在余手打完前打死对手；
+    # 本用例只量出手预算，把双方攻力压到 1（攻力=当前法力）隔离伤害。
+    player.current_mana = 1
+    opp.current_mana = 1
     player_budget = challenger.combat.single_round_action_count(player)
     opp_budget = challenger.combat.single_round_action_count(opp)
     assert player_budget > opp_budget, "本用例需要本侧出手多于对方"
@@ -667,6 +671,9 @@ def test_duel_last_leftover_then_both_exhausted_rejects():
 
     # 轮回者出手固定2次（DM裁定 2026-09-10），用【疯狂】+3 让挑战者留有余手
     player.add_status(StatusEffect(name="疯狂", value=3, remaining_rounds=-1, source="test"))
+    # 2026-11-09：只量预算，双方攻力压到 1，免得余手没打完就把对手打死
+    player.current_mana = 1
+    opp.current_mana = 1
     assert resolve_player_attack(challenger, "挑战者", [])["success"]
     assert resolve_player_attack(challenger, opp.name, [])["success"]
     for _ in range(3):

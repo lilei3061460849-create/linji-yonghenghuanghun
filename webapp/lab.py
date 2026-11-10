@@ -18,12 +18,16 @@
 from __future__ import annotations
 
 import os
+import random
 import tempfile
+from pathlib import Path
 from typing import Any
 
 from engine.api import GameEngine
 from engine.consumables import WING_ITEM_SPECS, make_wing_item
 from engine.daowen import DaoWenEngine
+from engine.daowen_text import daowen_effects
+from engine import derivatives as derivative_rules
 from engine.events import EVENT_CONSUMABLES, TWISTED_TOOL_LIBRARY
 from engine.gamedata import (
     FIRST_EMBRACE_DAOWEN,
@@ -39,6 +43,9 @@ from engine.models import Consumable, Relic
 from engine.monsters import assign_monster_preferences, make_monster_entity
 from engine.world import WorldState
 
+# 仓库根目录：演武场要读《全道纹索引》这类文档作为界面文案。
+ROOT = Path(__file__).resolve().parents[1]
+
 #: 演武场单场最多几只对手（地图遭遇的实际承载上限由 UI 与引擎共同决定）。
 MAX_ENEMIES = 6
 #: 属性自由模式的人为护栏：防止浏览器提交天文数字把引擎算崩。
@@ -51,6 +58,15 @@ _OPTIONS: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------- 目录
+
+
+def _daowen_effects() -> dict[str, str]:
+    """道纹 → 效果条文（供界面「点一下就看到效果」）。
+
+    解析逻辑与对局页共用 `engine.daowen_text`（同一份《全道纹索引》），
+    不再各写一份：一处改口径，两个界面同时生效。
+    """
+    return daowen_effects()
 
 
 def _daowen_groups() -> list[dict[str, Any]]:
@@ -71,6 +87,11 @@ def _daowen_groups() -> list[dict[str, Any]]:
         seen.update(picked)
         groups.append({"label": label, "names": picked, "note": note})
 
+    # 2026-11-09 用户令：衍生道纹可以像普通道纹一样直接放进角色卡的道纹栏，
+    # 不必非得在局内花【转换】+血限2+碎片3 去发现。这里单独成组，名字与条文
+    # 直接从 engine.derivatives 取，避免界面自建一份名单。
+    add("衍生道纹（母本衍生）", [spec.name for spec in derivative_rules.DERIVATIVE_SPECS],
+        "由母本道纹（杀伐／透支／再生）收益置换而来；局内也可用 0 出手【衍生】发现。")
     add("通用核心（开局可发现）", list(SHAFA_LOOP_DAOWEN),
         "开局【发现】只从这八种里抽；演武场里可任选。")
     add("原始怪物", sorted(ORIGINAL_MONSTER_DAOWEN))
@@ -127,17 +148,18 @@ def options(refresh: bool = False) -> dict[str, Any]:
         "attributes": {
             "total_points": 25,
             "blood_per_point": 6,
-            "points_per_speed": 2,
+            "points_per_speed": 1,   # 2026-11-09 用户令：1属性点=1速限
             "points_per_mana": 2,
             "limits": {"blood": MAX_BLOOD_LIMIT, "speed": MAX_TIER_LIMIT,
                        "mana": MAX_TIER_LIMIT, "shards": MAX_SHARDS, "uses": MAX_USES},
-            "note": "规则模式：1 点=6 血限，2 点=1 速限=1 法限，总和不超过 25；"
+            "note": "规则模式：1 点=6 血限=1 速限，2 点=1 法限，总和不超过 25；"
                     "自由模式直接填三个上限，仅用于演武场。",
         },
         "regions": _regions(engine),
         "resonance": ["转换", "反转", "曲解"],
         "relics": [{"name": name, "effect": effect} for name, effect in GameEngine.RELIC_DEFS],
         "daowen_groups": _daowen_groups(),
+        "daowen_effects": _daowen_effects(),
         "consumables": _consumables(),
         "max_enemies": MAX_ENEMIES,
         "notes": [
@@ -244,10 +266,26 @@ def _sheet_limits(sheet: dict[str, Any]) -> tuple[int, int, int]:
     """角色卡的三维上限（血限/速限/法限）。"""
     if sheet["mode"] == "rule":
         return (int(sheet["blood_points"]) * 6,
-                int(sheet["speed_points"]) // 2,
+                int(sheet["speed_points"]),          # 2026-11-09：1属性点=1速限
                 int(sheet["mana_points"]) // 2)
     return (int(sheet["blood_limit"]), int(sheet["speed_limit"]),
             int(sheet["mana_limit"]))
+
+
+def _clean_roll(raw: Any) -> dict[str, list[int]]:
+    """保存角色卡时保留「随机三维」的区间（只做展示/再掷，不参与结算）。"""
+    if not isinstance(raw, dict):
+        return {}
+    cleaned: dict[str, list[int]] = {}
+    for key, (label, hard_min, hard_max) in ROLL_FIELDS.items():
+        pair = raw.get(key)
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        low = _as_int(pair[0], f"{label}下限", hard_min, hard_max)
+        high = _as_int(pair[1], f"{label}上限", hard_min, hard_max)
+        if low <= high:
+            cleaned[key] = [low, high]
+    return cleaned
 
 
 def _check_daowen(names: list[str]) -> list[str]:
@@ -285,6 +323,52 @@ def _resolve_consumables(entries: list[Any]) -> list[dict[str, Any]]:
     return resolved
 
 
+ROLL_FIELDS = {
+    # 字段: (界面名, 下限, 上限)
+    "blood": ("血限", 1, MAX_BLOOD_LIMIT),
+    "speed": ("速限", 0, MAX_TIER_LIMIT),
+    "mana": ("法限", 0, MAX_TIER_LIMIT),
+}
+
+
+def roll_limits(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """随机三维：给每个上限在 [min, max] 区间里等概率取一个整数。
+
+    用途是 NPC / 造物这类「懒得想数值」的角色卡（用户令 2026-11-09）。
+    - `payload["ranges"]` 形如 `{"blood": [30, 120], "speed": [2, 8], "mana": [1, 8]}`；
+      省略的项用缺省区间。
+    - 端点包含在内；min > max、越界都直接报错，不悄悄改成合法值。
+    - `seed` 可选：给了就按它复现（测试/回放用），没给就真随机。
+    """
+    payload = payload or {}
+    ranges = payload.get("ranges") or {}
+    if not isinstance(ranges, dict):
+        raise ValueError("ranges 必须是对象")
+    seed = payload.get("seed")
+    rng = random.Random(seed) if seed not in (None, "") else random.Random()
+    defaults = {"blood": (30, 120), "speed": (2, 8), "mana": (1, 8)}
+    picked: dict[str, int] = {}
+    used: dict[str, list[int]] = {}
+    for key, (label, hard_min, hard_max) in ROLL_FIELDS.items():
+        raw = ranges.get(key, defaults[key])
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            raw = [raw, raw]
+        if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+            raise ValueError(f"{label}的区间必须是 [下限, 上限]")
+        low = _as_int(raw[0], f"{label}下限", hard_min, hard_max)
+        high = _as_int(raw[1], f"{label}上限", hard_min, hard_max)
+        if low > high:
+            raise ValueError(f"{label}下限不能高于上限（{low} > {high}）")
+        picked[key] = rng.randint(low, high)
+        used[key] = [low, high]
+    return {
+        "blood_limit": picked["blood"],
+        "speed_limit": picked["speed"],
+        "mana_limit": picked["mana"],
+        "roll": used,
+    }
+
+
 def normalize_sheet(payload: dict[str, Any]) -> dict[str, Any]:
     """把请求体/旧存档规范成一张角色卡配方（只校验，不碰引擎）。"""
     if not isinstance(payload, dict):
@@ -301,8 +385,8 @@ def normalize_sheet(payload: dict[str, Any]) -> dict[str, Any]:
         mana_points = _as_int(payload.get("mana_points", 6), "法限点", 0, 25)
         if blood_points + speed_points + mana_points > 25:
             raise ValueError("规则模式下三项加点之和不能超过 25")
-        if speed_points % 2 or mana_points % 2:
-            raise ValueError("速限/法限按 2 点一档计价，点数必须是偶数")
+        if mana_points % 2:
+            raise ValueError("法限按 2 点一档计价，点数必须是偶数（速限不限）")
         sheet = {
             "mode": "rule",
             "blood_points": blood_points, "speed_points": speed_points,
@@ -329,7 +413,9 @@ def normalize_sheet(payload: dict[str, Any]) -> dict[str, Any]:
         "relics": _check_relics(_as_name_list(payload.get("relics"), "遗物")),
         "consumables": _resolve_consumables(payload.get("consumables") or []),
         "shards": _as_int(payload.get("shards", 20), "碎片", 0, MAX_SHARDS),
-        "energy": _as_int(payload.get("energy", 3), "精力", 0, MAX_TIER_LIMIT),
+        "roll": _clean_roll(payload.get("roll")),
+        # 精力是局外资源，不再作为角色卡属性出现在界面上；旧卡缺省按 0。
+        "energy": _as_int(payload.get("energy", 0), "精力", 0, MAX_TIER_LIMIT),
     })
     return sheet
 
@@ -464,8 +550,12 @@ def _make_rival(engine: GameEngine, sheet: dict[str, Any], a_name: str) -> Any:
     """把一张角色卡造成 B 方实体（轮回者）。
 
     与 A 方共用同一套口径：三维直接写上限，道纹/残韵/消耗品挂在该实体上。
-    遗物也挂在实体上，但引擎里绝大多数遗物效果只读玩家侧 ``state.relics``，
-    所以 B 方遗物目前只是「持有记录」——界面会照实提示。
+    遗物同时写两处：
+
+    * ``rival.relics``：实体自己的持有记录（展示、以及怪物/队友口径的回退读取）；
+    * ``state.opponent_relics``：引擎给「敌方轮回者」准备的阵营遗物通道
+      （死斗同款）。战斗里绝大多数遗物判定走 ``state.side_has`` / ``_relic_active``，
+      它们对敌方轮回者读的正是这份名单——不登记进去，B 方遗物就只是摆设。
     """
     from engine.models import Entity
 
@@ -483,8 +573,14 @@ def _make_rival(engine: GameEngine, sheet: dict[str, Any], a_name: str) -> Any:
         engine._grant_named_daowen(rival, daowen_name)
     if sheet["relics"]:
         defs = dict(GameEngine.RELIC_DEFS)
-        for relic_name in sheet["relics"]:
-            rival.relics.append(Relic(name=relic_name, effect=defs.get(relic_name, "")))
+        # 启用槽位与 A 方同口径：ceil(血限/30)，超出的照常持有但停用。
+        limit = rival.enabled_relic_limit
+        squad = [
+            Relic(name=relic_name, effect=defs.get(relic_name, ""), enabled=index < limit)
+            for index, relic_name in enumerate(dict.fromkeys(sheet["relics"]))
+        ]
+        rival.relics.extend(squad)
+        engine.state.opponent_relics = squad
     catalog = {item["name"]: item for item in _consumables()}
     for entry in sheet["consumables"]:
         spec = catalog[entry["name"]]
@@ -538,6 +634,30 @@ def _start_custom_battle(engine: GameEngine, entities: list[Any],
     return {
         "mode": "指定对手",
         "encounter_id": encounter.encounter_id,
+        "enemies": [entity.name for entity in engine.state.enemies],
+    }
+
+
+def _start_direct_battle(engine: GameEngine, entities: list[Any]) -> dict[str, Any]:
+    """直接开战：不建地图、不登记遭遇，对手直接摆上擂台（杀戮尖塔式）。
+
+    演武场是测试工具，走地图那套只是为了「像正式对局」；用户明确表示不需要
+    副本当地图，所以这里只调 `battle_start`，战斗结算与正式对局完全一致。
+    """
+    if not entities:
+        raise ValueError("没有对手，无法开战")
+    engine.state.event_modifiers["lab_direct"] = True
+    engine.state.enemies = list(entities)
+    engine.state.energy = 0
+    started = engine.execute_action("battle_start", {
+        "relic_choices": {},
+        "inject_enemies": list(entities),
+    })
+    if not started.get("success"):
+        raise ValueError(f"开战失败：{started.get('error')}")
+    return {
+        "mode": "直接对战（无地图）",
+        "encounter_id": "",
         "enemies": [entity.name for entity in engine.state.enemies],
     }
 
@@ -608,10 +728,15 @@ def start(payload: dict[str, Any]) -> dict[str, Any]:
 def duel(payload: dict[str, Any]) -> dict[str, Any]:
     """A 方 vs B 方：两边都填角色卡（B 方也可以填副本怪物）。"""
     regions = _regions_by_name()
+    # 直接对战没有地图，副本只在「B 方用副本怪物」时决定怪物池；没传就给个默认，
+    # 别为了开一场测试架还逼用户选副本。
     region = str(payload.get("region") or "")
+    if not region:
+        region = "罪孽都市" if "罪孽都市" in regions else next(iter(regions))
     if region not in regions:
-        raise ValueError(f"副本必须从 {list(regions)} 中选择")
+        raise ValueError(f"怪物池必须从 {list(regions)} 中选择")
 
+    direct = bool(payload.get("direct", True))
     a_sheet = _resolve_side(payload.get("a"), "A方")
     b_side = payload.get("b") if isinstance(payload.get("b"), dict) else {}
     b_is_monster = str(b_side.get("kind") or "") == "monster"
@@ -628,6 +753,15 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
 
     engine = _new_engine(payload)
     notes: list[str] = []
+    # 推演模式（2026-11-09 用户令）：演武场是给自己推演/测试用的，AI 自动打会
+    # 干扰测试，所以允许「双方都手动」——每方行动完由引擎的交替出手自动换边，
+    # 敌方回合由用户在下方面板里点选，服务端不再调用 AI 启发式。
+    manual_both = bool(payload.get("manual_both"))
+    engine.state.event_modifiers["lab_manual_both"] = manual_both
+    # 先手已是引擎的通用规则（速限→法限→血限→当前生命，见规则正文·战斗行动），
+    # 演武场不再需要任何开关：A 方不会白拿先手，也不需要给 B 方开特权。
+    if manual_both:
+        notes.append("推演模式：双方都由你操作，B 方回合不使用 AI。")
     _apply_loadout(engine, a_sheet, region, notes)
 
     if b_is_monster:
@@ -636,17 +770,28 @@ def duel(payload: dict[str, Any]) -> dict[str, Any]:
         assert b_sheet is not None
         entities = [_make_rival(engine, b_sheet, a_sheet["name"])]
 
-    width = _as_int(payload.get("width", 11), "地图宽", 5, 41)
-    height = _as_int(payload.get("height", width), "地图高", 5, 41)
-    battle = _start_custom_battle(engine, entities, width, height)
+    if direct:
+        # 用户令 2026-11-09：不需要副本当地图，直接开打。
+        battle = _start_direct_battle(engine, entities)
+    else:
+        width = _as_int(payload.get("width", 11), "地图宽", 5, 41)
+        height = _as_int(payload.get("height", width), "地图高", 5, 41)
+        battle = _start_custom_battle(engine, entities, width, height)
 
+    notes.append("先手按通用规则判定（速限→法限→血限→当前生命，大者先手）；"
+                 "四项全同则随机首手、之后每回合交替。")
     a_blood, a_speed, a_mana = _sheet_limits(a_sheet)
     notes.append(f"A方 {a_sheet['name']}：{a_blood}/{a_speed}/{a_mana}（血限/速限/法限）")
     if b_sheet is not None:
         b_blood, b_speed, b_mana = _sheet_limits(b_sheet)
         notes.append(f"B方 {b_sheet['name']}：{b_blood}/{b_speed}/{b_mana}")
         if b_sheet["relics"]:
-            notes.append("B方遗物只作持有记录：引擎多数遗物效果只读玩家侧，暂不生效。")
+            enabled = min(len(b_sheet["relics"]), max(0, (b_blood + 29) // 30))
+            notes.append(
+                f"B方遗物按敌方轮回者通道（opponent_relics）生效："
+                f"启用 {enabled}/{len(b_sheet['relics'])} 件；"
+                "遗物按持有者阵营结算（回锋刀[回始]、减速、忘忧香、同魂笔已与 A 方对称）；"
+                "仅「无所求」事件选项依赖玩家交互，B 方无对应动作。")
     else:
         notes.append(f"B方怪物：{'、'.join(b_names)}")
     notes.append(f"开战：{'、'.join(battle['enemies'])}")

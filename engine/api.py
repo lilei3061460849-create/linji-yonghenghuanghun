@@ -533,6 +533,21 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if self.state.pending_daowen_choices and action_type != "choose_hired_daowen":
             return {"success": False,
                     "error": "雇佣后的转化道纹尚未选择，不能执行其它行动"}
+        # 衍生发现（局内0出手）必须显式领取／刷新／放弃。它是战斗内的 0 出手行动，
+        # 不能因此把回合推进、怪物阶段、攻击提交等战斗流程动作一并锁死。
+        if getattr(self.state, "pending_derivative_choices", []):
+            derivative_pending_allowed = {
+                "choose_derivative_daowen", "refresh_derivative_choices",
+                "save_game", "load_game", "restart_battle", "submit_ruling",
+                "resolve_attack", "prepare_attack", "prepare_monster_phase",
+                "resolve_monster_phase", "round_start", "round_end", "battle_end",
+                "skip", "resolve_ally_phases", "monster_phase",
+                "choose_discovered_relic", "discard_discovered_relic",
+                "choose_discovered_item", "discard_discovered_item",
+            }
+            if action_type not in derivative_pending_allowed:
+                return {"success": False,
+                        "error": "衍生发现尚未选择，请领取、刷新或放弃本次结果（0出手，不结束回合）"}
         if (self.event_pool.current is not None
                 and action_type not in {"resolve_event", "choose_discovered_relic", "choose_discovered_item"}):
             return {"success": False,
@@ -544,6 +559,10 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     "error": "当前开放世界行动尚处于第一阶段，只能在局外阶段调用；战斗/世界统一主循环尚未接通"}
         if action_type in ("pre_battle_action", "resolve_event", "upgrade_doctor", "set_active_relics", "toggle_relic") and phase != "pre_battle":
             return {"success": False, "error": "局外行动/事件只能在局外阶段执行"}
+        if (action_type in ("derive_daowen", "refresh_derivative_choices",
+                            "choose_derivative_daowen") and phase != "in_combat"):
+            return {"success": False,
+                    "error": "衍生道纹只能在战斗阶段发现／领取（局内0出手行动）"}
         if action_type == "battle_start" and phase != "pre_battle":
             return {"success": False, "error": "只有局外阶段可以进入战始"}
         if action_type == "battle_start" and self.state.energy > 0 and not params.get("world_encounter_id"):
@@ -721,14 +740,16 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "error": "必须先从发现候选中选择1件消耗品",
                 "choices": list(self.state.pending_item_choices),
             }
-        if self.state.pending_attack and action_type != "resolve_attack":
+        if self.state.pending_attack and action_type not in {
+                "resolve_attack", "attack_declare_hit", "attack_respond_hit"}:
             return {
                 "success": False,
-                "error": "已有待提交的攻击决策，请先调用resolve_attack",
+                "error": "已有待提交的攻击决策，请先继续逐击或调用resolve_attack",
                 "token": self.state.pending_attack.get("token"),
                 "recoverable": True,
                 "instruction": "攻击pending仍有效（上次提交失败已被整体回滚）；"
-                               "用上方token重新调用resolve_attack提交完整选择",
+                               "用上方token继续 attack_declare_hit/attack_respond_hit，"
+                               "或调用resolve_attack批量提交",
             }
         if self.state.pending_monster_phase and action_type not in {"resolve_monster_phase", "restart_battle"}:
             return {
@@ -819,7 +840,10 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                         and not self.combat._spell_stack):
                     if action_spent:
                         self.combat._priority_passes = 0
-                        self._advance_duel_turn()
+                        # 逐击普攻占到本次出手后，优先权要等这一手打完才交出去：
+                        # 否则第 1 击结算完就换边，剩下的击数永远打不出去。
+                        if not self.state.pending_attack:
+                            self._advance_duel_turn()
                 if result.get("success"):
                     side_logs = self._settle_side_turn_end_spells(side_capacity_before, params)
                     if side_logs:
@@ -1359,7 +1383,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _pre_battle_xiuxing(self, params: dict) -> dict:
         """修行：获得属性点并立即分配。
 
-        计价与开局初始分配同口径：1属性点=6[血限]，2属性点=1[速限]=1[法限]
+        计价与开局初始分配同口径：1属性点=6[血限]，1属性点=1[速限]，2属性点=1[法限]
         。
         不朽之躯不阻止修行：它只锁[血限]增长，不限制属性点本身的增长。"""
         tier = params.get("tier", 1)
@@ -2766,10 +2790,11 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if need > self.state.attribute_points:
             return {"success": False,
                     "error": f"属性点不足：需要{need}，池内{self.state.attribute_points}"}
-        if vals["speed_points"] % 2 or vals["mana_points"] % 2:
+        # 2026-11-09 用户令：1属性点=1速限（放开速限）；法限仍 2 点一档。
+        if vals["mana_points"] % 2:
             return {"success": False,
-                    "error": "速限/法限按2属性点一档计价，兑换点数必须是偶数",
-                    "instruction": "血限按1点一档不受此限；余点会留在池里，攒够2点再兑"}
+                    "error": "法限按2属性点一档计价，兑换点数必须是偶数",
+                    "instruction": "速限是 1属性点=1速限、血限是 1属性点=6血限，都不必偶数"}
         blood_gain = vals["blood_points"] * 6
         # 不朽之躯：[血限]无法增加，兑血限的点会白扔，直接拒绝而不是静默吞点。
         if blood_gain and self.state._relic_active(target_entity, "不朽之躯"):
@@ -2778,7 +2803,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     "instruction": "改兑 speed_points / mana_points"}
         self.state.attribute_points -= need
         gained = {"blood": blood_gain,
-                  "speed": vals["speed_points"] // 2,
+                  "speed": vals["speed_points"],
                   "mana": vals["mana_points"] // 2}
         if blood_gain:
             target_entity.blood_limit += blood_gain
@@ -4736,6 +4761,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         self.dice = restored["dice"]
         self.combat.state = self.state
         self.combat.dice = self.dice
+        # pickle 恢复的实体不带战斗引擎弱引用；读档边界重绑失血拦截钩子。
+        self.combat._bind_intercept_hooks()
         # 机制系统：事件观察者必须重新绑定到当前引擎。
         # 跨进程读档时，pickle 恢复的观察者仍持旧引擎 id，会静默失效
         # （事件机制如焦黑发丝/洗劫·夺碎片不触发）。

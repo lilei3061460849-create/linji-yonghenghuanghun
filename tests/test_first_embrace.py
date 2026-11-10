@@ -204,13 +204,13 @@ def test_option2_immortal_body_halves_blood_limit_and_blocks_growth():
     # 属性点增长与不朽之躯无关：修行照常提升速限（“无法超过上限”只限制获得的当前法力/速度）
     engine.state.energy = 3
     sp_before = player.speed_limit
-    # 2属性点=1速限：tier1 只给1点买不到面板，用 tier2（2点）才兑得到 1 速限
+    # 2026-11-09：1属性点=1速限，tier2 的 2 点全砸速度即 +2 速限
     engine.state.shards = max(engine.state.shards, 15)
     r_xiuxing = engine.execute_action("pre_battle_action", {
         "sub_action": "修行", "tier": 2,
         "allocations": {"speed_points": 2, "mana_points": 0}})
     assert r_xiuxing["success"] is True, r_xiuxing
-    assert player.speed_limit == sp_before + 1, "不朽之躯不阻止修行提升速限"
+    assert player.speed_limit == sp_before + 2, "不朽之躯不阻止修行提升速限"
     engine.state.energy = 0
 
     # 获得的法力无法超过法限：折速战始+24与守夜灯[回增]叠加都被钳到法限
@@ -231,11 +231,11 @@ def test_option2_immortal_body_halves_blood_limit_and_blocks_growth():
     assert player.current_mana == player.mana_limit, \
         f"守夜灯回增加叠的法力也被钳到法限：当前{player.current_mana} 法限{player.mana_limit}"
 
-    # 免疫衰老代价
-    engine.state.player.dao_wen["透支"] = DaoWenInstance(
-        DaoWen(name="透支", formula="", cost_type="代价", cost_formula="X", effect_formula=""))
+    # 免疫衰老代价（2026-11-09：衰老通道已拆为衍生【折年】，血限2X）
+    engine.state.player.dao_wen["折年"] = DaoWenInstance(
+        DaoWen(name="折年", formula="", cost_type="代价", cost_formula="X", effect_formula=""))
     bl_before = player.blood_limit
-    r_dw = engine.execute_action("use_daowen", {"daowen_name": "透支", "x": 5})
+    r_dw = engine.execute_action("use_daowen", {"daowen_name": "折年", "x": 5})
     assert r_dw["success"] is True
     assert player.blood_limit == bl_before, "不朽之躯应免疫衰老代价"
 

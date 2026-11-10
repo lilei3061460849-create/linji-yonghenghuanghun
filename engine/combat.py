@@ -377,17 +377,28 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """
         return self.state._relic_active(entity, name)
 
-    def _any_active_relic(self, name: str) -> bool:
-        """查询场上是否存在未封印的该遗物持有者，用于“任意角色/所有角色”的全场效果。"""
+    def _relic_holders(self, name: str) -> list:
+        """列出场上所有「实际生效」的该遗物持有者（玩家侧在前）。
+
+        遗物按**持有者阵营**结算：轮回者持有时从玩家遗物池/敌方轮回者遗物池
+        读取，其他实体读自身 `relics`；统一由 `_relic_active` 判定（含封印、
+        `enabled` 槽位与归属）。全场效果（如【减速】、【回锋刀】）应遍历
+        本列表，而不是只看玩家。
+        """
         entities = self.state.get_all_player_side() + self.state.get_all_enemy_side()
         seen: set[int] = set()
+        holders: list = []
         for entity in entities:
             if id(entity) in seen:
                 continue
             seen.add(id(entity))
             if self._relic_active(entity, name):
-                return True
-        return False
+                holders.append(entity)
+        return holders
+
+    def _any_active_relic(self, name: str) -> bool:
+        """查询场上是否存在未封印的该遗物持有者，用于“任意角色/所有角色”的全场效果。"""
+        return bool(self._relic_holders(name))
 
     def out_of_turn_blocked(self, entity) -> bool:
         """该角色是否被禁止「回合外行动」（唯一闸门，2026-10-12 用户令）。
@@ -1214,13 +1225,63 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             and self.entity_can_take_active_action(e)
             for e in entities)
 
-    def _initial_priority_side(self) -> str:
-        """回始时该由哪一方先出手：优先轮回者侧，其次敌方，双方皆无余手则轮回者侧。"""
-        if self.side_can_act("player_side"):
+    @staticmethod
+    def _duel_priority_key_of(entity) -> tuple:
+        """先手四项：速限→法限→血限→当前生命，数值大者先手（与最终死斗同一口径）。"""
+        return (entity.speed_limit, entity.mana_limit,
+                entity.blood_limit, entity.current_hp)
+
+    def _stats_priority_side(self) -> str:
+        """按四项先手属性决定回始先手——**通用规则**，所有战斗同一口径。
+
+        规则正文·战斗行动：[速限]→[法限]→[血限]→当前生命，数值大者先手；
+        四项完全相同则随机首手、之后每回合交替（2026-11-09 用户令：不再有
+        「仅死斗适用」，也不再限制开放地图对局）。
+        先手方若本回合已无出手权（沉溺/无力/预算耗尽），交给另一侧，避免死在
+        「拿不到优先权」的一侧。
+        """
+        player = self.state.player
+        player_key = (None if player is None or not player.is_alive
+                      else self._duel_priority_key_of(player))
+        enemy_keys = [self._duel_priority_key_of(e) for e in self.state.enemies
+                      if e is not None and e.is_alive
+                      and not getattr(e, "has_retreated", False)]
+        enemy_key = max(enemy_keys) if enemy_keys else None
+        if player_key is None and enemy_key is None:
             return "player_side"
-        if self.side_can_act("opponent_side"):
-            return "opponent_side"
-        return "player_side"
+        if enemy_key is None:
+            side = "player_side"
+        elif player_key is None:
+            side = "opponent_side"
+        elif player_key != enemy_key:
+            side = "player_side" if player_key > enemy_key else "opponent_side"
+        else:
+            first = self.state.event_modifiers.get("duel_priority_tie_first")
+            if not first:
+                roll = self.dice.auto_roll(
+                    "duel_priority_tie_first", ["player_side", "opponent_side"],
+                    context="四项先手完全平局：随机首手")
+                first = roll["selected"]
+                self.state.event_modifiers["duel_priority_tie_first"] = first
+            # 用「第几次平局」计数交替，不用 current_round 奇偶：回始时回合号已经
+            # 递增过，奇偶会和「这是第几回合」错开一位。
+            tied = int(self.state.event_modifiers.get("duel_priority_tie_rounds", 0))
+            self.state.event_modifiers["duel_priority_tie_rounds"] = tied + 1
+            side = first if tied % 2 == 0 else (
+                "opponent_side" if first == "player_side" else "player_side")
+        if not self.side_can_act(side):
+            other = "opponent_side" if side == "player_side" else "player_side"
+            if self.side_can_act(other):
+                return other
+        return side
+
+    def _initial_priority_side(self) -> str:
+        """回始先手：一律按四项先手属性判定（见 `_stats_priority_side`）。
+
+        旧实现在这里写「轮回者侧优先」，那等于给玩家一个结构性先手红利，
+        也把先手规则锁进了死斗兼容路径；两者都已按用户令删除。
+        """
+        return self._stats_priority_side()
 
     def round_start(self, relic_choices: Optional[dict] = None) -> dict:
         """
@@ -1229,6 +1290,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         2. 结算回始类效果
         3. 返回需要决策的信息
         """
+        # 读档／重来／沙盒恢复会剔除弱引用；回始统一重绑失血拦截钩子（幂等）。
+        self._bind_intercept_hooks()
         effects = self._begin_chenni_world_round(
             self.state.get_all_player_side() + self.state.get_all_enemy_side())
         # 先取出本回合应造成的伤害；被沉溺中断者整笔留到下一次真正经历的回合。
@@ -1845,22 +1908,42 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         relics = {r.name for r in self.state.relics if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0}
 
         if trigger == "round_start":
-            if self.chenni_round_blocked(player):
-                return logs
             choices = ctx.get("relic_choices", {})
-            self.validate_round_start_relic_choices(choices)
-            if "回锋刀" in relics:
-                d = 3 * max(0, player.speed_limit - player.current_speed)
-                if d > 0 and any(enemy.is_alive for enemy in self.state.enemies):
-                    enemy = self.state.enemies[choices["回锋刀"]["enemy_index"]]
-                    self._remember_huifeng_target(player, f"enemy:{choices['回锋刀']['enemy_index']}")
-                    self._apply_hostile_damage(enemy, d, source=player, ctx={
-                        "timing": "round_start", "source": "回锋刀", "source_type": "relic",
-                        "actor": player, "target": enemy, "owner": player,
-                        "mechanic": "damage", "subtype": "round_start_gap", "amount": d,
-                        "tags": {"relic", "round_start"},
-                    })
-                    logs.append(f"回锋刀：对{enemy.name}造{d}伤")
+            # 【沉溺】只封锁玩家的[回始]遗物，敌方持有者的[回始]照常结算。
+            if not self.chenni_round_blocked(player):
+                self.validate_round_start_relic_choices(choices)
+                if "回锋刀" in relics:
+                    d = 3 * max(0, player.speed_limit - player.current_speed)
+                    if d > 0 and any(enemy.is_alive for enemy in self.state.enemies):
+                        enemy = self.state.enemies[choices["回锋刀"]["enemy_index"]]
+                        self._remember_huifeng_target(player, f"enemy:{choices['回锋刀']['enemy_index']}")
+                        self._apply_hostile_damage(enemy, d, source=player, ctx={
+                            "timing": "round_start", "source": "回锋刀", "source_type": "relic",
+                            "actor": player, "target": enemy, "owner": player,
+                            "mechanic": "damage", "subtype": "round_start_gap", "amount": d,
+                            "tags": {"relic", "round_start"},
+                        })
+                        logs.append(f"回锋刀：对{enemy.name}造{d}伤")
+            # 【回锋刀】敌方持有者的[回始]段（遗物按持有者阵营结算）。
+            # 敌方没有「显式提交目标」这一步，走 _resolve_huifeng_target 的确定性
+            # 缺省目标（当前法术主目标 → 唯一/首个敌对存活单位），与法术循环同口径。
+            for holder in self._relic_holders("回锋刀"):
+                if holder is player or not holder.is_alive:
+                    continue
+                d = 3 * max(0, holder.speed_limit - holder.current_speed)
+                if d <= 0:
+                    continue
+                ref, target = self._resolve_huifeng_target(holder)
+                if target is None:
+                    continue
+                self._remember_huifeng_target(holder, ref)
+                self._apply_hostile_damage(target, d, source=holder, ctx={
+                    "timing": "round_start", "source": "回锋刀", "source_type": "relic",
+                    "actor": holder, "target": target, "owner": holder,
+                    "mechanic": "damage", "subtype": "round_start_gap", "amount": d,
+                    "tags": {"relic", "round_start"},
+                })
+                logs.append(f"回锋刀：{holder.name}对{target.name}造{d}伤")
             # 2026-10-14 用户令：【余火印】整段删除（extra 方案废弃），本分支移除。
         if trigger == "battle_start":
             choices = ctx.get("relic_choices", {})
@@ -1892,6 +1975,23 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                         "amount": -lost, "tags": {"relic", "battle_start"},
                     })
                     logs.append(f"减速：{foe.name}当前速度-{lost}")
+            # 【减速】敌方轮回者持有者的对称段：让玩家侧当前速度减半。
+            # 双方同持时各自只影响「持有者的敌对侧」，互不叠加（同一持有者只结算一次）。
+            opposite_slow = [h for h in self._relic_holders("减速")
+                             if h is not player and h.is_alive]
+            if opposite_slow:
+                owner = opposite_slow[0]
+                for foe in self.state.get_all_player_side():
+                    lost = foe.current_speed - math.ceil(foe.current_speed / 2)
+                    if lost <= 0:
+                        continue
+                    self._lose_current_speed(foe, lost, ctx={
+                        "timing": "battle_start", "source": "减速", "source_type": "relic",
+                        "actor": owner, "target": foe, "owner": owner,
+                        "mechanic": "speed_change", "subtype": "current_speed",
+                        "amount": -lost, "tags": {"relic", "battle_start"},
+                    })
+                    logs.append(f"减速：{owner.name}使{foe.name}当前速度-{lost}")
             if "炉心坠" in relics:
                 heart = next(item for item in self.state.consumables
                              if item.name == choices["炉心坠"]["heart_name"] and item.kind == "dragon_heart")

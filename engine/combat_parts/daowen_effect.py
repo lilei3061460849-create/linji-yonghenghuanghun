@@ -1171,6 +1171,18 @@ class DaowenEffectMixin:
                 note_delta(self, "hp", hp_before, life_target.current_hp)
                 result["effects"].append({"type": "target_life_loss", "target": life_target.name,
                                           "requested": amount, **loss})
+        if "others_life_loss" in calc:
+            # 【冲击】：除目标外**所有角色**失去生命——连自己和友方一起算，
+            # 这是这条道纹的代价之一，不做阵营筛选（用户令 2026-11-09）。
+            amount = calc["others_life_loss"]
+            for other in list(self.state.get_all_player_side()) + list(self.state.get_all_enemy_side()):
+                if other is target or other is None or not other.is_alive:
+                    continue
+                hp_before = other.current_hp
+                loss = self._raw_hp_loss(other, amount, ctx=daowen_ctx)
+                note_delta(self, "hp", hp_before, other.current_hp)
+                result["effects"].append({"type": "target_life_loss", "target": other.name,
+                                          "requested": amount, "aoe": "others", **loss})
         if "target_damage" in calc:
             base = calc["target_damage"] + (nilin_bonus if nilin_bonus else 0)
             dmg_amount = 0 if mengbi_blocked else base
@@ -1191,8 +1203,12 @@ class DaowenEffectMixin:
                         caster.damage_dealt_this_round += dmg["actual_damage"]
                 nilin_bonus = 0
             else:
+                # 【断脉】等带 ignore_shield 的单段伤害：按「无视格挡」类型落地，
+                # 与【贯穿】走同一条 damage_type 通道，格挡不再吸收。
                 dmg = self._apply_hostile_damage(
                     target, dmg_amount, source=caster,
+                    damage_type=(DamageType.IGNORE_SHIELD.value
+                                 if calc.get("ignore_shield") else DamageType.NORMAL.value),
                     ctx={"timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
                          "source": name, "source_type": "daowen", "actor": caster, "target": target,
                          "mechanic": "damage", "subtype": "daowen", "amount": dmg_amount,
@@ -1340,16 +1356,23 @@ class DaowenEffectMixin:
                 if dmg.get("actual_damage", 0) > 0:
                     caster.damage_dealt_this_round += dmg["actual_damage"]
 
-        # ---- 再生的攻击力代价：发动者失去攻击力，随后按正常目标结算回复 ----
+        # ---- 攻击力代价（【再生衍生·献锋】）：**本回合**的攻击力减益 ----
+        # 2026-11-09 用户令：不是永久失去攻击力，否则配上【波及】就完爆【弱化】。
+        # 走状态层（同名「献锋」），回终由 tick_status_effects 递减到期后自动复原；
+        # 攻击力本身对轮回者由 current_mana 换算，面板字段不能直接扣。
         if calc.get("cost_type") == "攻击力" and calc.get("cost_attack", 0) > 0:
             self._refuse_blocked_payment(caster, "攻击力")
             amount = int(calc["cost_attack"])
             available = max(0, int(caster.effective_attack_power()))
             if amount > available:
                 raise ValueError(f"再生攻击力代价需要{amount}点，当前有效攻击力仅{available}")
-            self._battle_delta(caster, "attack_power", -amount, name, EffectPolarity.DEBUFF.value)
+            caster.add_status(self._daowen_status(
+                daowen_order=daowen_order, name="献锋", value=amount,
+                remaining_rounds=1, source=name,
+                polarity=EffectPolarity.DEBUFF.value))
             result["effects"].append({"type": "attack_power_cost", "target": caster.name,
-                                      "paid": amount, "attack_power": caster.attack_power})
+                                      "paid": amount, "scope": "round",
+                                      "attack_power": caster.effective_attack_power()})
         # ---- 回复类 ----
         if "target_heal" in calc:
             if "target_heal" in wave_pieces:
@@ -1368,12 +1391,14 @@ class DaowenEffectMixin:
                     })})
             elif not huaisi_block:
                 heal_amount = calc["target_heal"]
+                # 【疯长】：实际回血照常，但计入本场累计治疗量时按双倍记（更快撞癌变线）。
+                heal_count_mult = int(calc.get("heal_count_multiplier", 1) or 1)
                 result["effects"].append({"type": "heal", "target": target.name, **self.state.apply_heal(target, heal_amount, ctx={
                     "timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
                     "source": name, "source_type": "daowen", "actor": caster, "target": target,
                     "owner": caster, "mechanic": "heal", "subtype": "daowen", "amount": heal_amount,
                     "tags": {"daowen"},
-                })})
+                }, count_multiplier=heal_count_mult)})
         if "heal_percent" in calc:
             if "heal_percent" in wave_pieces:
                 # 波及：总数值=各目标按血限×百分比之和，再平分。
@@ -1787,7 +1812,9 @@ class DaowenEffectMixin:
             else:
                 caster.fake_shards = getattr(caster, "fake_shards", 0) + calc["fake_shards"]
             result["effects"].append({"type": "fake_shards", "gained": calc["fake_shards"]})
-        if "cost_shards" in calc:
+        # 法术路径已在 _daowen_step_preflight 里付过通用碎片代价，这里不能重复扣。
+        shards_prepaid = bool(calc.get("_shards_prepaid"))
+        if "cost_shards" in calc and not shards_prepaid:
             payment = self.pay_resource(
                 caster, "碎片", int(calc["cost_shards"]),
                 ctx={"timing": "monster_action" if caster.entity_type == "怪物" else "player_action",

@@ -1,7 +1,9 @@
-"""【搏命】删除护栏（2026-10-14 用户令）。
+"""旧【搏命】（扭曲都市独占）的删除护栏（2026-10-14 用户令）。
 
-【搏命】仍不得恢复。它删除时在扭曲闭环留下的待补位，现由从杀伐闭环迁入的
-【增殖】承接；这不改变搏命删除本身，也不恢复旧效果。
+删除的是**扭曲都市那条**【搏命】：它留下的待补位由从杀伐闭环迁入的【增殖】承接，
+旧效果不得复活。2026-11-09 用户把【透支】衍生的「疾贷」改名为【搏命】，与它同名
+但完全不同——新【搏命】是支付速度X换X法力的衍生道纹，不在扭曲都市独占表里，
+也没有任何 calculate_boming 运行态标识。本文件锁的仍是「旧效果不复活」。
 """
 from __future__ import annotations
 
@@ -24,7 +26,13 @@ SCAN = [
 
 def test_boming_is_not_registered():
     DaoWenEngine.register_all()
-    assert "搏命" not in DaoWenEngine._registry
+    # 2026-11-09：同名新条目只能是【透支】衍生（速度X→X法力），且不得带旧效果实现。
+    from engine import derivatives as derivative_rules
+    if "搏命" in DaoWenEngine._registry:
+        spec = derivative_rules.spec_of("搏命")
+        assert (spec.parent, spec.cost_kind, spec.rate, spec.effect_kind) == \
+            ("透支", "速度", 1, "mana_gain")
+        assert not hasattr(DaoWenEngine, "calculate_boming")
     from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
 
     assert "搏命" not in REGION_EXCLUSIVE_DAOWEN["扭曲都市"]
@@ -62,4 +70,8 @@ def test_jianghua_is_still_gone():
     """【僵化】此前已被【搏命】取代，删除搏命不得把它复活。"""
     DaoWenEngine.register_all()
     assert "僵化" not in DaoWenEngine.list_all()
-    assert "搏命" not in DaoWenEngine.list_all()
+    # 同名新【搏命】是透支衍生，不是旧【搏命】的复活。
+    assert not hasattr(DaoWenEngine, "calculate_boming")
+    if "搏命" in DaoWenEngine.list_all():
+        from engine import derivatives as derivative_rules
+        assert derivative_rules.spec_of("搏命").parent == "透支"

@@ -65,19 +65,21 @@ class SpellReactionMixin:
                    "steps": [("封印", "any")],
                    "effect_flow": "自身回合结束后→发动封印X于任意目标",
                    "automatic": True},
-        # 血炼周天：
-        # 失去生命后→发动再生→发动透支（循环）。
-        # 【透支】的生命支付每轮都会推进【癌变】阈值，循环由规则自然终止
+        # 血炼周天（2026-11-09 单途径收束）：
+        # 失去生命后→发动再生→发动【燃命】（循环）。
+        # 原【透支·生命通道】已拆为衍生道纹【燃命】（生命4X→X法力）；
+        # 母本【透支】只留枯竭X，不再造成生命流失，无法驱动本循环。
+        # 【燃命】的生命支付每轮都会推进【癌变】阈值，循环由规则自然终止
         # （施法者命零 / 法力耗尽 / 调用方提交的 max_iterations 到顶）。
         "血炼周天": {"trigger": ActionPhase.AFTER_LIFE_LOST.value,
-                     "steps": [("再生", "self"), ("透支", "self")],
-                     "effect_flow": "失去生命后→发动再生→发动透支→循环",
+                     "steps": [("再生", "self"), ("燃命", "self")],
+                     "effect_flow": "失去生命后→发动再生→发动燃命→循环",
                      "loop": True},
         # 三阶动态循环：目标与中断条件由通用条件/目标选择器提供，
         # 不在法术名分支里写专用结算逻辑。
         "徒劳无功": {"trigger": ActionPhase.AFTER_LIFE_LOST.value,
-                     "steps": [("再生", "self"), ("透支", "self"), ("弱化", "any")],
-                     "effect_flow": "失去生命后→发动再生X于自身→发动透支X于自身→发动弱化X于任意目标→循环",
+                     "steps": [("再生", "self"), ("燃命", "self"), ("弱化", "any")],
+                     "effect_flow": "失去生命后→发动再生X于自身→发动燃命X于自身→发动弱化X于任意目标→循环",
                      "loop": True,
                      "loop_stop_conditions": ["自身场上最高怪物攻击力等于0", "自身癌变安全余量小于等于0"]},
     }
@@ -93,8 +95,8 @@ class SpellReactionMixin:
         "千刀万剐": ["连击", "再生"],
         "咎由自取": ["杀伐", "连击"],
         "镇魔印": ["封印"],
-        "血炼周天": ["再生", "透支"],
-        "徒劳无功": ["再生", "透支", "弱化"],
+        "血炼周天": ["再生", "燃命"],
+        "徒劳无功": ["再生", "燃命", "弱化"],
     }
 
     # 一步 = 一次"发动道纹"。两类策略的唯一差异是**是否开启新的
@@ -683,7 +685,9 @@ class SpellReactionMixin:
         """
         real_need = int(calc.get("cost_real_shards", 0) or 0)
         fake_need = int(calc.get("cost_fake_shards", 0) or 0)
-        if real_need <= 0 and fake_need <= 0:
+        # 【买命】等走通用【碎片】口径（cost_shards）：额度＝真＋假、先扣假。
+        universal_need = int(calc.get("cost_shards", 0) or 0)
+        if real_need <= 0 and fake_need <= 0 and universal_need <= 0:
             return None
         fake_avail = max(0, int(getattr(self.state if actor is self.state.player else actor,
                                         "fake_shards", 0) or 0))
@@ -693,11 +697,12 @@ class SpellReactionMixin:
             return (f"{actor.name}无法完整承担假碎片{fake_need}"
                     f"（可支付{fake_avail}）")
         shard_capacity = max(0, fake_avail - fake_need) + real_avail
-        if real_need > shard_capacity:
-            return (f"{actor.name}无法完整承担碎片{real_need}"
+        if real_need + universal_need > shard_capacity:
+            need_total = real_need + universal_need
+            return (f"{actor.name}无法完整承担碎片{need_total}"
                     f"（可支付{shard_capacity}：真碎片{real_avail}＋假碎片"
                     f"{max(0, fake_avail - fake_need)}）")
-        for resource, need in (("假碎片", fake_need), ("碎片", real_need)):
+        for resource, need in (("假碎片", fake_need), ("碎片", real_need + universal_need)):
             if need <= 0:
                 continue
             try:
@@ -708,6 +713,9 @@ class SpellReactionMixin:
                          "target": actor, "tags": {"active_payment"}})
             except ValueError as exc:
                 return str(exc)
+        if universal_need > 0:
+            # 通用【碎片】口径已在法术前置里付清，效果层不得再扣一次。
+            calc["_shards_prepaid"] = True
         return None
 
     def pay_daowen_mana(self, caster: Entity, calc: dict, target: Entity) -> tuple[int, Optional[str]]:
@@ -986,7 +994,7 @@ class SpellReactionMixin:
                 reason=InterruptReason.MANA_INSUFFICIENT, detail=err,
                 trigger_spell_logs=trigger_logs, iteration=iteration)
 
-        # --- 碎片代价（连击真/假碎片独立通道） ---
+        # --- 碎片代价（衍生【买命】真碎片／【买命】假碎片独立通道） ---
         shard_error = self.pay_daowen_shard_cost(caster, daowen, calc, x)
         if shard_error:
             return StepResult(

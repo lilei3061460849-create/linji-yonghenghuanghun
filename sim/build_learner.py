@@ -372,6 +372,10 @@ def _resolve_monster_turn(engine):
     if engine.state.combat_subphase == "await_round_end":
         return {"success": True, "skipped": True,
                 "result": {"details": [], "player_dead": not engine.state.player.is_alive}}
+    # 等待结算池（发现遗物/道具等）会门禁 prepare_monster_phase。以前先手固定归轮回者，
+    # 这些池总能在玩家出手前被清掉；先手改为通用规则后，怪物可能先手，池子会先挡住
+    # 怪物阶段（实测报「必须先从发现候选中选择1件遗物」）。驱动在此清一次。
+    _resolve_pending_choices(engine)
     prepared = engine.execute_action("prepare_monster_phase", {})
     if not prepared.get("success"):
         return prepared
@@ -1410,6 +1414,11 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
             if not rs.get("success"):
                 return {"cleared": cleared, "won": False, "invalid": True,
                         "reason": f"round_start: {rs.get('error')}"}
+            # 先手已改为通用规则（规则正文·战斗行动）：[回始]由属性占优的一方先出手，
+            # 怪物可能比轮回者快。此时若把「回始新出现的发现遗物/救赎等待」留到玩家
+            # 出手之后再清，怪物阶段会先撞上等待池门禁（实测报
+            # 「必须先从发现候选中选择1件遗物」）。故回始后立即清一次。
+            _resolve_pending_choices(e)
             ai.new_round()
             if death_trace:
                 _p = e.state.player

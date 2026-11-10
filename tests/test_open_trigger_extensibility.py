@@ -70,7 +70,8 @@ def test_unwired_trigger_is_honestly_labelled_by_production_define_spell(tmp_pat
     因此生产包装层此前没有任何覆盖），并用已接线时点做反向对照，防止退化成恒 False。
     """
     from engine.api import GameEngine
-    from tests.setup_support import begin_battle, begin_round, finish_initial_daowen
+    from tests.setup_support import (begin_battle, begin_round, finish_initial_daowen,
+                                     hand_priority_to_player)
 
     e = GameEngine(db_path=str(tmp_path / "g.db"), save_dir=str(tmp_path / "saves"),
                    sealed_candidate_path=str(tmp_path / "cand.json"), rng_seed=5)
@@ -87,6 +88,8 @@ def test_unwired_trigger_is_honestly_labelled_by_production_define_spell(tmp_pat
         x_value=0, x_free=True)
     assert begin_battle(e)["success"]
     assert begin_round(e)["success"]
+    # 先手通用规则：怪物速限更高时[回始]归怪物；本用例验的是玩家的定义法术接线。
+    hand_priority_to_player(e)
 
     r = e.execute_action("define_spell", {"spell": {
         "name": "死时点探针", "trigger_condition": "敌回始", "required_daowen": ["庇护"],

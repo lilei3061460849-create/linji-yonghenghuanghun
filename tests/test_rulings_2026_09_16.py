@@ -5,7 +5,7 @@
 - B2 副本专属道纹补进正文
 - B4 命零碎片公式禁止改写，事件收益改为独立列项奖金
 - B5 死斗守擂侧（怪物）出手预算封顶，不得无限出手
-- D1 血炼周天补内置流程；血溅五步删除
+- D1 血炼周天补内置流程（2026-11-09 起为 再生+燃命）；血溅五步删除
 """
 from __future__ import annotations
 
@@ -206,7 +206,7 @@ def test_duel_monster_defender_is_capped_not_unlimited(tmp_path):
 
 
 # ========================================================================
-# D1 血炼周天内置流程 / 血溅五步已删除
+# D1 血炼周天内置流程（再生+燃命）/ 血溅五步已删除
 # ========================================================================
 
 def test_blood_cycle_spell_has_builtin_flow(tmp_path):
@@ -215,8 +215,8 @@ def test_blood_cycle_spell_has_builtin_flow(tmp_path):
     assert flow is not None, "血炼周天缺内置流程"
     assert flow["loop"] is True
     daowen = [e.combat._step_daowen(s) for s in flow["steps"]]
-    assert daowen == ["再生", "透支"], daowen
-    assert e.SPELL_REGISTRY.get("血炼周天") == ["再生", "透支"]
+    assert daowen == ["再生", "燃命"], daowen
+    assert e.SPELL_REGISTRY.get("血炼周天") == ["再生", "燃命"]
 
 
 def test_blood_splash_removed_from_death_book():

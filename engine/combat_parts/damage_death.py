@@ -263,6 +263,16 @@ class DamageDeathMixin:
         for entity in self._hp_record_entities():
             self._bind_hp_hook(entity)
 
+    def _bind_intercept_hooks(self) -> None:
+        """只重绑【庇护】/【脆弱】的失血拦截钩子（不动上限与反应窗口）。
+
+        2026-11-09：轮回者在正式流程里由 `_bind_hp_hook` 绑完整引擎会同时打开
+        属性封顶与「失去生命后」反应，改变大量既有结算。这里单独给一个轻量
+        弱引用，让 `Entity.__setattr__` 的庇护/脆弱拦截照常工作即可。
+        """
+        for entity in self._hp_record_entities():
+            self._bind_intercept_hook(entity)
+
     def _bind_hp_hook(self, entity: Optional[Entity]) -> None:
         if entity is None:
             return
@@ -270,6 +280,14 @@ class DamageDeathMixin:
             entity._hp_engine_ref = weakref.ref(self)
         except TypeError:
             pass  # 兜底：非可弱引用对象不绑定（正常 CombatEngine 均可弱引用）
+
+    def _bind_intercept_hook(self, entity: Optional[Entity]) -> None:
+        if entity is None:
+            return
+        try:
+            entity._hp_intercept_ref = weakref.ref(self)
+        except TypeError:
+            pass
 
     def _shelter_hp_loss(self, entity: Entity, old: int, new: int) -> int:
         """庇护：非目标自身导致的下一次失去生命被免疫；返回允许写入的生命值。"""
@@ -290,6 +308,31 @@ class DamageDeathMixin:
         if status.value <= 0:
             entity.status_effects.remove(status)
         return old
+
+    def _fragile_hp_loss(self, entity: Entity, old: int, new: int) -> int:
+        """【脆弱】：目标「下次失去生命」重复 X 次 → 本次实际失血按 X+1 份合并落地。
+
+        2026-11-09 用户令。挂在与【庇护】同一个 ``Entity.current_hp`` 写入钩子上，
+        因此攻击伤害、代价失血、直接失血、血限压顶等任何**真实**降血通道都生效；
+        被【庇护】整笔免掉（写回 old）时不算失去生命，脆弱不消费。
+
+        口径（规则正文同步写明）：重复份不另开「失去生命前/后」反应窗口，也不再
+        触发另一层脆弱——同一笔结算内合并落地，避免「脆弱→不死不休→连击」无界
+        连锁。同名状态合并（数值相加），消费时一次性清空全部层数。
+        """
+        if new >= old or old <= 0:
+            return new
+        statuses = [status for status in list(getattr(entity, "status_effects", []))
+                    if status.name == "脆弱" and not status.is_expired and status.value > 0]
+        if not statuses:
+            return new
+        repeats = sum(max(0, int(status.value)) for status in statuses)
+        for status in statuses:
+            entity.status_effects.remove(status)
+        if repeats <= 0:
+            return new
+        loss = old - new
+        return max(0, old - loss * (repeats + 1))
 
     def _engine_owns(self, entity: Entity) -> bool:
         if entity is None:

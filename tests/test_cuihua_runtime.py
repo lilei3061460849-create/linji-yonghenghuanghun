@@ -165,11 +165,11 @@ def test_monster_prepare_exposes_same_catalysis_and_control_submission_contract(
     assert schema['catalysis_steps']['required']
 
 
-def test_nested_extra_choices_are_preserved_for_catalysed_step():
-    e,p,a=setup('nested_extra');_give(p,'透支');p.dao_wen['透支'].cooldown_remaining=3
-    from engine.models import Relic
-    e.state.relics.append(Relic('不朽之躯',''))
+def test_nested_legacy_channel_extra_cannot_reopen_a_second_channel():
+    """2026-11-09：单途径收束后，催化步骤里残留的 cost_channel 只是被透传的旧键，
+    不得为【燃命】改出第二条支付途径（仍按生命4X落账）。"""
+    e,p,a=setup('nested_extra');_give(p,'燃命');p.dao_wen['燃命'].cooldown_remaining=3
     hp=p.current_hp
-    result=call(e,[step('透支',x=1,extra={'cost_channel':'血限'})])
+    result=call(e,[step('燃命',x=1,extra={'cost_channel':'血限'})])
     assert result['success'],result
-    assert p.current_hp==hp  # 若丢弃extra而退回生命，会扣4生命。
+    assert p.current_hp==hp-4

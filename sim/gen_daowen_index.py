@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from engine.daowen import DaoWenEngine, ResonanceEngine, display_resonance_node  # noqa: E402
+from engine import derivatives as derivative_rules  # noqa: E402
 from engine.rule_engine import DAOWEN_RULES, UNMIGRATED_REASON  # noqa: E402
 from engine.gamedata import (  # noqa: E402
     MONSTER_TRANSFORM_DAOWEN,
@@ -163,6 +164,9 @@ CATEGORY["怜悯"] = "unimpl"      # 2026-11-02：怜悯随永夜庭四面体移
 # 【封印】回四面体二（随 SHAFA_LOOP_DAOWEN 标 shaifa），【篡改】回四面体四，列「其他通用」。
 CATEGORY["透支"] = "other"
 CATEGORY["篡改"] = "other"
+# 2026-11-09：衍生道纹不属任何四面体，单列一节；事实源是 engine/derivatives.py。
+for _n in derivative_rules.DERIVED_DAOWEN:
+    CATEGORY[_n] = "derivative"
 for n in ORIGINAL_MONSTER_DAOWEN:
     CATEGORY[n] = "original"
 for n in MONSTER_TRANSFORM_DAOWEN:
@@ -230,7 +234,8 @@ A("查道纹用这份。每条写清：怎么支付、效果是什么、作用�
 A("规则的完整叙述以[规则正文](规则正文.md)为准，这里只做速查。")
 A("")
 A(f"本索引收录 {len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)} 条道纹："
-  f"通用核心（四面体一·二）{len(SHAFA_LOOP_DAOWEN)}、原始怪物 {len(ORIGINAL_MONSTER_DAOWEN)}、怪物转化 {len(MONSTER_TRANSFORM_DAOWEN)}、"
+  f"通用核心（四面体一·二）{len(SHAFA_LOOP_DAOWEN)}、衍生道纹 {len(derivative_rules.DERIVATIVE_SPECS)}、"
+  f"原始怪物 {len(ORIGINAL_MONSTER_DAOWEN)}、怪物转化 {len(MONSTER_TRANSFORM_DAOWEN)}、"
   f"副本专属 {sum(len(region_daowen_order(r)) for r in REGION_EXCLUSIVE_DAOWEN)}、"
   f"鲛族 {sum(len(pool) for pool in RACE_EXCLUSIVE_DAOWEN.values())}、"
   f"初拥 {len(FIRST_EMBRACE_DAOWEN)}、"
@@ -243,6 +248,7 @@ A("")
 A("- [总览表](#总览表)")
 A(f"- [通用核心（四面体一·二，{len(SHAFA_LOOP_DAOWEN)}）](#通用核心四面体一二{len(SHAFA_LOOP_DAOWEN)})")
 A(f"- [其他通用道纹（{len(OTHER_DAOWEN)}）](#其他通用道纹{len(OTHER_DAOWEN)})")
+A(f"- [衍生道纹（{len(derivative_rules.DERIVATIVE_SPECS)}）](#衍生道纹{len(derivative_rules.DERIVATIVE_SPECS)})")
 A(f"- [原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）](#原始怪物道纹{len(ORIGINAL_MONSTER_DAOWEN)})")
 A(f"- [怪物转化道纹（{len(MONSTER_TRANSFORM_DAOWEN)}）](#怪物转化道纹{len(MONSTER_TRANSFORM_DAOWEN)})")
 for _r in REGION_EXCLUSIVE_DAOWEN:
@@ -267,6 +273,7 @@ CAT_LABEL = {
     "扭曲都市": "扭曲专属", "罪孽都市": "罪孽专属", "龙心谷": "龙心专属",
     "乱葬岗": "乱葬专属", "沉沦海": "沉沦海专属", "荒疫古城": "荒疫专属", "鲛族": "鲛族专属",
     "bloodline": "血族专属", "other": "其他通用", "first_embrace": "初拥专属", "unimpl": "副本未开放",
+    "derivative": "衍生",
 }
 for name in sorted(DaoWenEngine._registry, key=lambda n: (list(CATEGORY).index(n), n)):
     pass
@@ -276,7 +283,8 @@ order = (list(SHAFA_LOOP_DAOWEN) + ["共罪", "怜悯"] + sorted(ORIGINAL_MONSTE
          + [n for pool in RACE_EXCLUSIVE_DAOWEN.values() for n in sorted(pool)]
          + sorted(BLOODLINE_EXCLUSIVE_DAOWEN)
          + sorted(FIRST_EMBRACE_DAOWEN)
-         + list(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN))
+         + list(UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN)
+         + [s.name for s in derivative_rules.DERIVATIVE_SPECS])
 for name in order:
     out = "、".join(out_edges[name]) if out_edges[name] else "—"
     if name == "共罪":
@@ -327,6 +335,20 @@ section(f"其他通用道纹（{len(OTHER_DAOWEN)}）", OTHER_DAOWEN,
         note_lines=["不属于通用四面体一·二（发现池），也不属于任何副本专属池。",
                     "【透支】不在任何四面体内：任意角色出生自带，X每次自选；",
                     "【封印】属通用，关系见通用四面体四。"])
+
+DERIVATIVE_NAMES = [s.name for s in derivative_rules.DERIVATIVE_SPECS]
+for spec in derivative_rules.DERIVATIVE_SPECS:
+    if spec.name not in NOTES:
+        NOTES[spec.name] = f"【{spec.parent}】衍生：{spec.note}"
+section(f"衍生道纹（{len(DERIVATIVE_NAMES)}）", DERIVATIVE_NAMES,
+        note_lines=[
+            "公式：母本道纹→支付【转换】×1＋血限2＋灵魂碎片3→从该母本的衍生道纹池中【发现】一种衍生道纹获取。",
+            "衍生是局内独立行动，占 0 次主动出手、不结束回合、不消耗精力；领取／刷新／放弃同样占 0 出手。完整口径见[规则正文](规则正文.md#衍生道纹)。",
+            "每个衍生道纹独立占用 1 张死者之页；对本次结果不满意可重新支付血限2刷新选项。",
+            "衍生道纹严格受限于母本道纹的法则领域，不可跨界产生其他道纹的法则效果；其本质是法则内部的收益置换——改变支付途径，或牺牲灵活性、安全性、适用性来换更高数值汇率或特殊机制。",
+            "只能通过衍生发现获取：不进学习／典当／开局发现池，不占残韵四面体节点；衍生道纹自身不能再作母本。完整口径见[规则正文](规则正文.md#衍生道纹)。",
+            "多途径道纹一律只留一条途径：母本【杀伐】法力X→生命-X²、【透支】枯竭X→X法力、【再生】法力X→回复4X生命；其余同效果途径全部列为衍生道纹。",
+        ])
 
 section(f"原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）", sorted(ORIGINAL_MONSTER_DAOWEN),
         note_lines=[
