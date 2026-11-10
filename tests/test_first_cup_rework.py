@@ -162,11 +162,11 @@ def test_first_cup_doubles_bleed_cost_life_loss():
     player.current_hp = 100
     hp_before = player.current_hp
 
-    # 2026-11-09：连击代价 生命10X → X=2 付 20，【第一杯】再翻倍成 40。
-    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 2, "target": "靶怪"})
+    # 2026-11-09：连击代价压到最简比 生命2X → X=20 付 40，【第一杯】再翻倍成 80。
+    engine.execute_action("use_daowen", {"daowen_name": "连击", "x": 20, "target": "靶怪"})
 
-    assert player.current_hp == hp_before - 40, "流血20（连击X=2）的代价翻倍应造成 40 点生命损失"
-    assert player._hp_loss_events[-1]["amount"] == 40
+    assert player.current_hp == hp_before - 80, "流血40（连击X=20）的代价翻倍应造成 80 点生命损失"
+    assert player._hp_loss_events[-1]["amount"] == 80
 
 
 def test_first_cup_doubles_raw_hp_loss():
@@ -347,7 +347,7 @@ def test_first_cup_doubling_visible_in_preview():
     cup_loss, cup_dealt = _preview(True, "pvw_cup")
 
     assert cup_dealt == plain_dealt, "打出去的伤害不变（翻的只是自己失去的生命）"
-    # 2026-11-09：连击代价生命10X、伤害 5X → X=3 时付 30、打 15，两者不再相等。
-    assert plain_loss == 30, "无遗物：流血代价 = 生命10X（X=3 → 30）"
-    assert plain_dealt == 15, "打出的伤害 = 5X 段各 1 点（X=3 → 15）"
+    # 2026-11-09：连击代价生命2X、伤害 1X → 两者不再相等（付 > 打）。
+    assert plain_loss == 6, "无遗物：流血代价 = 生命2X（X=3 → 6）"
+    assert plain_dealt == 3, "打出的伤害 = X 段各 1 点（X=3 → 3）"
     assert cup_loss == plain_loss * 2, "持有【第一杯】：预演里的生命损失同样翻倍"

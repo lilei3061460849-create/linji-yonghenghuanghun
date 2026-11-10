@@ -963,7 +963,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
             granted.append(name)
         if granted:
             applied.append(f"取得法术定义：{'、'.join(granted)}")
-    # 获得N点[速限]/[法限]：按正文「2属性点 = 1[速限] = 1[法限]」，
+    # 获得N点[速限]/[法限]：按正文「1属性点 = 1[速限]、2属性点 = 1[法限]」，
     # 速限与法限同价，各按字面点数加到对应上限（2026-09-16 裁定，清单 A4：
     # 旧实现给法限加 2×x，与速限口径不一致）。
     for m in re.finditer(r'获得(\d+)点\s*\[?速限\]?', text):
@@ -972,7 +972,7 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         x = int(m.group(1)); player.mana_limit += x; player.current_mana = player.mana_limit; applied.append(f"获得{x}法限")
     # 属性点：入属性点池，由玩家按正文自行兑换（2026-09-16 裁定，清单 A3：
     # 旧实现把任意含"属性点"的文本直接吞成 +1 速限，既绕过属性点池，
-    # 也比价错误——1点属性点买不到1点速限，速限是2点一档）。
+    # 也比价错误——属性点入池由玩家自行兑换，2026-11-09 起 1 点就能兑 1 速限）。
     m_attr = re.search(r'获得(\d+)点?\s*属性点|属性点\s*\+(\d+)', text)
     if m_attr:
         pts = int(m_attr.group(1) or m_attr.group(2) or 1)

@@ -873,6 +873,8 @@ class Entity:
             "全力": lambda status, old: self.mana_limit,
             "强化": lambda status, old: old + status.value,
             "弱化": lambda status, old: old - status.value,
+            # 2026-11-09：【献锋】的攻击力代价是**本回合**减益（状态随回终到期复原）。
+            "献锋": lambda status, old: old - status.value,
             "定型": lambda status, old: status.effect_data.setdefault("attack_power", old),
         })
         return max(0, power)
@@ -1292,6 +1294,7 @@ class Entity:
                 "弱化", "无力", "减速", "全速", "束缚", "封印", "冰冻",
                 "坏死", "退化", "定型", "畸变", "加害", "伤痕", "沉溺",
                 "寄生", "蒙蔽", "手雷减攻", "被背负", "脆弱",  # 2026-10-11 删【衰败】
+                "献锋",  # 2026-11-09：本回合攻击力减益（代价）
             }
             if effect.name in buffs:
                 effect.polarity = EffectPolarity.BUFF.value

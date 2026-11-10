@@ -105,8 +105,8 @@ def test_zaisheng_merges_self_feeding_as_an_alternate_attack_cost():
     assert mana["cost"] == 2
     assert mana["target_heal"] == 8
     assert attack["cost_type"] == "攻击力"
-    assert attack["cost_attack"] == 8
-    assert attack["target_heal"] == 8
+    assert attack["cost_attack"] == 2      # 2026-11-09 最简比：本回合攻击力1X
+    assert attack["target_heal"] == 2
     assert "自食" not in DaoWenEngine.list_all()
     # 2026-11-02 四面体三：曲解 强化⇄全速、弱化⇄全力（原「全力→曲解→再生」撤边）。
     assert ("弱化", "曲解", "全力") in ResonanceEngine.edges_of_region("通用")

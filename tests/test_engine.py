@@ -40,9 +40,9 @@ def test_setup():
         "blood_points": 11, "speed_points": 8, "mana_points": 6
     })
     assert result["success"], f"属性分配失败: {result}"
-    # 1属性点=6[血限]、2属性点=1[速限]=1[法限]；所有角色基础出手 1 次（单行动契约）
+    # 1属性点=6[血限]=1[速限]、2属性点=1[法限]；所有角色基础出手 1 次（单行动契约）
     assert engine.state.player.blood_limit == 66, f"血限错误: {engine.state.player.blood_limit}"
-    assert engine.state.player.speed_limit == 4, f"速限错误: {engine.state.player.speed_limit}"
+    assert engine.state.player.speed_limit == 8, f"速限错误: {engine.state.player.speed_limit}"
     assert engine.state.player.mana_limit == 3, f"法限错误: {engine.state.player.mana_limit}"
     assert engine.state.player.action_count == 1, "出手次数错误：基础出手应为 1 次"
     assert engine.state.shards == 20, "初始碎片错误"
@@ -361,11 +361,11 @@ def test_full_flow():
     print("  ✓ 领悟已删除：调用被拒且精力不泄漏")
 
     speed_before = engine.state.player.speed_limit
-    # 2属性点=1速限：tier1 只给1点、买不到任何面板（余点入池），要用 tier2 才买得到
+    # 2026-11-09：1属性点=1速限，tier2 的 2 点全砸速度即 +2 速限
     engine.state.shards = max(engine.state.shards, 15)
     result = engine.execute_action("pre_battle_action", {"sub_action": "修行", "tier": 2, "to": "speed"})
     assert result["success"], f"修行失败: {result}"
-    assert engine.state.player.speed_limit == speed_before + 1, "修行应+1速限"
+    assert engine.state.player.speed_limit == speed_before + 2, "修行 tier2 应+2速限"
     print(f"  ✓ 修行：速限{speed_before}→{engine.state.player.speed_limit}")
     
     heal_amt = math.ceil(engine.state.player.blood_limit * 0.2)

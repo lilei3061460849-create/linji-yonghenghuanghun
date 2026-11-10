@@ -32,8 +32,8 @@ class SupplyOutputAuditTests(unittest.TestCase):
         c = arena('不朽之躯');p = c.state.player;t = c.state.enemies[0]
         before = p.current_hp, p.blood_limit, p.current_mana
         for _ in range(12):
-            # 2026-11-09：折年改为 2X 法力，X=1 正好补上杀伐2 的 2 点法力。
-            cast_paid(c, '折年', 1)
+            # 2026-11-09 最简比：折年 1X 法力，X=2 正好补上杀伐2 的 2 点法力。
+            cast_paid(c, '折年', 2)
             cast_paid(c, '杀伐', 2, t)
         self.assertEqual((p.current_hp, p.blood_limit, p.current_mana), before)
         self.assertEqual(t.current_hp, 100000 - 12 * 4)
@@ -65,9 +65,9 @@ class SupplyOutputAuditTests(unittest.TestCase):
         c = arena('增生药剂');p = c.state.player
         p.add_status(StatusEffect('无限血限', 1, value=1, source='增殖'))
         start = p.current_hp
-        # 2026-11-09：连击代价抬到生命10X，5X 段自伤也变成 5X 次药剂回复，
-        # 净差额随 X 走（X=1 → +35）。本用例只锁「无限血限下确实是净回复」。
-        cast_paid(c, '连击', 1, p)
+        # 2026-11-09 最简比：连击付生命2X、打 X 段，X 段自伤换成 X 次药剂回复（X=10 → 净 +80）。
+        # 本用例只锁「无限血限下确实是净回复」。
+        cast_paid(c, '连击', 10, p)
         self.assertGreater(p.current_hp - start, 0)
         self.assertIsNone(c.check_cancer(p))
 

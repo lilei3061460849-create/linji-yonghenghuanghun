@@ -1356,16 +1356,23 @@ class DaowenEffectMixin:
                 if dmg.get("actual_damage", 0) > 0:
                     caster.damage_dealt_this_round += dmg["actual_damage"]
 
-        # ---- 攻击力代价（【再生衍生·献锋】）：发动者失去攻击力，随后按正常目标结算 ----
+        # ---- 攻击力代价（【再生衍生·献锋】）：**本回合**的攻击力减益 ----
+        # 2026-11-09 用户令：不是永久失去攻击力，否则配上【波及】就完爆【弱化】。
+        # 走状态层（同名「献锋」），回终由 tick_status_effects 递减到期后自动复原；
+        # 攻击力本身对轮回者由 current_mana 换算，面板字段不能直接扣。
         if calc.get("cost_type") == "攻击力" and calc.get("cost_attack", 0) > 0:
             self._refuse_blocked_payment(caster, "攻击力")
             amount = int(calc["cost_attack"])
             available = max(0, int(caster.effective_attack_power()))
             if amount > available:
                 raise ValueError(f"再生攻击力代价需要{amount}点，当前有效攻击力仅{available}")
-            self._battle_delta(caster, "attack_power", -amount, name, EffectPolarity.DEBUFF.value)
+            caster.add_status(self._daowen_status(
+                daowen_order=daowen_order, name="献锋", value=amount,
+                remaining_rounds=1, source=name,
+                polarity=EffectPolarity.DEBUFF.value))
             result["effects"].append({"type": "attack_power_cost", "target": caster.name,
-                                      "paid": amount, "attack_power": caster.attack_power})
+                                      "paid": amount, "scope": "round",
+                                      "attack_power": caster.effective_attack_power()})
         # ---- 回复类 ----
         if "target_heal" in calc:
             if "target_heal" in wave_pieces:

@@ -40,7 +40,7 @@ def test_generic_blood_limit_delta_does_not_turn_infinite_limit_into_finite_hp_c
 
 def test_unknown_calculator_state_has_no_999_finite_substitute_for_infinity():
     calc=DaoWenEngine.resolve('折年',1000)
-    assert calc['cost_blood_limit']==2000
+    assert calc['cost_blood_limit']==1000   # 2026-11-09 最简比 血限1X
     # 显式给出的有限上限依然校验，不把实际有限支付变成免费。
     import pytest
     with pytest.raises(ValueError):

@@ -632,7 +632,7 @@ def test_instant_silence_mask_interrupts_cost_daowen_step():
 
 
 def test_instant_buymai_shards_insufficient_is_normal_interrupt():
-    """【买命】碎片5X：两池合计不足 5 点时，施法步骤按 shards_insufficient 中断。"""
+    """【买命】碎片X：两池合计不足 1 点时，施法步骤按 shards_insufficient 中断。"""
     engine = _setup("p2_weifa_shards")
     player, foe = engine.state.player, engine.state.enemies[0]
     _give(player, "买命")
@@ -648,14 +648,14 @@ def test_instant_buymai_shards_insufficient_is_normal_interrupt():
 
 
 def test_instant_buymai_pays_shards_like_use_daowen():
-    """【买命】碎片5X：走通用碎片口径（假碎片优先），60 假碎片付 5 点后剩 55。"""
+    """【买命】碎片X：走通用碎片口径（假碎片优先），60 假碎片付 5 点后剩 55。"""
     engine = _setup("p2_weifa_shards_ok")
     player, foe = engine.state.player, engine.state.enemies[0]
     _give(player, "买命")
     engine.state.fake_shards = 60
     resp = _cast(engine, "发动买命X于目标",
-                 [{"x": 1, "dodge": False}], target=foe)
+                 [{"x": 5, "dodge": False}], target=foe)
     assert resp["success"], resp
     assert resp["result"]["execution_status"] == EXECUTION_COMPLETED
-    assert engine.state.fake_shards == 55  # 60 - 5X
+    assert engine.state.fake_shards == 55  # 60 - 5
     assert foe.current_hp == foe.blood_limit - 5

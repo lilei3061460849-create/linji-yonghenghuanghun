@@ -278,7 +278,7 @@ def test_event_path_applies_silence_mask_to_step():
 
 
 def test_event_path_pays_buymai_shard_cost_and_interrupts_when_short():
-    """【买命】碎片5X 在事件型法术步骤里同样支付/拦截（单途径，无通道参数）。"""
+    """【买命】碎片X 在事件型法术步骤里同样支付/拦截（单途径，无通道参数）。"""
     state, combat, player, enemy = _state(player_hp=60, mana=20)
     state.fake_shards = 0
     state.shards = 0
@@ -299,8 +299,8 @@ def test_event_path_pays_buymai_shard_cost_and_interrupts_when_short():
     logs2 = combat._resolve_spell_reactions(
         "失去生命后", player, enemy, {"买命": decision}, refs)
     assert any(lg.get("spell") == "买命" and lg.get("execution") for lg in logs2)
-    assert state.fake_shards == 55
-    assert enemy.current_hp == 95
+    assert state.fake_shards == 59      # 60 - 碎片1X（X=1）
+    assert enemy.current_hp == 99      # 买命 1:1，X=1 失 1 生命
 
 
 def test_event_path_flight_blocks_step_with_explicit_reason():
@@ -397,9 +397,9 @@ def test_same_interruption_reason_and_detail_as_use_daowen():
     direct2 = engine.execute_action("use_daowen", {
         "daowen_name": "买命", "x": 1, "target_ref": "enemy:0",
         "dodge": False})
-    assert not direct2["success"] and "无法完整承担碎片5" in direct2["error"]
+    assert not direct2["success"] and "无法完整承担碎片1" in direct2["error"]
     execution2 = _cast(engine.combat, player, engine.state.enemies[0],
                        "发动买命X于目标",
                        [{"x": 1, "dodge": False}], target=None)
     assert execution2.results[0].reason == InterruptReason.SHARDS_INSUFFICIENT
-    assert "无法完整承担碎片5" in execution2.results[0].detail
+    assert "无法完整承担碎片1" in execution2.results[0].detail

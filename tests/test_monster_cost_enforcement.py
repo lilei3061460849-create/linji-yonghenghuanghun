@@ -144,8 +144,8 @@ def test_monster_bleed_cost_daowen_deducts_monster_hp(tmp_path):
         }]
     })
 
-    # 验证：怪物生命真实扣除了连击2的代价（2026-11-09 连击流血价10X：2×10=20点）
-    assert m.current_hp == hp_after_player_hit - 20, f"怪物发动连击2应扣20生命，实扣{hp_after_player_hit - m.current_hp}"
+    # 验证：怪物生命真实扣除了连击2的代价（2026-11-09 最简比 生命2X：2×2=4点）
+    assert m.current_hp == hp_after_player_hit - 4, f"怪物发动连击2应扣4生命，实扣{hp_after_player_hit - m.current_hp}"
 
 
 def test_monster_cannot_cast_when_hp_insufficient_for_cost(tmp_path):

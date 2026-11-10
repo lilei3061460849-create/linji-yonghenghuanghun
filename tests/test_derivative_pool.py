@@ -27,15 +27,15 @@ from tests.setup_support import begin_battle, finish_initial_daowen, hand_priori
 # ---------- 计算层：每条衍生只有一条途径 ----------
 
 @pytest.mark.parametrize("name,cost_key,amount,cost_type", [
-    ("连击", "cost_hp", 70, "生命"),
+    ("连击", "cost_hp", 14, "生命"),
     ("虚耗", "cost_mana_cap", 7, "法限"),
-    ("断脉", "cost_blood_limit", 35, "血限"),
-    ("买命", "cost_shards", 35, "碎片"),
+    ("断脉", "cost_blood_limit", 7, "血限"),
+    ("买命", "cost_shards", 7, "碎片"),
     ("冲击", "cost", 7, "消耗"),
     ("燃命", "cost_hp", 28, "生命"),
-    ("折年", "cost_blood_limit", 14, "血限"),
+    ("折年", "cost_blood_limit", 7, "血限"),
     ("搏命", "cost_speed", 7, "速度"),
-    ("献锋", "cost_attack", 28, "攻击力"),
+    ("献锋", "cost_attack", 7, "攻击力"),
 ])
 def test_derivative_has_exactly_one_channel(name, cost_key, amount, cost_type):
     DaoWenEngine.register_all()
@@ -46,7 +46,9 @@ def test_derivative_has_exactly_one_channel(name, cost_key, amount, cost_type):
     amount_keys = [k for k in calc
                    if k != "cost_type" and (k.startswith("cost_") or k == "cost")]
     assert amount_keys == [cost_key], f"{name} 出现了第二条支付途径: {amount_keys}"
-    assert f"支付：{derivative_rules.spec_of(name).cost_kind}{amount}" in calc["summary"]
+    kind = derivative_rules.spec_of(name).cost_kind
+    label = "本回合攻击力" if kind == "攻击力" else kind   # 献锋的攻击力只是本回合减益
+    assert f"支付：{label}{amount}" in calc["summary"]
 
 
 def test_shafa_pool_is_one_pool_with_five_forms():
@@ -54,11 +56,11 @@ def test_shafa_pool_is_one_pool_with_five_forms():
 
 
 @pytest.mark.parametrize("name,key,value", [
-    ("连击", "hits", 35),
+    ("连击", "hits", 7),                # 1 段/X
     ("虚耗", "target_damage", 84),      # 12X
-    ("断脉", "target_damage", 35),
-    ("买命", "target_life_loss", 35),
-    ("冲击", "others_life_loss", 35),
+    ("断脉", "target_damage", 7),       # 1:1
+    ("买命", "target_life_loss", 7),    # 1:1
+    ("冲击", "others_life_loss", 35),   # 5X
 ])
 def test_shafa_derivatives_have_distinct_damage_forms(name, key, value):
     """杀伐域五条各自一种伤害表现：只有【连击】是多段，其余形态互不重复。"""
@@ -74,14 +76,14 @@ def test_shafa_derivatives_have_distinct_damage_forms(name, key, value):
         assert not calc.get("ignore_shield")
 
 
-@pytest.mark.parametrize("name,mana", [("燃命", 7), ("折年", 14), ("搏命", 7)])
+@pytest.mark.parametrize("name,mana", [("燃命", 7), ("折年", 7), ("搏命", 7)])
 def test_touzhi_derivatives_gain_mana(name, mana):
-    """透支域都换成法力；【折年】在 2026-11-09 抬到 2X（血限2X → 2X 法力）。"""
+    """透支域都换成法力，且都压成最简比 1 法力 : 1 倍率。"""
     assert DaoWenEngine.resolve(name, 7)["mana_gain"] == mana
 
 
-def test_zaisheng_derivative_heals_4x():
-    assert DaoWenEngine.resolve("献锋", 7)["target_heal"] == 28
+def test_zaisheng_derivative_heals_x():
+    assert DaoWenEngine.resolve("献锋", 7)["target_heal"] == 7
 
 
 def test_mothers_keep_exactly_one_channel():
@@ -197,38 +199,38 @@ def test_battle_shard_derivative_spends_fake_first(tmp_path):
     """【买命】走通用碎片口径：额度=真+假，实际扣除先假后真。"""
     e, p, m = _setup_battle(tmp_path, "买命")
     e.state.shards, e.state.fake_shards = 20, 40
-    r = _cast(e, m, "买命", 2)
+    r = _cast(e, m, "买命", 3)
     assert r["success"], r
-    assert e.state.fake_shards == 40 - 10
+    assert e.state.fake_shards == 40 - 3
     assert e.state.shards == 20
-    assert m.current_hp == 80 - 10
+    assert m.current_hp == 80 - 3
 
 
 def test_battle_shard_derivative_falls_back_to_real(tmp_path):
     e, p, m = _setup_battle(tmp_path, "买命")
     e.state.shards, e.state.fake_shards = 20, 3
-    r = _cast(e, m, "买命", 2)
+    r = _cast(e, m, "买命", 5)
     assert r["success"], r
-    assert e.state.fake_shards == 0 and e.state.shards == 20 - 7
-    assert m.current_hp == 80 - 10
+    assert e.state.fake_shards == 0 and e.state.shards == 20 - 2
+    assert m.current_hp == 80 - 5
 
 
 def test_battle_shard_derivative_insufficient_rejected_cleanly(tmp_path):
     e, p, m = _setup_battle(tmp_path, "买命")
-    e.state.shards, e.state.fake_shards = 7, 0
-    r = _cast(e, m, "买命", 2)
+    e.state.shards, e.state.fake_shards = 2, 0
+    r = _cast(e, m, "买命", 3)
     assert r["success"] is False
-    assert e.state.shards == 7 and m.current_hp == 80
+    assert e.state.shards == 2 and m.current_hp == 80
 
 
 def test_battle_pierce_derivative_ignores_shield(tmp_path):
     """【断脉】无视格挡：目标有格挡时生命照样掉。"""
     e, p, m = _setup_battle(tmp_path, "断脉")
     m.shield = 30
-    r = _cast(e, m, "断脉", 2)
+    r = _cast(e, m, "断脉", 4)
     assert r["success"], r
     assert m.shield == 30, "无视格挡不得消耗格挡"
-    assert m.current_hp == 80 - 10
+    assert m.current_hp == 80 - 4
     assert p.blood_limit < 60 or p.current_hp <= p.blood_limit  # 血限支付已落地
 
 
@@ -237,11 +239,11 @@ def test_battle_multi_hit_derivative_is_split_across_hits(tmp_path):
     e, p, m = _setup_battle(tmp_path, "连击")
     m.shield = 3
     hp0 = p.current_hp
-    r = _cast(e, m, "连击", 2)
+    r = _cast(e, m, "连击", 5)
     assert r["success"], r
     assert m.shield == 0
-    assert m.current_hp == 80 - 7          # 10 段里 3 段被格挡吃掉
-    assert p.current_hp == hp0 - 20        # 生命10X
+    assert m.current_hp == 80 - 2          # 5 段里 3 段被格挡吃掉
+    assert p.current_hp == hp0 - 10        # 生命2X
 
 
 def test_battle_impact_derivative_hits_everyone_but_the_target(tmp_path):

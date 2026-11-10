@@ -24,11 +24,11 @@ def finish_round(engine):
     return engine.execute_action("round_end", {})
 
 
-# 加点 11/8/6 在 DM裁定 2026-09-10 口径下的面板：1属性点=6[血限]、2属性点=1[速限]=1[法限]。
+# 加点 11/8/6 的面板：1属性点=6[血限]=1[速限]、2属性点=1[法限]（2026-11-09 放开速限）。
 # 以下期望值一律由此推导，不再硬编码——旧口径（1点=1速限=2法限）下的 14/8 已作废。
 _BLOOD_P, _SPEED_P, _MANA_P = 11, 8, 6
 EXP_BLOOD = _BLOOD_P * 6        # 66
-EXP_SPEED = _SPEED_P // 2       # 4
+EXP_SPEED = _SPEED_P            # 8
 EXP_MANA = _MANA_P // 2         # 3
 
 

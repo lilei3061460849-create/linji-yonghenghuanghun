@@ -158,6 +158,6 @@ class OpeningHandlersMixin:
         if not isinstance(allocations, dict):
             return {"success": False,
                     "error": "请用 allocations 指定兑换："
-                             "{'blood_points': 非负整数, 'speed_points': 偶数, 'mana_points': 偶数}",
+                             "{'blood_points': 非负整数, 'speed_points': 整数, 'mana_points': 偶数}",
                     "attribute_points": self.state.attribute_points}
         return self._redeem_attribute_points(allocations, target=params.get("target", "player"))

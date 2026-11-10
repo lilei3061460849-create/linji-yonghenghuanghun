@@ -181,11 +181,11 @@ def test_event_and_daowen_costs_use_blood_pact_bus(tmp_path):
     state.enemies.append(target)
     calc = DaoWenEngine.resolve("连击", 5, target=target)
     combat.apply_daowen_effect("连击", calc, player, target)
-    # 连击5支付生命50（2026-11-09：生命10X），三个名额各扣 ceil(50/3)=17；
-    # 连同事件 15 每人 5，各扣 22。
+    # 连击5支付生命10（2026-11-09 最简比：生命2X），三个名额各扣 4；
+    # 连同事件 15 每人 5，各扣 9。
     losses = sorted([100 - player.current_hp, 80 - ally.current_hp,
                      80 - second.current_hp])
-    assert losses == [22, 22, 22]
+    assert losses == [9, 9, 9]
 
 
 def test_gongzui_daowen_binds_two_targets_who_share_resource_payments(tmp_path):

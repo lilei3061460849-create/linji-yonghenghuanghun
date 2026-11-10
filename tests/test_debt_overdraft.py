@@ -82,22 +82,22 @@ def test_fake_shards_pay_a_real_shard_cost_fake_first():
 
 
 def test_buymai_shard_channel_has_no_fake_shard_twin():
-    """2026-11-09 用户令：假碎片途径取消，碎片只留【买命】一条（碎片5X）。
+    """2026-11-09 用户令：假碎片途径取消，碎片只留【买命】一条（碎片1X）。
 
     旧实现里【碎伐】（只认真碎片）与【伪伐】（只认假碎片）是两条通道；现在只有
     【买命】一条，走通用【碎片】口径：额度＝真＋假、先扣假、真碎片补足。
     """
     spec = derivative_rules.spec_of("买命")
-    assert spec.cost_kind == "碎片" and spec.rate == 5
+    assert spec.cost_kind == "碎片" and spec.rate == 1
     assert "伪伐" not in DaoWenEngine.list_all() and "碎伐" not in DaoWenEngine.list_all()
     assert DaoWenEngine.list_all().count("买命") == 1
 
 
 def test_buymai_can_borrow_from_fake_shards():
-    """【买命】碎片5X：额度＝真+假；真碎片为0、假碎片100 时先扣假碎片。"""
+    """【买命】碎片X：额度＝真+假；真碎片为0、假碎片100 时先扣假碎片。"""
     combat = _make_combat(_haoduo_monster(shards=0, fake=100))
     monster = combat.state.enemies[0]
-    calc = DaoWenEngine.resolve("买命", 1, target=combat.state.player)
+    calc = DaoWenEngine.resolve("买命", 5, target=combat.state.player)
     combat.apply_daowen_effect("买命", calc, monster, combat.state.player)
     assert monster.fake_shards == 95 and monster.shards == 0, \
         f"应先扣假碎片，实 真{monster.shards}／假{monster.fake_shards}"

@@ -69,7 +69,7 @@ def test_relic_supply_can_be_removed_after_prefix_and_before_later_cost():
     result=e.combat.apply_daowen_effect('豪夺',DaoWenEngine.resolve('豪夺',1,target=p),a,p)
     assert not e.state.side_has(p,'不朽之躯'),result
     assert paid_step(e,p,'折年',p).status==StepStatus.COMPLETED
-    assert p.blood_limit==blood-2
+    assert p.blood_limit==blood-1   # 2026-11-09 最简比：血限1X
 
 
 def test_bizhong_blocks_passive_actions_not_reaction_spells():

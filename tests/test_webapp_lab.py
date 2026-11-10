@@ -3,7 +3,7 @@
 演武场是「把用户选择翻译成一次合法开局」的薄层，这里钉住四件事：
 
 1. 可选项只来自运行时（道纹必须已注册、消耗品必须有登记规格）；
-2. 规则模式仍受 25 点预算与偶数档位约束；
+2. 规则模式仍受 25 点预算约束（法限 2 点一档，速限已放开为 1 点一档）；
 3. 自由模式直接写三个上限，但只影响本局；
 4. 指定对手随 battle_start 注入（`inject_enemies`），不建地图，敌人就是用户选的那几只。
 """
@@ -65,7 +65,7 @@ def test_rule_mode_custom_loadout_opens_a_real_battle():
     })
     engine = prepared["engine"]
     player = engine.state.player
-    assert (player.blood_limit, player.speed_limit, player.mana_limit) == (90, 3, 2)
+    assert (player.blood_limit, player.speed_limit, player.mana_limit) == (90, 6, 2)
     assert {"杀伐", "再生", "操纵"} <= set(player.dao_wen)
     assert [relic.name for relic in engine.state.relics] == ["叠鳞甲"]
     assert {item.name: item.current_uses for item in engine.state.consumables} == {
@@ -104,7 +104,7 @@ def test_random_battle_uses_engine_spawn_recipe():
 
 @pytest.mark.parametrize("payload, message", [
     ({"region": "罪孽都市", "blood_points": 20, "speed_points": 4, "mana_points": 2}, "25"),
-    ({"region": "罪孽都市", "blood_points": 20, "speed_points": 3, "mana_points": 2}, "偶数"),
+    ({"region": "罪孽都市", "blood_points": 20, "speed_points": 4, "mana_points": 1}, "偶数"),
     ({"region": "罪孽都市", "blood_points": 20, "speed_points": 4, "mana_points": 0,
       "daowen": ["不存在的道纹"]}, "道纹"),
     ({"region": "罪孽都市", "blood_points": 20, "speed_points": 4, "mana_points": 0,
@@ -144,7 +144,7 @@ def test_character_cards_can_be_saved_updated_and_deleted(roster_file):
     saved = lab.save_sheet(_sheet("甲", relics=["叠鳞甲"], consumables=["急救箱"]))
     assert roster_file.exists()
     assert saved["id"] and saved["name"] == "甲"
-    assert (saved["blood_limit"], saved["speed_limit"], saved["mana_limit"]) == (90, 3, 2)
+    assert (saved["blood_limit"], saved["speed_limit"], saved["mana_limit"]) == (90, 6, 2)
     assert saved["consumables"] == [{"name": "急救箱", "uses": 2}]
 
     updated = lab.save_sheet({**saved, "name": "甲改"})

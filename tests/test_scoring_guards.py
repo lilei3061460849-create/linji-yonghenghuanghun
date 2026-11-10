@@ -131,8 +131,8 @@ def test_full_pool_shield_dump_loses_to_damage(engine):
     s_dump = ai._score_candidate(dump, "盾X=10", kind="shield")
     s_strike = ai._score_candidate(strike, "杀伐X=8", kind="damage")
     assert s_strike > s_dump, (s_dump, s_strike)
-    # 攻力折价可见：同样的梭哈，攻次 12 比攻次 4 多罚 8×0.5×10=40 分
+    # 攻力折价可见：同样的梭哈，攻次 12 比面板攻次 8 多罚 4×0.5×10=20 分
     engine.state.player.current_speed = 12
     ai12 = TacticalAI(engine)
     s_dump12 = ai12._score_candidate(dump, "盾X=10", kind="shield")
-    assert s_dump - s_dump12 == pytest.approx(40.0), (s_dump, s_dump12)
+    assert s_dump - s_dump12 == pytest.approx(20.0), (s_dump, s_dump12)
