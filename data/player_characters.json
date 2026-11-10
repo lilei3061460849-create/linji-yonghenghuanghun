@@ -263,6 +263,35 @@
       "energy": 0,
       "created_at": "2026-11-10T11:48:23",
       "updated_at": "2026-11-10T11:48:23"
+    },
+    {
+      "mode": "free",
+      "blood_points": 0,
+      "speed_points": 0,
+      "mana_points": 0,
+      "blood_limit": 150,
+      "speed_limit": 4,
+      "mana_limit": 3,
+      "attribute_points": 0,
+      "id": "e9b2dea92972",
+      "name": "怪甲",
+      "faction": "怪物",
+      "resonance": "转换",
+      "daowen": [
+        "杀伐"
+      ],
+      "relics": [],
+      "consumables": [
+        {
+          "name": "备用血泵",
+          "uses": 2
+        }
+      ],
+      "shards": 20,
+      "roll": {},
+      "energy": 0,
+      "created_at": "2026-11-10T12:05:41",
+      "updated_at": "2026-11-10T12:05:41"
     }
   ]
 }
