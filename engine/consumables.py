@@ -1,31 +1,27 @@
-"""消耗品通用被动：自愈X（2026-10-14 用户令）。
+"""消耗品声明层：翼类耐久/模式常量、耐久恢复声明（2026-11-09 用户令：删掉「自愈X」）。
 
-**自愈X**：恢复 X 点当前耐久，不超过耐久上限。X 为固定点数（如自愈1）；
-【无限肉块】的「自愈80%已损耐久」是比例特例（同族不同参）。
+**2026-11-09 用户令**：消耗品通用关键词【自愈X】取消——该机制此前已令删除，
+不得复活。这里因此：
+- 不再有「自愈X」这个术语，也不解析物品文本；
+- 不再有「目标死亡时」这种跨物品通用时机；
+- 只剩一条：把**物品正文里逐条写明**的[战终]耐久恢复落到实处。
 
-触发时机写在消耗品文本里，由本表的 kind 条目声明；将来剧情新增消耗品
-只需加一行声明，不写新引擎代码（A（5/10）即按此形状举例，未落地）。
+| kind | 条文出处 | 效果 |
+| --- | --- | --- |
+| `infinite_meat` | 《物品索引》无限肉块、《死者之书》癌变章 | [战终]恢复80%已损耐久，向上取整 |
 
-时机：
-- battle_end（规则文本：战终）；
-- target_death（规则文本：目标死亡时）＝持有者本场战斗出手选中过的目标死亡
-  （2026-10-14 用户裁定：你选中的目标才算，没打过的不算；命中与否不影响“选中”，
-  被闪避/挡掉照样算。只看选中集合，不限敌我、不问击杀者）。
-  离场/暂离不是死亡，不走统一命零管线，天然排除。
-
-数值规格 spec：
-- int：固定点数（如 1＝自愈1）；
-- ("percent_lost", p)：已损耐久的 p%，向上取整（仅无限肉块在用）。
+将来新增同类物品，先把效果写进该物品自己的条文，再在声明表里加一行
+（按 kind 索引，不按名字判断，也不做文本解析）。
 
 **三个消耗品模块的分工（2026-11-03 补注，只写注释不改行为）**：
 
 | 模块 | 负责什么 | 什么时候动它 |
 | --- | --- | --- |
-| `engine/consumables.py` | 消耗品**被动/触发**声明表（自愈X、翼类耐久与模式常量、战终/目标死亡等时机） | 新增一种"挂在某个时机上自动生效"的消耗品 |
+| `engine/consumables.py` | 消耗品**声明层**（翼类耐久与模式常量、写明的[战终]耐久恢复） | 新增一种"挂在某个时机上自动生效"的消耗品 |
 | `engine/npc_consumables.py` | **角色化**消耗品结算与 NPC 决策（谁用、何时用、不能越权用） | 改怪物/朋友/员工的用物品策略或合法性 |
 | `engine/world_consumables.py` | 副本地图上的**投放与独占拾取**、死者之页持有记录 | 改地图掉落密度/拾取归属 |
 
-三者互不替代：不要在 `npc_consumables` 里再写一份被动表，也不要在 `consumables.py`
+三者互不替代：不要在 `npc_consumables` 里再写一份声明，也不要在 `consumables.py`
 里塞地图投放逻辑。历史上有过把同一判定写两遍的返工，护栏测试会盯"同一口径只有一个实现"。
 """
 from __future__ import annotations
@@ -33,53 +29,34 @@ from __future__ import annotations
 import math
 from typing import Any
 
-ZIYU_TRIGGER_BATTLE_END = "battle_end"
-ZIYU_TRIGGER_TARGET_DEATH = "target_death"
-
-# kind → [(时机, 数值规格)]
-CONSUMABLE_ZIYU_TRIGGERS: dict[str, list[tuple[str, Any]]] = {
-    "infinite_meat": [(ZIYU_TRIGGER_BATTLE_END, ("percent_lost", 80))],
+# kind → 恢复规格（"percent_lost", p = 已损耐久的 p%，向上取整）
+DURABILITY_RECOVERY: dict[str, tuple[str, Any]] = {
+    "infinite_meat": ("percent_lost", 80),
 }
 
 
-def apply_zi_yu_trigger(items: list | None, trigger: str) -> list[dict]:
-    """结算一批消耗品在某时机上的自愈，返回逐件日志。
+def apply_battle_end_durability_recovery(items: list | None) -> list[dict]:
+    """[战终]结算条文里写明的耐久恢复，返回逐件日志。
 
-    每件匹配条目必记一条日志（含 restored=0 的满耐久件，与旧口径一致）。
+    每件匹配条目必记一条日志（含 restored=0 的满耐久件），与旧口径一致。
     """
     logs: list[dict] = []
     for item in items or []:
-        entries = CONSUMABLE_ZIYU_TRIGGERS.get(getattr(item, "kind", ""), ())
-        for trg, spec in entries:
-            if trg != trigger:
-                continue
-            room = max(0, item.max_uses - item.current_uses)
-            if isinstance(spec, tuple) and spec and spec[0] == "percent_lost":
-                restored = min(room, math.ceil(room * spec[1] / 100)) if room else 0
-            else:
-                restored = min(room, max(0, int(spec)))
-            if restored:
-                item.current_uses += restored
-            logs.append({"item": item.name, "trigger": trigger, "lost": room,
-                         "restored": restored, "current_uses": item.current_uses,
-                         "max_uses": item.max_uses})
+        spec = DURABILITY_RECOVERY.get(getattr(item, "kind", ""))
+        if spec is None:
+            continue
+        room = max(0, item.max_uses - item.current_uses)
+        kind, param = spec
+        if kind == "percent_lost":
+            restored = min(room, math.ceil(room * param / 100)) if room else 0
+        else:  # pragma: no cover - 声明表目前只有上面一种规格
+            restored = min(room, max(0, int(param)))
+        if restored:
+            item.current_uses += restored
+        logs.append({"item": item.name, "trigger": "battle_end", "lost": room,
+                     "restored": restored, "current_uses": item.current_uses,
+                     "max_uses": item.max_uses})
     return logs
-
-
-def note_action_targets(state, actor, targets) -> None:
-    """记录一次成功出手的显式目标（本场战斗选中集合）。
-
-    只记持有者（轮回者）本人的选择：朋友/员工代发动、怪物的出手不记。
-    调用点保证：只在成功提交后调用；X=0、非法提交、默认自身（非显式目标）不传进来。
-    """
-    if actor is None or state is None or actor is not getattr(state, "player", None):
-        return
-    seen = set(getattr(state, "player_selected_targets", None) or [])
-    for t in targets or []:
-        rid = getattr(t, "runtime_id", "")
-        if rid and rid not in seen:
-            seen.add(rid)
-            state.player_selected_targets.append(rid)
 
 # ==================== 翼类消耗品（2026-10-23 用户令） ====================
 # 血翼（原血族遗物【鲜血之翼】）与烬翼（原龙族遗物【烬翼】）都是消耗品：

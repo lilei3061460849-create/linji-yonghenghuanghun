@@ -1544,7 +1544,6 @@ class GameState:
     # 本场战斗轮回者出手选中过的目标 runtime_id（自愈X「目标死亡时」用）。
     # 只记成功提交的攻击/道纹/法术的显式目标（闪避/挡掉照样算选中；X=0、非法提交、
     # 朋友/员工代发动、消耗品使用不记）；每场战始清空。
-    player_selected_targets: list[str] = field(default_factory=list)
     # 抵扣X封印的玩家遗物 {遗物名: 剩余回合}，[回终]-1，归零解封（封印期间不触发 process_relics）
     sealed_relics: dict = field(default_factory=dict)
     # 豪夺：玩家/敌人互相夺取的遗物临时寄存
