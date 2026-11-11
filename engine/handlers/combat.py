@@ -525,15 +525,16 @@ class CombatHandlersMixin:
             "instruction": "需要DM裁定「某人」以何种扭曲方式实现愿望及轮回者付出的代价"
         }
 
-    ESCAPE_ACTION_COST = 5
+    ESCAPE_ACTION_COST = 3
 
     @ACTION_REGISTRY.action("declare_escape", group="combat")
     def _action_declare_escape(self, params: dict) -> dict:
-        """逃跑（2026-10-13 改制）：轮回者行动，一次付清5次出手，
+        """逃跑（2026-10-13 改制；2026-11-10 由5次下调为3次——跳过回合即可攒出手，
+        一次付清5次过苛）：轮回者行动，一次付清3次出手，
         以当前状态强制脱离本场战斗，不再走DM追击裁定。
 
         前置：非最终死斗；未持有生效中的【不离】（所有角色无法离场）；
-        本轮剩余出手≥5（原子消费，不足则一次不扣）。
+        本轮剩余出手≥3（原子消费，不足则一次不扣）。
         脱战清理口径沿用原【买路财】撤退：敌方清空、造物解散、员工撤部署、
         朋友/员工撤退标记重置、精力回满、阶段回 pre_battle；不产生击杀碎片奖励。
         """

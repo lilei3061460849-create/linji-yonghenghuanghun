@@ -1,7 +1,7 @@
 """
 pytest 风格测试 - 【买路财】改制逃跑行动 + 新道纹【典当】+【逼债】删除。
 
-逃跑：轮回者行动，一次付清5次出手，以当前状态强制脱离本场战斗，
+逃跑：轮回者行动，一次付清3次出手，以当前状态强制脱离本场战斗，
 不再走DM追击裁定；最终死斗/【不离】不可逃跑。
 典当X（罪孽专属，顶替逼债的闭环格）：代价失忆2X；发现获得X种道纹
 （发现池=局外【学习】口径；轮回者逐组3选1领取，怪物即时随机授予）。
@@ -51,19 +51,19 @@ def _start_with_enemy(engine: GameEngine, enemy: Entity):
 
 # ==================== 逃跑 ====================
 
-def test_escape_pays_five_atomically_and_forces_departure():
-    """正常：预算≥5时一次扣5，敌方清空、阶段回战前、不产生击杀奖励、无DM中断。"""
+def test_escape_pays_three_atomically_and_forces_departure():
+    """正常：预算≥3时一次扣3（此处恰好3），敌方清空、阶段回战前、不产生击杀奖励、无DM中断。"""
     engine = _new_engine("ok")
     player = engine.state.player
     _start_with_enemy(engine, Entity(name="拦路怪", entity_type="怪物",
                                      blood_limit=100, current_hp=100))
-    player.add_status(StatusEffect(name="疯狂", value=4, remaining_rounds=-1, source="test"))
-    assert player.action_count == 5
+    player.add_status(StatusEffect(name="疯狂", value=2, remaining_rounds=-1, source="test"))
+    assert player.action_count == 3
 
     r = engine.execute_action("declare_escape", {})
     assert r["success"], r
-    assert r["result"]["actions_paid"] == 5
-    assert player.actions_used_this_round == 5
+    assert r["result"]["actions_paid"] == 3
+    assert player.actions_used_this_round == 3
     assert engine.state.enemies == []
     assert engine.state.phase == "pre_battle"
     assert engine.state.energy == engine.state.energy_budget

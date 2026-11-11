@@ -904,7 +904,7 @@ class AvailableActionsMixin:
             {"action_type": "prepare_attack", "params_schema": {"actor_ref": actor_options}},
             {"action_type": "declare_wish", "params_schema": {"wish_text": "string", "target_ref": target_options}},
             {"action_type": "declare_escape", "params_schema": {},
-             "note": "逃跑：一次付清5次出手，以当前状态强制脱离本场战斗（最终死斗/【不离】不可）"},
+             "note": "逃跑：一次付清3次出手，以当前状态强制脱离本场战斗（最终死斗/【不离】不可）"},
             {"action_type": "choose_diandang_daowen",
              "params_schema": {"daowen_name": list(self.state.pending_diandang_discoveries[0])
                                if self.state.pending_diandang_discoveries else "string"},
