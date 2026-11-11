@@ -27,22 +27,30 @@ def handle_setup_attributes(engine: Any, params: Dict[str, Any]) -> Dict[str, An
         return {
             "success": False,
             "error": f"属性点总和不能超过25，当前为{total}",
-            "instruction": "1属性点=1速限／1属性点=6血限／2属性点=1法限；"
+            "instruction": "2属性点=1速限／1属性点=6血限／2属性点=1法限；"
                            "没花完的点会存进属性点池，之后随时可兑"
         }
-    # 放开速限——**1属性点 = 1速限**（原来 2 点一档）。
-    # 法限仍按 2 点一档计价，所以只有法限点数必须为偶数，速限点任何整数都行。
-    # DM裁定 2026-09-10：余点不再强塞血限，允许留着（total<25 的部分进属性点池）。
+    # 2026-11-10 用户裁定：速限计价改回 **2属性点 = 1速限**（结构层让每击沉淀
+    # 收益，速度按稀缺资源计价）。法限维持 2 点一档，血限维持 1 点=6血限。
+    # 速限与法限点数都必须为偶数。
+    # DM裁定 2026-09-10：余点不强塞血限，允许留着（total<25 的部分进属性点池）。
     if mana_points % 2:
         return {
             "success": False,
             "error": f"法限按2属性点一档计价，点数必须是偶数（当前 法{mana_points}）",
-            "instruction": "法限点数改成偶数即可；速限是 1属性点=1速限、不限奇偶。"
+            "instruction": "法限点数改成偶数即可；速限是 2属性点=1速限、也须偶数。"
+                           "没花完的点会留在属性点池里，攒着之后随时兑"
+        }
+    if speed_points % 2:
+        return {
+            "success": False,
+            "error": f"速限按2属性点一档计价，点数必须是偶数（当前 速{speed_points}）",
+            "instruction": "速限点数改成偶数即可；血限是 1属性点=6血限、不限奇偶。"
                            "没花完的点会留在属性点池里，攒着之后随时兑"
         }
 
     blood_limit = blood_points * 6
-    speed_limit = speed_points
+    speed_limit = speed_points // 2
     mana_limit = mana_points // 2
 
     player = Entity(
@@ -64,7 +72,7 @@ def handle_setup_attributes(engine: Any, params: Dict[str, Any]) -> Dict[str, An
     # 战始快照/深拷贝会剔除弱引用；建号后先给轮回者接回【庇护】/【脆弱】的
     # 失血拦截钩子（不绑完整引擎，避免同时改变封顶与「失去生命后」反应）。
     engine.combat._bind_intercept_hook(player)
-    # 属性点可存储，随时兑换（1点=1速限=6血限；2点=1法限）
+    # 属性点可存储，随时兑换（2点=1速限=1法限；1点=6血限）
     engine.state.attribute_points = 25 - total
     engine.state.allocated_blood = blood_limit
     engine.state.shards = 20

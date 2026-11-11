@@ -37,15 +37,15 @@ def _engine(suffix, **points):
 
 def test_points_buy_speed_at_one_to_one_and_mana_at_two_to_one():
     """正常路径：1属性点=1[速限]=6[血限]，2属性点=1[法限]。"""
-    e = _engine("rate", blood_points=7, speed_points=8, mana_points=10)
+    e = _engine("rate", blood_points=1, speed_points=16, mana_points=4)
     p = e.state.player
-    assert (p.blood_limit, p.speed_limit, p.mana_limit) == (42, 8, 5)
-    assert e.state.attribute_points == 0, "25 点花完，池内应为空"
+    assert (p.blood_limit, p.speed_limit, p.mana_limit) == (6, 8, 2)  # 2点=1速限、1点=6血限、2点=1法限
+    assert e.state.attribute_points == 4, "21 点花掉，池内应剩 4"
 
 
 def test_unspent_points_are_banked_not_lost():
     """正常路径（DM裁定 2026-09-10）：没花完的属性点存进池子，随时可兑。"""
-    e = _engine("bank", blood_points=6, speed_points=8, mana_points=10)   # 合计 24
+    e = _engine("bank", blood_points=4, speed_points=16, mana_points=4)   # 合计 24（2点=1速限）
     assert e.state.attribute_points == 1
     e.state.phase = "pre_battle"        # 兑换限局外（战斗内兑换会连带补满当前资源）
     r = e.execute_action("redeem_attribute_points",
@@ -57,27 +57,27 @@ def test_over_budget_rejected_and_odd_mana_points_rejected():
     """错误输入：超过 25 点拒绝；法限按 2 点一档计价，奇数买不出半档（速限 1 点一档不限奇偶）。"""
     e = GameEngine(db_path="/tmp/linji_tests/test_basic_attack_bad.db", rng_seed=7)
     over = e.execute_action("setup_attributes", {
-        "name": "白某", "blood_points": 10, "speed_points": 8, "mana_points": 10})  # 28
-    assert over["success"] is False and "25" in over["error"] and "28" in over["error"]
+        "name": "白某", "blood_points": 10, "speed_points": 16, "mana_points": 10})  # 36
+    assert over["success"] is False and "25" in over["error"] and "36" in over["error"]
 
     odd = e.execute_action("setup_attributes", {
-        "name": "白某", "blood_points": 10, "speed_points": 8, "mana_points": 7})   # 25 但法为奇（本条**故意**非法，勿被批量取偶扫到）
+        "name": "白某", "blood_points": 8, "speed_points": 8, "mana_points": 7})   # 23，法为奇（本条**故意**非法，勿被批量取偶扫到）
     assert odd["success"] is False and "偶数" in odd["error"]
     assert "池" in odd["instruction"]   # 引擎文案：「余点会留在池里，攒够2点再兑」
 
     odd_speed = e.execute_action("setup_attributes", {
-        "name": "白某", "blood_points": 10, "speed_points": 9, "mana_points": 6})   # 25，速为奇
-    assert odd_speed["success"] is True, "速限 1 点一档，奇数合法"
+        "name": "白某", "blood_points": 8, "speed_points": 11, "mana_points": 6})   # 25，速为奇
+    assert odd_speed["success"] is False and "偶数" in odd_speed["error"], "速限 2 点一档，奇数非法"
 
 
 # ==================== 2. 攻次/攻力 = 当前速度/当前法力 ====================
 
 def test_attack_panel_is_derived_from_current_resources():
     """正常路径：轮回者的攻次/攻力是派生值，随当前速度/当前法力实时变化。"""
-    e = _engine("derived", blood_points=1, speed_points=8, mana_points=16)
+    e = _engine("derived", blood_points=1, speed_points=16, mana_points=8)
     p = e.state.player
-    assert (p.speed_limit, p.mana_limit) == (8, 8)
-    assert (p.effective_attack_count(), p.effective_attack_power()) == (8, 8)
+    assert (p.speed_limit, p.mana_limit) == (8, 4)
+    assert (p.effective_attack_count(), p.effective_attack_power()) == (8, 4)
 
     p.current_speed = 2                 # 闪避花掉速度 → 击数跟着掉
     p.current_mana = 3                  # 放道纹花掉法力 → 每击伤害跟着掉
@@ -111,7 +111,7 @@ def test_action_count_is_fixed_one():
 
 def test_basic_attack_lands_current_speed_times_current_mana():
     """正常路径：普攻总伤 = 当前速度 × 当前法力（目标速度0→不闪避→伤害确定）。"""
-    e = _engine("hit", blood_points=1, speed_points=8, mana_points=16)
+    e = _engine("hit", blood_points=1, speed_points=16, mana_points=8)
     p = e.state.player
     m = Entity(name="靶尸", entity_type="怪物", blood_limit=200, current_hp=200,
                attack_count=1, attack_power=1, speed_limit=0, current_speed=0)
@@ -119,7 +119,7 @@ def test_basic_attack_lands_current_speed_times_current_mana():
     e.state.phase = "in_combat"
     r = resolve_attack(e)
     assert r.get("success"), r
-    expect = p.effective_attack_count() * p.effective_attack_power()   # 8 × 8 = 64
+    expect = p.effective_attack_count() * p.effective_attack_power()   # 8 × 4 = 32
     assert m.current_hp == 200 - expect, (m.current_hp, expect)
 
 
@@ -130,37 +130,38 @@ def test_spending_mana_weakens_the_basic_attack():
     攻力是**实时读取当前法力**，不是战始快照——法力补回来（守夜灯/承露盏/
     共罪/透支/再生等）攻击力同步回升，不存在「掉下去就永远回不来」。
     """
-    e = _engine("decay", blood_points=1, speed_points=8, mana_points=16)
+    e = _engine("decay", blood_points=1, speed_points=16, mana_points=8)
     p = e.state.player
     before = p.effective_attack_count() * p.effective_attack_power()
+    assert before == 8 * 4 == 32
     assert p.spend_mana(3) is True                  # 模拟放一次法力道纹
     after = p.effective_attack_count() * p.effective_attack_power()
-    assert after == p.effective_attack_count() * 5 == 40 < before
-    # 回蓝 2 点（例：守夜灯[回始]授予/承露盏失血返还）→ 攻力跟着回升到 7
+    assert after == p.effective_attack_count() * 1 == 8 < before
+    # 回蓝 2 点（例：守夜灯[回始]授予/承露盏失血返还）→ 攻力跟着回升到 3
     p.current_mana += 2
-    assert p.effective_attack_power() == 7
-    assert p.effective_attack_count() * p.effective_attack_power() == 56
+    assert p.effective_attack_power() == 3
+    assert p.effective_attack_count() * p.effective_attack_power() == 24
     # 掉到 0 也不锁死：补满即回到战始水平
     p.current_mana = 0
     assert p.effective_attack_power() == 0
     p.current_mana = p.mana_limit
-    assert p.effective_attack_power() == 8
+    assert p.effective_attack_power() == 4
 
 
 # ==================== 4. 修行：入池 + 兑换 ====================
 
 def test_training_banks_points_and_redemption_raises_attack_panel():
     """正常路径：修行给的点先入池；兑成[速限]/[法限]后攻次/攻力随之上升。"""
-    e = _engine("train", blood_points=7, speed_points=8, mana_points=10)
+    e = _engine("train", blood_points=1, speed_points=16, mana_points=8)
     e.state.phase = "pre_battle"
     e.state.shards = 200
     p = e.state.player
-    assert (p.effective_attack_count(), p.effective_attack_power()) == (8, 5)
+    assert (p.effective_attack_count(), p.effective_attack_power()) == (8, 4)
 
     r = e.execute_action("pre_battle_action", {
         "sub_action": "修行", "tier": 4,
-        "allocations": {"speed_points": 2, "mana_points": 2}})
+        "allocations": {"speed_points": 4, "mana_points": 0}})
     assert r["success"], r
-    assert (p.speed_limit, p.mana_limit) == (10, 6)
-    assert (p.effective_attack_count(), p.effective_attack_power()) == (10, 6)
+    assert (p.speed_limit, p.mana_limit) == (10, 4)
+    assert (p.effective_attack_count(), p.effective_attack_power()) == (10, 4)
     assert r["result"]["gained"] == {"blood": 0, "speed": 2, "mana": 1}

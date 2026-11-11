@@ -65,7 +65,7 @@ def test_rule_mode_custom_loadout_opens_a_real_battle():
     })
     engine = prepared["engine"]
     player = engine.state.player
-    assert (player.blood_limit, player.speed_limit, player.mana_limit) == (90, 6, 2)
+    assert (player.blood_limit, player.speed_limit, player.mana_limit) == (90, 3, 2)  # 2点=1速限
     assert {"杀伐", "再生", "操纵"} <= set(player.dao_wen)
     assert [relic.name for relic in engine.state.relics] == ["叠鳞甲"]
     assert {item.name: item.current_uses for item in engine.state.consumables} == {
@@ -144,7 +144,7 @@ def test_character_cards_can_be_saved_updated_and_deleted(roster_file):
     saved = lab.save_sheet(_sheet("甲", relics=["叠鳞甲"], consumables=["急救箱"]))
     assert roster_file.exists()
     assert saved["id"] and saved["name"] == "甲"
-    assert (saved["blood_limit"], saved["speed_limit"], saved["mana_limit"]) == (90, 6, 2)
+    assert (saved["blood_limit"], saved["speed_limit"], saved["mana_limit"]) == (90, 3, 2)  # 2点=1速限
     assert saved["consumables"] == [{"name": "急救箱", "uses": 2}]
 
     updated = lab.save_sheet({**saved, "name": "甲改"})

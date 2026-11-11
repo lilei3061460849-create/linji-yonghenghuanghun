@@ -149,11 +149,11 @@ def options(refresh: bool = False) -> dict[str, Any]:
         "attributes": {
             "total_points": 25,
             "blood_per_point": 6,
-            "points_per_speed": 1,   # 1属性点=1速限
+            "points_per_speed": 2,   # 2属性点=1速限
             "points_per_mana": 2,
             "limits": {"blood": MAX_BLOOD_LIMIT, "speed": MAX_TIER_LIMIT,
                        "mana": MAX_TIER_LIMIT, "shards": MAX_SHARDS, "uses": MAX_USES},
-            "note": "规则模式：1 点=6 血限=1 速限，2 点=1 法限，总和不超过 25；"
+            "note": "规则模式：1 点=6 血限，2 点=1 速限=1 法限，总和不超过 25；"
                     "自由模式直接填三个上限，仅用于演武场。",
         },
         "regions": _regions(engine),
@@ -267,7 +267,7 @@ def _sheet_limits(sheet: dict[str, Any]) -> tuple[int, int, int]:
     """角色卡的三维上限（血限/速限/法限）。"""
     if sheet["mode"] == "rule":
         return (int(sheet["blood_points"]) * 6,
-                int(sheet["speed_points"]),          # 2026-11-09：1属性点=1速限
+                int(sheet["speed_points"]) // 2,     # 2026-11-10：改回2属性点=1速限
                 int(sheet["mana_points"]) // 2)
     return (int(sheet["blood_limit"]), int(sheet["speed_limit"]),
             int(sheet["mana_limit"]))
@@ -401,7 +401,9 @@ def normalize_sheet(payload: dict[str, Any]) -> dict[str, Any]:
         if blood_points + speed_points + mana_points > 25:
             raise ValueError("规则模式下三项加点之和不能超过 25")
         if mana_points % 2:
-            raise ValueError("法限按 2 点一档计价，点数必须是偶数（速限不限）")
+            raise ValueError("法限按 2 点一档计价，点数必须是偶数")
+        if speed_points % 2:
+            raise ValueError("速限按 2 点一档计价，点数必须是偶数")
         sheet = {
             "mode": "rule",
             "blood_points": blood_points, "speed_points": speed_points,

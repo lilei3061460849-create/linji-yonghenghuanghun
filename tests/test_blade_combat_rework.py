@@ -13,19 +13,19 @@ def _target(e, hp=200, speed=4):
 
 
 def test_attack_damage_can_be_freely_split_with_empty_swings():
-    e = _engine("split", blood_points=1, speed_points=8, mana_points=16)  # 8刀，总伤64
+    e = _engine("split", blood_points=1, speed_points=16, mana_points=8)  # 8刀，总伤32（2点=1速限）
     m = _target(e)
-    r = resolve_attack(e, damages=[0, 2, 10, 20, 0, 4, 8, 20])
+    r = resolve_attack(e, damages=[0, 2, 10, 20, 0, 0, 0, 0])
     assert r["success"], r
-    assert m.current_hp == 136
-    assert [x["allocated_damage"] for x in r["result"]["hits"]] == [0, 2, 10, 20, 0, 4, 8, 20]
+    assert m.current_hp == 168
+    assert [x["allocated_damage"] for x in r["result"]["hits"]] == [0, 2, 10, 20, 0, 0, 0, 0]
 
 
 def test_attack_rejects_damage_over_snapshot_budget():
-    e = _engine("over_split", blood_points=1, speed_points=8, mana_points=16)
+    e = _engine("over_split", blood_points=1, speed_points=16, mana_points=8)
     _target(e)
     r = resolve_attack(e, damages=[0, 0, 0, 65, 0, 0, 0, 0])
-    assert not r["success"] and "超过上限64" in r["error"]
+    assert not r["success"] and "超过上限32" in r["error"]
 
 
 def test_parry_real_hit_refunds_speed_but_empty_swing_does_not():

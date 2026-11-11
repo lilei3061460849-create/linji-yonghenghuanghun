@@ -204,13 +204,13 @@ def test_option2_immortal_body_halves_blood_limit_and_blocks_growth():
     # 属性点增长与不朽之躯无关：修行照常提升速限（“无法超过上限”只限制获得的当前法力/速度）
     engine.state.energy = 3
     sp_before = player.speed_limit
-    # 2026-11-09：1属性点=1速限，tier2 的 2 点全砸速度即 +2 速限
+    # 2026-11-10：2属性点=1速限，tier2 的 2 点全砸速度即 +1 速限
     engine.state.shards = max(engine.state.shards, 15)
     r_xiuxing = engine.execute_action("pre_battle_action", {
         "sub_action": "修行", "tier": 2,
         "allocations": {"speed_points": 2, "mana_points": 0}})
     assert r_xiuxing["success"] is True, r_xiuxing
-    assert player.speed_limit == sp_before + 2, "不朽之躯不阻止修行提升速限"
+    assert player.speed_limit == sp_before + 1, "不朽之躯不阻止修行提升速限"
     engine.state.energy = 0
 
     # 获得的法力无法超过法限：折速战始+24与守夜灯[回增]叠加都被钳到法限

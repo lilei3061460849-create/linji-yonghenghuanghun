@@ -1385,7 +1385,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _pre_battle_xiuxing(self, params: dict) -> dict:
         """修行：获得属性点并立即分配。
 
-        计价与开局初始分配同口径：1属性点=6[血限]，1属性点=1[速限]，2属性点=1[法限]
+        计价与开局初始分配同口径：1属性点=6[血限]，2属性点=1[速限]，2属性点=1[法限]
         。
         不朽之躯不阻止修行：它只锁[血限]增长，不限制属性点本身的增长。"""
         tier = params.get("tier", 1)
@@ -2792,11 +2792,15 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if need > self.state.attribute_points:
             return {"success": False,
                     "error": f"属性点不足：需要{need}，池内{self.state.attribute_points}"}
-        # 1属性点=1速限（放开速限）；法限仍 2 点一档。
+        # 2026-11-10：速限计价改回 2 点一档；法限仍 2 点一档，速/法点数都须偶数。
         if vals["mana_points"] % 2:
             return {"success": False,
                     "error": "法限按2属性点一档计价，兑换点数必须是偶数",
-                    "instruction": "速限是 1属性点=1速限、血限是 1属性点=6血限，都不必偶数"}
+                    "instruction": "速限是 2属性点=1速限、血限是 1属性点=6血限；速限点数同样须为偶数"}
+        if vals["speed_points"] % 2:
+            return {"success": False,
+                    "error": "速限按2属性点一档计价，兑换点数必须是偶数",
+                    "instruction": "血限是 1属性点=6血限，不必偶数"}
         blood_gain = vals["blood_points"] * 6
         # 不朽之躯：[血限]无法增加，兑血限的点会白扔，直接拒绝而不是静默吞点。
         if blood_gain and self.state._relic_active(target_entity, "不朽之躯"):
@@ -2805,7 +2809,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     "instruction": "改兑 speed_points / mana_points"}
         self.state.attribute_points -= need
         gained = {"blood": blood_gain,
-                  "speed": vals["speed_points"],
+                  "speed": vals["speed_points"] // 2,
                   "mana": vals["mana_points"] // 2}
         if blood_gain:
             target_entity.blood_limit += blood_gain
