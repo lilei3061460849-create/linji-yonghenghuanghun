@@ -103,7 +103,10 @@ def test_dungeon_daowen_text_is_reachable_from_index_or_rules():
 
 def test_ai_context_daowen_digest_is_not_empty():
     text = AI_CONTEXT.read_text(encoding="utf-8")
-    block = text.split("### 来源 4：机制速查·道纹", 1)[1].split("### 来源 5", 1)[0]
+    # 来源序号会随速查节增删移动：按标题文本定位，不再硬编码序号。
+    marker = "：机制速查·道纹"
+    heading = next(line for line in text.splitlines() if line.startswith("### 来源") and marker in line)
+    block = text.split(heading, 1)[1].split("\n### 来源 ", 1)[0]
     assert "（暂无）" not in block, "AI 上下文的道纹速查整块丢失"
     lines = [line for line in block.splitlines() if "：支付" in line or "：代价" in line]
     assert len(lines) >= 40, f"道纹速查条目过少（{len(lines)}）"

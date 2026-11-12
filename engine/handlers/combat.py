@@ -58,13 +58,21 @@ class CombatHandlersMixin:
         if not target_refs and attacker.effective_attack_count() > 0:
             return {"success": False, "error": "没有合法攻击目标"}
 
+        # 法力结构声明（2026-11-10 一期）：一次普通攻击只能构建一种结构。
+        # 声明在 prepare 锁定并存进 pending 快照；逐击造成≥1点伤害时逐击 +1 层。
+        structure = str(params.get("blood_structure") or "").strip()
+        structure_error = self.combat.validate_structure_declaration(attacker, structure)
+        if structure_error:
+            return {"success": False, "error": structure_error}
+
         target_options = []
         for ref in target_refs:
             target = refs[ref]
             blood_pact_options = self.combat.blood_shadow_cost_share_options(target)
             target_options.append({
                 "ref": ref, "name": target.name,
-                "can_dodge": target.current_speed > 0,
+                "can_dodge": (target.current_speed
+                              > self.combat.structure_dodge_extra(target)),
                 "can_parry": target.current_speed > 0,
                 "can_blood_shadow": (self.state._relic_active(target, "血影")
                                      and (target.current_hp > 10 or bool(blood_pact_options))),
@@ -81,6 +89,9 @@ class CombatHandlersMixin:
             # DM裁定 2026-09-10：轮回者的击数=当前速度（换算仅限轮回者）
             "hit_count": attacker.effective_attack_count(),
             "damage_budget": attacker.effective_attack_count() * attacker.effective_attack_power(),
+            # 法力结构（血液结构）：本次攻击构建的结构名；空串=不构建。
+            "blood_structure": structure,
+            "blood_structure_options": self.combat.blood_structure_options(attacker),
             "target_options": target_options,
             "hits_schema": [{
                 "target_ref": [o["ref"] for o in target_options],
@@ -132,7 +143,9 @@ class CombatHandlersMixin:
             "target": entry.get("name"),
             "can_tank": True,
             "can_parry": bool(entry.get("can_parry")) and speed > 0,
-            "can_dodge": bool(entry.get("can_dodge")) and speed > 0,
+            # 【粘滞】承载期：闪避需额外支付X点速度，速度不足1+X时不可宣告。
+            "can_dodge": (bool(entry.get("can_dodge"))
+                          and speed > self.combat.structure_dodge_extra(target)),
             "can_blood_shadow": bool(entry.get("can_blood_shadow")),
             # 【必中】剩余次数覆盖本击时，闪避无效（与结算同一判定）。
             "dodge_locked": bizhong > index,
@@ -276,6 +289,7 @@ class CombatHandlersMixin:
             if target is None or not target.is_alive:
                 results.append({"hit_index": absolute, "skipped": "目标已命零"})
                 continue
+            hp_before_hit = int(target.current_hp)
             result = self.combat.resolve_attack(
                 attacker, target, dodge=hit["dodge"], parry=hit["parry"],
                 allocated_damage=hit["damage"], blood_shadow=hit["blood_shadow"],
@@ -286,6 +300,16 @@ class CombatHandlersMixin:
                 wanjunyin=bool(hit.get("wanjunyin")),
             )
             result["hit_index"] = absolute
+            # 法力结构（血液结构）：本击实际造成≥1点伤害（生命真实下降）时
+            # 为目标 +1 层声明的结构。damage_dealt 是格挡/免疫前的伤害意图，
+            # 不作数——被【庇护】整笔免疫、伤害全被格挡吸收、空刀、被闪避、
+            # 被招架的击都没有真实降血，不构建；目标已死不挂层。
+            structure = str(options.get("blood_structure") or "")
+            if (structure and target.is_alive
+                    and not result.get("dodge_success")
+                    and int(target.current_hp) < hp_before_hit):
+                result["structure"] = self.combat.apply_structure_layer(
+                    attacker, target, structure)
             results.append(result)
         done.extend(hits)
         pending["hit_index"] = offset + len(hits)
