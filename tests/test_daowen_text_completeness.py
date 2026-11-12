@@ -87,11 +87,17 @@ def test_rule_dungeon_section_bullets_carry_full_text():
 
 
 def test_dungeon_daowen_text_is_reachable_from_index_or_rules():
-    """副本文件里的专属道纹，其条文必须能在索引或规则正文副本节读到。"""
+    """副本文件里的专属道纹，其条文必须能在索引或规则正文副本节读到。
+
+    例外：藐视/独断/读心——2026-11-10 移出规则正文巴别塔节（巴别塔未开放、
+    引擎尚未实现，正文只保留傲慢/真诚并标注不可发动），条文草案仅存
+    副本/巴别塔.md；它们本就不在引擎注册表与索引里。
+    """
+    draft_only = {"藐视", "独断", "读心"}
     index_names = set(_index_entries())
     section = _rule_dungeon_section()
     rule_names = set(re.findall(r"(?m)^- 【([\u4e00-\u9fff]{2})】", section))
-    missing = sorted(_dungeon_daowen_names() - index_names - rule_names)
+    missing = sorted(_dungeon_daowen_names() - index_names - rule_names - draft_only)
     assert missing == [], f"这些道纹在任何正文里都读不到效果：{missing}"
 
 

@@ -2260,8 +2260,9 @@ class DaowenEffectMixin:
                 result["effects"].append({"type": "cancer_check", "result": cancer})
 
         if name == "淬火":
-            # 【淬火】（新增）：目标所有消耗品当前耐久 +X。
-            # 满耐久的条目按同样数值抬耐久上限，避免"对完好消耗品毫无收益"。
+            # 【淬火】：目标所有消耗品当前耐久 +X，不超过各自的耐久上限。
+            # 2026-11-10 取消抬耐久上限：满耐久条目淬火无收益，当前耐久只向上
+            # 钳到既有 max_uses，上限本身不变（与 docstring/正文/索引口径一致）。
             if target is None:
                 raise ValueError("淬火需要显式目标")
             gain = max(1, int(calc.get("consumable_durability_gain") or x))
@@ -2270,11 +2271,11 @@ class DaowenEffectMixin:
             for item in list(items):
                 if getattr(item, "current_uses", None) is None:
                     continue
-                item.current_uses = int(item.current_uses) + gain
-                item.max_uses = max(int(getattr(item, "max_uses", 0) or 0),
-                                    int(item.current_uses))
+                before = int(item.current_uses)
+                cap = int(getattr(item, "max_uses", 0) or 0)
+                item.current_uses = min(before + gain, cap) if cap > 0 else before + gain
                 touched.append({"item": item.name, "durability": item.current_uses,
-                                "max_durability": item.max_uses})
+                                "max_durability": cap})
             result["effects"].append({
                 "type": "consumable_durability_gain", "target": target.name,
                 "gain": gain, "items": touched})

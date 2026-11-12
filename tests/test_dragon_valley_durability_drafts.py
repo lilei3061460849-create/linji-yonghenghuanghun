@@ -108,6 +108,24 @@ def test_ronghua_destroys_only_items_at_or_below_threshold():
     assert [c.name for c in monster.consumables] == ["破障晶"]
 
 
+def test_cuihuo_caps_at_existing_max_durability():
+    """淬火只回耐久、不抬上限：超出 max_uses 的部分不计（2026-11-10 取消抬上限）。"""
+    engine, player, monster = _combat_with_player("cuihuo_cap")
+    from tests.test_daowen_wiring import _give
+    _give(engine.state.player, "淬火")
+    monster.consumables = [
+        Consumable(name="破障晶", effect="x", current_uses=1, max_uses=2),
+        Consumable(name="定命丸", effect="y", current_uses=2, max_uses=2),
+    ]
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "淬火", "x": 3, "target_ref": "enemy:0",
+        "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
+    })
+    assert result["success"], result
+    dur = {c.name: (c.current_uses, c.max_uses) for c in monster.consumables}
+    assert dur == {"破障晶": (2, 2), "定命丸": (2, 2)}, dur
+
+
 def test_duanzao_discovers_only_fixed_spec_consumables_with_x_durability():
     engine, player, monster = _combat_with_player("duanzao")
     result = engine.execute_action("use_daowen", {
