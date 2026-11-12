@@ -1372,11 +1372,14 @@ class SpellReactionMixin:
                 for _idx, step, _optional in iter_action_slots(self._flow_program(flow)):
                     subject, entity = subject_of(step)
                     if subject == "any":
-                        # 【封印】的 DSL 目标是 any：自动提交只选当前敌方怪物，
-                        # 不把轮回者/队友放进自动目标。
+                        # 【封印】的 DSL 目标是 any（2026-11-10 裁定：封印任意目标）：
+                        # 自动提交选当前**任意敌对角色**——怪物、敌对轮回者、
+                        # 敌方的[朋友]/[员工]/造物都算；不再限定怪物类型，
+                        # 否则打非怪物敌队时镇魔印永远哑火。己方单位不进自动
+                        # 候选（自动封自己人只会误伤；手动提交仍可任意选）。
                         candidates = [
                             ref for ref, e in refs.items()
-                            if e.is_alive and e.entity_type == "怪物"
+                            if e.is_alive
                             and self.state.on_player_side(e) != self.state.on_player_side(holder)
                             and self.is_targetable(holder, e)
                         ]

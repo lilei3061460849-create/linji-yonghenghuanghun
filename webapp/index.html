@@ -1028,6 +1028,7 @@ const MENU_EXCLUDED = new Set([
   "choose_discovered_relic", "choose_discovered_item", "choose_derivative_daowen",
   "refresh_derivative_choices", "choose_diandang_daowen", "resolve_redemption",
   "choose_hired_daowen",
+  "toggle_relic",  // 菜单里有专门类目（遗物启用切换）
 ]);
 
 function entryRefs(entry){
@@ -1252,6 +1253,25 @@ function actionMenuFor(c){
   if (res && entryAvailable(res)){
     menu.append(el("div", "hint", "残韵（转化道纹，1 手）："));
     menu.append(genericActionForm(res));
+  }
+
+  /* 遗物启用切换：战斗中不占出手（轮到谁才能改谁的），局外也可整理 */
+  const relicEntry = rel("toggle_relic")[0];
+  if (relicEntry && entryAvailable(relicEntry)){
+    const opts = (relicEntry.params_schema || {}).relic_name || [];
+    if (opts.length){
+      const boxWrap = el("div", "stack menu-panel");
+      boxWrap.append(el("div", "hint",
+        `遗物启用（不占出手；上限 ${(relicEntry.params_schema || {}).limit ?? "?"} 件）：`));
+      for (const t of opts){
+        const row = el("div", "row");
+        const b = el("button", t.enabled ? "primary" : "", t.enabled ? "停用 " + t.name : "启用 " + t.name);
+        b.onclick = () => act("toggle_relic", {relic_name: t.name});
+        row.append(b);
+        boxWrap.append(row);
+      }
+      menu.append(boxWrap);
+    }
   }
 
   /* 同伴：只在玩家方且场上真有同伴/员工时出现 */

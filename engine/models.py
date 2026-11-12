@@ -2039,59 +2039,73 @@ class GameState:
                 disabled.append(relic.name)
         return disabled
 
-    def set_active_relics(self, names) -> tuple:
-        """把本局遗物的启用集合设为 names（战始/局外自定义启用）。
+    def _relic_pool_for(self, entity: Optional[Entity]) -> list:
+        """按实体归属找遗物池（与 _relic_object 的三分支同一口径）。"""
+        if entity is None:
+            return []
+        if entity is self.player:
+            return self.relics
+        if entity.entity_type == "轮回者" and self.on_enemy_side(entity):
+            return self.opponent_relics
+        return getattr(entity, "relics", None) or []
 
+    def set_active_relics(self, names, entity: Optional[Entity] = None) -> tuple:
+        """把遗物的启用集合设为 names（战始/局外/战斗中整理）。
+
+        2026-11-10 裁定：启用槽**战斗中也可切换**。entity 缺省＝玩家；
+        传敌方轮回者/怪物等实体时改操作其归属池（口径同 _relic_object）。
         返回 (True, None) 或 (False, 错误文案)。启用件数不得超过
-        `ceil(血限/30)`（，重构1）；未列名的已持有遗物
-        一律置为停用（仍持有，不丢弃）。
+        `ceil(血限/30)`；未列名的已持有遗物一律置为停用（仍持有，不丢弃）。
         """
-        player = self.player
-        if player is None:
+        target = entity if entity is not None else self.player
+        if target is None:
             return False, "没有玩家"
         if (not isinstance(names, list)
                 or any(not isinstance(n, str) or not n for n in names)):
             return False, "active_relics必须是遗物名字符串列表"
         if len(set(names)) != len(names):
             return False, "active_relics不得重复"
-        owned = {r.name for r in self.relics}
+        pool = self._relic_pool_for(target)
+        owned = {r.name for r in pool}
         unknown = [n for n in names if n not in owned]
         if unknown:
             return False, f"未持有遗物：{'、'.join(unknown)}"
-        limit = player.enabled_relic_limit
+        limit = target.enabled_relic_limit
         if len(names) > limit:
             return False, (f"同时启用的遗物不得超过{limit}件"
-                           f"（ceil(血限{player.blood_limit}/30)={limit}），"
+                           f"（ceil(血限{target.blood_limit}/30)={limit}），"
                            f"当前提交{len(names)}件")
         wanted = set(names)
-        for relic in self.relics:
+        for relic in pool:
             relic.enabled = relic.name in wanted
         return True, None
 
-    def toggle_relic(self, name) -> tuple:
-        """切换单件遗物的启用/停用。
+    def toggle_relic(self, name, entity: Optional[Entity] = None) -> tuple:
+        """切换单件遗物的启用/停用（2026-11-10 起**战斗中也可用**）。
 
+        entity 缺省＝玩家；传敌方轮回者/怪物等实体时操作其归属池。
         返回 (True, 现在是否启用) 或 (False, 错误文案)。停用永远允许；
-        **启用**受 `ceil(血限/30)` 的启用槽位限制（，重构1）：
-        槽位已满时须先停用另一件，或改用 `set_active_relics` 一次性改选。
+        **启用**受 `ceil(血限/30)` 的启用槽位限制：槽位已满时须先停用
+        另一件，或改用 `set_active_relics` 一次性改选。
         """
-        player = self.player
-        if player is None:
+        target = entity if entity is not None else self.player
+        if target is None:
             return False, "没有玩家"
         if not isinstance(name, str) or not name:
             return False, "relic_name必须是遗物名字符串"
-        relic = next((r for r in self.relics if r.name == name), None)
+        pool = self._relic_pool_for(target)
+        relic = next((r for r in pool if r.name == name), None)
         if relic is None:
             return False, f"未持有遗物：{name}"
         if getattr(relic, "enabled", True):
             relic.enabled = False
             return True, False
-        limit = player.enabled_relic_limit
-        # 玩家侧遗物挂在 GameState.relics（不是 player.relics），统一经本方法读。
-        enabled_now = len(self.enabled_relic_names())
+        limit = target.enabled_relic_limit
+        # 玩家侧遗物挂在 GameState.relics（不是 player.relics），统一经归属池读。
+        enabled_now = len([r for r in pool if getattr(r, "enabled", True)])
         if enabled_now >= limit:
             return False, (f"已启用遗物{enabled_now}件，达到上限{limit}件"
-                           f"（ceil(血限{player.blood_limit}/30)）；"
+                           f"（ceil(血限{target.blood_limit}/30)）；"
                            f"请先停用一件，或用set_active_relics一次性改选")
         relic.enabled = True
         return True, True

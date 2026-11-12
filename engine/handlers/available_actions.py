@@ -691,6 +691,18 @@ class AvailableActionsMixin:
                 "action_type": "use_daowen", "available": max_x >= 1,
                 "params_schema": params_schema,
             })
+        # 遗物启用切换：战斗中不占出手、不结束回合（2026-11-10 裁定）；局外同一入口。
+        if self.state.relics:
+            actions.append({
+                "action_type": "toggle_relic",
+                "params_schema": {
+                    "relic_name": [{"name": r.name,
+                                    "enabled": bool(getattr(r, "enabled", True))}
+                                   for r in self.state.relics],
+                    "limit": player.enabled_relic_limit},
+                "note": "切换单件遗物启用/停用：不占出手、不结束回合；"
+                        "启用件数≤ceil(血限/30)，轮到你才能改",
+            })
         for actor_ref, actor in refs.items():
             if actor is player or not self.state.on_player_side(actor):
                 continue

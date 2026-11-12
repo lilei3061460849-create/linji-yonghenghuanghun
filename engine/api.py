@@ -557,8 +557,10 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if action_type.startswith("world_") and phase != "pre_battle":
             return {"success": False,
                     "error": "当前开放世界行动尚处于第一阶段，只能在局外阶段调用；战斗/世界统一主循环尚未接通"}
-        if action_type in ("pre_battle_action", "resolve_event", "upgrade_doctor", "set_active_relics", "toggle_relic") and phase != "pre_battle":
+        if action_type in ("pre_battle_action", "resolve_event", "upgrade_doctor") and phase != "pre_battle":
             return {"success": False, "error": "局外行动/事件只能在局外阶段执行"}
+        # set_active_relics / toggle_relic：局外与战斗中都可整理（2026-11-10 裁定），
+        # 阶段校验在 handler 内做（setup 阶段仍拒绝）。
         if (action_type in ("derive_daowen", "refresh_derivative_choices",
                             "choose_derivative_daowen") and phase != "in_combat"):
             return {"success": False,

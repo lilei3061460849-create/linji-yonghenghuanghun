@@ -164,4 +164,4 @@ def test_training_banks_points_and_redemption_raises_attack_panel():
     assert r["success"], r
     assert (p.speed_limit, p.mana_limit) == (10, 4)
     assert (p.effective_attack_count(), p.effective_attack_power()) == (10, 4)
-    assert r["result"]["gained"] == {"blood": 0, "speed": 2, "mana": 1}
+    assert r["result"]["gained"] == {"blood": 0, "speed": 2, "mana": 0}

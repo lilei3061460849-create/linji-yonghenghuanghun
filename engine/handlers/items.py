@@ -70,41 +70,82 @@ class ItemHandlersMixin:
 
         return self._consume_item_effect(item, params, actor=item_user)
 
+    def _relic_swap_actor(self):
+        """遗物启用整理的操作者：局外＝玩家；战斗中＝当前交替出手侧的轮回者。
+
+        2026-11-10 裁定：启用槽战斗中可切换（不占出手、不结束回合）。
+        敌方回合解析为敌方轮回者（其遗物池是 state.opponent_relics）；
+        找不到敌方轮回者（纯怪物战）时返回 None，由调用方拒绝。
+        """
+        if self.state.phase != "in_combat":
+            return self.state.player
+        side = self.state.duel_turn or "player_side"
+        if side == "opponent_side":
+            return next((e for e in self.state.get_all_enemy_side()
+                         if e.entity_type == "轮回者"), None)
+        return self.state.player
+
+    def _guard_relic_swap(self) -> dict | None:
+        """阶段与交替出手校验；返回错误 dict 或 None。"""
+        if self.state.phase not in ("pre_battle", "in_combat"):
+            return {"success": False,
+                    "error": "遗物启用整理只能在局外阶段或战斗中执行"}
+        actor = self._relic_swap_actor()
+        if actor is None:
+            return {"success": False,
+                    "error": "当前出手侧没有可整理遗物的轮回者"}
+        duel_error = self._check_duel_turn_or_error(actor)
+        if duel_error:
+            return {"success": False, "error": duel_error}
+        return None
+
     @ACTION_REGISTRY.action("set_active_relics", group="items")
     def _action_set_active_relics(self, params: dict) -> dict:
-        """自定义启用已持有的遗物：页数限制持有，不另限制生效数。
+        """整组改选遗物启用集合：局外与战斗中均可（2026-11-10 裁定）。
 
-        局外整理用；战斗中不开放——生效集合在[战始]锁定，也可在
-        battle_start 时以 active_relics 参数一次提交。
+        战斗中＝不占出手的整理动作：受交替出手约束（轮到你才能改你的），
+        启用件数仍受 `ceil(血限/30)` 上限约束，不消耗出手也不交优先权。
         """
+        guard = self._guard_relic_swap()
+        if guard:
+            return guard
+        actor = self._relic_swap_actor()
         names = params.get("relic_names", params.get("active_relics"))
-        ok, error = self.state.set_active_relics(names)
+        ok, error = self.state.set_active_relics(names, entity=actor)
         if not ok:
             return {"success": False, "error": error}
-        player = self.state.player
+        pool = self.state._relic_pool_for(actor)
+        enabled = {r.name for r in pool if getattr(r, "enabled", True)}
         return {"success": True, "action": "自定义启用遗物",
-                "result": {"enabled": sorted(self.state.enabled_relic_names()),
-                           "disabled": sorted({r.name for r in self.state.relics}
-                                              - self.state.enabled_relic_names()),
-                           "capacity": player.load_capacity if player else 0,
-                           "death_pages": player.load_capacity if player else 0}}
+                "result": {"actor": actor.name,
+                           "enabled": sorted(enabled),
+                           "disabled": sorted({r.name for r in pool} - enabled),
+                           "limit": actor.enabled_relic_limit,
+                           "capacity": actor.load_capacity if actor else 0,
+                           "death_pages": actor.load_capacity if actor else 0}}
 
     @ACTION_REGISTRY.action("toggle_relic", group="items")
     def _action_toggle_relic(self, params: dict) -> dict:
-        """切换单件遗物启用/停用。
+        """切换单件遗物启用/停用：局外与战斗中均可（2026-11-10 裁定）。
 
-        局外行动；与 set_active_relics（整组改选）互补：本行动只翻一件。
-        停用不释放页，启用不另限生效数量。
+        与 set_active_relics（整组改选）互补：本行动只翻一件。
+        战斗中＝不占出手的整理动作，受交替出手与启用槽上限约束。
         """
+        guard = self._guard_relic_swap()
+        if guard:
+            return guard
+        actor = self._relic_swap_actor()
         name = params.get("relic_name", params.get("name"))
-        ok, result = self.state.toggle_relic(name)
+        ok, result = self.state.toggle_relic(name, entity=actor)
         if not ok:
             return {"success": False, "error": result}
-        player = self.state.player
+        pool = self.state._relic_pool_for(actor)
+        enabled = sorted(r.name for r in pool if getattr(r, "enabled", True))
         return {"success": True, "action": "切换遗物启用",
                 "result": {"relic": name, "enabled": result,
-                           "enabled_relics": sorted(self.state.enabled_relic_names()),
-                           "capacity": player.load_capacity if player else 0}}
+                           "actor": actor.name, "limit": actor.enabled_relic_limit,
+                           "enabled_relics": enabled,
+                           "capacity": actor.load_capacity if actor else 0}}
 
     @ACTION_REGISTRY.action("choose_discovered_relic", group="items")
     def _action_choose_discovered_relic(self, params: dict) -> dict:
