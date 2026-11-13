@@ -2027,7 +2027,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
         return logs
 
     # 【买路财】遗物删除（撤退改制为轮回者【逃跑】行动，
-    # 一次付清3次出手强制脱战；见 api._action_declare_escape）。原 buyaicai_escape_cost
+    # 按公式价一次付清出手强制脱战；见 handlers/combat._action_declare_escape）。
+    # 原 buyaicai_escape_cost
     # 与 api._action_retreat_via_toll 一并移除。
 
     def apply_opposing_longxi(self, actor: Entity) -> Optional[dict]:

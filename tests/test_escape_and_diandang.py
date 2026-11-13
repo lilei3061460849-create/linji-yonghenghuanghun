@@ -1,8 +1,8 @@
 """
 pytest 风格测试 - 【买路财】改制逃跑行动 + 新道纹【典当】+【逼债】删除。
 
-逃跑：轮回者行动，一次付清3次出手，以当前状态强制脱离本场战斗，
-不再走DM追击裁定；最终死斗/【不离】不可逃跑。
+逃跑：轮回者行动，一次付清（敌方当前速度−我方当前速度）次出手（最低为1），
+以当前状态强制脱离本场战斗，不再走DM追击裁定；最终死斗/【不离】不可逃跑。
 典当X（罪孽专属，顶替逼债的闭环格）：代价失忆2X；发现获得X种道纹
 （发现池=局外【学习】口径；轮回者逐组3选1领取，怪物即时随机授予）。
 
@@ -52,13 +52,17 @@ def _start_with_enemy(engine: GameEngine, enemy: Entity):
 # ==================== 逃跑 ====================
 
 def test_escape_pays_three_atomically_and_forces_departure():
-    """正常：预算≥3时一次扣3（此处恰好3），敌方清空、阶段回战前、不产生击杀奖励、无DM中断。"""
+    """正常：预算≥公式价时一次付清（拦路怪速度=玩家+3 → 价3），
+    敌方清空、阶段回战前、不产生击杀奖励、无DM中断。"""
     engine = _new_engine("ok")
     player = engine.state.player
-    _start_with_enemy(engine, Entity(name="拦路怪", entity_type="怪物",
-                                     blood_limit=100, current_hp=100))
+    enemy = Entity(name="拦路怪", entity_type="怪物",
+                   blood_limit=100, current_hp=100)
+    _start_with_enemy(engine, enemy)
     player.add_status(StatusEffect(name="疯狂", value=2, remaining_rounds=-1, source="test"))
     assert player.action_count == 3
+    enemy.speed_limit = player.current_speed + 3     # current_speed 向 speed_limit 钳制
+    enemy.current_speed = enemy.speed_limit          # 公式价=max(1, 3)=3
 
     r = engine.execute_action("declare_escape", {})
     assert r["success"], r
@@ -68,6 +72,40 @@ def test_escape_pays_three_atomically_and_forces_departure():
     assert engine.state.phase == "pre_battle"
     assert engine.state.energy == engine.state.energy_budget
     assert not getattr(engine.state, "pending_interrupts", []), "逃跑不再产生DM追击中断"
+
+
+def test_escape_cost_floor_is_one_when_player_not_slower():
+    """公式边界：同速或玩家更快 → 最低为1，实际扣1。"""
+    engine = _new_engine("floor1")
+    player = engine.state.player
+    enemy = Entity(name="慢怪", entity_type="怪物", blood_limit=100, current_hp=100)
+    _start_with_enemy(engine, enemy)
+    enemy.speed_limit = player.current_speed
+    enemy.current_speed = enemy.speed_limit             # 差0 → 最低为1
+    r = engine.execute_action("declare_escape", {})
+    assert r["success"], r
+    assert r["result"]["actions_paid"] == 1
+    assert player.actions_used_this_round == 1
+    assert engine.state.phase == "pre_battle"
+
+
+def test_escape_cost_uses_fastest_enemy_and_rejects_short_budget():
+    """公式边界：多怪取最高当前速度；剩余出手不足公式价时一次不扣、逃跑失败。"""
+    engine = _new_engine("multi")
+    player = engine.state.player
+    slow = Entity(name="慢怪", entity_type="怪物", blood_limit=100, current_hp=100)
+    fast = Entity(name="快怪", entity_type="怪物", blood_limit=100, current_hp=100)
+    _start_with_enemy(engine, slow)
+    engine.state.enemies.append(fast)
+    slow.speed_limit = 2
+    slow.current_speed = 2
+    fast.speed_limit = player.current_speed + 5
+    fast.current_speed = fast.speed_limit               # 最高者定价：玩家+5
+    used_before = player.actions_used_this_round
+    r = engine.execute_action("declare_escape", {})     # 基础预算1 < 公式价6？不——价=5
+    assert r["success"] is False
+    assert "一次付清5次出手" in r["error"]
+    assert player.actions_used_this_round == used_before, "不足时一次不扣"
 
 
 def test_escape_rejected_by_buli_and_final_duel():

@@ -81,8 +81,9 @@ class MonsterLifeMixin:
         
         return None
     
-    # 逃跑改制——【逃跑】是轮回者行动，一次付清3次出手、
-    # 以当前状态强制脱离本场战斗，不再走DM追击裁定。原 initiate_escape（追击中断）
+    # 逃跑改制——【逃跑】是轮回者行动，按公式价一次付清出手
+    # （max(1, 敌方最高当前速度−自身当前速度)）、以当前状态强制脱离本场战斗，
+    # 不再走DM追击裁定。原 initiate_escape（追击中断）
     # 随改制删除；declare_escape 的新实现见 engine/api.py。
     # ========== 进化（原初X，引擎直接结算，无需DM中断） ==========
     

@@ -2199,7 +2199,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
 
     # ==================== 出手预算校验 ====================
     # 覆盖：attack/use_daowen/deploy_employee/declare_wish 消耗1出手；
-    # declare_escape（逃跑）一次付清3出手（2026-10-13 改制，2026-11-10 由5改3）；
+    # declare_escape（逃跑）一次付清公式价出手（2026-11-10：max(1, 敌方最高当前
+    # 速度−自身当前速度)，见 handlers/combat._escape_action_cost）；
     # consume_item(明确不消耗出手)、use_resonance(可任意时刻插队)不受此约束。
 
     def _action_budget_of(self, entity: "Entity") -> int:
@@ -3155,7 +3156,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _force_disengage(self, *, reason: str) -> dict:
         """强制脱战（清理口径 = 原买路财撤退，不改语义）。
 
-        `declare_escape`（付 3 出手）与【血翼/烬翼·立刻逃跑】（付 1 耐久）共用。
+        `declare_escape`（按公式付清出手价）与【血翼/烬翼·立刻逃跑】（付 1 耐久）共用。
         """
         self.state.enemies.clear()
         self.state.temp_friends.clear()

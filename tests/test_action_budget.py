@@ -6,7 +6,8 @@ DM裁定记录：
   造物不另设上限；怪物与玩家侧共用交替优先权及同一预算。
 - 普攻本身不消耗速度；速度消耗只来自正文明确的闪避等机制。
 - 消耗1出手的动作：attack、use_daowen(含指挥朋友/员工)、deploy_employee(消耗玩家的出手)、
-  declare_wish；declare_escape（逃跑）一次付清3出手（2026-10-13 改制，2026-11-10 由5改3）。
+  declare_wish；declare_escape（逃跑）一次付清公式价出手
+  （2026-11-10：max(1, 敌方最高当前速度−自身当前速度)，最低为1）。
 - 不消耗出手：consume_item(原文明确)、use_resonance(可任意时刻插队)。
 - 预算按回合重置(round_start时归零本回合已用出手数)。
 
@@ -223,7 +224,10 @@ def test_declare_wish_and_escape_consume_budget_and_reject_when_exhausted():
     assert r_wit["success"] is False
     assert "出手已用完" in r_wit["error"]
 
-    # 逃跑改制：一次付清3次出手（2026-11-10 由5改3）；剩0次时拒绝且一次不扣。
+    # 逃跑公式价（2026-11-10）：把靶怪速度抬到玩家+3 → 一次付清3次出手；
+    # 剩0次时拒绝且一次不扣。
+    engine.state.enemies[0].speed_limit = player.current_speed + 3
+    engine.state.enemies[0].current_speed = engine.state.enemies[0].speed_limit
     used_before = player.actions_used_this_round
     r_escape = engine.execute_action("declare_escape", {})
     assert r_escape["success"] is False
@@ -232,10 +236,13 @@ def test_declare_wish_and_escape_consume_budget_and_reject_when_exhausted():
 
 
 def test_escape_requires_three_remaining_and_consumes_atomically():
-    """边界：剩2次出手时逃跑被拒（3次是硬门槛，不足一次不扣）；预算≥3时一次扣3。"""
+    """边界：出手不足公式价时逃跑被拒（不足一次不扣）；预算恰达时一次付清。"""
     engine = _new_engine("escape_atomic")
     player = engine.state.player
     assert player.action_count < 3
+    # 靶怪速度=玩家+3 → 公式价=3（最低为1不影响本例）
+    engine.state.enemies[0].speed_limit = player.current_speed + 3
+    engine.state.enemies[0].current_speed = engine.state.enemies[0].speed_limit
     used_before = player.actions_used_this_round
     r = engine.execute_action("declare_escape", {})
     assert r["success"] is False

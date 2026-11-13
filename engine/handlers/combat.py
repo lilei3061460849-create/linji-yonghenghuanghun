@@ -549,16 +549,31 @@ class CombatHandlersMixin:
             "instruction": "需要DM裁定「某人」以何种扭曲方式实现愿望及轮回者付出的代价"
         }
 
-    ESCAPE_ACTION_COST = 3
+    def _escape_action_cost(self, escaper: "Entity") -> int:
+        """逃跑出手价（2026-11-10 公式化）：max(1, 敌方当前速度 − 我方当前速度)。
+
+        敌方当前速度取敌方侧存活单位的**最高**当前速度（多怪取最高、无存活
+        敌方视为0）；我方取发动逃跑者自身当前速度；差值≤0按「最低为1」收口。
+        怪物逃跑仍走DM追击裁定，不进本公式。
+        """
+        escaper_on_player = self.state.on_player_side(escaper)
+        everyone = self.state.get_all_player_side() + self.state.get_all_enemy_side()
+        enemy_top_speed = max(
+            (int(e.current_speed) for e in everyone
+             if e is not escaper and e.is_alive
+             and self.state.on_player_side(e) != escaper_on_player),
+            default=0)
+        return max(1, enemy_top_speed - int(escaper.current_speed))
 
     @ACTION_REGISTRY.action("declare_escape", group="combat")
     def _action_declare_escape(self, params: dict) -> dict:
-        """逃跑（2026-10-13 改制；2026-11-10 由5次下调为3次——跳过回合即可攒出手，
-        一次付清5次过苛）：轮回者行动，一次付清3次出手，
-        以当前状态强制脱离本场战斗，不再走DM追击裁定。
+        """逃跑（2026-10-13 改制；2026-11-10 公式化出手价）：轮回者行动，
+        一次付清 max(1, 敌方当前速度−我方当前速度) 次出手
+        （敌方取敌方侧存活单位最高当前速度），以当前状态强制脱离本场战斗，
+        不再走DM追击裁定。
 
         前置：非最终死斗；未持有生效中的【不离】（所有角色无法离场）；
-        本轮剩余出手≥3（原子消费，不足则一次不扣）。
+        本轮剩余出手≥本次出手价（原子消费，不足则一次不扣）。
         脱战清理口径沿用原【买路财】撤退：敌方清空、造物解散、员工撤部署、
         朋友/员工撤退标记重置、精力回满、阶段回 pre_battle；不产生击杀碎片奖励。
         """
@@ -569,15 +584,17 @@ class CombatHandlersMixin:
         if blocked:
             return {"success": False, "error": blocked}
 
+        cost = self._escape_action_cost(escaper)
         budget_error = self._consume_actions_or_error(
-            escaper, self.ESCAPE_ACTION_COST, action_label="逃跑")
+            escaper, cost, action_label="逃跑")
         if budget_error:
             return budget_error
 
         self._force_disengage(reason="逃跑")
         return {
             "success": True, "action": "逃跑·强制脱战",
-            "result": {"actions_paid": self.ESCAPE_ACTION_COST,
+            "result": {"actions_paid": cost,
+                       "cost_formula": "max(1, 敌方最高当前速度−自身当前速度)",
                        "actions_used": escaper.actions_used_this_round,
                        "note": "本场战斗结束，未击败任何怪物，不产生击杀碎片奖励"},
         }
