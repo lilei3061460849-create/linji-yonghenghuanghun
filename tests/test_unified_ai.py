@@ -1,6 +1,6 @@
 """统一 AI 入口回归测试。
 
-AIPlayer 是对外唯一的玩家控制器。2026-09-29 用户令：不用规则型 AI，
+AIPlayer 是对外唯一的玩家控制器。不用规则型 AI，
 全部决策（含轮回者自己的战斗行动）交给 LLM 后端。
 2026-10-02 架构收口：AIPlayer 不再继承 TacticalAI，也没有 tactical_combat 分支——
 规则战术层（engine/ai_tactics.py）只作为隔离的实验/模拟工具存在。

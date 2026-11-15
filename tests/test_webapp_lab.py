@@ -19,7 +19,7 @@ from webapp import lab
 
 
 def test_derivative_daowen_can_go_straight_into_a_character_sheet():
-    """2026-11-09 用户令：衍生道纹也能像普通道纹一样直接放进角色卡的道纹栏。
+    """衍生道纹也能像普通道纹一样直接放进角色卡的道纹栏。
 
     角色卡是局外配装，不该被「局内 0 出手衍生」这一条获得途径锁死——衍生道纹
     既是母本的收益置换，也是怪物去同质化的素材，必须先能在卡里选到。
@@ -65,7 +65,7 @@ def test_rule_mode_custom_loadout_opens_a_real_battle():
     })
     engine = prepared["engine"]
     player = engine.state.player
-    assert (player.blood_limit, player.speed_limit, player.mana_limit) == (90, 6, 2)
+    assert (player.blood_limit, player.speed_limit, player.mana_limit) == (90, 3, 2)  # 2点=1速限
     assert {"杀伐", "再生", "操纵"} <= set(player.dao_wen)
     assert [relic.name for relic in engine.state.relics] == ["叠鳞甲"]
     assert {item.name: item.current_uses for item in engine.state.consumables} == {
@@ -144,7 +144,7 @@ def test_character_cards_can_be_saved_updated_and_deleted(roster_file):
     saved = lab.save_sheet(_sheet("甲", relics=["叠鳞甲"], consumables=["急救箱"]))
     assert roster_file.exists()
     assert saved["id"] and saved["name"] == "甲"
-    assert (saved["blood_limit"], saved["speed_limit"], saved["mana_limit"]) == (90, 6, 2)
+    assert (saved["blood_limit"], saved["speed_limit"], saved["mana_limit"]) == (90, 3, 2)  # 2点=1速限
     assert saved["consumables"] == [{"name": "急救箱", "uses": 2}]
 
     updated = lab.save_sheet({**saved, "name": "甲改"})
@@ -300,7 +300,7 @@ def test_random_card_keeps_the_window_and_saves_as_free_mode(roster_file):
 
 
 def test_duel_runs_directly_without_a_dungeon_map(roster_file):
-    """用户令 2026-11-09：不需要副本当地图，对手摆好就直接开打。
+    """不需要副本当地图，对手摆好就直接开打。
 
     这条钉住「直接对战」的两半：引擎侧 `inject_enemies` 真的把对手摆上台
     （不是被随机出怪顶掉），界面侧 `direct` 标记让前端隐藏地图卡。
@@ -393,3 +393,30 @@ def test_duel_priority_tie_is_random_then_alternates(roster_file):
     assert first in {"player_side", "opponent_side"}
     second = engine.combat._stats_priority_side()
     assert second != first                     # 下一次平局交给另一边
+
+
+def test_duel_without_relics_grants_none(roster_file):
+    """演武场不入副本——没选遗物就一件都没有，不随机给。
+
+    「选副本前必须持有一件遗物」是进副本规则；演武场是特殊场景，直接开战，
+    开局随机发现只是候选，不显式挑选就不落到角色身上。
+    """
+    left = lab.save_sheet(_sheet("空手甲"))
+    right = lab.save_sheet(_sheet("空手乙"))
+    engine = lab.duel({"a": {"id": left["id"]}, "b": {"id": right["id"]},
+                       "seed": 5})["engine"]
+    assert [relic.name for relic in engine.state.relics] == []
+    assert [relic.name for relic in engine.state.opponent_relics] == []
+    assert engine.state.pending_relic_choices == [], "未选的随机发现应被放弃"
+    assert engine.state.phase == "in_combat", "不入副本也要能直接开战"
+
+
+def test_start_without_relics_still_opens_a_random_battle(roster_file):
+    """单人演武场同样不给随机遗物；副本只当怪物池口径用。"""
+    card = lab.save_sheet(_sheet("空手单"))
+    prepared = lab.start({"id": card["id"], "region": "罪孽都市", "start_battle": True,
+                          "seed": 7})
+    engine = prepared["engine"]
+    assert [relic.name for relic in engine.state.relics] == []
+    assert engine.state.phase == "in_combat"
+    assert any("不给随机遗物" in note for note in prepared["notes"])

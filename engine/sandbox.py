@@ -89,7 +89,7 @@ COMBAT_RUNTIME_ATTRS = (
     "_monster_activated",          # 本场已激活道纹（持续激活口径）
     "_monster_daowen_round_used",  # 本回合已发动道纹（每回合每道纹至多一次）
     "_resonance_rewrites",         # 残韵改写映射（按实体）
-    # 2026-10-13 用户令删【三相残韵盘】：_sanxiang_consumed 运行态一并移除。
+    # 删【三相残韵盘】：_sanxiang_consumed 运行态一并移除。
     "_split_clones_spawned",       # 【分裂】本场已创生数量
     "_monster_evolved",            # 本场已进化怪物（每场一次）
     "_effect_chain_depth",         # 效果链深度保险丝计数器

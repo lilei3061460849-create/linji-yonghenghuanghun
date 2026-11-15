@@ -58,13 +58,21 @@ class CombatHandlersMixin:
         if not target_refs and attacker.effective_attack_count() > 0:
             return {"success": False, "error": "没有合法攻击目标"}
 
+        # 法力结构声明（2026-11-10 一期）：一次普通攻击只能构建一种结构。
+        # 声明在 prepare 锁定并存进 pending 快照；逐击造成≥1点伤害时逐击 +1 层。
+        structure = str(params.get("blood_structure") or "").strip()
+        structure_error = self.combat.validate_structure_declaration(attacker, structure)
+        if structure_error:
+            return {"success": False, "error": structure_error}
+
         target_options = []
         for ref in target_refs:
             target = refs[ref]
             blood_pact_options = self.combat.blood_shadow_cost_share_options(target)
             target_options.append({
                 "ref": ref, "name": target.name,
-                "can_dodge": target.current_speed > 0,
+                "can_dodge": (target.current_speed
+                              > self.combat.structure_dodge_extra(target)),
                 "can_parry": target.current_speed > 0,
                 "can_blood_shadow": (self.state._relic_active(target, "血影")
                                      and (target.current_hp > 10 or bool(blood_pact_options))),
@@ -81,6 +89,9 @@ class CombatHandlersMixin:
             # DM裁定 2026-09-10：轮回者的击数=当前速度（换算仅限轮回者）
             "hit_count": attacker.effective_attack_count(),
             "damage_budget": attacker.effective_attack_count() * attacker.effective_attack_power(),
+            # 法力结构（血液结构）：本次攻击构建的结构名；空串=不构建。
+            "blood_structure": structure,
+            "blood_structure_options": self.combat.blood_structure_options(attacker),
             "target_options": target_options,
             "hits_schema": [{
                 "target_ref": [o["ref"] for o in target_options],
@@ -119,18 +130,37 @@ class CombatHandlersMixin:
         speed = int(getattr(target, "current_speed", 0) or 0)
         index = int(pending.get("hit_index", 0))
         bizhong = int(self.combat.bizhong_remaining(attacker)) if attacker else 0
+        # 消耗品改为「主动且被动」行动——被选中时也能先用
+        # 消耗品再选应对（不耗出手也不耗应对）。必中次数覆盖本击时被动行动被封锁。
+        items_pool = (self.state.consumables if target is self.state.player
+                      else getattr(target, "consumables", []) or [])
+        item_options = [
+            {"name": c.name, "uses": int(c.current_uses), "effect": c.effect}
+            for c in items_pool if not c.is_depleted and c.name != "万钧印"
+        ]
         return {
             "target_ref": ref,
             "target": entry.get("name"),
             "can_tank": True,
             "can_parry": bool(entry.get("can_parry")) and speed > 0,
-            "can_dodge": bool(entry.get("can_dodge")) and speed > 0,
+            # 【粘滞】承载期：闪避需额外支付X点速度，速度不足1+X时不可宣告。
+            "can_dodge": (bool(entry.get("can_dodge"))
+                          and speed > self.combat.structure_dodge_extra(target)),
             "can_blood_shadow": bool(entry.get("can_blood_shadow")),
             # 【必中】剩余次数覆盖本击时，闪避无效（与结算同一判定）。
             "dodge_locked": bizhong > index,
             "speed_left": speed,
             "blood_shadow_cost_share_target_options":
                 entry.get("blood_shadow_cost_share_target_options") or [],
+            "item_options": item_options,
+            "can_use_item": bool(item_options) and bizhong <= index,
+            "item_locked": bizhong > index,
+            # 万钧印（可选改道）：持有未耗尽的万钧印且攻击者不是自己时可用；
+            # 同样是被选中的响应，【必中】覆盖本击时一并锁死。
+            "can_wanjunyin": (self.combat._wanjunyin_item(target) is not None
+                              and attacker is not target),
+            "wanjunyin_uses": (getattr(self.combat._wanjunyin_item(target),
+                                       "current_uses", 0) or 0),
         }
 
     def _attack_pending_view(self, pending: dict) -> dict:
@@ -259,14 +289,27 @@ class CombatHandlersMixin:
             if target is None or not target.is_alive:
                 results.append({"hit_index": absolute, "skipped": "目标已命零"})
                 continue
+            hp_before_hit = int(target.current_hp)
             result = self.combat.resolve_attack(
                 attacker, target, dodge=hit["dodge"], parry=hit["parry"],
                 allocated_damage=hit["damage"], blood_shadow=hit["blood_shadow"],
                 spell_choices=hit.get("spell_choices") or {}, entity_refs=refs,
                 dodge_relic_target_ref=hit.get("dodge_relic_target_ref"),
                 cost_share_target_ref=hit.get("cost_share_target_ref", ""),
+                # 万钧印（按物品索引=持有者选择）：应对窗口显式提交才改道。
+                wanjunyin=bool(hit.get("wanjunyin")),
             )
             result["hit_index"] = absolute
+            # 法力结构（血液结构）：本击实际造成≥1点伤害（生命真实下降）时
+            # 为目标 +1 层声明的结构。damage_dealt 是格挡/免疫前的伤害意图，
+            # 不作数——被【庇护】整笔免疫、伤害全被格挡吸收、空刀、被闪避、
+            # 被招架的击都没有真实降血，不构建；目标已死不挂层。
+            structure = str(options.get("blood_structure") or "")
+            if (structure and target.is_alive
+                    and not result.get("dodge_success")
+                    and int(target.current_hp) < hp_before_hit):
+                result["structure"] = self.combat.apply_structure_layer(
+                    attacker, target, structure)
             results.append(result)
         done.extend(hits)
         pending["hit_index"] = offset + len(hits)
@@ -338,12 +381,57 @@ class CombatHandlersMixin:
             return {"success": False,
                     "error": "先由攻击方分配伤害（声明这一击的目标与 X）"}
         choice = str(params.get("choice") or "")
-        if choice not in {"tank", "parry", "dodge", "blood_shadow"}:
-            return {"success": False, "error": "应对方式只能是 硬扛/招架/闪避/血影"}
+        if choice not in {"tank", "parry", "dodge", "blood_shadow", "use_item", "wanjunyin"}:
+            return {"success": False,
+                    "error": "应对方式只能是 硬扛/招架/闪避/血影/使用消耗品/万钧印改道"}
         ref = declared["target_ref"]
         legal = {entry["ref"]: entry for entry in pending["options"]["target_options"]}
         entry = legal.get(ref) or {}
         defender = self._attack_defender_options(pending, ref)
+        if choice == "wanjunyin":
+            # 万钧印（按物品索引=持有者选择）：把这一击改为攻击者对自己发动。
+            if defender.get("item_locked"):
+                return {"success": False,
+                        "error": "【必中】次数覆盖本击：目标无法进行被动行动（含万钧印改道）"}
+            if not defender.get("can_wanjunyin"):
+                return {"success": False,
+                        "error": f"{entry.get('name')}没有可用的万钧印（未持有或已耗尽）"}
+            item = self.combat._wanjunyin_item(
+                self.combat._combat_entity_refs().get(ref))
+            if item is None:
+                return {"success": False, "error": "万钧印已不可用（耐久耗尽）"}
+            hit = {"target_ref": ref, "damage": int(declared["damage"]),
+                   "dodge": False, "parry": False, "blood_shadow": False,
+                   "wanjunyin": True,
+                   "spell_choices": {"before": {}, "after": {}}}
+            return self._apply_attack_hits(pending, [hit])
+        if choice == "use_item":
+            # 消耗品是「主动且被动」行动——被选中时可先用消耗品
+            # 再选应对；不耗出手也不耗应对，本击窗口保持开放。使用者按阵营摆位
+            # 定（actor_ref），不硬编码玩家槽位。
+            if defender.get("item_locked"):
+                return {"success": False,
+                        "error": "【必中】次数覆盖本击：目标无法进行被动行动（含使用消耗品）"}
+            if not defender.get("item_options"):
+                return {"success": False,
+                        "error": f"{entry.get('name')}没有可用消耗品（耐久耗尽或未持有）"}
+            item_name = str(params.get("item_name") or "")
+            if not item_name:
+                return {"success": False, "error": "必须提交 item_name（要使用的消耗品名）"}
+            consume_params = {"name": item_name, "actor_ref": ref}
+            if params.get("item_target_ref"):
+                consume_params["target_ref"] = params["item_target_ref"]
+            consumed = self._action_consume_item(consume_params)
+            if not consumed.get("success"):
+                return consumed
+            return {
+                "success": True,
+                "action": f"被选中时使用消耗品【{item_name}】（被动行动，不耗应对）",
+                "result": {**consumed.get("result", {}),
+                           "attack_still_pending": True,
+                           "note": "消耗品不耗出手也不耗应对；这一击接着选硬扛/招架/闪避/血影"},
+                "state": self.combat._get_combat_state(),
+            }
         if choice == "dodge" and not defender["can_dodge"]:
             return {"success": False,
                     "error": f"{entry.get('name')}当前不能闪避"
@@ -461,15 +549,31 @@ class CombatHandlersMixin:
             "instruction": "需要DM裁定「某人」以何种扭曲方式实现愿望及轮回者付出的代价"
         }
 
-    ESCAPE_ACTION_COST = 5
+    def _escape_action_cost(self, escaper: "Entity") -> int:
+        """逃跑出手价（2026-11-10 公式化）：max(1, 敌方当前速度 − 我方当前速度)。
+
+        敌方当前速度取敌方侧存活单位的**最高**当前速度（多怪取最高、无存活
+        敌方视为0）；我方取发动逃跑者自身当前速度；差值≤0按「最低为1」收口。
+        怪物逃跑仍走DM追击裁定，不进本公式。
+        """
+        escaper_on_player = self.state.on_player_side(escaper)
+        everyone = self.state.get_all_player_side() + self.state.get_all_enemy_side()
+        enemy_top_speed = max(
+            (int(e.current_speed) for e in everyone
+             if e is not escaper and e.is_alive
+             and self.state.on_player_side(e) != escaper_on_player),
+            default=0)
+        return max(1, enemy_top_speed - int(escaper.current_speed))
 
     @ACTION_REGISTRY.action("declare_escape", group="combat")
     def _action_declare_escape(self, params: dict) -> dict:
-        """逃跑（2026-10-13 改制）：轮回者行动，一次付清5次出手，
-        以当前状态强制脱离本场战斗，不再走DM追击裁定。
+        """逃跑（2026-10-13 改制；2026-11-10 公式化出手价）：轮回者行动，
+        一次付清 max(1, 敌方当前速度−我方当前速度) 次出手
+        （敌方取敌方侧存活单位最高当前速度），以当前状态强制脱离本场战斗，
+        不再走DM追击裁定。
 
         前置：非最终死斗；未持有生效中的【不离】（所有角色无法离场）；
-        本轮剩余出手≥5（原子消费，不足则一次不扣）。
+        本轮剩余出手≥本次出手价（原子消费，不足则一次不扣）。
         脱战清理口径沿用原【买路财】撤退：敌方清空、造物解散、员工撤部署、
         朋友/员工撤退标记重置、精力回满、阶段回 pre_battle；不产生击杀碎片奖励。
         """
@@ -480,15 +584,17 @@ class CombatHandlersMixin:
         if blocked:
             return {"success": False, "error": blocked}
 
+        cost = self._escape_action_cost(escaper)
         budget_error = self._consume_actions_or_error(
-            escaper, self.ESCAPE_ACTION_COST, action_label="逃跑")
+            escaper, cost, action_label="逃跑")
         if budget_error:
             return budget_error
 
         self._force_disengage(reason="逃跑")
         return {
             "success": True, "action": "逃跑·强制脱战",
-            "result": {"actions_paid": self.ESCAPE_ACTION_COST,
+            "result": {"actions_paid": cost,
+                       "cost_formula": "max(1, 敌方最高当前速度−自身当前速度)",
                        "actions_used": escaper.actions_used_this_round,
                        "note": "本场战斗结束，未击败任何怪物，不产生击杀碎片奖励"},
         }
@@ -982,7 +1088,7 @@ class CombatHandlersMixin:
         from ..monsters import (make_monster_entity, roll_spawn_plan,
                                scale_monster_def_for_endless, assign_monster_preferences)
         relic_choices = params.get("relic_choices", {})
-        # 自定义启用（2026-10-22 用户令）：[战始]可提交 active_relics 选定
+        # 自定义启用：[战始]可提交 active_relics 选定
         # 本场生效的遗物（持有占页，生效数不另限），必须在战始遗物结算之前先生效。
         if params.get("active_relics") is not None:
             ok, error = self.state.set_active_relics(params.get("active_relics"))
@@ -1080,6 +1186,8 @@ class CombatHandlersMixin:
         self.state.phase = GamePhase.IN_COMBAT.value
         self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_START.value
         self.state.current_battle += 1
+        # 协力法术是战斗作用域：开新战斗时清掉上场残留（正常应在发动/取消时移除）。
+        self.state.open_spells = []
         # 记录[战始]生命，作为[战终]清除"回复"类增益后的生命下限
         for entity in (([self.state.player] if self.state.player else [])
                        + self.state.friends + self.state.employees + self.state.temp_friends):
@@ -1455,7 +1563,7 @@ class CombatHandlersMixin:
         _battled_ids = {id(emp) for emp in self.state.employees
                         if emp.is_alive and not emp.is_debt_bound and emp.is_deployed}
 
-        # 2026-09-17 用户令：[员工]**出场**并**存活**满 EMPLOYEE_PROMOTION_BATTLES
+        # [员工]**出场**并**存活**满 EMPLOYEE_PROMOTION_BATTLES
         # 场战斗后转为[朋友]。口径与 _battled_ids 一致——本场确实参战(is_deployed)
         # 且[战终]仍存活；待命未上场不计，阵亡者已被上面的 departed_employees 移除。
         # 还债员工(is_debt_bound)不晋升：其身份是债务约束而非雇佣关系。
@@ -1580,7 +1688,7 @@ class CombatHandlersMixin:
             "player_dead": (not self.state.player.is_alive) if self.state.player else False,
         }
 
-        # 【最终的冠冕】不再由第7场战终强制触发（用户裁定：删除第8场强制死斗）。
+        # 【最终的冠冕】不再由第7场战终强制触发（删除第8场强制死斗）。
         # 它改为世界事件：由 `_resolve_world_crown` 在世界回合推进时按时间随机刷新，
         # 持有者连续存活满 5 个世界回合即自动脱离副本（见 engine/world.py 常量）。
 

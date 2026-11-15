@@ -140,9 +140,9 @@ def test_resonance_does_not_duplicate_same_name():
 
 
 def test_resonance_refuses_missing_stock_and_grants_original():
-    """残韵库存不足时拒绝；授予不再区分原始/转化（2026-10-07 用户令：完全放开）。
+    """残韵库存不足时拒绝；授予不再区分原始/转化（完全放开）。
 
-    旧断言「原始怪物道纹不授予施法者」编码的是已被用户令删除的门禁，
+    旧断言「原始怪物道纹不授予施法者」编码的是已被删除的门禁，
     本用例按新裁定重写。
     """
     engine = _ready_combat(_engine("res_bad"))

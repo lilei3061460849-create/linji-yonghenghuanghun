@@ -127,7 +127,7 @@ def test_dianjin_ally_purification_amnesia_loop_is_blocked():
     e.state.friends = [ally]
     mana_before = ally.current_mana
     shards_before = e.state.shards
-    # 2026-11-01 用户令：失忆必须由调用方显式指定要销毁的道纹，不按持有顺序代选。
+    # 失忆必须由调用方显式指定要销毁的道纹，不按持有顺序代选。
     gain = e.execute_action("use_daowen", {
         "daowen_name": "点金", "x": 1, "forget_daowen": ["杀伐"]})
     assert gain["success"], gain

@@ -1,6 +1,6 @@
 """【操纵】【迟滞】口径：指令 / 未给指令作废不退 / 出手加价对每一次行动同口径。
 
-2026-11-02 用户令：【操作】改名【操纵】，作用范围由「下一次」改为「下X次」。
+【操作】改名【操纵】，作用范围由「下一次」改为「下X次」。
 """
 from engine.daowen import DaoWenEngine, normalize_caozuo_order
 from tests.test_daowen_wiring import _engine, _give, _monster

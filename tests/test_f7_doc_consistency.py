@@ -55,7 +55,7 @@ def test_boundary_no_zengsheng_in_active_code():
                 # 计算行号
                 for i, line in enumerate(text.splitlines(), 1):
                     if "增生" in line and "增殖" not in line:
-                        # 2026-10-03：通用遗物【增生药剂】是用户令新增的正当名字，
+                        # 2026-10-03：通用遗物【增生药剂】是新增的正当名字，
                         # 与旧机制名「增生」（已改叫癌变）无关——只放行这一处。
                         if "增生药剂" in line:
                             continue
@@ -122,7 +122,7 @@ def test_no_active_zengsheng_in_tests_except_allowed():
 
 
 def test_boundary_bengjie_term_retired_in_favour_of_mishi():
-    """边界：规则正文与引擎文案里旧称已退场，统一为“迷失”（2026-10-08 用户令）。
+    """边界：规则正文与引擎文案里旧称已退场，统一为“迷失”。
 
     历史存档（data/、reports/、archive/）里的旧称指同一件事，不在扫描范围内。
     旧称二字在下方拼接成串，避免本文件被同类批量改名再次误伤。

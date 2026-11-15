@@ -129,7 +129,7 @@ def test_cross_engine_load_continue_battle_full_round(tmp_path):
     m1.shards = 8
     p1.add_status(StatusEffect("洗劫", -1, 2, "e"))
     p1.add_status(StatusEffect("自愈", -1, 1, "e"))
-    # 2026-10-11 用户令：【衰败】删除（它是当时唯一的回始掉血源）。改用【畸变】
+    # 【衰败】删除（它是当时唯一的回始掉血源）。改用【畸变】
     # ——它的回始机制「畸变·标记」仍在（`engine/mechanisms/builtins.py`），
     # 但只发报告条目不改生命，所以断言从「掉血」改成「状态与机制条目都活过读档」。
     m1.add_status(StatusEffect("畸变", -1, 2, "e"))

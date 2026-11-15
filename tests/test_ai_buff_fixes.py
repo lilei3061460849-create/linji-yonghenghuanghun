@@ -6,7 +6,7 @@ pytest - AI 战术表死码修复（2026-08-18）
    爆裂/超频/龙鳞/滑翔/分裂/招魂）授予后 0 发动（死码）。
 2. try_debuff 的 X≥2 门槛对代价型道纹（cost≤0，_x_for 恒为1，如畸变/逆鳞）
    永不满足；衰败被错标为 nuke 且按默认 dmg_per_x=2 错价，从未被选中。
-   （2026-10-11 用户令：【衰败】已删除，对应的 `test_shuaibai_*` 用例随之移除；
+   （【衰败】已删除，对应的 `test_shuaibai_*` 用例随之移除；
    「分类必须来自预演」这条不变量仍由本文件的代价型削弱与【瓦解】两个用例守着。）
 3. （2026-10-03：【尸爆】删除）同类的「分类必须来自预演而非人工标签」回归改用【瓦解】。
 
@@ -68,7 +68,7 @@ def test_shufu_cooldown_debuff_casts_at_x1(tmp_path):
     assert r is not None, "冷却型削弱应以X=1发动，不得被X≥2门槛卡死"
 
 
-# 2026-10-11 用户令：`test_shuaibai_reclassified_as_debuff_and_casts` 已删除——它整条建立在被删机制上，不是改断言能救的。
+# `test_shuaibai_reclassified_as_debuff_and_casts` 已删除——它整条建立在被删机制上，不是改断言能救的。
 
 
 

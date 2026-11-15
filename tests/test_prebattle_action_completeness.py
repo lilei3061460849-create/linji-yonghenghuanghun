@@ -39,7 +39,7 @@ def test_available_prebattle_schemas_use_real_executable_parameter_names(tmp_pat
     assert {"allocations", "tier"} <= set(by_sub_action["修行"])
     assert "tier" in by_sub_action["探索"]
     assert {"tier", "names", "target"} <= set(by_sub_action["改造"])
-    assert "维修" not in by_sub_action, "维修已按 2026-11-01 用户令改为【改造】"
+    assert "维修" not in by_sub_action, "维修已按 改为【改造】"
     assert "additional" not in by_sub_action["改造"]
 
 
@@ -195,17 +195,17 @@ def test_training_splits_tier_points_between_speed_and_mana(tmp_path):
     player = engine.state.player
     before = (player.speed_limit, player.mana_limit)
 
-    # 2026-11-09 用户令：1属性点=1[速限]，2属性点=1[法限]
+    # 2属性点=1[速限]，2属性点=1[法限]（2026-11-10 改回）
     trained = engine.execute_action("pre_battle_action", {
         "sub_action": "修行", "tier": 4,
-        "allocations": {"speed_points": 2, "mana_points": 2},
+        "allocations": {"speed_points": 4, "mana_points": 0},
     })
 
     assert trained["success"], trained
-    assert (player.speed_limit, player.mana_limit) == (before[0] + 2, before[1] + 1)
+    assert (player.speed_limit, player.mana_limit) == (before[0] + 2, before[1])
     assert (player.current_speed, player.current_mana) == (player.speed_limit, player.mana_limit)
-    assert trained["result"]["allocations"] == {"blood_points": 0, "speed_points": 2, "mana_points": 2}
-    assert trained["result"]["gained"] == {"blood": 0, "speed": 2, "mana": 1}
+    assert trained["result"]["allocations"] == {"blood_points": 0, "speed_points": 4, "mana_points": 0}
+    assert trained["result"]["gained"] == {"blood": 0, "speed": 2, "mana": 0}
     assert engine.state.shards == 35
 
 
@@ -232,14 +232,14 @@ def test_training_banks_points_when_no_allocations(tmp_path):
     d = engine.execute_action("redeem_attribute_points",
                               {"allocations": {"speed_points": 2, "mana_points": 0}})
     assert d["success"], d
-    assert player.speed_limit == panel_before[0] + 2
+    assert player.speed_limit == panel_before[0] + 1
     assert engine.state.attribute_points == bank_before
     assert (engine.state.energy, engine.state.shards) == (energy_before, shards_before), \
         "兑换不该消耗精力或碎片"
 
 
 def test_redeem_rejects_odd_mana_and_overspend_and_in_combat(tmp_path):
-    """边界：法限奇数点买不出半档（速限 1 点一档合法）；超额拒绝；战斗内拒绝。"""
+    """边界：法限/速限奇数点都买不出半档（2026-11-10 速限改回2点一档）；超额拒绝；战斗内拒绝。"""
     engine = _engine(tmp_path)
     engine.state.attribute_points = 3
 
@@ -247,10 +247,15 @@ def test_redeem_rejects_odd_mana_and_overspend_and_in_combat(tmp_path):
                                 {"allocations": {"speed_points": 0, "mana_points": 1}})
     assert not odd["success"] and "偶数" in odd["error"]
 
-    one_speed = engine.execute_action("redeem_attribute_points",
+    odd_speed = engine.execute_action("redeem_attribute_points",
                                       {"allocations": {"speed_points": 1, "mana_points": 0}})
-    assert one_speed["success"] and engine.state.attribute_points == 2, \
-        "1 属性点正好兑 1 速限"
+    assert not odd_speed["success"] and "偶数" in odd_speed["error"]
+    assert engine.state.attribute_points == 3, "奇数点被拒，池子不变"
+
+    two_speed = engine.execute_action("redeem_attribute_points",
+                                      {"allocations": {"speed_points": 2, "mana_points": 0}})
+    assert two_speed["success"] and engine.state.attribute_points == 1, \
+        "2 属性点正好兑 1 速限"
 
     over = engine.execute_action("redeem_attribute_points",
                                  {"allocations": {"speed_points": 4, "mana_points": 0}})
@@ -286,7 +291,7 @@ def test_training_rejects_invalid_split_atomically(tmp_path):
 
 
 def test_training_can_raise_blood_limit(tmp_path):
-    """用户裁定 2026-09-12：局外修行不再与开局初始分配区分，血限同样可以修上去。
+    """局外修行不再与开局初始分配区分，血限同样可以修上去。
 
     正常：1属性点=6血限，当前生命同步抬高；
     边界：存点后用自由动作 redeem_attribute_points 兑血限（血限按1点一档，不受偶数限制）；

@@ -151,10 +151,23 @@ class AvailableActionsMixin:
             }
         if self.state.pending_monster_phase:
             pending = self.state.pending_monster_phase
+            # 2026-11-10 统一形状：这里原来返回顶层 action_type/params_schema 的旧形状
+            # （没有 actions 数组），网页统一行动菜单读 S.actions.actions 会拿到空——
+            # 表现为「B 方准备行动后：引擎当前没有可选战斗行动」。改回标准形状；
+            # pending["options"]（actors/token 等）仍摊平在顶层供界面展示。
             return {
                 "phase": "怪物阶段待提交",
-                "action_type": "resolve_monster_phase",
-                "params_schema": {"token": pending["token"], "choices": "为全部actors各提交一次"},
+                "actions": [
+                    {"action_type": "resolve_monster_phase",
+                     "params_schema": {"token": pending["token"],
+                                       "choices": "恰好一个actor的一个行动：daowen或attack_actions，不得打包"},
+                     "note": "提交一个行动后统一恢复优先权与施法栈"},
+                    {"action_type": "skip",
+                     "params_schema": {"actor_ref": [
+                         {"ref": entry["actor_ref"], "name": entry.get("monster", entry["actor_ref"])}
+                         for entry in (pending["options"].get("actors") or [])]},
+                     "note": "结束敌方回合，不消耗出手并保留当前出手数量"},
+                ],
                 **pending["options"],
             }
 
@@ -314,7 +327,7 @@ class AvailableActionsMixin:
             actions.append({"action_type": "upgrade_doctor",
                             "params_schema": {"mode": ["attack_count", "attack_power"]},
                             "cost": "5碎片，不消耗精力"})
-        # 2026-09-28 用户令：删除局外【忘忧】行动；忘忧香效果为溢出回复转格挡。
+        # 删除局外【忘忧】行动；忘忧香效果为溢出回复转格挡。
         player = self.state.player
         blood_pact_cost_targets = ([
             {"ref": ref, "name": entity.name}
@@ -330,7 +343,7 @@ class AvailableActionsMixin:
                             "remaining_groups": len(self.state.pending_diandang_discoveries),
                             "note": "领取【典当】发现：从当前组3选1里选1种获得，不消耗出手/精力"})
         if "真龙之心" in self.state.artifacts_owned:
-            # 2026-10-23 用户令：龙性货币废除。数值型代价自动入账，
+            # 龙性货币废除。数值型代价自动入账，
             # 满 12 点可直接换 1 件龙族遗物；不再有「换取龙性」这一步。
             actions.append(
                 {"action_type": "unlock_dragon_trait",
@@ -536,6 +549,40 @@ class AvailableActionsMixin:
                 actions.append({"action_type": "skip", "params_schema": {
                     "actor_ref": enemy_actors},
                     "note": "结束敌方回合，不消耗出手并保留当前出手数量"})
+            # 协力施法：B 方回合里同样可以往协力法术空位填道纹
+            # 或（作为施法者的 B 方法术）发动/取消。口径与 A 方回合完全一致。
+            refs_now = self.combat._combat_entity_refs()
+            coop_now = [spell for spell in getattr(self.state, "open_spells", [])
+                        if spell.get("status") == "open"]
+            coop_refs = [{"ref": ref, "name": entity.name}
+                         for ref, entity in refs_now.items() if entity.is_alive]
+            if not coop_now:
+                actions.append({"action_type": "declare_spell", "params_schema": {
+                    "actor_ref": coop_refs, "name": "可选",
+                    "slots": "正整数＝N个道纹空位；或槽位模板列表",
+                    "cast_target_ref": coop_refs},
+                    "note": "协力施法·发起：不花出手；每格由填入者花1次出手；发动时空位＝空白跳过"})
+            for spell in coop_now:
+                from ..handlers.coop_spell import _coop_flat_slots
+                flat = _coop_flat_slots(spell.get("slots") or [])
+                empty = [i for i in range(len(flat)) if str(i) not in (spell.get("fills") or {})]
+                actions.append({"action_type": "fill_spell", "params_schema": {
+                    "spell_id": spell["id"], "slot": empty, "actor_ref": coop_refs,
+                    "daowen_name": "填入者持有的道纹名", "x": "integer≥1",
+                    "target_mode": ["target", "self", "caster", "any"],
+                    "target_ref": coop_refs, "dodge": "boolean"},
+                    "available": bool(empty),
+                    "note": f"协力法术【{spell['name']}】：填入者花1次出手；剩余空位 {len(empty)}/{len(flat)}"})
+                actions.append({"action_type": "release_spell",
+                                "params_schema": {"spell_id": spell["id"]},
+                                "available": bool(spell.get("fills")),
+                                "note": "协力法术【%s】·发动（仅施法者%s）：空白格跳过，不另花出手"
+                                        % (spell.get("name", ""), spell.get("caster_name", ""))})
+                actions.append({"action_type": "cancel_spell",
+                                "params_schema": {"spell_id": spell["id"]},
+                                "available": True,
+                                "note": "协力法术【%s】·取消（仅施法者%s）：已填的出手不退"
+                                        % (spell.get("name", ""), spell.get("caster_name", ""))})
             return {"phase": subphase, "round": self.state.current_round,
                     "duel_turn": self.state.duel_turn, "actions": actions,
                     "ended_turn_sides": sorted(self.combat._ended_turn_sides),
@@ -565,7 +612,7 @@ class AvailableActionsMixin:
                                 "reason": "冷却中/被封印/【唯一】锁死"})
                 continue
             max_x = self._max_legal_daowen_x(player, name)
-            # 【真理】X=陈述句数（2026-10-23 用户裁定）；只需目标与待裁定陈述，
+            # 【真理】X=陈述句数；只需目标与待裁定陈述，
             # 发动仍沿用初拥旧口径，不消耗主动出手，也不经过普通数值道纹的闪避流程。
             if name == "真理":
                 params_schema = {
@@ -575,7 +622,7 @@ class AvailableActionsMixin:
                     "statement": "string（须正好X句）",
                 }
             else:
-                # 2026-10-09 用户令：波及 X≥2 下限 repealed，X 下限恒为 1（X_MIN 已拔除）。
+                # 波及 X≥2 下限 repealed，X 下限恒为 1（X_MIN 已拔除）。
                 min_x = 1
                 params_schema = {
                     "daowen_name": name,
@@ -626,7 +673,7 @@ class AvailableActionsMixin:
                                   "blood_shadow": "可选布尔值"},
                     }
             if name in ("点金", "典当"):
-                # 失忆代价必须显式选纹（2026-11-01 用户令）：把候选直接公布，
+                # 失忆代价必须显式选纹：把候选直接公布，
                 # 缺失/数量不符会被 use_daowen 在扣费前拒绝。
                 params_schema["forget_daowen"] = {
                     "count": f"{'X' if name == '点金' else '2X'}（随发动X）",
@@ -643,6 +690,18 @@ class AvailableActionsMixin:
             actions.append({
                 "action_type": "use_daowen", "available": max_x >= 1,
                 "params_schema": params_schema,
+            })
+        # 遗物启用切换：战斗中不占出手、不结束回合（2026-11-10 裁定）；局外同一入口。
+        if self.state.relics:
+            actions.append({
+                "action_type": "toggle_relic",
+                "params_schema": {
+                    "relic_name": [{"name": r.name,
+                                    "enabled": bool(getattr(r, "enabled", True))}
+                                   for r in self.state.relics],
+                    "limit": player.enabled_relic_limit},
+                "note": "切换单件遗物启用/停用：不占出手、不结束回合；"
+                        "启用件数≤ceil(血限/30)，轮到你才能改",
             })
         for actor_ref, actor in refs.items():
             if actor is player or not self.state.on_player_side(actor):
@@ -723,6 +782,63 @@ class AvailableActionsMixin:
                 "note": "瞬发法术的每个实际效果步骤各扣1次出手，步骤间及最后一步后留敌方行动空档；"
                         "触发时机与最后空档不额外扣手，下一步付不起即中断，已结算步骤保留；"
                         "不写入角色法术列表。kind=daowen 为单道纹发动，kind=spell 为统一自定义施法"})
+        # 协力施法：发起开空位；任意存活角色（双方）逐格填道纹，
+        # 每格由填入者花1手；发动时空位＝空白跳过。条件分支用瞬发法术 DSL 句式。
+        coop_open = [spell for spell in getattr(self.state, "open_spells", [])
+                     if spell.get("status") == "open"]
+        coop_actors = [{"ref": ref, "name": entity.name}
+                       for ref, entity in refs.items() if entity.is_alive]
+        if not coop_open:
+            actions.append({
+                "action_type": "declare_spell",
+                "params_schema": {
+                    "actor_ref": coop_actors,
+                    "name": "可选，仅用于识别这条协力法术",
+                    "slots": "正整数＝N个道纹空位；或槽位模板列表 "
+                             "[{kind:'daowen'} 或 {kind:'if', cond:'条件(主语限自身/施法者)', "
+                             "then:[槽位…], else:[槽位…]}]",
+                    "cast_target_ref": target_options,
+                },
+                "available": player.is_alive,
+                "note": "协力施法·发起：不花出手；每格由填入者花1次出手；"
+                        "发动（release_spell）时空位＝空白直接跳过；一名施法者同时只能挂一条"})
+        for spell in coop_open:
+            from ..handlers.coop_spell import _coop_flat_slots
+            flat = _coop_flat_slots(spell.get("slots") or [])
+            empty = [index for index in range(len(flat)) if str(index) not in (spell.get("fills") or {})]
+            filled_desc = [
+                f"槽{i}【{fill['daowen_name']}X={fill['x']}】{fill.get('filled_by_name', '?')}"
+                for i, fill in sorted(((int(k), v) for k, v in (spell.get("fills") or {}).items()))
+            ]
+            actions.append({
+                "action_type": "fill_spell",
+                "params_schema": {
+                    "spell_id": spell["id"], "slot": empty, "actor_ref": coop_actors,
+                    "daowen_name": "填入者自己持有的道纹名", "x": "integer≥1",
+                    "target_mode": ["target", "self", "caster", "any"],
+                    "target_ref": target_options, "dodge": "boolean",
+                    "extra": "可选对象：该步附加决策（结构同瞬发法术 steps 条目）",
+                },
+                "available": bool(empty),
+                "caster": spell.get("caster_name"),
+                "cast_target": spell.get("cast_target_name") or None,
+                "filled": filled_desc,
+                "note": f"协力法术【{spell['name']}】：往空位填入道纹，填入者花1次出手；"
+                        f"剩余空位 {len(empty)}/{len(flat)}；发动前不结算任何效果"})
+            actions.append({
+                "action_type": "release_spell",
+                "params_schema": {"spell_id": spell["id"]},
+                "available": bool(spell.get("fills")),
+                "caster": spell.get("caster_name"),
+                "filled": filled_desc,
+                "note": "协力法术【{name}】·发动（仅施法者）：空白格直接跳过；"
+                        "发动本身不花出手；步骤间照常留敌方行动空档".format(name=spell.get("name", ""))})
+            actions.append({
+                "action_type": "cancel_spell",
+                "params_schema": {"spell_id": spell["id"]},
+                "available": True,
+                "caster": spell.get("caster_name"),
+                "note": "协力法术【%s】·取消（仅施法者）：已填入的出手不退" % spell.get("name", "")})
         if any(value > 0 for value in self.state.resonance.values()):
             actions.append({"action_type": "use_resonance", "params_schema": {
                 "resonance_type": [n for n, v in self.state.resonance.items() if v > 0],
@@ -800,7 +916,10 @@ class AvailableActionsMixin:
             {"action_type": "prepare_attack", "params_schema": {"actor_ref": actor_options}},
             {"action_type": "declare_wish", "params_schema": {"wish_text": "string", "target_ref": target_options}},
             {"action_type": "declare_escape", "params_schema": {},
-             "note": "逃跑：一次付清5次出手，以当前状态强制脱离本场战斗（最终死斗/【不离】不可）"},
+             "available": bool(player is not None and player.is_alive),
+             "note": (f"逃跑：一次付清{self._escape_action_cost(player) if player else '?'}次出手"
+                      "（max(1, 敌方最高当前速度−自身当前速度)），"
+                      "以当前状态强制脱离本场战斗（最终死斗/【不离】不可）")},
             {"action_type": "choose_diandang_daowen",
              "params_schema": {"daowen_name": list(self.state.pending_diandang_discoveries[0])
                                if self.state.pending_diandang_discoveries else "string"},
@@ -814,7 +933,7 @@ class AvailableActionsMixin:
              "available": bool(idle_allies),
              "note": "让一名未出手的[朋友]/[员工]自主完成一个行动（无命令时）"},
         ])
-        # 2026-11-09 用户令：衍生是**局内**的独立 0 出手行动；代价不变。
+        # 衍生是**局内**的独立 0 出手行动；代价不变。
         # 它不占主动出手、不结束回合，也不因本回合出手用尽而不可用。
         derivative_parents = [name for name in derivative_rules.known_parents()
                               if name in player.dao_wen]
@@ -847,7 +966,7 @@ class AvailableActionsMixin:
         """按真实代价口径枚举当前可提交的最大X，不把当前法力直接冒充上限。
 
         y 为预留双参数第二参数；现行【分裂】只有X（造物数量），不读取Y。
-        【真理】的X=陈述句数（2026-10-23 用户裁定）：只受实际写出的句子上限约束，
+        【真理】的X=陈述句数：只受实际写出的句子上限约束，
         这里给出一个宽松上限，最终以提交的陈述句数为准。
         """
         if name == "真理":

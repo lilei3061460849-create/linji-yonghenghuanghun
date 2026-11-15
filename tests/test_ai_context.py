@@ -2,7 +2,7 @@
 
 外部 AI 常只会读取一个 GitHub raw URL，不能保证继续抓 README 的相对链接。AI_CONTEXT.md
 优先保留世界观、角色名单、角色扮演约束与外部推演守则，并附机制速查：道纹／遗物／
-法术／已实现副本各取名称与一行效果（2026-10-14 用户令——外部 AI 不知道具体道纹与
+法术／已实现副本各取名称与一行效果（——外部 AI 不知道具体道纹与
 遗物就会胡说八道）。通用规则正文、完整推演规范、副本机制细节与战报仍按需查询，
 不成为新的规则正本。
 
@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / README_FILE
 
 REQUIRED_SOURCES = {"故事文档.md", "AI_EXPERIENCE.md"}
-# 2026-10-24 用户令：AI 上下文必须能回答「这一手怎么打」。
+# AI 上下文必须能回答「这一手怎么打」。
 # 规则正文只以「战斗行动」节的整段摘录进入（见 extract_actions），
 # 其余机制原文照旧按需查询，因此它从 EXCLUDED_MECHANICS_SOURCES 移入速查。
 DIGEST_SOURCES = {"规则正文.md", "全道纹索引.md", "物品索引.md", "法术索引.md", "副本索引.md", "角色记忆"}
@@ -76,14 +76,22 @@ def test_context_covers_story_sources_digests_and_excludes_bulk_mechanics():
 
 
 def test_action_digest_is_only_the_combat_action_section():
-    """边界：规则正文进上下文的那一块只能是「战斗行动」整段，不许夹带别的规则章节。"""
-    body = _bodies()["规则正文.md"]
+    """边界：规则正文进上下文的两块只能是「战斗行动」与「法力结构」整段摘录，
+    不许夹带别的规则章节。"""
+    rule_blocks = {role: body for role, relpath, body, _ in context_blocks()
+                   if relpath == "规则正文.md"}
+    assert set(rule_blocks) == {"机制速查·行动", "机制速查·法力结构"}, set(rule_blocks)
+    body = rule_blocks["机制速查·行动"]
     assert "攻击（占1次主动出手）" in body
     assert "招架（回合外，不占出手，仅对攻击）" in body
     # 只摘一节：篇幅有界，且其余章节标题一个都不许出现
     assert len(body) < 3000, f"行动摘录过长，疑似整篇规则被塞进来：{len(body)} 字"
     for other in ("基础定义", "道纹体系", "核心规则", "怪物准则", "特殊事件", "通用事件池"):
         assert other not in body, f"行动摘录混入了《规则正文》其它章节：{other}"
+    structure_body = rule_blocks["机制速查·法力结构"]
+    assert "承载" in structure_body and "永焰X" in structure_body
+    for other in ("基础定义", "道纹体系", "核心规则", "怪物准则", "特殊事件", "通用事件池"):
+        assert other not in structure_body, f"结构摘录混入了《规则正文》其它章节：{other}"
 
 
 def test_context_body_contains_no_code_interface_format_or_future_plans():

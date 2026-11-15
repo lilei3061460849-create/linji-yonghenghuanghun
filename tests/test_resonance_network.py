@@ -29,7 +29,7 @@ def rules_text() -> str:
 def tetrahedron_spec(text: str | None = None) -> set:
     """从规则正文的四面体串解析出 (节点, 残韵, 节点) 三元组。
 
-    2026-11-02 用户令：关系表改为四面体，正文写法为
+    关系表改为四面体，正文写法为
     「反转 A⇄B、C⇄D ｜ 转换 A⇄C、B⇄D ｜ 曲解 A⇄D、B⇄C」。
     """
     txt = text if text is not None else rules_text()
@@ -62,7 +62,7 @@ def engine_undirected_edges() -> set:
 def test_all_readme_monster_transforms_registered():
     """正常路径：规则正文声明的每一条怪物原始道纹转化都必须在引擎中登记。
 
-    2026-10-07 用户令：转化途径改为双向，正文用 ⇄（历史写法 → 同样接受）。
+    转化途径改为双向，正文用 ⇄（历史写法 → 同样接受）。
     """
     txt = rules_text()
     spec = tetrahedron_spec(txt)
@@ -113,7 +113,7 @@ def test_monster_transform_branch_is_reversible():
 def test_generic_core_is_four_tetrahedra():
     """正常路径：通用核心由四面体一~四构成，16 节点 96 个有向关系。
 
-    2026-11-02 用户令：环状链 + 占位节点整体改为四面体；【操纵】由【操作】改名，
+    环状链 + 占位节点整体改为四面体；【操纵】由【操作】改名，
     作用次数改为「下X次」。
     """
     assert "切割闭环" not in R.CLOSED_LOOPS
@@ -128,7 +128,7 @@ def test_generic_core_is_four_tetrahedra():
     }
     assert R.find_transformation("脆弱", "反转") == "庇护"
     assert R.find_transformation("操纵", "转换") == "迟滞"
-    # 2026-11-08 用户令：【篡改】与【封印】再次调换（封印回四面体二、篡改回四面体四）。
+    # 【篡改】与【封印】再次调换（封印回四面体二、篡改回四面体四）。
     assert R.find_transformation("迟滞", "反转") == "封印"
     assert R.find_transformation("杀伐", "曲解") == "庇护"
     assert R.find_transformation("束缚", "曲解") == "迟滞"
@@ -182,7 +182,7 @@ def test_region_tetrahedra_present():
 def test_monster_daowen_now_transformable():
     """正常路径：仍在册的原始怪物道纹必须有可用残韵路径。
 
-    2026-10-25 用户令：【疯狂】【减速】遗物化退出道纹体系，不再有残韵路径；
+    【疯狂】【减速】遗物化退出道纹体系，不再有残韵路径；
     【狂暴】2026-10-03 删除、【飞行】是状态。现存原始道纹只剩【全力】【必中】。
     """
     for dw in ("必中", "全力"):

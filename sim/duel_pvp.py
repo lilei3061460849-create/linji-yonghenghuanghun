@@ -43,7 +43,7 @@ from engine.ai_tactics import TacticalAI   # 仅 sim 工具可用（engine/ 生�
 
 
 def _default_ai_cls():
-    """死斗默认战术 AI（用户裁定 2026-09-10：胜负唯一计分）。延迟导入防循环。
+    """死斗默认战术 AI（胜负唯一计分）。延迟导入防循环。
     LJ_WIN_ONLY=0 退回启发式 TacticalAI（千局级扫描用）。"""
     if os.environ.get("LJ_WIN_ONLY", "1") == "0":
         return TacticalAI
@@ -481,8 +481,7 @@ def run_duel_pvp(e, player_act=None, max_rounds=60, max_steps=400, log=None,
                  ai_cls=None, resume=False):
     """PvP 对称交替死斗：双方都按轮回者规则行动。
 
-    ai_cls: 双方共用的战术 AI 类。**默认 WinOnlyAI（用户裁定 2026-09-10：
-        胜负唯一计分——胜+1/败-1，无论什么手段什么战术）**；显式传 TacticalAI
+    ai_cls: 双方共用的战术 AI 类。**默认 WinOnlyAI（胜负唯一计分——胜+1/败-1，无论什么手段什么战术）**；显式传 TacticalAI
         或 LegacyAwareAI 可回到启发式/遗言桥口径（旧报告实录均为该口径）。
 
     resume=True：从**进行中的死斗状态**续跑（供整局推演 WinOnlyAI 用）——跳过
@@ -526,7 +525,7 @@ def run_duel_pvp(e, player_act=None, max_rounds=60, max_steps=400, log=None,
     # 一律**只使用真实准备的残韵**，绝不凭空充能——没有就是没有。
     # 挑战者用 TacticalAI 驱动（残韵+性格+变数）
     from engine.ai_tactics import TacticalAI
-    # 默认 = WinOnlyAI（用户裁定 2026-09-10：胜负唯一计分，死斗默认用它——
+    # 默认 = WinOnlyAI（胜负唯一计分，死斗默认用它——
     # 「不然出的再快看一群傻子打架有什么意思」）。启发式 TacticalAI 降级为
     # 推演内环/显式指定时的实现。延迟导入防循环。
     _ai_cls = ai_cls if ai_cls is not None else _default_ai_cls()
@@ -574,8 +573,7 @@ def run_duel_pvp(e, player_act=None, max_rounds=60, max_steps=400, log=None,
 
     def _duelist_out(ent) -> bool:
         """判负出场=命零**或**化雕塑（is_sculptured/is_departed 离场不是命零，
-        但死斗只允许一名轮回者离开——化雕塑同样判负，2026-09-10 用户裁定：
-        判定须区分 被击杀/化雕塑/凡庸/崩解，不许一律写「阵亡」）。"""
+        但死斗只允许一名轮回者离开——化雕塑同样判负，判定须区分 被击杀/化雕塑/凡庸/崩解，不许一律写「阵亡」）。"""
         return bool(ent is None or not ent.is_alive
                     or getattr(ent, "is_sculptured", False)
                     or getattr(ent, "is_departed", False))

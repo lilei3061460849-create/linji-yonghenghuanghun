@@ -1,4 +1,4 @@
-"""扭曲都市专属行动【改造】（2026-11-01 用户令：由【维修】改做）。
+"""扭曲都市专属行动【改造】（由【维修】改做）。
 
 规则：选择2/3/4件不同名消耗品，使其全部效果叠加到其中一个消耗品中。
 - 档位＝参与件数（2件 0碎片／3件 5碎片／4件 12碎片），另耗 1 点精力；
@@ -131,7 +131,8 @@ def test_wanjunyin_still_triggers_after_being_merged(tmp_path):
     before = enemy.current_hp
 
     engine.combat.resolve_attack(enemy, player, hit_index=0, is_must_hit=True,
-                                 dodge=False, allocated_damage=10)
+                                 dodge=False, allocated_damage=10,
+                                 wanjunyin=True)
     assert enemy.current_hp == before - 10, "改道：这一击打回攻击者自己"
     assert host.current_uses == 5, "触发消耗的是合成条目的共用耐久池"
 
@@ -196,3 +197,24 @@ def test_gaizao_shard_ladder_matches_item_count(tmp_path):
     poor = _gaizao(engine, 3, ["备用血泵", "储能电池", "高爆手雷"], "备用血泵")
     assert not poor["success"] and "碎片" in poor["error"]
     assert [item.name for item in engine.state.consumables] == before
+
+
+def test_wanjunyin_redirect_is_a_respond_window_choice(tmp_path):
+    """按物品索引=持有者选择：应对窗口显式选「万钧印改道」才把这一击打回攻击者。"""
+    engine = _engine(tmp_path)
+    engine.state.phase = "in_combat"
+    engine.state.combat_subphase = "player_actions"
+    engine.state.duel_turn = "opponent_side"
+    player = engine.state.player
+    enemy = Entity("靶怪", "怪物", blood_limit=100, current_hp=100,
+                   attack_count=2, attack_power=10)
+    engine.state.enemies = [enemy]
+    engine.state.consumables = [_tool("万钧印")]
+    assert engine.execute_action("prepare_attack", {"actor_ref": "enemy:0"})["success"]
+    assert engine.execute_action("attack_declare_hit",
+                                 {"target_ref": "player:0", "damage": 10})["success"]
+    step = engine.execute_action("attack_respond_hit", {"choice": "wanjunyin"})
+    assert step["success"], step
+    assert enemy.current_hp == 90, "改道：这一击打回攻击者自己"
+    assert player.current_hp == player.blood_limit
+    assert engine.state.consumables[0].current_uses == 2

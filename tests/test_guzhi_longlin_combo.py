@@ -100,7 +100,7 @@ def test_guzhi_longlin_zeroes_only_hits_within_longlin_threshold_and_each_large_
 def test_guzhi_longlin_apply_to_piercing_and_cost_still_bypasses_longlin():
     """无视格挡不绕过组合；代价伤害绕过龙鳞，但**不再**绕过固执。
 
-    2026-10-11 用户令：固执简化为「你每次失去的生命不会超过1，持续X」，
+    固执简化为「你每次失去的生命不会超过1，持续X」，
     代价路径与直接失血一并封顶。旧口径「代价同时绕过龙鳞与固执」中，
     绕过龙鳞的部分仍然成立（代价不经伤害调整阶段），绕过固执的部分已废止。
     """

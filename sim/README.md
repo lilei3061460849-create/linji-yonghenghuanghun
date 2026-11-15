@@ -49,7 +49,7 @@ python3 sim/duels/manual_handplay.py              # 例：手动死斗
 | `probe_arena_head2head.py` | 对抗性配对探针：训练权重 / 默认权重 / 纯随机，三者同场对打。 |
 | `probe_arena_weight_divergence.py` | 对照探针：两套权重到底有没有改变怪物的实际行为？ |
 | `probe_attack_only_cap.py` | 实验探针（2026-09-10）：一池制法力 + 攻次=速/攻力=法 的新经济下，普攻流上限在哪里。 |
-| `probe_boba_min_x.py` | 探针：验【波及】X=1 合法（2026-10-09 用户令 repealed 了 2026-10-03 的 X≥2 下限）。 |
+| `probe_boba_min_x.py` | 探针：验【波及】X=1 合法（repealed 了 2026-10-03 的 X≥2 下限）。 |
 | `probe_combo_full.py` | （无 docstring） |
 | `probe_custom_spell_triggers.py` | 真实引擎冒烟：逐一实测各触发时机能否在自创法术上真正触发。 |
 | `probe_damage_attribution.py` | 探针：轮回者实际输出里，普攻 / 道纹 / 法术 / 遗物 各占多少，以及道纹使用分布。 |
@@ -57,7 +57,7 @@ python3 sim/duels/manual_handplay.py              # 例：手动死斗
 | `probe_daowen_cost_text_drift.py` | 对照探针：道纹「代价文本」与「引擎实扣」的一致性扫描。 |
 | `probe_free_action_compositions.py` | 固定行动构成的对照探针（规则实验：怪物行动自由化）。 |
 | `probe_global_trigger_spells.py` | 真实引擎冒烟：逐一实测【战始/战终/回始/回终/敌回始/敌回终】6种全局时点 |
-| `probe_new_relics.py` | 探针：5 件新遗物的实测表现（2026-10-03 用户令）。 |
+| `probe_new_relics.py` | 探针：5 件新遗物的实测表现。 |
 | `probe_region_choice_synergy.py` | 探针：开局拿到【回锋刀】/【避风铃】后，AI 会不会为了【超频】【搏命】进扭曲都市？ |
 | `probe_resonance_targeting.py` | 探针：残韵去向 + 各副本通关率基线/对照。 |
 | `probe_spell_candidates.py` | （无 docstring） |
@@ -152,4 +152,4 @@ python3 sim/duels/manual_handplay.py              # 例：手动死斗
 | `threshold_evidence.py` | 保险丝阈值的实测依据（Phase 5）。 |
 | `tournament.py` | 淘汰赛：让胜者池两两死斗，直到只剩最后一人。 |
 | `trace_run.py` | 完整轮回战报生成器：从第1场跑到通关/死亡，记录开局、每场局外行动、遗物、逐回合战斗。 |
-| `win_only_ai.py` | 胜负唯一计分 AI（用户裁定 2026-09-10：胜 +1 / 败 −1，无论什么手段什么战术； |
+| `win_only_ai.py` | 胜负唯一计分 AI（胜 +1 / 败 −1，无论什么手段什么战术； |

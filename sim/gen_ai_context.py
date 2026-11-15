@@ -2,7 +2,7 @@
 """生成第四宇宙剧情优先的混合 AI 上下文。
 
 上下文保留世界观、角色名单、角色扮演与外部推演守则，并附机制速查：道纹、遗物、
-法术与已实现副本各取名称与一行效果（2026-10-14 用户令：外派 AI 不知道具体道纹与
+法术与已实现副本各取名称与一行效果（外派 AI 不知道具体道纹与
 遗物就会胡说八道）。速查不替代原文——精确数值、边界与结算规则仍按需查询。
 
 AI_CONTEXT.md 是生成文件，不是新的规则事实源。修改来源后运行本脚本；使用 --check
@@ -109,7 +109,7 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-# ==================== 机制速查：结构化摘取（2026-10-14 用户令） ====================
+# ==================== 机制速查：结构化摘取 ====================
 
 _SECTION_RE = re.compile(r"^##\s+(.*\S)\s*$")
 _SUBSECTION_RE = re.compile(r"^###\s+(.*\S)\s*$")
@@ -190,12 +190,24 @@ def extract_daowen(root: Path, relpath: str) -> str:
 def extract_actions(root: Path, relpath: str) -> str:
     """行动速查：整段照录《规则正文》「战斗行动」节。
 
-    2026-10-24 用户令：AI 上下文必须能回答「这一手怎么打」，不能只列道纹名。
+    AI 上下文必须能回答「这一手怎么打」，不能只列道纹名。
     条文只有一处正文（规则正文·战斗行动），这里整段摘录，不另写一份口径。
     """
     raw = _read_raw(root, relpath)
     match = re.search(
         r"^###\s+战斗行动\s*$(?P<body>.*?)(?=^###\s|^##\s|\Z)",
+        raw, re.MULTILINE | re.DOTALL)
+    if not match:
+        return ""
+    return "\n".join(line.strip() for line in match.group("body").splitlines()
+                     if line.strip())
+
+
+def extract_structures(root: Path, relpath: str) -> str:
+    """法力结构速查：整段摘录规则正文·法力结构节（与行动速查同一口径）。"""
+    raw = _read_raw(root, relpath)
+    match = re.search(
+        r"^###\s+法力结构（血液结构）\s*$(?P<body>.*?)(?=^###\s|^##\s|\Z)",
         raw, re.MULTILINE | re.DOTALL)
     if not match:
         return ""
@@ -280,6 +292,7 @@ def digest_sources() -> list[DigestSource]:
     """机制速查与角色名单：只摘名称与一行效果，供外部 AI 避免凭空编造。"""
     return [
         DigestSource("机制速查·行动", "规则正文.md", extract_actions),
+        DigestSource("机制速查·法力结构", "规则正文.md", extract_structures),
         DigestSource("机制速查·道纹", "全道纹索引.md", extract_daowen, count_label="条"),
         DigestSource("机制速查·物品", "物品索引.md", extract_relics, count_label="件"),
         DigestSource("机制速查·法术", "法术索引.md", extract_spells, count_label="式"),

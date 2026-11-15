@@ -88,6 +88,7 @@ from .handlers.combat import CombatHandlersMixin
 from .handlers.companions import CompanionHandlersMixin
 from .handlers.endgame import EndgameHandlersMixin
 from .handlers.daowen import DaowenHandlersMixin
+from .handlers.coop_spell import CoopSpellHandlersMixin
 from .handlers.items import ItemHandlersMixin
 from .handlers.opening import OpeningHandlersMixin
 from .handlers.rulings import RulingHandlersMixin
@@ -98,19 +99,19 @@ from .rollback import EngineSnapshot
 
 
 
-# 自由结晶随机代价池（2026-10-05 用户令）：代价一节中可数值化的八种代价，共计10。
+# 自由结晶随机代价池：代价一节中可数值化的八种代价，共计10。
 # 【唯一】无数值、无法按 X=10 结算，不入池（见 物品索引.md#自由结晶）。
 FREE_CRYSTAL_COST_POOL = ("生命", "血限", "枯竭", "法限", "速度", "失忆", "异变", "冷却")
 FREE_CRYSTAL_COST_AMOUNT = 10
 
-# 局外可发动的道纹白名单（2026-10-23 用户裁定：默认局内，局外须明示）。
+# 局外可发动的道纹白名单（默认局内，局外须明示）。
 # 「明示」＝该道纹条文自己写明可局外发动；没写的一律只能在战斗中发动。
 # 明示项：【真理】、【唤潮】与【蜃景】（鲛族专属开放地图道纹）。
 OUT_OF_COMBAT_DAOWEN = frozenset({"真理", "唤潮", "蜃景"})
 
 
 class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixin,
-                 DaowenHandlersMixin,
+                 DaowenHandlersMixin, CoopSpellHandlersMixin,
                  CombatHandlersMixin,
                  ItemHandlersMixin, OpeningHandlersMixin, EndgameHandlersMixin,
                  CompanionHandlersMixin, RulingHandlersMixin):
@@ -142,7 +143,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         self.state.death_book_legacies = self.death_book.load()
         self._load_progression()  # 阶级推进/无尽模式：与封存槽同文件持久（见 _save_progression）
         # 封存槽是跨轮回持久文件；若进程重启，从中恢复《死者之书》的系统记录。
-        # （2026-10-05 用户令：癌变休整加成 rest_heal_bonus 已废止，旧封存文件里
+        # （癌变休整加成 rest_heal_bonus 已废止，旧封存文件里
         # 的该键直接忽略。）
         if os.path.exists(sealed_candidate_path):
             try:
@@ -556,8 +557,10 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if action_type.startswith("world_") and phase != "pre_battle":
             return {"success": False,
                     "error": "当前开放世界行动尚处于第一阶段，只能在局外阶段调用；战斗/世界统一主循环尚未接通"}
-        if action_type in ("pre_battle_action", "resolve_event", "upgrade_doctor", "set_active_relics", "toggle_relic") and phase != "pre_battle":
+        if action_type in ("pre_battle_action", "resolve_event", "upgrade_doctor") and phase != "pre_battle":
             return {"success": False, "error": "局外行动/事件只能在局外阶段执行"}
+        # set_active_relics / toggle_relic：局外与战斗中都可整理（2026-11-10 裁定），
+        # 阶段校验在 handler 内做（setup 阶段仍拒绝）。
         if (action_type in ("derive_daowen", "refresh_derivative_choices",
                             "choose_derivative_daowen") and phase != "in_combat"):
             return {"success": False,
@@ -607,6 +610,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "cast", "focus", "rest", "skip",
                 "declare_wish", "declare_escape", "deploy_employee",
                 "define_spell", "undefine_spell",
+                # 协力施法：发起/填入/发动都是行动阶段的施法类操作。
+                "declare_spell", "fill_spell", "release_spell", "cancel_spell",
                 "lianxin_in_battle", "declare_evolution", "activate_duel_relic",
                 "use_black_card", "use_crime_vault", "fire_godfather_revolver",
                 "select_shared_dragon_heart", "declare_fuyuebei_toll",
@@ -720,7 +725,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "error": "必须先结算【救赎】：接纳或终结",
                 "pending": dict(self.state.pending_redemption),
             }
-        # 2026-10-12 用户裁定③：强制遗物发现在额度满时也要能脱困，故「放弃本次发现」
+        # ③：强制遗物发现在额度满时也要能脱困，故「放弃本次发现」
         # 与「选择」一样属于该门禁下的合法动作。少了它，额度满 + 有强制发现 = 死局
         # （两边都不许动，且没有任何动作能清空 pending_relic_choices）。
         if (self.state.pending_relic_choices
@@ -957,7 +962,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         spec = ACTION_REGISTRY.get(action_type)
         if spec is not None:
             return getattr(self, spec.handler)(params)
-        # 2026-09-28 用户令：回合动作重构
+        # 回合动作重构
         #   attack  → 普攻（等价 prepare_attack+resolve_attack 单步封装；或走prepare/resolve两步）
         #   cast    → 施法（=发动道纹或瞬发自定义施法）
         #   focus   → 聚能：消耗1出手，恢复50%已损法力（向上取整）
@@ -1335,7 +1340,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         base_heal = (math.ceil(player.blood_limit * tier_pct[tier] / 100)
                      if player is not None else 0)
         cost = tier_cost[tier]
-        # 2026-10-05 用户令：癌变不再为【休整】提供额外恢复量，恢复额度=档位基础值。
+        # 癌变不再为【休整】提供额外恢复量，恢复额度=档位基础值。
         heal = base_heal
         refs = ({"player:0": self.state.player}
                 if self.state.player and self.state.player.is_alive else {})
@@ -1382,7 +1387,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _pre_battle_xiuxing(self, params: dict) -> dict:
         """修行：获得属性点并立即分配。
 
-        计价与开局初始分配同口径：1属性点=6[血限]，1属性点=1[速限]，2属性点=1[法限]
+        计价与开局初始分配同口径：1属性点=6[血限]，2属性点=1[速限]，2属性点=1[法限]
         。
         不朽之躯不阻止修行：它只锁[血限]增长，不限制属性点本身的增长。"""
         tier = params.get("tier", 1)
@@ -1465,7 +1470,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     }
 
     # 初拥之夜9选1（1~8限选1次，9号可重复触发权）
-    # 2026-10-23 用户令：【鲜血之翼】改名【血翼】并改为消耗品（耐久3/3）。
+    # 【鲜血之翼】改名【血翼】并改为消耗品（耐久3/3）。
     # 选项编号与总数（9选1）不变，只是选项3 从「授予遗物」改为「发放消耗品」。
     FIRST_EMBRACE_OPTIONS = {
         1: ("血族血脉", "[回终]若本回合造成伤害则获得等量[回复]，否则支付生命20"),
@@ -1483,7 +1488,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     FIRST_EMBRACE_RETAIN_CHOICE = 9
 
     # 遗物池定义（27件；【发现】只列候选，效果在对应触发时点应用）
-    # 2026-10-13 用户令：【买路财】改制为轮回者【逃跑】行动，【三相残韵盘】删除
+    # 【买路财】改制为轮回者【逃跑】行动，【三相残韵盘】删除
     # （发现侧由道纹【典当】承接），两件均移出遗物池。
     RELIC_DEFS = [
         ("缓厄沙漏", "你受到的一半伤害转移到下回合承受。"),
@@ -1515,10 +1520,10 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         ("蚀界残钟", "每回终，所有角色各自失去等同于其当前法力×当前速度的血限"),
         ("窥隙法匣", "每次成功闪避后，下回合获得10点法力"),
         ("逐影胫骨", "每累计成功闪避两次，速度+1"),
-        # 2026-10-25 用户令：引擎早有实现（combat_hooks 的造物吸血），此前漏登记，补进遗物池。
+        # 引擎早有实现（combat_hooks 的造物吸血），此前漏登记，补进遗物池。
         ("共生血囊", "由你创造的造物造成伤害时，造物按目标实际减少的生命回复；"
                      "超出造物生命上限的回复量改为回复创造者"),
-        # 2026-10-25 用户令：两条原始怪物道纹遗物化，进通用遗物池。
+        # 两条原始怪物道纹遗物化，进通用遗物池。
         ("疯狂", "所有角色每回合出手次数+1"),
         ("减速", "［战始］所有敌人的当前速度减半"),
     ]
@@ -1877,7 +1882,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _pre_battle_gaizao(self, params: dict) -> dict:
         """改造（扭曲都市专属）：选择2/3/4件不同名消耗品，把全部效果叠加到其中一件。
 
-        口径（2026-11-01 用户令，原【维修】撤销；同日补正：耐久同样叠加、被动效果照常携带）：
+        口径（，原【维修】撤销；同日补正：耐久同样叠加、被动效果照常携带）：
         - 档位＝参与件数：2件（0碎片）／3件（5碎片）／4件（12碎片），另耗1点精力；
         - names 必须互不同名且都在持有中，target 必须是 names 之一；
         - 被并入条目的**当前耐久与耐久上限一并叠加**到目标条目，目标条目成为唯一的耐久池；
@@ -2194,7 +2199,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
 
     # ==================== 出手预算校验 ====================
     # 覆盖：attack/use_daowen/deploy_employee/declare_wish 消耗1出手；
-    # declare_escape（逃跑）一次付清5出手（2026-10-13 改制）；
+    # declare_escape（逃跑）一次付清公式价出手（2026-11-10：max(1, 敌方最高当前
+    # 速度−自身当前速度)，见 handlers/combat._escape_action_cost）；
     # consume_item(明确不消耗出手)、use_resonance(可任意时刻插队)不受此约束。
 
     def _action_budget_of(self, entity: "Entity") -> int:
@@ -2746,12 +2752,12 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _grant_transformed_daowen(self, player: Entity, dest: str) -> bool:
         """残韵获得变化后道纹。X不从原道纹拷贝；同名不重复。
 
-        2026-10-07 用户令：残韵路径双向 + 完全放开——变化结果是原始怪物道纹时
+        残韵路径双向 + 完全放开——变化结果是原始怪物道纹时
         施法者同样永久获得（旧版在此处直接拒绝授予，与「双向 + 可永久持有」冲突）。
         """
         if dest in player.dao_wen:
             return False
-        # 2026-10-12 用户裁定②：残韵转化补给施法者的这一份是真正的获得，
+        # ②：残韵转化补给施法者的这一份是真正的获得，
         # 同样受【承载上限】约束；超出额度就**不授予**（持有者的一换一照常发生）。
         if len(player.dao_wen) >= player.daowen_capacity:
             return False
@@ -2789,11 +2795,15 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if need > self.state.attribute_points:
             return {"success": False,
                     "error": f"属性点不足：需要{need}，池内{self.state.attribute_points}"}
-        # 2026-11-09 用户令：1属性点=1速限（放开速限）；法限仍 2 点一档。
+        # 2026-11-10：速限计价改回 2 点一档；法限仍 2 点一档，速/法点数都须偶数。
         if vals["mana_points"] % 2:
             return {"success": False,
                     "error": "法限按2属性点一档计价，兑换点数必须是偶数",
-                    "instruction": "速限是 1属性点=1速限、血限是 1属性点=6血限，都不必偶数"}
+                    "instruction": "速限是 2属性点=1速限、血限是 1属性点=6血限；速限点数同样须为偶数"}
+        if vals["speed_points"] % 2:
+            return {"success": False,
+                    "error": "速限按2属性点一档计价，兑换点数必须是偶数",
+                    "instruction": "血限是 1属性点=6血限，不必偶数"}
         blood_gain = vals["blood_points"] * 6
         # 不朽之躯：[血限]无法增加，兑血限的点会白扔，直接拒绝而不是静默吞点。
         if blood_gain and self.state._relic_active(target_entity, "不朽之躯"):
@@ -2802,7 +2812,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     "instruction": "改兑 speed_points / mana_points"}
         self.state.attribute_points -= need
         gained = {"blood": blood_gain,
-                  "speed": vals["speed_points"],
+                  "speed": vals["speed_points"] // 2,
                   "mana": vals["mana_points"] // 2}
         if blood_gain:
             target_entity.blood_limit += blood_gain
@@ -2851,7 +2861,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "note": "仅公开已结算步骤；对方可完成1个行动或跳过，随后原法术续跑",
         }
 
-    def _push_spell_frame(self, execution, huangfu_temp_granted=None) -> dict:
+    def _push_spell_frame(self, execution, huangfu_temp_granted=None, coop_temp_granted=None) -> dict:
         self.combat._spell_window_serial += 1
         caster_side = self._spell_side(execution.caster)
         frame = {
@@ -2860,6 +2870,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "awaiting_side": self._other_spell_side(caster_side),
             "token": f"spell-window-{self.combat._spell_window_serial}",
             "huangfu_temp_granted": list(huangfu_temp_granted or []),
+            "coop_temp_granted": list(coop_temp_granted or []),
         }
         self.combat._spell_stack.append(frame)
         self.combat._priority_passes = 0
@@ -2870,6 +2881,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _finish_spell_frame(self, frame: dict) -> None:
         caster = frame["execution"].caster
         for name in frame.get("huangfu_temp_granted", []):
+            caster.dao_wen.pop(name, None)
+        for name in frame.get("coop_temp_granted", []):
             caster.dao_wen.pop(name, None)
 
     def _resume_spell_stack(self) -> list[dict]:
@@ -2990,6 +3003,11 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                         name=daowen, formula="", cost_type="", cost_formula="", effect_formula=""))
                     huangfu_temp_granted.append(daowen)
         spell_name = params.get("name") or huangfu_name or "瞬发法术"
+        # 协力法术发动（release_spell 透传）：出手已在填入时由各填入者付清，
+        # 这里不再逐步扣施法者的出手；其他角色填入的道纹以临时授予支撑校验，
+        # 结算完成/中断后由法术框统一回收（黄符同款口径）。
+        coop_release = params.get("coop_release") if isinstance(params.get("coop_release"), dict) else None
+        coop_temp_granted: list = list(coop_release.get("temp_granted") or []) if coop_release else []
         try:
             execution = self.combat.build_instant_execution(
                 actor, flow_text, cast_target, params.get("steps"), refs,
@@ -3019,7 +3037,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if huangfu_spell is not None:
             huangfu_mana = max(1, huangfu_spell.rank or 1)
             effective_huangfu_mana = actor.mana_cost(huangfu_mana)
-        if actor.actions_used_this_round >= self._action_budget_of(actor):
+        if not coop_release and actor.actions_used_this_round >= self._action_budget_of(actor):
             for daowen in huangfu_temp_granted:
                 actor.dao_wen.pop(daowen, None)
             return {"success": False, "error": f"{actor.name}本回合出手已用完"}
@@ -3037,7 +3055,19 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     actor.dao_wen.pop(daowen, None)
                 return {"success": False, "error": f"【黄符】施法支付失败：{exc}"}
 
-        self._bind_spell_step_payment(execution)
+        if coop_release:
+            # 协力法术：每格出手已由填入者支付；这里只校验施法者仍在场上，
+            # 不再消耗任何人的出手。
+            def _coop_step_payment(caster, _step, _index):
+                if (not caster.is_alive or caster.has_retreated
+                        or self.state.is_sealed_away(caster)):
+                    return {"reason": InterruptReason.CASTER_UNAVAILABLE.value,
+                            "detail": f"{caster.name}已死亡、撤退或暂离，后续步骤中断"}
+                return None
+            execution.before_step = (
+                lambda step, index: _coop_step_payment(execution.caster, step, index))
+        else:
+            self._bind_spell_step_payment(execution)
         execution.run_to_window()
         # 若对方已用【跳过】结束回合，其后续空档自动让过；原法术自己的
         # 后续步骤仍按真实预算逐步支付，不视为新的回合外插队。
@@ -3051,9 +3081,11 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 self.combat._resuming_spell_stack = False
         from .spell_execution import ExecutionStatus
         if execution.is_running:
-            self._push_spell_frame(execution, huangfu_temp_granted)
+            self._push_spell_frame(execution, huangfu_temp_granted, coop_temp_granted)
         else:
             for daowen in huangfu_temp_granted:
+                actor.dao_wen.pop(daowen, None)
+            for daowen in coop_temp_granted:
                 actor.dao_wen.pop(daowen, None)
         status = "awaiting_window" if execution.is_running else execution.status.value
         reason = execution.interrupt_reason.value or None
@@ -3124,7 +3156,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _force_disengage(self, *, reason: str) -> dict:
         """强制脱战（清理口径 = 原买路财撤退，不改语义）。
 
-        `declar_escape`（付 5 出手）与【血翼/烬翼·立刻逃跑】（付 1 耐久）共用。
+        `declare_escape`（按公式付清出手价）与【血翼/烬翼·立刻逃跑】（付 1 耐久）共用。
         """
         self.state.enemies.clear()
         self.state.temp_friends.clear()
@@ -3144,7 +3176,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         return {"note": "本场战斗结束，未击败任何怪物，不产生击杀碎片奖励", "reason": reason}
 
     def _settle_free_crystal_cost(self, target: Entity, cost_type: str, amount: int) -> dict:
-        """自由结晶：强制目标付出指定代价共计 amount（2026-10-05 用户令）。
+        """自由结晶：强制目标付出指定代价共计 amount。
 
         生命/血限/枯竭/法限/速度/异变走统一代价结算入口 _apply_numeric_cost_part
         （含致死判定、不朽之躯免疫、异变迷失等既有口径）；失忆与冷却没有
@@ -3181,7 +3213,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     "paid": amount, "cooled_daowen": cooled}
         return self.combat.pay_numeric_cost(target, cost_type, amount, forced=True, ctx=ctx)
 
-    def _consume_merged_item(self, item: Consumable, params: dict) -> dict:
+    def _consume_merged_item(self, item: Consumable, params: dict,
+                             actor: Entity | None = None) -> dict:
         """使用【改造】合成条目：按原顺序逐条结算全部来源效果。
 
         每个来源都用一份临时 Consumable 走同一条使用管线，因此耐久扣除只发生在
@@ -3214,7 +3247,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             if isinstance(own, dict):
                 source_params.update(own)
             try:
-                outcome = self._consume_item_effect(temp, source_params)
+                outcome = self._consume_item_effect(temp, source_params, actor=actor)
             except Exception as exc:  # 单条效果异常不拖垮其余来源
                 outcome = {"success": False, "error": f"效果结算异常：{exc}"}
             executed += 1
@@ -3241,21 +3274,38 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "state": self.combat._get_combat_state() if self.state.phase == GamePhase.IN_COMBAT.value else None,
         }
 
-    def _consume_item_effect(self, item: Consumable, params: dict) -> dict:
-        """单件消耗品的真实结算（改造合成条目也复用这条管线）。"""
+    def _item_actor_opponents(self, actor: Entity | None) -> list:
+        """消耗品使用者视角的「对面」名单（不按 A/B 硬编码）。
+
+        使用者在轮回者侧 → 对面是敌方名单；使用者在怪物侧 → 对面是玩家侧存活单位。
+        """
+        if actor is None or self.state.on_player_side(actor):
+            return self.state.get_all_enemy_side()
+        refs = self.combat._combat_entity_refs()
+        return [entity for ref, entity in refs.items()
+                if self.state.on_player_side(entity) and entity.is_alive]
+
+    def _consume_item_effect(self, item: Consumable, params: dict,
+                             actor: Entity | None = None) -> dict:
+        """单件消耗品的真实结算（改造合成条目也复用这条管线）。
+
+        ``actor`` 是真实使用者（缺省仍是玩家）；效果里的
+        「自身/对面」都按使用者阵营推，不再硬编码 state.player。
+        """
+        actor = self.state.player if actor is None else actor
         item_name = item.name
 
         # 扭曲工具库消耗品：引擎侧真实结算（F3）
         if item.name in TWISTED_TOOL_LIBRARY:
-            return self._consume_twisted_tool(item, params)
+            return self._consume_twisted_tool(item, params, actor=actor)
 
-        # 翼类消耗品（2026-10-23 用户令）：每次使用选一个模式，耗 1 点耐久。
+        # 翼类消耗品：每次使用选一个模式，耗 1 点耐久。
         #   血翼：噬血（本回合你失去的生命改为回复）／飞行1／立刻逃跑
         #   烬翼：熄事（本回合不触发任何特殊事件）／飞行1／立刻逃跑
         if item.kind == "wing" or item.name in WING_MODES:
-            player = self.state.player
+            player = actor
             if player is None or not player.is_alive:
-                return {"success": False, "error": "没有可行动的玩家"}
+                return {"success": False, "error": f"{item_name}的使用者不存在或已倒下"}
             modes = WING_MODES.get(item.name, {})
             mode = params.get("mode", "")
             if mode not in modes:
@@ -3287,9 +3337,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             target = None
             if mode == "damage":
                 target = self.combat._combat_entity_refs().get(params.get("target_ref", ""))
-                if target not in self.state.get_all_enemy_side():
+                if target not in self._item_actor_opponents(actor):
                     target = None
-            result = self.combat.use_sculpture(item, target=target, mode=mode)
+            result = self.combat.use_sculpture(item, target=target, mode=mode, actor=actor)
             return {
                 "success": result.get("success", True),
                 "action": f"使用雕塑【{item_name}】({mode})",
@@ -3297,7 +3347,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "state": self.combat._get_combat_state(),
             }
 
-        # 自由结晶（2026-10-05 用户令重做，旧口径「对同一怪物喂满3次触发救赎」废止）：
+        # 自由结晶（重做，旧口径「对同一怪物喂满3次触发救赎」废止）：
         # 对[目标]使用→其随机付出一种代价，共计10；若目标是生命≤20%血限的怪物，
         # 代价结算后仍存活的，强制触发救赎。
         if item.name == "自由结晶":
@@ -3333,15 +3383,15 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "state": self.combat._get_combat_state(),
             }
 
-        # 【无限肉块】：恢复10生命（2026-10-05 用户令：5→10），但本次恢复不计入癌变累计治疗量。
+        # 【无限肉块】：恢复10生命（5→10），但本次恢复不计入癌变累计治疗量。
         if item.kind == "infinite_meat":
-            return consume_infinite_meat(self.combat, item, self.state.player)
+            return consume_infinite_meat(self.combat, item, actor)
 
         # 正文具名消耗品：全部在扣耐久前完成参数校验；未实现项不得“成功但只扣耐久”。
         # 2026-10-14 审计F4：镇魂铁钉处理器补齐（此前发而无用）；替死鬼/赶尸铃/黄符见下。
         if item.name in {"绝息淤泥", "活性土壤", "假钞贴", "破障晶", "洗劫面具", "赤泉囊", "龙血瓶",
                           "镇魂铁钉", "赶尸铃", "黄符", "逆命筹", "怒火针", "灼罪钉", "定命丸"}:
-            return self._consume_named_event_item(item, params)
+            return self._consume_named_event_item(item, params, actor=actor)
 
         # 自定义消耗品（2026-10-23）：声明里的 effects 由 verbs 执行，不占出手。
         # 触发式（trigger 非空）的消耗品走机制自动结算，不接受手动使用。
@@ -3352,25 +3402,28 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                         "error": f"消耗品【{item.name}】是被动触发型，不能手动使用"}
             target_ref = params.get("target_ref", "")
             refs = self.combat._combat_entity_refs()
-            target = refs.get(target_ref, self.state.player) if target_ref else self.state.player
+            target = refs.get(target_ref, actor) if target_ref else actor
             if target_ref and target is None:
                 return {"success": False, "error": "target_ref不是当前合法目标"}
             remaining = item.use()
             logs = custom_resources.apply_effects(
                 self.combat, custom_item.spec["effects"],
-                actor=self.state.player, target=target,
+                actor=actor, target=target,
                 x=int(params.get("x", 1)), source=item.name)
             return {"success": True, "action": f"使用消耗品【{item.name}】",
                     "result": {"uses_remaining": remaining, "effects": logs},
                     "state": self.combat._get_combat_state()}
 
-        return consume_ordinary(self.combat, item, self.state.player)
+        return consume_ordinary(self.combat, item, actor)
 
-    def _consume_named_event_item(self, item: Consumable, params: dict) -> dict:
+    def _consume_named_event_item(self, item: Consumable, params: dict,
+                                  actor: Entity | None = None) -> dict:
+        # 使用者按 actor 结算（缺省玩家）；个别条目涉及的
+        # 世界侧副作用（逃跑标记、[朋友]、假碎片）仍是全局状态，保持原样。
         refs = self.combat._combat_entity_refs()
-        player = self.state.player
+        player = self.state.player if actor is None else actor
         if player is None:
-            return {"success": False, "error": "没有玩家"}
+            return {"success": False, "error": "没有使用者"}
         name = item.name
         if name in NAMED_COMBAT_ITEMS:
             return consume_named_combat_item(self.combat, item, params, player)
@@ -3566,9 +3619,11 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         result.update({"uses_remaining": item.current_uses, "is_depleted": item.is_depleted})
         return {"success": True, "action": f"使用消耗品【{name}】", "result": result}
 
-    def _consume_twisted_tool(self, item: Consumable, params: dict) -> dict:
-        return consume_tool(self.combat, item, params, self.state.player,
-                            self.state.get_all_enemy_side())
+    def _consume_twisted_tool(self, item: Consumable, params: dict,
+                              actor: Entity | None = None) -> dict:
+        actor = self.state.player if actor is None else actor
+        return consume_tool(self.combat, item, params, actor,
+                            self._item_actor_opponents(actor))
 
     # ==================== 事件结算 ====================
 
@@ -4014,7 +4069,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         （否则下面 _replace_state_preserving_death_book_progress 会清空 state，
         本次胜者的快照丢失）。开关打开时则由 _save_progression 一并把 slots 重写。
 
-        2026-09-28 用户令：阶级推进总开关 `PROGRESSION_ENABLED` 默认 False；
+        阶级推进总开关 `PROGRESSION_ENABLED` 默认 False；
         关闭时不修改 unlocked_tier/endless_mode、不写 progression 段——
         留作未来五阶全部接入后启用。
         """
@@ -4087,7 +4142,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _trigger_final_crown(self) -> dict:
         """旧入口：封存候选人 / 开启第8场死斗（**只在显式调用时发生**）。
 
-        2026-10-31 用户裁定：死斗不再是强硬规则 —— 第7场战终**不再**自动调用本方法，
+        死斗不再是强硬规则 —— 第7场战终**不再**自动调用本方法，
         收尾条件改由【最终的冠冕】世界事件承载（`_resolve_world_crown`：地图随机刷新 +
         持有存活 5 个世界回合即自动脱离副本）。
 
@@ -4213,7 +4268,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         self.state.phase = GamePhase.IN_COMBAT.value
         self.state.combat_subphase = CombatSubphase.AWAIT_ROUND_START.value
 
-        # 2026-10-13 用户令删【三相残韵盘】后，死斗开场已无可选遗物；
+        # 删【三相残韵盘】后，死斗开场已无可选遗物；
         # optional_relics 键保留（契约稳定），恒为空列表。
         optional = []
 
@@ -4299,7 +4354,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         return migrated
 
     def _migrate_legacy_xuezhai_names(self) -> bool:
-        """旧档【血债】→【连击】（2026-10-22 用户令：改名只发生在读入边界）。
+        """旧档【血债】→【连击】（改名只发生在读入边界）。
 
         遍历状态内全部实体的道纹表：键序不变地改键、实例定义名同步归一。
         引擎注册表不收旧名，迁移完成后旧名提交照常报未知道纹。
@@ -4336,7 +4391,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     ) -> dict:
         """真理X：提出 X 句陈述，要求目标逐句言明真理，否则无法开口。
 
-        2026-10-23 用户裁定：X = 陈述句数（「X 句话」）；X 同时决定无法开口的持续回合。
+        X = 陈述句数（「X 句话」）；X 同时决定无法开口的持续回合。
         局外发动同样允许（【真理】已列入 OUT_OF_COMBAT_DAOWEN 明示项）。
         """
         actor = actor or self.state.player
@@ -4403,7 +4458,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _replace_state_preserving_death_book_progress(self) -> None:
         """开始新轮回者时保留《死者之书》的系统记录。
 
-        2026-10-05 用户令：癌变休整加成已废止，此处不再携带 rest_heal_bonus。"""
+        癌变休整加成已废止，此处不再携带 rest_heal_bonus。"""
         wisdom = list(self.state.death_book_wisdom)
         # 死斗败者先过死者之页（reset）再走resolve_final_duel(defeat)；
         # reset若清空擂主快照，defeat就无声吞掉擂主（r14实战复现）。
@@ -4455,7 +4510,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _queue_death_inheritance_if_needed(self, action_type: str = "") -> Optional[Interrupt]:
         """轮回者命零后只抛一次【死者之页】中断，草稿写入 context 待审核。
 
-        2026-10-24/25 用户令：一页两项——〖生平〗由引擎自动总结（`summarize_life`，
+        2026-10-24/25 一页两项——〖生平〗由引擎自动总结（`summarize_life`，
         含死因这种事实），〖遗言〗由本人自定义（≤20字，也可以不写）。
         死因不是遗言，所以草稿里不带任何死因模板文案；生平不接受改稿。
         """

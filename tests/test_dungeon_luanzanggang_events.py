@@ -127,7 +127,7 @@ def test_xuanmu_option2_hongsha_on_shaifa():
 def test_gufen_option1_consumable():
     """正常路径：上前续香——衰老6+获消耗品三香通冥（耐久3/3）。
 
-    2026-11-07 用户令：【三香通冥】由遗物改消耗品，不再进遗物列表。
+    【三香通冥】由遗物改消耗品，不再进遗物列表。
     """
     e = _engine("gf1")
     bl0 = e.state.player.blood_limit

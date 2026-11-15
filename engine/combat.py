@@ -36,6 +36,8 @@ MEDIOCRITY_ROUNDS = Entity.MEDIOCRITY_ROUNDS
 #  遗物结算 / 凡庸与目标合法性）。拆分不改变行为与对外契约：CombatEngine 仍是
 # 唯一入口，全部引用方（含 self.combat.X 与 CombatEngine.X）经 MRO 解析不变。
 # 新增分片时请同步 engine/validator.py 的机制护栏扫描范围。
+from .combat_parts.blood_structures import (BloodStructureMixin,
+                                            IMPLEMENTED_BLOOD_STRUCTURES)
 from .combat_parts.cost_payment import CostPaymentMixin
 from .combat_parts.damage_death import DamageDeathMixin
 from .combat_parts.daowen_effect import DaowenEffectMixin
@@ -44,8 +46,9 @@ from .combat_parts.monster_phase import MonsterPhaseMixin
 from .combat_parts.spells import SpellReactionMixin
 
 
-class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
-                   DaowenEffectMixin, SpellReactionMixin, MonsterPhaseMixin):
+class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
+                   MonsterLifeMixin, DaowenEffectMixin, SpellReactionMixin,
+                   MonsterPhaseMixin):
     """战斗计算引擎（门面；实现见 engine/combat_parts/*.py）"""
     
     # 副本专属道纹：唯一事实源在 gamedata；复制集合避免调用方修改时污染全局配置。
@@ -57,7 +60,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     # 原始怪物道纹（道纹归属规则：各组起点）——【原初X】可借用范围
     ORIGINAL_MONSTER_DAOWEN = ("全力", "必中", "飞行")  # 2026-10-29：飞行恢复为冷却X道纹
     # 原始怪物道纹每次实际发动时支付异变5X（X 恒为面板/借用时写定的值；
-    # 2026-09-16 用户令：道纹递增机制已废止）；效果持续期间（未再次发动）不再重复计费。
+    # 道纹递增机制已废止）；效果持续期间（未再次发动）不再重复计费。
     # 必中为次数型（下X次选择[目标]无法闪避），余数记在 entity._bizhong_left。
     YUANCHU_COST_RATE = 5
     # 波及X（2026-08-21）：你发动的道纹同时作用于所有拥有波及效果的目标。
@@ -269,7 +272,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             "hit_index": hit_index,
             "attack_power": attacker.attack_power,
             "is_must_hit": is_must_hit,
-            # 2026-10-12 用户令：目标带【必中】debuff 时闪避/招架都不开放，
+            # 目标带【必中】debuff 时闪避/招架都不开放，
             # prepare 侧如实回报，免得推演端提交一个注定失败的回合外行动。
             "out_of_turn_blocked": self.out_of_turn_blocked(target),
             "can_dodge": (not is_must_hit and not self.out_of_turn_blocked(target)
@@ -359,7 +362,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         self.clamp_immortal_body(entity)
         gained = entity.current_speed - before
         speed_ctx = self._record_speed_change_event(entity, gained, ctx, field="current_speed")
-        # 【回锋刀】（2026-11-02 用户令）：当前速度**实际发生变化**就触发——
+        # 【回锋刀】：当前速度**实际发生变化**就触发——
         # 获得与失去双向都算，每次固定 5 点伤害。封顶导致没有实际变化时不触发。
         self._trigger_huifeng_on_speed_change(entity, gained, speed_ctx=speed_ctx)
         return gained
@@ -401,7 +404,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         return bool(self._relic_holders(name))
 
     def out_of_turn_blocked(self, entity) -> bool:
-        """该角色是否被禁止「回合外行动」（唯一闸门，2026-10-12 用户令）。
+        """该角色是否被禁止「回合外行动」（唯一闸门）。
 
         来源是道纹【必中】X：「你选中的目标无法进行回合外行动，持续X」。
         回合外行动 = 在自己回合之外做出的任何响应，当前含：
@@ -423,7 +426,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
     def mana_overflow_exempt(self, entity) -> bool:
         """当前法力是否允许超出[法限]（唯一豁免：遗物【苍白之花】）。
 
-        2026-10-11 用户令，`物品索引.md:110`「你的当前法力可以超出[法限]。」。
+        `物品索引.md:110`「你的当前法力可以超出[法限]。」。
         只豁免**当前法力**这一项；当前速度≤[速限] 对持有者同样成立。
         当前生命≤[血限] 另有自己的豁免（2026-10-14【猩红果实】，见
         `GameState.hp_overflow_exempt`），不在本方法内。
@@ -436,7 +439,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         return self.state.mana_overflow_exempt(entity)
 
     def clamp_immortal_body(self, entity: Entity) -> None:
-        """任何属性都不得超过其上限（用户裁定 2026-09-13，全局化）。
+        """任何属性都不得超过其上限（全局化）。
 
         原先这条只在持有【不朽之躯】时生效，其余情况允许当前法力/速度超池。
         现改为**无条件对所有角色生效**：当前生命≤[血限]、当前法力≤[法限]、
@@ -575,7 +578,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 and self.state.on_player_side(entity) != holder_side]
 
     def _default_huifeng_target(self, holder: Entity) -> tuple[str, Optional[Entity]]:
-        """回锋刀缺省目标（2026-11-02 用户令）。
+        """回锋刀缺省目标。
 
         调用方没显式提交 `dodge_relic_target_ref` 时**不得抛错中断**——法术循环
         （如【超频】+【透支】）与 1v1 里根本没有"选目标"这一步。取目标的顺序：
@@ -620,7 +623,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         *, require_target: bool = False,
         speed_ctx: Optional[dict] = None,
     ) -> Optional[dict]:
-        """【回锋刀】（2026-11-02 用户令版）：当前速度**实际变化**时触发。
+        """【回锋刀】（版）：当前速度**实际变化**时触发。
 
         - 触发条件：结算后 `当前速度 != 变化前速度`，**获得与失去都算**，与变化
           幅度无关（旧版只认失速、并按 `3 × 失去点数` 造伤，已废除）。
@@ -866,10 +869,10 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             "hp_lost": 0,
             "target_died": False,
         }
-        # 万钧印（消耗品）：持有者被选为攻击目标时自动触发并消耗1点耐久，
-        # 将攻击改为攻击者对自己发动。显式传 wanjunyin=False 可拒绝本次；
+        # 万钧印（消耗品，按物品索引=持有者选择）：应对窗口显式请求（wanjunyin=True）
+        # 才把这一击改为攻击者对自己发动，触发消耗1点耐久；默认不触发。
         # 被改道的一次自攻不会再被改道（_wanjunyin_converted 防 A→B→A 递归）。
-        if (not _wanjunyin_converted and wanjunyin is not False
+        if (not _wanjunyin_converted and wanjunyin is True
                 and attacker is not target and attacker.is_alive
                 and self._wanjunyin_holder(target)):
             item = self._wanjunyin_item(target)
@@ -914,7 +917,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             s = next((s for s in ent.status_effects if s.name == "必中"), None)
             return bool(s and s.remaining_rounds > 0)  # -1 是次数型标记，不算真buff
         caster_has_bizhong_buff = _has_real_bizhong_buff(attacker)
-        # 2026-10-12 用户令：必中X 改挂**目标**，故目标身上的【必中】debuff 同样封死闪避。
+        # 必中X 改挂**目标**，故目标身上的【必中】debuff 同样封死闪避。
         # 2026-11-01：必中＝发动者侧的「下X次选中」次数，选中即耗1次，该次目标不能
         # 闪避/招架。目标身上的【必中】debuff 口径已废弃（不再夺走目标的行动）。
         must_hit = (is_must_hit or caster_has_bizhong_buff
@@ -930,7 +933,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             result["note"] = "血影：支付生命10，本次判定被取消"
             return result
 
-        # 【束缚】限定只能施法（2026-11-01 用户令）：闪避、招架也是行动，同样不可选。
+        # 【束缚】限定只能施法：闪避、招架也是行动，同样不可选。
         # 这不是新的旁路：束缚的旧闸门只管主动行动，零出手的响应行动原样沿用它。
         if target.has_status("束缚"):
             if dodge:
@@ -944,18 +947,24 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
 
         # 闪避判定
         if dodge:
+            nianzhi_extra = self.structure_dodge_extra(target)
             if must_hit:
                 result["dodge_success"] = False
                 result["dodge_fail_reason"] = "必中攻击无法闪避"
             elif (penalty := self.charge_reaction_penalty(target, "闪避")) is not None:
                 result["dodge_success"] = False
                 result["dodge_fail_reason"] = penalty["reason"]
-            elif target.current_speed >= 1:
+            elif target.current_speed >= 1 + nianzhi_extra:
                 extra = self._spend_dodge_speed(target, dodge_relic_target_ref)
                 result["dodge_success"] = True
                 result["speed_after_dodge"] = target.current_speed
                 if extra:
                     result["dodge_extra"] = extra
+                # 法力结构【粘滞】：宣告闪避成功后额外支付X点速度并清空层数。
+                nianzhi_log = self.consume_nianzhi_on_dodge(target)
+                if nianzhi_log:
+                    result["nianzhi"] = nianzhi_log
+                    result["speed_after_dodge"] = target.current_speed
                 # 「闪避时」开放可扩展触发：持有者成功闪避后触发（注册/接线见
                 # spell_dsl.EXTRA_TRIGGERS 与 _fire_auto_reaction）。此分支位于
                 # _attack_after_window_target 置位之前，不会与普攻伤害窗口冲突。
@@ -968,7 +977,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                 return result
             else:
                 result["dodge_success"] = False
-                result["dodge_fail_reason"] = "速度不足"
+                result["dodge_fail_reason"] = ("速度不足（粘滞需额外支付"
+                                               f"{nianzhi_extra}点速度）"
+                                               if nianzhi_extra else "速度不足")
         
         # 逐击招架：与闪避一样先支付1速度，但只免疫攻击伤害，不取消判定。
         # 真刀（分配伤害>0）成功后返还1速度；空刀不返还，因此可骗取速度。
@@ -989,6 +1000,13 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                          "source_type": "action", "actor": target, "target": target,
                          "tags": {"parry", "active_payment"}})
                 result["speed_after_parry_cost"] = target.current_speed
+                # 法力结构【震爆】：宣告招架成立（速度已付）即引爆——清空层数
+                # 并受X点结构伤害；不属于被招架的这次攻击，不影响免疫与返还。
+                zhenbao_log = self.consume_zhenbao_on_parry(target, attacker)
+                if zhenbao_log:
+                    result["zhenbao"] = zhenbao_log
+                    result["target_died"] = bool(result.get("target_died")) \
+                        or zhenbao_log.get("target_died", False)
                 revealed = (attacker.effective_attack_power()
                             if allocated_damage is None else allocated_damage)
                 if revealed > 0:
@@ -1015,22 +1033,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             damage += bonus
             result["nilin_bonus"] = bonus
             attacker._nilin = 0
-        # 检查蒙蔽状态
-        if attacker.has_status("蒙蔽"):
-            stacks = attacker.get_status_value("蒙蔽")
-            if stacks > 0:
-                damage = 0
-                # 减少蒙蔽层数
-                for s in attacker.status_effects:
-                    if s.name == "蒙蔽" and s.value > 0:
-                        s.value -= 1
-                        if s.value <= 0:
-                            attacker.status_effects.remove(s)
-                        break
-                result["damage_dealt"] = 0
-                result["blocked_by"] = "蒙蔽"
-                return result
-        
+        # （蒙蔽已改为统一伤害入口拦截：engine/combat_parts/damage_death.py）
+
         # 检查贯穿（无视格挡）
         ignore_shield = attacker.has_status("贯穿")
         # 震岳龙躯（真龙之心遗物）：激活期间，自身受到超出15点的伤害无效
@@ -1235,7 +1239,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """按四项先手属性决定回始先手——**通用规则**，所有战斗同一口径。
 
         规则正文·战斗行动：[速限]→[法限]→[血限]→当前生命，数值大者先手；
-        四项完全相同则随机首手、之后每回合交替（2026-11-09 用户令：不再有
+        四项完全相同则随机首手、之后每回合交替（不再有
         「仅死斗适用」，也不再限制开放地图对局）。
         先手方若本回合已无出手权（沉溺/无力/预算耗尽），交给另一侧，避免死在
         「拿不到优先权」的一侧。
@@ -1279,7 +1283,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """回始先手：一律按四项先手属性判定（见 `_stats_priority_side`）。
 
         旧实现在这里写「轮回者侧优先」，那等于给玩家一个结构性先手红利，
-        也把先手规则锁进了死斗兼容路径；两者都已按用户令删除。
+        也把先手规则锁进了死斗兼容路径；两者都已按删除。
         """
         return self._stats_priority_side()
 
@@ -1366,7 +1370,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         # DM裁定 2026-09-09：[回始]不再回填法力。法力改为**一池制**——[战始]给满
         # 等同[法限]的一池，整场只出不进，[战终]复原（与[速度]同口径）。
         # 因这一段，"[回始]不获得法力"曾一度失去作用对象，【勾魂】在 2026-09-09
-        # 改为消耗法力翻倍；2026-10-08 用户令恢复「无法获得[法力]」原意——
+        # 改为消耗法力翻倍；恢复「无法获得[法力]」原意——
         # 战斗内已有多个法力来源（聚能/储能电池/守夜灯/承露盏/
         # 透支/法术），效果重新有对象。判定位见 models.py::gain_mana。
 
@@ -1377,7 +1381,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         # 遗物：回始触发（回锋刀按速限缺口造伤）。
         relic_logs = self.process_relics(TriggerTiming.ROUND_START, {"relic_choices": relic_choices or {}})
         effects.extend({"type": "relic", "log": l} for l in relic_logs)
-        # 【守夜灯】2026-10-25 用户令改到[回终]结算（见 round_end），[回始]不再授予。
+        # 【守夜灯】改到[回终]结算（见 round_end），[回始]不再授予。
 
         # 结算回始效果
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
@@ -1401,6 +1405,20 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             # 机制的报告条目并入 effects，战报格式与迁移前一致。
             effects.extend(self._dispatch_phase(Phase.ROUND_START, target=entity))
 
+        # 法力结构【永焰】回始结算：每回始目标失去 X 点生命（X=层数；直接失血，
+        # 走统一失血钩子，受【庇护】等失血规则约束）。独立循环自带去重（迷失
+        # 变身时 player 可能同时出现在两侧列表），沉溺阻断的回合不经历、不烧灼。
+        seen_yongyan: set[int] = set()
+        for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
+            if id(entity) in seen_yongyan:
+                continue
+            seen_yongyan.add(id(entity))
+            if not entity.is_alive or self.chenni_round_blocked(entity):
+                continue
+            yongyan_log = self.tick_yongyan(entity)
+            if yongyan_log:
+                effects.append({"type": "structure_tick", **yongyan_log})
+
         # 遗物【灾厄轮盘】回始结算相位；原清算机制已删除。
         effects.extend(self._dispatch_phase_all(
             Phase.ROUND_START_SETTLE,
@@ -1413,9 +1431,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             self.state.get_all_player_side() + self.state.get_all_enemy_side()))
 
         # 【封印X】延迟回场：在第 R+X 回合始把原实体放回它脱场前所在的阵营。
-        # 2026-10-08 用户令：封印的目标已不限于怪物，home/index 记录原址
+        # 封印的目标已不限于怪物，home/index 记录原址
         # （"player" 表示玩家位），一律回原址，不得一律塞回 enemies。
-        # 回场当回合记录 spawned_round；2026-09-15 用户令取消白板后，回场当回合
+        # 回场当回合记录 spawned_round；取消白板后，回场当回合
         # 同样可以发动道纹（spawned_round 仅作出生回合记录）。
         delayed = list(getattr(self.state, "delayed_monster_reentries", []) or [])
         due = [entry for entry in delayed if entry.get("return_round", 0) <= self.state.current_round]
@@ -1437,9 +1455,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                                 "delay_rounds": entry.get("delay_rounds", 0),
                                 "home": entry.get("home") or "enemies"})
 
-        # 出怪配方（2026-09-28 用户令）：增援在第 i 波 `T_i` 累加的回合进场，
+        # 出怪配方：增援在第 i 波 `T_i` 累加的回合进场，
         # 一波可进 R_i（≥1）只；旧的固定波次 R4/R7/R10 已废止。
-        # 死斗无增援；增援怪进场当回合即可发动道纹（2026-09-15 用户令删除白板）。
+        # 死斗无增援；增援怪进场当回合即可发动道纹（删除白板）。
         queue = list(getattr(self.state, "monster_reinforcements", []) or [])
         if queue and not self.state.in_final_duel:
             from .monsters import make_monster_entity
@@ -1828,11 +1846,11 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             raise ValueError("relic_choices必须是对象")
         active = {r.name for r in self.state.relics if getattr(r, "enabled", True) and self.state.sealed_relics.get(r.name, 0) <= 0}
         player = self.state.player
-        # 2026-10-13 用户令：【三相残韵盘】遗物删除，原战始显式决策分支一并移除。
-        # 2026-10-11 用户令：【苍白之花】改为纯被动（物品索引.md:110「你的当前法力可以
+        # 【三相残韵盘】遗物删除，原战始显式决策分支一并移除。
+        # 【苍白之花】改为纯被动（物品索引.md:110「你的当前法力可以
         # 超出[法限]。」），旧效果「战始可选择疲惫5；战终精力+1」废止——它不再出现在
         # 战始可选遗物里，也不再有 use 布尔值需要提交。
-        # 2026-10-14 用户令：【猩红果实】重做为纯被动（当前生命可超出[血限]），
+        # 【猩红果实】重做为纯被动（当前生命可超出[血限]），
         # 旧效果「战始可选流血10、战终血限+2」移交道纹【增殖】——战始 use 决策取消。
         refs = self._combat_entity_refs()
         if "负岳索" in active:
@@ -1860,7 +1878,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             if (not isinstance(decision, dict)
                     or (target_ref not in legal and not deferred_enemy_ref)):
                 raise ValueError(f"烙痕钉必须显式选择敌方target_ref，可选{sorted(legal)}")
-        # 2026-10-11 用户令：按 物品索引.md 重写【回锋刀】——索引只给了
+        # 按 物品索引.md 重写【回锋刀】——索引只给了
         # 「每失去1点速度后对[目标]造成3伤害」与「[回始]对[目标]造成3×([速限]-当前速度)伤害」，
         # 没有战始效果。原先这里的「苍白之花已发动 ⇒ 回锋刀必须提交目标」是遗物之间的
         # 硬编码联动（AI_EXPERIENCE.md 规则18 禁止），已删除。
@@ -1886,8 +1904,8 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             if (not isinstance(index, int) or isinstance(index, bool) or index < 0
                     or index >= len(self.state.enemies) or not self.state.enemies[index].is_alive):
                 raise ValueError(f"回锋刀触发时必须显式提交合法relic_choices.回锋刀.enemy_index，可选{legal}")
-        # 2026-10-14 用户令：【余火印】整段删除（extra 方案废弃）——回始 use 决策取消。
-        # 2026-10-12 用户令：【共罪】删掉与道纹【透支】重合的「[回始]流血4X换X法力」，
+        # 【余火印】整段删除（extra 方案废弃）——回始 use 决策取消。
+        # 【共罪】删掉与道纹【透支】重合的「[回始]流血4X换X法力」，
         # 只保留「数值型代价可与朋友/员工平分」作为其主要功能。它因此不再是回始主动
         # 遗物，`共罪`/`对手共罪` 两个回始决策键随之取消（平分仍在各代价提交处走
         # cost_share_target_ref，不受影响）。
@@ -1944,12 +1962,12 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
                     "tags": {"relic", "round_start"},
                 })
                 logs.append(f"回锋刀：{holder.name}对{target.name}造{d}伤")
-            # 2026-10-14 用户令：【余火印】整段删除（extra 方案废弃），本分支移除。
+            # 【余火印】整段删除（extra 方案废弃），本分支移除。
         if trigger == "battle_start":
             choices = ctx.get("relic_choices", {})
             self.validate_battle_start_relic_choices(choices)
-            # 2026-10-13 用户令：【三相残韵盘】遗物删除（残韵生产改由道纹【典当】承接发现侧）。
-            # 2026-10-14 用户令：【猩红果实】重做为纯被动（当前生命可超出[血限]），
+            # 【三相残韵盘】遗物删除（残韵生产改由道纹【典当】承接发现侧）。
+            # 【猩红果实】重做为纯被动（当前生命可超出[血限]），
             # 旧「战始流血10→战终血限+2」移交道纹【增殖】，本分支移除。
             # 机制系统：BATTLE_START 相位分发。位置即原缄默面具/帮派令结算位置
             # （缄默面具=5、帮派令=10 同相位按 priority 保持原序；负岳索之前）——顺序与迁移前一致。
@@ -2008,8 +2026,9 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
             logs.extend(self._dispatch_phase(Phase.BATTLE_END, target=player))
         return logs
 
-    # 2026-10-13 用户令：【买路财】遗物删除（撤退改制为轮回者【逃跑】行动，
-    # 一次付清5次出手强制脱战；见 api._action_declare_escape）。原 buyaicai_escape_cost
+    # 【买路财】遗物删除（撤退改制为轮回者【逃跑】行动，
+    # 按公式价一次付清出手强制脱战；见 handlers/combat._action_declare_escape）。
+    # 原 buyaicai_escape_cost
     # 与 api._action_retreat_via_toll 一并移除。
 
     def apply_opposing_longxi(self, actor: Entity) -> Optional[dict]:
@@ -2084,7 +2103,7 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         effects = [{"type": "mediocrity", "entity": entity.name,
                     "note": f"{why}，触发【凡庸】：凭空全身炸裂，[命零]"}]
         if entity.entity_type == "怪物":
-            # 2026-10-05 用户令：旧【残骸】（恢复20生命+异变10）与旧【自由结晶】
+            # 旧【残骸】（恢复20生命+异变10）与旧【自由结晶】
             # （喂3次触发救赎）合并重做为单一【自由结晶】，效果见 物品索引.md。
             self.state.consumables.append(
                 Consumable(name="自由结晶",
@@ -2104,18 +2123,20 @@ class CombatEngine(DamageDeathMixin, CostPaymentMixin, MonsterLifeMixin,
         """
         # 2026-11-01：【必中】改口径为「目标无法行动」，任何行动都不可用。
         # 【束缚】放行施法；法术由道纹构成，直接发动单个道纹同属施法（基础定义·施法）。
+        # 协力施法的发起/填入/发动同属施法操作，一并放行。
         return (entity.is_alive
                 and not self.state.is_sealed_away(entity)
                 and not self.chenni_round_blocked(entity)
                 and (not entity.has_status("束缚")
-                     or action_type in {"cast", "define_spell", "use_daowen"}))
+                     or action_type in {"cast", "define_spell", "use_daowen",
+                                        "declare_spell", "fill_spell", "release_spell"}))
 
     def yapo_target_lock_holder(self, attacker: Entity, target: Entity) -> Optional[Entity]:
         """返回限制这次选目标的【压迫】持有者；没有压迫限制则返回None。
 
         压迫只豁免其[目标]：其他角色只能选择自己，不能选择压迫持有者或第三方。
 
-        2026-11-02 用户令：**所有被本次发动选中的[目标]构成同一个豁免集合**。
+        **所有被本次发动选中的[目标]构成同一个豁免集合**。
         波及/多目标提交时 {A, B} 各持一份【压迫】状态，A 与 B 互为"除目标外"，
         绝不能让 A 因为 B 身上有压迫就被锁死（那就是两个豁免目标互相压迫）。
         判定顺序：攻击者本人就在豁免集合内 → 不限制；否则场上任一压迫持有者

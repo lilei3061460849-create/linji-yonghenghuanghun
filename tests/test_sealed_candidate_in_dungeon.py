@@ -71,9 +71,9 @@ def test_sealed_candidate_fights_in_dungeon():
 
     e = _engine_with_snapshot(snapshot, seed=7)
     p = e.state.player
-    # 现行定价（2026-11-09：1属性点=1速限、2属性点=1法限）下 8速点→速限8、6法点→法限3，
-    # 叠加本条的 +6 法限 / +3 速限后为 9 / 11。
-    assert p.mana_limit == 9 and p.speed_limit == 11, "封存角色应带成长属性"
+    # 现行定价（2026-11-10：2属性点=1速限、2属性点=1法限）下 8速点→速限4、6法点→法限3，
+    # 叠加本条的 +6 法限 / +3 速限后为 9 / 7。
+    assert p.mana_limit == 9 and p.speed_limit == 7, "封存角色应带成长属性"
     assert "庇护" in p.dao_wen and "再生" in p.dao_wen, "封存角色应带已学道纹"
     assert len(e.state.friends) == 1, "封存角色应带朋友"
 
@@ -193,7 +193,7 @@ def test_sealed_candidate_dungeon_growth_applies():
 
 
 def test_seal_roundtrip_preserves_mutation_count(tmp_path):
-    """④修复（2026-09-10 用户裁定）：异变是已实付的代价，封存→读回必须保真。
+    """④修复：异变是已实付的代价，封存→读回必须保真。
 
     旧格式丢弃 mutation_count → 封存=免费洗白迷失进度，「带伤续战」是假的。
     癌变 total_healed 不随封存走：DM 已裁定它是局内减益、每场归零。

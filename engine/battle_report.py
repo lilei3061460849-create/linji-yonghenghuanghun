@@ -43,7 +43,7 @@ def _daowen_str(entity: Any) -> str:
 def _lethal_progress(entity: Any) -> list[str]:
     """致死类特殊事件的进度串（迷失／癌变／凡庸），例如 ['迷失（10/50）']。
 
-    2026-09-15 用户令：致死事件的进度必须随面板一起输出，AI 才看得见自己离
+    致死事件的进度必须随面板一起输出，AI 才看得见自己离
     【迷失】这类命零还有多远，不会"自爆"。口径唯一事实源＝Entity.lethal_progress()。
     """
     fn = getattr(entity, "lethal_progress", None)

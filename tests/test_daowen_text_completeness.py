@@ -1,6 +1,6 @@
 """护栏：道纹效果正文不得只剩支付句。
 
-2026-11-02 用户令：`全道纹索引.md` 里出现了只有「X：支付：法力NX。」而无效果句的
+`全道纹索引.md` 里出现了只有「X：支付：法力NX。」而无效果句的
 条目，且 `规则正文.md` 副本专属道纹节一度用「见《全道纹索引》」代替正文。两条都
 算效果描述丢失，本文件把这类退化钉死：
 
@@ -87,17 +87,26 @@ def test_rule_dungeon_section_bullets_carry_full_text():
 
 
 def test_dungeon_daowen_text_is_reachable_from_index_or_rules():
-    """副本文件里的专属道纹，其条文必须能在索引或规则正文副本节读到。"""
+    """副本文件里的专属道纹，其条文必须能在索引或规则正文副本节读到。
+
+    例外：藐视/独断/读心——2026-11-10 移出规则正文巴别塔节（巴别塔未开放、
+    引擎尚未实现，正文只保留傲慢/真诚并标注不可发动），条文草案仅存
+    副本/巴别塔.md；它们本就不在引擎注册表与索引里。
+    """
+    draft_only = {"藐视", "独断", "读心"}
     index_names = set(_index_entries())
     section = _rule_dungeon_section()
     rule_names = set(re.findall(r"(?m)^- 【([\u4e00-\u9fff]{2})】", section))
-    missing = sorted(_dungeon_daowen_names() - index_names - rule_names)
+    missing = sorted(_dungeon_daowen_names() - index_names - rule_names - draft_only)
     assert missing == [], f"这些道纹在任何正文里都读不到效果：{missing}"
 
 
 def test_ai_context_daowen_digest_is_not_empty():
     text = AI_CONTEXT.read_text(encoding="utf-8")
-    block = text.split("### 来源 4：机制速查·道纹", 1)[1].split("### 来源 5", 1)[0]
+    # 来源序号会随速查节增删移动：按标题文本定位，不再硬编码序号。
+    marker = "：机制速查·道纹"
+    heading = next(line for line in text.splitlines() if line.startswith("### 来源") and marker in line)
+    block = text.split(heading, 1)[1].split("\n### 来源 ", 1)[0]
     assert "（暂无）" not in block, "AI 上下文的道纹速查整块丢失"
     lines = [line for line in block.splitlines() if "：支付" in line or "：代价" in line]
     assert len(lines) >= 40, f"道纹速查条目过少（{len(lines)}）"

@@ -99,8 +99,13 @@ def test_wanjunyin_owned_by_npc_and_never_borrowed_from_player():
     combat, npc = arena()
     npc.consumables = [item("万钧印")]
     assert combat._wanjunyin_holder(npc)
+    # 按物品索引=持有者选择：不显式请求（wanjunyin=True）不改道、不耗耐久。
     combat.resolve_attack(combat.state.player, npc, dodge=False, parry=False,
                           spell_choices={"before": {}, "after": {}})
+    assert npc.consumables[0].current_uses == 2
+    combat.resolve_attack(combat.state.player, npc, dodge=False, parry=False,
+                          spell_choices={"before": {}, "after": {}},
+                          wanjunyin=True)
     assert npc.consumables[0].current_uses == 1
     ally = Entity("F", "朋友")
     combat.state.consumables = [item("万钧印")]

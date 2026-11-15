@@ -14,7 +14,7 @@ import math
 
 # 残韵闭环上的非道纹占位节点：
 #   RESERVED_SLOT（2026-10-08）：一般删纹后尚待补设计的空位，如乱葬岗旧【镇尸】节点；
-#   RELICIZED_SLOT（2026-10-14 用户令）：道纹遗物化后统一用「？？」替代原闭环节点。
+#   RELICIZED_SLOT：道纹遗物化后统一用「？？」替代原闭环节点。
 # 两者都保留环的边数与入度/出度；查得到，但绝不能作为残韵结果获得（不耗残韵、不改牌面、不授予）。
 # 名字避开真实道纹词汇，闭环结构仍可完整验证。
 RESERVED_SLOT = "（待补）"
@@ -29,7 +29,7 @@ RELOCATED_DAOWEN_SLOTS = {name: f"（待补）〔{name}〕" for name in ("增殖
 
 
 # 【操纵】可以被施法者预指定的行动种类（施法本身不在其中）。
-# 2026-11-02 用户令：【操作】改名【操纵】，作用次数由「下一次」改为「下X次」。
+# 【操作】改名【操纵】，作用次数由「下一次」改为「下X次」。
 CAOZUO_ORDER_ACTIONS = ("攻击", "跳过", "使用消耗品")
 
 
@@ -85,7 +85,7 @@ def is_reserved_slot(name) -> bool:
 
 
 # 道纹改名别名（旧档/旧面板读入时映射；引擎注册表只收新名，旧名提交照常报未知道纹）。
-# 2026-10-22 用户令：【血债】改名【连击】并扩为多支付道纹，旧名只许在读入边界被映射。
+# 【血债】改名【连击】并扩为多支付道纹，旧名只许在读入边界被映射。
 # 【血债】→【连击】是 2026-10-22 的改名；2026-11-09 第二轮的衍生道纹改名
 # （连珠→虚耗等）同样只在读入边界生效，别名表以 engine/derivatives.py 为唯一事实源。
 LEGACY_DAOWEN_ALIASES = {"血债": "连击", "操作": "操纵",
@@ -134,7 +134,7 @@ class DaoWenEngine:
     TRANSFORMED_DAOWEN = [
         # 与 gamedata.MONSTER_TRANSFORM_DAOWEN、全道纹索引「转化」行保持同一份名单。
         "弱化", "强化", "全速", "压迫",  # 愤怒已转消耗品怒火针，不得由转化授予入口复活。
-        # 2026-10-11 用户令（A14）：【无神】【借力】【衰败】整条删除，不补位。
+        # （A14）：【无神】【借力】【衰败】整条删除，不补位。
     ]
 
     # 波及X：选择X个目标建立/解除无限期效果分摊关系；X决定目标数与法力消耗。
@@ -169,7 +169,7 @@ class DaoWenEngine:
 
         DM裁定 2026-09-10：法力改一池制后（战终才复原，不再每回合回填），道纹数值
         的约束从「速率」变成「预算」，可以放开。
-        用户裁定 2026-09-13：由线性 5X 改为平方 X²——小X时弱于旧值（X≤4），
+        由线性 5X 改为平方 X²——小X时弱于旧值（X≤4），
         大X时远强（X=10 打 100），把「攒法力一次性爆发」从习惯变成硬性最优解，
         与一池制预算的设计意图一致。
         """
@@ -188,7 +188,7 @@ class DaoWenEngine:
     def calculate_zaisheng(x: int, target: Entity = None) -> dict:
         """再生X：支付：法力X。为[目标]回复4X点生命。
 
-        2026-11-09 用户令：多途径道纹收成一条途径。【攻击力4X】通道改由
+        多途径道纹收成一条途径。【攻击力4X】通道改由
         【再生衍生·献锋】独立承载（见 engine/derivatives.py），母本不再接受通道参数。
         """
         target_name = target.name if target is not None else "未选定目标"
@@ -204,7 +204,7 @@ class DaoWenEngine:
     def calculate_bihu(x: int, target: Entity = None) -> dict:
         """庇护X：支付：法力X。使[目标]免疫非[目标]导致的下X次失去生命。
 
-        2026-11-01 用户令：庇护是**纯次数型**——只有"下X次"次数，没有回合倒计时。
+        庇护是**纯次数型**——只有"下X次"次数，没有回合倒计时。
         旧版同时挂 duration=X（状态既按次数消耗又按回合递减），等于同一个 X
         被消费两遍：回合先到就白扔剩余次数，次数先用完则"持续X"毫无意义。
         现状只保留 shelter_charges，状态本身 remaining_rounds=-1（不按回合递减），
@@ -220,7 +220,7 @@ class DaoWenEngine:
             "summary": f"支付：法力{x}，使{target_name}免疫非{target_name}导致的下{x}次失去生命"
         }
     
-    # 【脆弱】2026-11-09 用户令：原【连击】的通用四面体一格改由【脆弱】承接。
+    # 【脆弱】原【连击】的通用四面体一格改由【脆弱】承接。
     # 纯次数型：状态 value=X、remaining_rounds=-1（不按回合递减），下一次实际
     # 失去生命时由 CombatEngine._fragile_hp_loss 一次性消费。
     @staticmethod
@@ -321,7 +321,7 @@ class DaoWenEngine:
     @staticmethod
     def calculate_zengzhi(x: int, target: Entity = None) -> dict:
         """增殖X：支付：冷却X。使[目标]的[血限]变为∞，持续X回合（战终清除）。"""
-        # 2026-11-07 用户令：代价由血限X 改为冷却X（原 cost_blood_limit 账本撤销，
+        # 代价由血限X 改为冷却X（原 cost_blood_limit 账本撤销，
         # 与【迟滞】【飞行】同走 COOLDOWN 支付通道）；效果（无限血限）不变。
         target_name = target.name if target is not None else "未选定目标"
         return {
@@ -353,11 +353,11 @@ class DaoWenEngine:
     def calculate_touzhi(x: int) -> dict:
         """透支X：支付：枯竭X。你获得X点法力。
 
-        用户裁定 2026-09-12：与【再生X】构成生命⇄法力闭环，净值不产生免费资源；
+        与【再生X】构成生命⇄法力闭环，净值不产生免费资源；
         实际上限由【癌变】(本场累计回复=2×血限) 自然封死。
-        用户裁定 2026-09-13：3X→4X。与【再生X】(支付：法力X→回复4X生命) 对齐为
+        3X→4X。与【再生X】(支付：法力X→回复4X生命) 对齐为
         严格 4:1 双向汇率，闭环净值归零，不再每轮白赚生命。
-        2026-11-09 用户令：多途径道纹收成一条途径，母本只留【枯竭X】；
+        多途径道纹收成一条途径，母本只留【枯竭X】；
         生命4X／血限2X／速度X 三条改由【透支衍生·燃命／折年／搏命】独立承载。
         （速度通道的 k=1 结论继续沿用：卖X速度得kX法力可经【超频】买回 kX/2 速度，
         k≥2 即永动，故取 k=1。）
@@ -373,7 +373,7 @@ class DaoWenEngine:
     def calculate_fengyin(x: int, target: Entity = None) -> dict:
         """封印X：支付：异变X，使一个[目标]延后X回合再入场。
 
-        2026-10-08 用户令：目标由"只限怪物"放开为**任意目标**——敌人、[朋友]、
+        目标由"只限怪物"放开为**任意目标**——敌人、[朋友]、
         [员工]、造物、敌对轮回者，以及施法者自己都可以被封印。
         暂离的语义不变：从场上摘走，X 回合后的[回始]回到它原本所在的阵营与位置
         （见 GameState.detach_from_field / reattach_to_field）。
@@ -396,7 +396,7 @@ class DaoWenEngine:
     def calculate_quanli(x: int, target: Entity = None) -> dict:
         """全力X：支付：异变5X。使[目标]攻击力等同其法限，持续X
 
-        2026-09-17 用户令重做。旧版「攻击力+X，持续∞」写的是遗留字段 attack_power，
+        重做。旧版「攻击力+X，持续∞」写的是遗留字段 attack_power，
         属性模型统一后（攻击力=当前法力）对不写穿的轮回者完全无效。
 
         新版改为**锁定**：生效期间[目标]的攻击力恒等于其[法限]，不再随当前法力
@@ -498,7 +498,7 @@ class DaoWenEngine:
     def calculate_bizhong(x: int) -> dict:
         """必中X：支付：异变X。你接下来的X次选中，[目标]无法进行被动行动。
 
-        口径（2026-11-01 用户令）：必中是**攻击者侧的次数资源**，不做目标 debuff，
+        口径：必中是**攻击者侧的次数资源**，不做目标 debuff，
         也不夺走目标的行动。每次选中[目标]消耗1次，该次选中下目标不能闪避、招架
         （被动行动见《规则正文·基础定义》）。次数记在发动者 _bizhong_left。
         """
@@ -527,7 +527,7 @@ class DaoWenEngine:
         }
     
 
-    # 2026-11-02 用户令：原【操作】改名【操纵】（旧名只允许在读入边界映射）。
+    # 原【操作】改名【操纵】（旧名只允许在读入边界映射）。
     @staticmethod
     def calculate_caozuo(x: int, target: Entity = None, order: Optional[dict] = None) -> dict:
         """操纵X：支付：法限X。使[目标]接下来X次除施法外的行动由你控制。
@@ -549,7 +549,7 @@ class DaoWenEngine:
                         f"支付：法限{x}，{target_name}接下来{x}次除施法外的行动由施法者控制（未预指定，将作废）"),
         }
 
-    # 2026-11-02 用户令：饥饿为扭曲都市新增道纹（四面体二，与增殖反转）。
+    # 饥饿为扭曲都市新增道纹（四面体二，与增殖反转）。
     @staticmethod
     def calculate_ji_e(x: int, target: Entity = None) -> dict:
         """饥饿X：支付：法力2X。使[目标]的[血限]等同其当前生命，持续X；到期恢复施加前的[血限]。
@@ -569,7 +569,7 @@ class DaoWenEngine:
                        f"（{hp}），持续{x}",
         }
 
-    # 2026-11-02 用户令：扭曲为扭曲都市新增道纹（四面体二，与坏死反转）。
+    # 扭曲为扭曲都市新增道纹（四面体二，与坏死反转）。
     @staticmethod
     def calculate_niuqu(x: int, target: Entity = None) -> dict:
         """扭曲X：支付：法力3X。使[目标]的累积治疗量翻倍X次（×2^X）；翻倍后立即按[癌变]阈值复核一次。
@@ -584,7 +584,7 @@ class DaoWenEngine:
             "summary": f"支付：法力{3 * x}，使{target_name}的累积治疗量翻倍{x}次（×{2 ** x}）",
         }
 
-    # 2026-11-02 用户令：淬火为龙心谷新增道纹（四面体，与炽热反转）。
+    # 淬火为龙心谷新增道纹（四面体，与炽热反转）。
     @staticmethod
     def calculate_cuihuo(x: int, target: Entity = None) -> dict:
         """淬火X：支付：法力2X。使[目标]所有消耗品的当前耐久+X（不超过各自的耐久上限）。
@@ -599,7 +599,7 @@ class DaoWenEngine:
             "summary": f"支付：法力{2 * x}，使{target_name}所有消耗品当前耐久+{x}",
         }
 
-    # 2026-11-02 用户令：炽热为龙心谷新增道纹，与【熔化】互为反转，效果方向相反。
+    # 炽热为龙心谷新增道纹，与【熔化】互为反转，效果方向相反。
     @staticmethod
     def calculate_chire(x: int, target: Entity = None) -> dict:
         """炽热X：支付：法力3X。使[目标]所有消耗品的当前耐久-X，最低为0；只削当前耐久，不销毁条目。
@@ -616,7 +616,7 @@ class DaoWenEngine:
             "summary": f"支付：法力{3 * x}，使{target_name}所有消耗品当前耐久-{x}（最低0，不销毁）",
         }
 
-    # 2026-11-02 用户令：熔化为龙心谷新增道纹，移除条目本身（与炽热只削耐久相反）。
+    # 熔化为龙心谷新增道纹，移除条目本身（与炽热只削耐久相反）。
     @staticmethod
     def calculate_ronghua(x: int, target: Entity = None) -> dict:
         """熔化X：支付：法力5X。销毁[目标]所有当前耐久≤X的消耗品条目（含0耐久）。
@@ -633,7 +633,7 @@ class DaoWenEngine:
             "summary": f"支付：法力{5 * x}，销毁{target_name}当前耐久≤{x}的全部消耗品",
         }
 
-    # 2026-11-02 用户令：锻造为龙心谷新增道纹，只发现既有固定规格消耗品。
+    # 锻造为龙心谷新增道纹，只发现既有固定规格消耗品。
     @staticmethod
     def calculate_duanzao(x: int) -> dict:
         """锻造X：支付：法力5X。发现一个既有固定规格消耗品，给予其X点耐久（当前耐久与耐久上限同取X）。
@@ -649,7 +649,7 @@ class DaoWenEngine:
             "summary": f"支付：法力{5 * x}，发现一个消耗品并给予其{x}耐久",
         }
 
-    # 2026-11-02 用户令：涌潮为沉沦海新增道纹，效果与遗物【苍白之花】同域。
+    # 涌潮为沉沦海新增道纹，效果与遗物【苍白之花】同域。
     @staticmethod
     def calculate_yongchao(x: int, target: Entity = None) -> dict:
         """涌潮X：支付：法限X。使[目标]的[法限]变为无限，当前法力可以突破法限，持续X回合。
@@ -691,7 +691,7 @@ class DaoWenEngine:
     def calculate_quansu(x: int, target: Entity = None) -> dict:
         """全速X（原名【迟滞】）：支付：冷却X。使[目标]攻击次数等同其速限，持续X
 
-        2026-09-17 用户令重做并改名。旧版「攻击次数固定为1」是减益，写的是遗留字段
+        重做并改名。旧版「攻击次数固定为1」是减益，写的是遗留字段
         attack_count，属性模型统一后（攻击次数=当前速度）对轮回者无效。
 
         新版改为**锁定为[速限]**：生效期间[目标]的攻击次数恒等于其[速限]。
@@ -717,7 +717,7 @@ class DaoWenEngine:
 
 
     @staticmethod
-    # 2026-10-11 用户令（A14）：【shuaibai】整条删除——不做闭环补位、不设计替换道纹。
+    # （A14）：【shuaibai】整条删除——不做闭环补位、不设计替换道纹。
 
     
 
@@ -726,11 +726,11 @@ class DaoWenEngine:
         """变形X：支付：法力X。使[目标]当前速度与当前法力互换，持续X
 
         注意**故意不声明 target 形参**：api.py 的判定是"计算函数声明了 target 就
-        强制要求显式指定目标，禁止静默改为自身"。而 2026-09-17 用户令要的是
+        强制要求显式指定目标，禁止静默改为自身"。而 要的是
         **可选目标**：指定了就作用于该目标，不指定则作用于自身。故此处不声明，
         由 combat.py 的 ``swap_target = target if target else caster`` 兜底。
 
-        2026-09-17 用户令重做。旧版「使自身攻击力与攻击次数互换」写的是遗留字段
+        重做。旧版「使自身攻击力与攻击次数互换」写的是遗留字段
         attack_power / attack_count，属性模型统一后（攻击力=当前法力、攻击次数=
         当前速度）对不写穿的轮回者无效，且只能对自己用。
 
@@ -773,7 +773,7 @@ class DaoWenEngine:
 
         目标由发动方自由指定，选到谁就给谁加速度——可以给自己，也可以给队友
         或敌人。旧版写作"使自身速度+X"，但实现一直是给 target 加速，文案与
-        行为不符；现按用户裁定统一为"自由选择目标"。
+        行为不符；现统一为"自由选择目标"。
         """
         return {
             "dao_wen": "超频",
@@ -829,7 +829,7 @@ class DaoWenEngine:
 
     # ---- 罪孽都市专属道纹 ----
     
-    # 2026-10-13 用户令：典当顶替【逼债】的闭环格。
+    # 典当顶替【逼债】的闭环格。
     @staticmethod
     def calculate_diandang(x: int) -> dict:
         """典当X：支付：失忆2X。发现并获得X种道纹。
@@ -850,7 +850,7 @@ class DaoWenEngine:
             "summary": f"失忆{2 * x}，发现获得{x}种道纹",
         }
     
-    # 2026-09-28 用户令：原【抵扣】改名【豪夺】。
+    # 原【抵扣】改名【豪夺】。
     @staticmethod
     def calculate_haoduo(x: int, target: Entity = None) -> dict:
         """豪夺X：支付：5X碎片，夺取[目标]1件遗物或消耗品持续X回合。
@@ -858,20 +858,20 @@ class DaoWenEngine:
         夺取=把目标的一件遗物或消耗品转移到己方（施法者）临时持有，持续X回合，到期归还。
         与旧【抵扣】（只封印）的区别：夺取期间施法者**真正持有**该遗物并能触发其被动，
         目标在这段时间里不能触发该遗物。
-        2026-11-07 用户令加强：可夺对象由遗物扩为遗物/消耗品；消耗品夺取期间可使用，
+        加强：可夺对象由遗物扩为遗物/消耗品；消耗品夺取期间可使用，
         到期按归还时剩余耐久还回（已用完的只剩空壳，一并归还）。
         """
         target_name = target.name if target is not None else "未选定目标"
         return {
             "dao_wen": "豪夺", "x": x,
-            # 2026-09-28 用户令：支付：5X碎片（沿用现有 cost_shards 付费通道；
+            # 支付：5X碎片（沿用现有 cost_shards 付费通道；
             # 不写 cost_type=MANA，避免被当成法力支付）。
             "cost_type": "代价", "cost_shards": 5 * x,
             "relic_steal": 1, "item_steal": 1, "duration": x,
             "summary": f"支付：{5*x}碎片，夺取{target_name}一件遗物或消耗品，持续{x}回合"
         }
 
-    # 2026-10-31 用户令：【抢劫】【勒索】删除，补入主环四纹。
+    # 【抢劫】【勒索】删除，补入主环四纹。
     @staticmethod
     def calculate_shuojin(x: int, target: Entity = None) -> dict:
         """烁金X：支付：法力X。使[目标]碎片减少10X。"""
@@ -931,7 +931,7 @@ class DaoWenEngine:
     # ---- 龙心谷专属道纹 ----
     
     @staticmethod
-    # 2026-10-11 用户令（A13）：【嫁祸】整条删除——效果与遗物【贪婪契约】重复。
+    # （A13）：【嫁祸】整条删除——效果与遗物【贪婪契约】重复。
 
     
     @staticmethod
@@ -1103,7 +1103,7 @@ class DaoWenEngine:
     def calculate_gouhun(x: int, target: Entity = None, daowen_names: list = None) -> dict:
         """勾魂X：支付：法力5X。将［目标］的X种道纹转移至1个［造物］身上，持续∞。
 
-        2026-11-08 用户令重做：旧「无法获得[法力]」效果整条撤销（can_gain_mana
+        重做：旧「无法获得[法力]」效果整条撤销（can_gain_mana
         不再读【勾魂】）。转移是把道纹实例从[目标]身上整只搬到指定的一个
         [造物]身上（造物已持有同名时该种不转移）；[目标]有【出土】余次时
         按次保留原道纹、改为复制。持续∞＝转移在本场内不自动返回。
@@ -1119,7 +1119,7 @@ class DaoWenEngine:
             "summary": f"支付：法力{5 * x}，将{target_name}的{x}种道纹转移至1个[造物]身上",
         }
 
-    # 2026-10-08 用户令删除【镇尸】（支付：法力2X。使一个[目标]无法获得[回复]，持续X）。
+    # 删除【镇尸】（支付：法力2X。使一个[目标]无法获得[回复]，持续X）。
     # 它与【坏死】是同一效果的**两套实现**（坏死=effect 字符串状态，镇尸=no_heal 布尔钩子），
     # 属硬重复。保留【坏死】作为「无法获得[回复]」的唯一实现；乱葬岗闭环上这一格
     # 留成空占位符（见 RESERVED_SLOT），不直连、不拿别的道纹顶替。
@@ -1138,7 +1138,7 @@ class DaoWenEngine:
     def calculate_zhenli(x: int, target: Entity = None) -> dict:
         """真理X：支付：冷却2场。提出 X 句陈述，要求[目标]逐句言明真理。
 
-        2026-10-23 用户裁定：X 不再是固定值，改为「X 句话」——X 决定陈述句数，
+        X 不再是固定值，改为「X 句话」——X 决定陈述句数，
         每有一句无法言明真理，[目标]即无法开口，持续 X 回合（X 同时放大强度与持续）。
         任一句的真伪均由 DM 裁定。
         """
@@ -1168,7 +1168,7 @@ class DaoWenEngine:
             "summary": f"支付：法力{5*x}，使{target_name}无法使用用过的道纹，持续{x}",
         }
 
-    # ========== 2026-11-08 用户令：四副本补齐（每副本 8 纹，第二四面体） ==========
+    # ========== 四副本补齐（每副本 8 纹，第二四面体） ==========
 
     @staticmethod
     def calculate_bailian(x: int, target: Entity = None) -> dict:
@@ -1426,7 +1426,7 @@ class DaoWenEngine:
             "束缚": cls.calculate_shufu,
             "透支": cls.calculate_touzhi,
             "操纵": cls.calculate_caozuo,
-            # 2026-11-02 用户令：四面体补位新增/漏项补回。
+            # 四面体补位新增/漏项补回。
             "饥饿": cls.calculate_ji_e,
             "扭曲": cls.calculate_niuqu,
             "淬火": cls.calculate_cuihuo,
@@ -1437,7 +1437,7 @@ class DaoWenEngine:
             "迟滞": cls.calculate_chizhi,
             "封印": cls.calculate_fengyin,
             "怜悯": cls.calculate_lianmin,
-            # 怪物原始（2026-10-25 用户令：【疯狂】【减速】遗物化，退出道纹体系）
+            # 怪物原始（【疯狂】【减速】遗物化，退出道纹体系）
             "全力": cls.calculate_quanli,
             "强化": cls.calculate_qianghua,
             "飞行": cls.calculate_feixing,
@@ -1460,10 +1460,10 @@ class DaoWenEngine:
             "坏死": cls.calculate_huaisi,
             # 罪孽都市
             "点金": cls.calculate_dianjin,
-            # 2026-10-13 用户令：【逼债】删除，【典当】顶替其闭环格（点金—转换—典当—反转—豪夺）。
+            # 【逼债】删除，【典当】顶替其闭环格（点金—转换—典当—反转—豪夺）。
             "典当": cls.calculate_diandang,
             "豪夺": cls.calculate_haoduo,
-            # 2026-10-31 用户令：【抢劫】【勒索】删除，主环改由烁金/假钞/交易/赦免/贿赂/豪夺/典当/点金构成。
+            # 【抢劫】【勒索】删除，主环改由烁金/假钞/交易/赦免/贿赂/豪夺/典当/点金构成。
             "烁金": cls.calculate_shuojin,
             "赦免": cls.calculate_shemian,
             "贿赂": cls.calculate_huilu,
@@ -1486,7 +1486,7 @@ class DaoWenEngine:
             "招魂": cls.calculate_zhaohun,
             # 初拥之夜专属道纹；只允许事件授予，不进入常规学习/残韵池。
             "真理": cls.calculate_zhenli,
-            # 2026-11-08 用户令：四副本补齐第二四面体（每副本 8 纹）。
+            # 四副本补齐第二四面体（每副本 8 纹）。
             "百炼": cls.calculate_bailian,
             "锈蚀": cls.calculate_xiushi,
             "重铸": cls.calculate_chongzhu,
@@ -1552,7 +1552,7 @@ class DaoWenEngine:
         # 先调用一次获取cost_type
         func = cls._registry[dao_wen_name]
 
-        # 2026-10-09 用户令：波及 X≥2 下限 repealed——X_MIN 装置整套拔除，
+        # 波及 X≥2 下限 repealed——X_MIN 装置整套拔除，
         # 不再有「低于下限」的拦截；波及 X=1 合法（单目标全值，见 daowen_effect 分路）。
 
         import inspect
@@ -1595,14 +1595,14 @@ class ResonanceEngine:
     反转（极性对冲）：逆转因果极性
     曲解（概念腐化）：扭曲代数逻辑
 
-    2026-10-07 用户令：残韵路径**双向**。`CLOSED_LOOPS` 里的每条边 `(src, 类型, dst)`
+    残韵路径**双向**。`CLOSED_LOOPS` 里的每条边 `(src, 类型, dst)`
     是无向边：src 与 dst 互为闭环上的相邻节点，两个方向都走**同一种**残韵、
     **同样**支付：一次（规则正文：沿闭环选择一条相邻的变化路径）。边表只登记一次，
     不重复登记反向边——双向由 `find_transformations` 在查询时展开，避免边数与
     「闭环 N 条边」的口径翻倍。
     """
 
-    # ==================== 道纹关系表（2026-11-02 用户令·四面体大改）====================
+    # ==================== 道纹关系表（·四面体大改）====================
     # 每个「四面体」= 4 个节点、6 条边：3 条反转 + 3 条转换 + 3 条曲解，任两节点恰好
     # 由一种残韵相连。旧「闭环环状链 + 遗物化？？占位」的写法整体废止——空位（固执／
     # 贯穿／感染／重演／原初／退化／畸变／缄默／瓦解／冥气／洞察／蒙蔽）不再占位，
@@ -1612,13 +1612,13 @@ class ResonanceEngine:
     # 两个方向都走同一种残韵、支付同样一次；反向由 find_transformations 查询时展开。
     CLOSED_LOOPS = {
         # ---- 通用（四面体一~四）----
-        # 2026-11-09 用户令：【连击】替换为【脆弱】；原【连击】拆散成【杀伐】衍生池。
+        # 【连击】替换为【脆弱】；原【连击】拆散成【杀伐】衍生池。
         "通用四面体一": [
             ("杀伐", "反转", "再生"), ("脆弱", "反转", "庇护"),
             ("杀伐", "转换", "脆弱"), ("再生", "转换", "庇护"),
             ("杀伐", "曲解", "庇护"), ("再生", "曲解", "脆弱"),
         ],
-        # 2026-11-08 用户令：【篡改】与【封印】再次调换（继 2026-11-07 互换后
+        # 【篡改】与【封印】再次调换（继 2026-11-07 互换后
         # 改回）——四面体二含【封印】、四面体四含【篡改】，效果条文不变。
         "通用四面体二": [
             ("操纵", "反转", "束缚"), ("迟滞", "反转", "封印"),
@@ -1765,7 +1765,7 @@ class ResonanceEngine:
     @classmethod
     def find_transformations(cls, source_daowen: str, resonance_type: str) -> list[dict]:
         """
-        双向查找残韵变化结果（2026-10-07 用户令：路径双向）
+        双向查找残韵变化结果（路径双向）
         source_daowen: 源道纹名
         resonance_type: 残韵类型（转换/反转/曲解）
         返回：[{resonance_type, target_daowen, direction, loop}, ...]
@@ -1876,7 +1876,7 @@ class ResonanceEngine:
         1. 残韵作用于任意角色拥有的道纹时，将其永久变为变化后的道纹
         2. 施法者同时永久获得变化后的道纹
         3. 通过残韵获得的道纹，X值按施法者自由控X规则自定义
-        4. 路径双向：正反向同一种残韵、同样支付：（2026-10-07 用户令）
+        4. 路径双向：正反向同一种残韵、同样支付：
         """
         # 检查路径是否存在（双向展开）
         candidates = cls.find_transformations(source_daowen, resonance_type)

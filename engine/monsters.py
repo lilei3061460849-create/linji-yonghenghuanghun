@@ -21,7 +21,7 @@ _DAOWEN_TOKEN = re.compile(r'^([一-鿿]{2,4})(\d+)?$')
 def _parse_daowen_field(dw_str: str) -> dict[str, int | None]:
     """解析面板的道纹段，**同时兼容带 X 与不带 X 两种写法**。
 
-    2026-09-16 用户令：道纹 X 不再写死在面板上，改由怪物 AI 在发动时自选，
+    道纹 X 不再写死在面板上，改由怪物 AI 在发动时自选，
     上限只受[法限]或代价限制。
 
     返回值 None 表示该道纹面板没写 X、需由发动方自选；整数表示面板写死的固定 X。
@@ -45,7 +45,7 @@ def parse_monster_pool(index_path: str | Path) -> dict:
     """从索引登记的副本文档解析怪物池。
     返回 {region: [{"name","attack_count","attack_power","blood_limit","dao_wen"}, ...]}"""
     documents = load_dungeon_documents(index_path)
-    # 2026-09-16 用户令：怪物/微光者面板与轮回者同口径，写作「名字（[血限]/[法限]/[速限]，道纹…）」。
+    # 怪物/微光者面板与轮回者同口径，写作「名字（[血限]/[法限]/[速限]，道纹…）」。
     # 旧格式「攻次×攻力/血限」废止——[攻击次数]=[当前速度]、[攻击力]=[当前法力] 对全体生效后，
     # 攻次/攻力已不是独立面板，再单独印一遍属于冗余且会与上限打架。
     pat = re.compile(r'^([\u4e00-\u9fff\w·]+)[（(](\d+)/(\d+)/(\d+)(?:[，,]([^)）\n]*))?[）)]')
@@ -82,16 +82,16 @@ def parse_monster_pool(index_path: str | Path) -> dict:
     return pools
 
 
-# 出怪配方（2026-09-28 用户令）的三个常量：N 的上界、T_i 的上界、一阶的场数偏置。
+# 出怪配方的三个常量：N 的上界、T_i 的上界、一阶的场数偏置。
 # 正文口径见 推演规范.md「[战始]：抽取出怪」与 AI_EXPERIENCE.md「当前有效的工程约束」。
 MONSTER_POOL_LIMIT = 12      # 每副本怪物池 12 种，也是配方 N=随机(1,12) 的上界
 SPAWN_WAVE_GAP_LIMIT = 5     # T_i=随机(1,5)：上一波之后最多等待 5 回合
 SPAWN_TIER1_BATTLE_BIAS = 3  # 一阶把旧「战斗场数-3」保留为 N 的上界（见 compute_draw_cap）
-# 一阶上界的下界。2026-10-12 用户令：出怪不再固定数量，前四场「恒为1只」的确定段
+# 一阶上界的下界。出怪不再固定数量，前四场「恒为1只」的确定段
 # 去掉，改为 N=随机(1,2)；第 6 场起的上界梯度（3/4/5/…）保持不变。
 SPAWN_TIER1_MIN_CAP = 2
 
-# 阶级推进总开关（2026-09-28 用户令）：
+# 阶级推进总开关：
 # 机制代码完整保留，但默认关闭——玩家通过一阶死斗不会自动解锁二阶/五阶→无尽。
 # 未来五阶副本【启示录】正文与怪物池全部接入后，再把此开关拨为 True 启用自动推进。
 # 测试可通过 `engine.monsters.set_progression_enabled(True/False)` 临时覆盖。
@@ -105,19 +105,19 @@ def set_progression_enabled(value: bool) -> None:
 
 
 def compute_draw_cap(battle_number: int, tier: int = 1) -> int:
-    """本场怪物总数 N 的随机上界（配方式出怪，2026-09-28 用户令，按阶级递增）。
+    """本场怪物总数 N 的随机上界（配方式出怪，按阶级递增）。
 
     * 一阶：上界沿用旧「数量 = 战斗场数 - 3」，因此旧七场序列 `1/1/1/1/2/3/4`
       从"确定值"变成"上限"（N=随机(1,上限)）；上界再被怪物池规模 12 夹住，
       使第 8 场以后（无尽/自定义长局）不会突破「N=随机(1,12)」的正文口径。
-      2026-10-12 用户令「修改出怪公式，不再像现在这样固定数量，而是全随机」，
+      「修改出怪公式，不再像现在这样固定数量，而是全随机」，
       按用户选定的最小改动口径：**只去掉前四场「恒为1只」的确定段**——下界从 1 抬到 2，
       于是第 1~5 场一律 N=随机(1,2)，第 6 场起仍是 3/4/5/…（梯度与上界都不动）。
     * 二阶及以上：上界固定为怪物池规模 12，即 N=随机(1,12)。
     旧口径里"数量=战斗场数-3"是**精确值**；本函数只保留它作为**上界**的语义。
     """
     if int(tier) <= 1:
-        # 下界 2：2026-10-12 用户令，前四场不再恒为 1 只（详见本函数 docstring）。
+        # 下界 2：前四场不再恒为 1 只（详见本函数 docstring）。
         return min(MONSTER_POOL_LIMIT,
                    max(SPAWN_TIER1_MIN_CAP, int(battle_number) - SPAWN_TIER1_BATTLE_BIAS))
     return MONSTER_POOL_LIMIT
@@ -136,7 +136,7 @@ def _roll_upper(dice, pool_name: str, upper: int, context: str) -> int:
 
 
 def roll_spawn_plan(dice, battle_number: int, tier: int = 1) -> dict:
-    """出怪配方（2026-09-28 用户令，取代"数量=战斗场数-3"的确定值口径）。
+    """出怪配方（，取代"数量=战斗场数-3"的确定值口径）。
 
     ```text
     N=随机(1,上界)，S=随机(1,N)，R_i=随机(1,N-S-ΣR_j)，T_i=随机(1,5)，直至 S+ΣR_i=N
@@ -176,7 +176,7 @@ def roll_spawn_plan(dice, battle_number: int, tier: int = 1) -> dict:
 
 
 def scale_monster_def_for_endless(monster_def: dict, cycle: int) -> dict:
-    """无尽模式强度递增（2026-09-28 用户令）：第 C 轮把怪物面板整体抬高。
+    """无尽模式强度递增：第 C 轮把怪物面板整体抬高。
 
     C<=1 时原样返回（无尽首轮＝基线，与实盘口径逐位相同）；C>=2 起
     [血限]×(100+25(C-1))% 向上取整、[法限]/[速限]各 +3(C-1)。
@@ -197,7 +197,7 @@ def scale_monster_def_for_endless(monster_def: dict, cycle: int) -> dict:
 
 
 def merge_monster_pools(monster_pools: dict) -> list[dict]:
-    """无尽模式怪物池（2026-09-28 用户令：怪物池包含所有副本）。
+    """无尽模式怪物池（怪物池包含所有副本）。
 
     按 `副本索引.md` 登记的已实现副本顺序合并全部怪物池；同名怪物只保留先出现的一只，
     避免"同一种怪在合并池里被抽到的概率翻倍"。草案副本不进入运行时，因此不参与合并。
@@ -221,12 +221,12 @@ MONSTER_PREFERENCE_POOL = (
 )
 
 
-# 怪物随机遗物池（2026-10-25 用户令：X阶怪物 = X种随机偏爱 + X种随机遗物）。
+# 怪物随机遗物池（X阶怪物 = X种随机偏爱 + X种随机遗物）。
 # 只收「效果由逐实体判定结算」的遗物：这些判定读持有者自身的 relics，
 # 换到怪物身上照样成立。依赖局外／事件／玩家专属入口的遗物（同魂笔、
 # 无所求、忘忧香、灾厄轮盘、蚀命刻尺、失速冥灯、衰变沙漏、蚀界残钟）
 # 不在池内——怪物抽到也不会结算，等于空遗物。
-# 【共生血囊】2026-10-25 用户令入池：它的判定锚在「创建者持有该遗物」，
+# 【共生血囊】入池：它的判定锚在「创建者持有该遗物」，
 # 怪物成为造物创建者时同样成立。
 MONSTER_RELIC_POOL = (
     "疯狂", "减速", "癫狂之脑", "千荆甲", "活血衣", "增生药剂", "承露盏",
@@ -236,7 +236,7 @@ MONSTER_RELIC_POOL = (
 
 
 def assign_monster_relics(entity, tier: int, dice) -> list[str]:
-    """2026-10-25 用户令：X阶怪物额外获得 X 种随机遗物（与偏爱各自独立抽取）。
+    """X阶怪物额外获得 X 种随机遗物（与偏爱各自独立抽取）。
 
     随机流单独一条：种子取「引擎种子 + 怪物 runtime_id + 标签」，
     不再从共享骰子流里取数——否则每多抽一件遗物都会把后续出怪、
@@ -297,7 +297,7 @@ def assign_monster_preferences(entity, tier: int, dice) -> list[str]:
 def make_monster_entity(monster_def: dict):
     """按怪物定义构造Entity（延迟导入避免循环依赖）"""
     from .models import Entity, DaoWen, DaoWenInstance, Relic
-    # 2026-09-16 用户令：怪物与轮回者同口径，持有[速限]/[法限]；[攻击次数]=[当前速度]、[攻击力]=[当前法力]。
+    # 怪物与轮回者同口径，持有[速限]/[法限]；[攻击次数]=[当前速度]、[攻击力]=[当前法力]。
     # 战始当前值给满，[回始]由 combat.round_start 再次回满（怪物专属；微光者不回满）。
     _speed_limit = monster_def.get("speed_limit", monster_def.get("attack_count", 0))
     _mana_limit = monster_def.get("mana_limit", monster_def.get("attack_power", 0))
@@ -323,7 +323,7 @@ def make_monster_entity(monster_def: dict):
                        "抢劫", "勒索"}:
             continue
         dw_name = normalize_daowen_name(dw_name)  # 旧面板【血债】读入即映射【连击】
-        # x 为 None → 面板未写死 X，标记 x_free 由发动方自选（2026-09-16 用户令）；
+        # x 为 None → 面板未写死 X，标记 x_free 由发动方自选；
         # x 为整数 → 旧面板的固定 X，原样保留。
         m.dao_wen[dw_name] = DaoWenInstance(
             dao_wen=DaoWen(name=dw_name, formula="", cost_type="", cost_formula="", effect_formula=""),
@@ -332,5 +332,5 @@ def make_monster_entity(monster_def: dict):
     if any(name in ORIGINAL_MONSTER_DAOWEN for name in m.dao_wen):
         m._had_monster_daowen = True
     # 注意：不在此设 is_flying。飞行是状态，由消耗品（血翼／烬翼）的飞行选项结算。
-    # （2026-09-15 用户令已删除"登场回合不出道纹"的白板限制）。
+    # （已删除"登场回合不出道纹"的白板限制）。
     return m

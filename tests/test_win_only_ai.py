@@ -1,6 +1,6 @@
 """胜负唯一计分 AI（WinOnlyAI）守卫测试。
 
-用户裁定 2026-09-10：胜 +1 / 败 −1，无论什么手段什么战术。
+胜 +1 / 败 −1，无论什么手段什么战术。
 WinOnlyAI 用「整局推演的结局 ±1」做最终裁决（启发式只裁剪提案）。
 本文件守住两件事：
 1. 推演世界切换不泄漏——同 seed 复跑两次逐字节一致（世界换回不干净会立刻发散）；
@@ -45,7 +45,7 @@ def test_win_only_strutsural_verdicts_both_seats():
 
 
 def test_win_only_is_run_duel_pvp_default():
-    """用户裁定 2026-09-10：胜负唯一计分是死斗默认口径（不许悄悄改回去）。"""
+    """胜负唯一计分是死斗默认口径（不许悄悄改回去）。"""
     from sim.duel_pvp import _default_ai_cls
     assert _default_ai_cls() is WinOnlyAI
 

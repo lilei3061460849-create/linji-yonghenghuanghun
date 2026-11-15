@@ -44,7 +44,7 @@ from sim.build_learner import (KNOWLEDGE, load, save, retire_stale_tactics,
 SEED_TACTICS = {
     "花碎片提升战力": {
         "status": "active", "n": 0, "wins": 0,
-        "rule": "七场局外把碎片花成战力(修行/附煞/共鸣)。用户裁定：不花碎片怎么快速提高战力？实测：旧池(法40-46)挑战spend池(法60-68)守擂 0:6 完败。"},
+        "rule": "七场局外把碎片花成战力(修行/附煞/共鸣)。不花碎片怎么快速提高战力？实测：旧池(法40-46)挑战spend池(法60-68)守擂 0:6 完败。"},
     "护卫命令流": {
         "status": "active", "n": 0, "wins": 0,
         "rule": "command_ally 护卫X 无消耗强制挡伤，怪物打轮回者的伤害转给盟友。实测：乱葬岗1-6场83~100%。"},

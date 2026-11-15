@@ -103,7 +103,7 @@ def test_retired_xiaozai_is_not_an_out_of_combat_daowen():
     r = engine.execute_action("use_daowen", {"daowen_name": "假钞", "x": 1,
                                              "dodge": False, "blood_shadow": False,
                                              "trigger_spell_choices": {}})
-    # 2026-10-23 用户裁定：默认局内，局外须条文明示；错误文案随之改为「明示」口径。
+    # 默认局内，局外须条文明示；错误文案随之改为「明示」口径。
     assert not r["success"] and "局外发动须条文明示" in r["error"]
     r = engine.execute_action("use_daowen", {"daowen_name": "消灾", "x": 1,
                                              "dodge": False, "blood_shadow": False,
@@ -249,7 +249,7 @@ def test_pool_relics_all_in_index():
 
 
 def test_qianjingjia_wording_is_life_loss_not_damage():
-    """2026-11-01 用户令：【千荆甲】条文改「攻击者失去等量生命」。
+    """【千荆甲】条文改「攻击者失去等量生命」。
 
     反噬是直接失血，不产生一次新的伤害。旧的「攻击者受到等量伤害」会被读成
     再打一次伤害（从而被格挡/减伤/伤害触发链吃住），池文本与索引必须同时改口。

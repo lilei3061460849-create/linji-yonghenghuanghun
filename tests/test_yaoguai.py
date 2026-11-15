@@ -112,7 +112,7 @@ def test_zaosheng_only_creates_and_generic_xiuxing_handles_growth(tmp_path):
     assert (first.blood_limit, first.mana_limit, first.speed_limit,
             first.created_being_vision_range) == before
 
-    # 用户裁定：既有妖怪的成长由通用行动承接，不再经造生重复实现。
+    # 既有妖怪的成长由通用行动承接，不再经造生重复实现。
     grown = engine.execute_action("pre_battle_action", {
         "sub_action": "修行", "tier": 1, "target": first.name,
         "allocations": {"blood_points": 1, "speed_points": 0, "mana_points": 0},

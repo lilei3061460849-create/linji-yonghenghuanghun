@@ -111,9 +111,9 @@ def test_transformed_monster_daowen_not_learnable_outside_battle():
 
 
 def test_original_monster_daowen_learnable_after_lift():
-    """边界：原始怪物道纹不再是人类禁区（2026-10-07 用户令：残韵双向 + 完全放开）。
+    """边界：原始怪物道纹不再是人类禁区（残韵双向 + 完全放开）。
 
-    旧断言「人类无法承受并获得」编码的是已被用户令删除的门禁，本用例按新裁定重写。
+    旧断言「人类无法承受并获得」编码的是已被删除的门禁，本用例按新裁定重写。
     """
     e = _engine("龙心谷")
     for dw in ("必中", "全力"):   # 2026-10-25：【疯狂】【减速】遗物化，不再是道纹

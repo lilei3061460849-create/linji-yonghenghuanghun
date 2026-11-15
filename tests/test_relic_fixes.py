@@ -3,13 +3,13 @@ pytest 风格测试 - 里程碑8：修复5件坏掉/缺失的遗物（血誓戒/
 
 历史背景：早期遗物池中只有7件真正在战斗中生效，血誓戒完全没做、买路财只有计算没有执行动作、同魂笔只生成
 一条虚假日志不改任何状态、钱袋的触发点从未被调用过是死代码、忘忧香曾未注册。钱袋已删除；其当初并入【第一杯】的免疫癌变效果也已在 2026-09-23【第一杯】重做时废止。
-2026-10-13：【买路财】改制为轮回者【逃跑】行动（一次付清5次出手强制脱战），本文件原 retreat_via_toll 四组用例已删除；逃跑回归见 tests/test_escape_and_diandang.py。
+2026-10-13：【买路财】改制为轮回者【逃跑】行动（一次付清3次出手强制脱战，2026-11-10 由5改3），本文件原 retreat_via_toll 四组用例已删除；逃跑回归见 tests/test_escape_and_diandang.py。
 
 覆盖范围：
 1. 血誓戒：[回始]玩家首次主动支付生命代价获得等量格挡/低血量时改为等量生命，每回合限一次
 2. 买路财（已删除，见上）：原覆盖 retreat_via_toll 真正执行撤退(扣碎片/生命、清空战场)，不再只是算个数字
 3. 同魂笔：第二目标的道纹也永久变为变化后的道纹，施法者同时永久获得
-4. 第一杯（2026-09-23 用户令重做）：你受到的[回复]与失去的生命翻倍；
+4. 第一杯（重做）：你受到的[回复]与失去的生命翻倍；
    旧「+50%回复、[回终]未回复流血10、免疫癌变」已废止，持有者照样癌变；朋友/员工不继承
 5. 忘忧香：保持在遗物池中（2026-09-28 重做为战斗被动：溢出回复→等量格挡；局外【忘忧】行动已删除）
 
@@ -124,7 +124,7 @@ def test_blood_oath_ring_only_once_per_round():
     assert engine.state.player.shield == shield_after_first, "同一回合第二次生命支付不应再给格挡"
 
 
-# 2026-10-13：【买路财】改制为轮回者【逃跑】行动（一次付清5次出手强制脱战），
+# 2026-10-13：【买路财】改制为轮回者【逃跑】行动（一次付清3次出手强制脱战，2026-11-10 由5改3），
 # 原 retreat_via_toll 四组用例删除；逃跑回归见 tests/test_escape_and_diandang.py。
 
 
@@ -154,7 +154,7 @@ def test_tonghunbi_grants_caster_real_daowen_from_second_target():
 def test_first_cup_doubles_heal_and_no_longer_blocks_cancer():
     """第一杯（2026-09-23 重做）：回复翻倍；旧「免疫癌变」条款废止，持有者照样癌变。
 
-    旧断言（持有者 check_cancer 返回 None）编码的是已被用户令删除的规则，
+    旧断言（持有者 check_cancer 返回 None）编码的是已被删除的规则，
     本用例按新规则重写；完整覆盖见 tests/test_first_cup_rework.py。
     """
     engine = _new_engine("firstcup_ok")
@@ -202,7 +202,7 @@ def test_wangyouxiang_registered_in_revised_relic_pool():
 
 
 def test_wangyouxiang_out_of_battle_action_removed():
-    """2026-09-28 用户令：忘忧香改为战斗被动（溢出回复→格挡），局外【忘忧】行动已删除。"""
+    """忘忧香改为战斗被动（溢出回复→格挡），局外【忘忧】行动已删除。"""
     engine = _new_engine("wangyou_removed")
     engine.state.relics.append(Relic(name="忘忧香", effect=""))
     engine.state.energy = 3

@@ -527,7 +527,7 @@ def test_cast_kind_daowen_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# 2026-09-29 用户裁定：法术本质上就是依次发动多种道纹。
+# 法术本质上就是依次发动多种道纹。
 # 瞬发的每一步都与 use_daowen 走同一套"发动道纹"环节：
 # 敌方「目标发动道纹前」反应、无神、缄默面具、连击假碎片通道；
 # 施法失败（中途中断）出手照扣，不退。
@@ -613,7 +613,7 @@ def test_instant_missing_trigger_choices_rejected_without_consuming_action():
     assert player.actions_used_this_round == used0
 
 
-# 2026-10-11 用户令：`test_instant_step_under_wushen_hits_self` 已删除——它整条建立在被删机制上，不是改断言能救的。
+# `test_instant_step_under_wushen_hits_self` 已删除——它整条建立在被删机制上，不是改断言能救的。
 
 
 

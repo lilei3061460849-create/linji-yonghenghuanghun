@@ -368,7 +368,7 @@ class DaoWenRuleDefinition:
     def _rule_text(self, rule: DamageRuleDefinition, x: str | int, subject: str) -> str:
         value_label = _value_label(rule.reads)
         operator = rule.operator
-        # 2026-10-11 用户令：固执改为「你每次失去的生命不会超过1」，龙鳞描述简化。
+        # 固执改为「你每次失去的生命不会超过1」，龙鳞描述简化。
         # 三条都不再复述「格挡后仍有伤害待结算的非代价受击」这一长串触发口径。
         # 主语按用户口径写「你」（default_subject 仍是「自身」，只在文案层改写）。
         subject = "你" if self.default_subject == "自身" else subject

@@ -331,7 +331,7 @@ engine.remove_personality(entity)       # 手工清除（幂等）
 | `prepare_attack` / `resolve_attack` | 两阶段攻击：逐击绑定目标、闪避、血影和法术反应 |
 | `consume_item` | 使用消耗品 |
 | `declare_wish` | 声明许愿：轮回者向"某人"祈求（消耗1出手） |
-| `declare_escape` | 逃跑：一次付清5次出手，以当前状态强制脱离本场战斗（死斗/【不离】不可） |
+| `declare_escape` | 逃跑：一次付清3次出手，以当前状态强制脱离本场战斗（死斗/【不离】不可） |
 | `declare_evolution` | 旧怪物进化借用接口；尚未同步原初的目标随机X种新定义 |
 | `round_start` | 回始结算 |
 | `round_end` | 回终结算 |

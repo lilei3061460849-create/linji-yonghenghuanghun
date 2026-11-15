@@ -199,7 +199,7 @@ def _candidates(actor: dict, rivals: list[dict]) -> list[dict]:
     has_daowen = bool(daowen_opts)
     dao_cands: list[dict | None] = []
     for opt in daowen_opts:
-        # X 下限恒为 1（2026-10-09 用户令 repealed 了波及 X≥2；prepare 已不再暴露
+        # X 下限恒为 1（repealed 了波及 X≥2；prepare 已不再暴露
         # min_x 字段，这里兜底 1）。波及 X=1 合法——单目标全值。
         min_x = max(1, int(opt.get("min_x") or 1))
         wave_refs = ([t["ref"] for t in (opt.get("dodge_target_options") or [])]
@@ -574,7 +574,7 @@ def train(*, gens: int, pop: int, matches: int, monsters: int, seed: int, rounds
                          lineups=lineups, hp_scale=hp_scale, cull_self_kill=cull_self_kill,
                          free_actions=free_actions)
             # 目标＝全席平均适应度：fitness 本身已经写着「存活+1／击杀+0.3／自己作死死＝0」
-            # （2026-10-03 用户令），直接用它的均值当选择压力，比只看赢率（二值、噪声大）
+            # ，直接用它的均值当选择压力，比只看赢率（二值、噪声大）
             # 更稳；再给输出效率一个小权重把平局拉开。
             score = m["mean_fitness"] + 0.001 * m["avg_damage_per_match"]
             scored.append((score, w, m))
@@ -636,7 +636,7 @@ def main() -> None:
     ap.add_argument("--weights", type=Path, default=None)
     ap.add_argument("--save", action="store_true", help="训练后保存权重到 reports/monster_ai_weights.json")
     ap.add_argument("--free-actions", action="store_true", dest="free_actions",
-                    help="规则实验（2026-10-03 用户裁定）：怪物每回合 2 槽、不再强制发动道纹")
+                    help="规则实验：怪物每回合 2 槽、不再强制发动道纹")
     ap.add_argument("--no-cull", action="store_false", dest="cull_self_kill",
                     help="消融：训练时不把「自己行动导致自己死亡」判为失败品（权重另存 _nocull 文件）")
     args = ap.parse_args()

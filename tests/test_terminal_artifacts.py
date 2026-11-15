@@ -270,7 +270,7 @@ def test_godfather_revolver_escalates_and_refills_next_battle():
 def test_godfather_revolver_is_artifact_only():
     """静态守护：教父左轮只是法器，不得再以消耗品身份重复记账。
 
-    2026-10-26 用户令：早期消耗品没有自动回满耐久的机制，才借了「消耗品+法器」
+    早期消耗品没有自动回满耐久的机制，才借了「消耗品+法器」
     双重身份；现在回满就是[战始]重置，弹药由 `godfather_revolver_uses` 单点计数。
     """
     src = (Path(__file__).resolve().parents[1] / "engine" / "api.py").read_text(encoding="utf-8")
