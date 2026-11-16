@@ -461,3 +461,38 @@ def test_purifying_blood_limit_can_trigger_redemption():
     assert r["success"], r
     assert monster.blood_limit == 96
     assert engine.state.pending_redemption["name"] == monster.name
+
+
+def test_redeem_ai_purifies_low_health_monster():
+    from sim.duels.victory_path_tournament import RedeemAI
+    engine = _ready_combat(_engine("rd_ai_purify"))
+    _give(engine.state.player, "净化")
+    engine.state.player.current_mana = 100
+    monster = Entity(name="救赎目标", entity_type="怪物", blood_limit=100,
+                     current_hp=20, mutation_count=50, attack_count=1, attack_power=1)
+    engine.state.enemies[:] = [monster]
+    ai = RedeemAI(engine)
+    result = ai.try_purify_redemption()
+    assert result and result["success"]
+    assert engine.state.pending_redemption["name"] == monster.name
+    assert ai.used["净化"] == 1
+
+
+def test_direct_life_loss_immediately_triggers_redemption():
+    engine = _ready_combat(_engine("rd_raw_loss"))
+    monster = Entity(name="失血怪", entity_type="怪物", blood_limit=100, current_hp=25,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies[:] = [monster]
+    result = engine.combat._raw_hp_loss(monster, 5)
+    assert result["redemption"]["type"] == "redemption"
+    assert engine.state.pending_redemption["name"] == monster.name
+
+
+def test_direct_lethal_loss_remains_death_not_redemption():
+    engine = _ready_combat(_engine("rd_raw_lethal"))
+    monster = Entity(name="命零怪", entity_type="怪物", blood_limit=100, current_hp=5,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies[:] = [monster]
+    result = engine.combat._raw_hp_loss(monster, 5)
+    assert result["died"] and not engine.state.pending_redemption
+    assert not monster.is_alive and not monster.is_departed

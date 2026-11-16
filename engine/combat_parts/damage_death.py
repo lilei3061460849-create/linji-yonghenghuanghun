@@ -1209,6 +1209,10 @@ class DamageDeathMixin:
             result["reaction_logs"] = reaction_logs
         if ctx is None and lost > 0:
             result["context_warning"] = "直接失去生命缺少EffectContext；已按legacy来源兼容记录"
+        if lost > 0 and not died and entity.entity_type == "怪物":
+            redemption = self.check_redemption(entity)
+            if redemption:
+                result["redemption"] = redemption
         return result
 
     def _seal_one_relic(self, target: Entity, rounds: int) -> str:

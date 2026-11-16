@@ -38,6 +38,7 @@ def test_damage_stops_at_one_and_does_not_heal_or_mark_dead():
 
 def test_raw_loss_and_direct_writes_obey_same_floor():
     e,p,t=setup('raw');assert cast(e,t)['success']
+    t.mutation_count = 50  # 只验证不死下限，避免低血救赎先令目标离场
     r=e.combat._raw_hp_loss(t,100)
     assert r['lost']==19 and not r['died'] and t.current_hp==1
     t.current_hp=-10

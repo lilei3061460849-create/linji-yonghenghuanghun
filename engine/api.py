@@ -3358,7 +3358,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             redemption_eligible = (
                 target.entity_type == "怪物"
                 and target.blood_limit > 0
-                and target.current_hp <= math.ceil(target.blood_limit * 0.2))
+                and target.current_hp <= self.combat.redemption_hp_threshold(target))
             remaining = item.use()
             roll = self.dice.auto_roll(
                 f"free_crystal_cost_{target.name}_{remaining}",
