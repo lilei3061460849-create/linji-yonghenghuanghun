@@ -47,6 +47,7 @@ def test_raw_loss_and_direct_writes_obey_same_floor():
 
 def test_bleed_payment_uses_actual_life_loss_not_nominal_damage():
     e,p,t=setup('bleed');assert cast(e,t)['success']
+    t.mutation_count = 50  # 隔离不死下限与救赎离场
     r=e.combat.pay_numeric_cost(t,'流血',20)
     assert t.current_hp==1 and t.is_alive
     assert r['actual_paid']==19
