@@ -496,3 +496,12 @@ def test_direct_lethal_loss_remains_death_not_redemption():
     result = engine.combat._raw_hp_loss(monster, 5)
     assert result["died"] and not engine.state.pending_redemption
     assert not monster.is_alive and not monster.is_departed
+
+
+def test_redemption_rounding_allows_monster_at_one_full_hp():
+    engine = _ready_combat(_engine("rd_one_full"))
+    monster = Entity(name="一血怪", entity_type="怪物", blood_limit=1, current_hp=1,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies[:] = [monster]
+    assert engine.combat.redemption_hp_threshold(monster) == 1
+    assert engine.combat.check_redemption(monster) is not None
