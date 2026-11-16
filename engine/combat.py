@@ -1558,6 +1558,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                 self._sync_chuyong(target)
                 expired = target.tick_status_effects()
                 effects.extend(self._settle_daowen_status_expiry(target, expired))
+                if "熄事" in expired and target.entity_type == "怪物":
+                    effects.extend(self.recheck_redemption_candidates())
                 if expired:
                     if "无限法限" in expired and not self.state.mana_overflow_exempt(target):
                         before_mana = target.current_mana
@@ -1706,6 +1708,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             self._sync_chuyong(entity)
             expired = entity.tick_status_effects()
             effects.extend(self._settle_daowen_status_expiry(entity, expired))
+            if "熄事" in expired and entity.entity_type == "怪物":
+                effects.extend(self.recheck_redemption_candidates())
             if expired:
                 # 【涌潮】到期：当前法力压回原法限（无限法限只是"持续X回合"的豁免）。
                 if "无限法限" in expired and not self.state.mana_overflow_exempt(entity):

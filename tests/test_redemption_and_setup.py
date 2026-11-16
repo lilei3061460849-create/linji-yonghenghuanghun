@@ -533,3 +533,16 @@ def test_redemption_recheck_uses_current_state():
     second.mutation_count = 50
     assert engine.execute_action("resolve_redemption", {"option": "终结"})["success"]
     assert not engine.state.pending_redemption and second.is_alive
+
+
+def test_redemption_rechecked_when_suppression_expires():
+    from engine.models import StatusEffect
+    engine = _ready_combat(_engine("rd_suppress_expiry"))
+    monster = Entity(name="熄事怪", entity_type="怪物", blood_limit=100, current_hp=20,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    monster.add_status(StatusEffect(name="熄事", value=1, remaining_rounds=1))
+    engine.state.enemies[:] = [monster]
+    assert engine.combat.check_redemption(monster) is None
+    engine.combat.round_end()
+    assert not monster.has_status("熄事")
+    assert engine.state.pending_redemption["name"] == "熄事怪"
