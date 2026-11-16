@@ -109,7 +109,7 @@ def test_normal_round_skip_is_target_local_and_last_block_still_skips():
     assert monster.get_status_effects("测试减益")[0].remaining_rounds == 1
     assert monster.no_action_rounds == monster.no_damage_rounds == 0
     assert not player.has_status("玩家状态")
-    assert player.no_action_rounds == player.no_damage_rounds == 1
+    assert player.no_net_change_rounds == 1
 
     # 次数已在上一回始归零，但上一回合仍完整跳过；下一次回始才恢复。
     engine.combat.round_start()
@@ -118,7 +118,7 @@ def test_normal_round_skip_is_target_local_and_last_block_still_skips():
     assert engine.combat.prepare_monster_phase()["actors"][0]["actor_ref"] == "enemy:0"
     engine.combat.round_end()
     assert not monster.has_status("测试减益")
-    assert monster.no_action_rounds == monster.no_damage_rounds == 1
+    assert monster.no_net_change_rounds == 1
 
 
 def test_sealed_away_round_neither_consumes_nor_restores_old_block_marker():
@@ -205,12 +205,12 @@ def test_dameng_after_blocked_normal_round_is_independent():
     assert sum(isinstance(effect, dict)
                and effect.get("type") == "extra_target_round" for effect in effects) == 1
     assert target.current_mana == 3  # 大梦自己的回增不能继承普通回合的跳过标记
-    assert target.no_action_rounds == 1
+    assert target.no_net_change_rounds == 1
     assert engine.state.current_round == 3
     assert engine.combat.chenni_round_blocked(target)  # 原普通回终仍须跳过
 
     engine.combat.round_end()
-    assert target.no_action_rounds == 1
+    assert target.no_net_change_rounds == 1
 
 
 def test_dameng_extra_rounds_consume_blocks_before_any_round_settlement():
@@ -243,7 +243,7 @@ def test_dameng_extra_rounds_consume_blocks_before_any_round_settlement():
     # 前两个额外回合完整中断；只有第三个触发守夜灯、凡庸和状态递减。
     assert engine.state.current_round == 10
     assert target.current_mana == 10
-    assert target.no_action_rounds == target.no_damage_rounds == 1
+    assert target.no_net_change_rounds == 1
     assert not target.has_status("沉溺")
     assert not target.has_status("测试减益")
     assert player.get_status_effects("玩家状态")[0].remaining_rounds == 3

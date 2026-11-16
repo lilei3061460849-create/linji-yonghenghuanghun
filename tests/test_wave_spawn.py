@@ -61,6 +61,7 @@ def _start_battle_with_reinforcements(engine: GameEngine, tries: int = 10) -> di
         if engine.state.phase == "in_combat":
             engine.state.player.damage_dealt_this_round = 1
             engine.state.player.actions_used_this_round = 1
+            engine.state.player.net_change_this_round = True
             engine.execute_action("round_end", {})
             engine.execute_action("battle_end", {})
     raise AssertionError(f"连续 {tries} 场第7战都没出现增援队列，配方式出怪可能失效")
@@ -109,6 +110,7 @@ def _pass_round(engine: GameEngine, kill_first: bool = True):
     # 测试替身击杀：免凡庸（进场节奏与凡庸正交）
     p.damage_dealt_this_round = 1
     p.actions_used_this_round = 1
+    p.net_change_this_round = True
     re_ = engine.execute_action("round_end", {})
     assert re_["success"] is True, re_
     return r
@@ -152,6 +154,7 @@ def test_reinforcements_arrive_exactly_on_planned_rounds():
         assert prep.get("skipped") is True, prep
         engine.state.player.damage_dealt_this_round = 1
         engine.state.player.actions_used_this_round = 1
+        engine.state.player.net_change_this_round = True
         engine.execute_action("round_end", {})
         if not engine.state.monster_reinforcements:
             break

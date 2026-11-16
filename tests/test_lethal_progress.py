@@ -45,14 +45,11 @@ def test_progress_rendering_matches_rule_numbers():
     assert e.lethal_progress() == ["迷失（10/50）", "癌变（30/84）"]
 
 
-def test_mediocrity_shows_the_closer_line():
+def test_mediocrity_shows_net_change_progress():
     e = _player()
-    e.no_action_rounds, e.no_damage_rounds = 1, 4
-    assert e.lethal_counters()["凡庸·未致敌掉血"] == (4, Entity.MEDIOCRITY_ROUNDS)
-    assert "凡庸·未致敌掉血（4/5）" in e.lethal_progress()
-    other = _player()
-    other.no_action_rounds = 3
-    assert "凡庸·未出手（3/5）" in other.lethal_progress()
+    e.no_net_change_rounds = 4
+    assert e.lethal_counters()["凡庸·无净变化"] == (4, Entity.MEDIOCRITY_ROUNDS)
+    assert "凡庸·无净变化（4/5）" in e.lethal_progress()
 
 
 def test_zero_blood_limit_has_no_cancer_line():

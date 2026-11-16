@@ -1436,12 +1436,19 @@ class DaowenEffectMixin:
                 for kind in list(reductions):
                     owned = purifiable_cost_layers(wt, kind)
                     reductions[kind] = min(reductions[kind], max(0, owned))
-                    if kind != "异变" and isinstance(ledger, dict):
-                        ledger[kind] = max(0, owned - reductions[kind])
                 if reductions.get("血限", 0) > 0:
                     amount = int(reductions["血限"])
                     wt.blood_limit += amount
                     applied["血限"] = amount
+                    if isinstance(ledger, dict):
+                        ledger["血限"] = max(0, int(ledger.get("血限", 0)) - amount)
+                    if wt.entity_type == "怪物":
+                        redemption = self.check_redemption(wt)
+                        if redemption:
+                            result["effects"].append({"type": "cost_purified", "target": wt.name,
+                                                      "requested": reductions, "applied": applied})
+                            result["effects"].append(redemption)
+                            continue
                 if reductions.get("枯竭", 0) > 0:
                     amount = int(reductions["枯竭"])
                     pending = int(getattr(wt, "pending_exhaust_mana", 0) or 0)
@@ -1450,15 +1457,21 @@ class DaowenEffectMixin:
                     # 只取消尚未在下一次[战始]结算的额度，不恢复法限或历史法力。
                     if actual:
                         applied["枯竭"] = actual
+                        if isinstance(ledger, dict):
+                            ledger["枯竭"] = max(0, int(ledger.get("枯竭", 0)) - actual)
                     else:
                         reductions["枯竭"] = 0
                 if reductions.get("法限", 0) > 0:
                     amount = int(reductions["法限"])
                     wt.mana_limit += amount
                     applied["法限"] = amount
+                    if isinstance(ledger, dict):
+                        ledger["法限"] = max(0, int(ledger.get("法限", 0)) - amount)
                 if reductions.get("速度", 0) > 0:
                     amount = int(reductions["速度"])
                     applied["速度"] = self._gain_speed(wt, amount, ctx=daowen_ctx)
+                    if isinstance(ledger, dict):
+                        ledger["速度"] = max(0, int(ledger.get("速度", 0)) - amount)
                 if reductions.get("异变", 0) > 0:
                     amount = int(reductions["异变"])
                     pay = wt.add_mutation(-amount)
@@ -2590,6 +2603,15 @@ class DaowenEffectMixin:
             elif src == "速度":
                 self._gain_speed(target, layers, ctx=daowen_ctx)
                 ledger["速度"] = max(0, int(ledger.get("速度", 0) or 0) - layers)
+            # 用户裁定：逐次变化后立即检查；目标已救赎离场时，病变后半段不能再施加。
+            if target.entity_type == "怪物" and src in {"异变", "血限"}:
+                redemption = self.check_redemption(target)
+                if redemption:
+                    result["effects"].append({"type": "cost_conversion_interrupted",
+                                              "target": target.name, "from": src,
+                                              "to": dst, "layers": layers})
+                    result["effects"].append(redemption)
+                    return result
             if dst == "异变":
                 target.add_mutation(layers)
             elif dst == "枯竭":

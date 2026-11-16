@@ -92,8 +92,7 @@ def test_extra_rounds_drive_mediocrity_threshold():
     """【凡庸】按角色实际经历的回合推进，额外回合同样计数并触发。"""
     engine = _engine("target_round_mediocrity")
     target = _monster(engine, "大梦靶怪", hp=200)
-    target.no_action_rounds = 3
-    target.no_damage_rounds = 3
+    target.no_net_change_rounds = 3
     _world_round_10(engine)
 
     effects = engine.combat.advance_target_rounds(target, 2, source="大梦")

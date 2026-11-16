@@ -139,7 +139,7 @@ _BATTLE_COUNTER_FIELDS: tuple[str, ...] = (
     "deferred_damage",       # 缓厄沙漏：待结算的普通伤害
     "shards",                # 碎片代价的余额（实体自带，供怪物/中立同样可比）
     "fake_shards",
-    "no_action_rounds",      # 凡庸：连续未出手回合
+    "no_action_rounds",      # 旧档兼容
     "no_damage_rounds",      # 旧档兼容
     "no_net_change_rounds",  # 凡庸：连续未造成净变化回合
 )

@@ -546,3 +546,23 @@ def test_redemption_rechecked_when_suppression_expires():
     engine.combat.round_end()
     assert not monster.has_status("熄事")
     assert engine.state.pending_redemption["name"] == "熄事怪"
+
+
+def test_purify_stops_other_costs_when_blood_limit_triggers_redemption():
+    engine = _ready_combat(_engine("rd_mixed_purify"))
+    _give(engine.state.player, "净化")
+    engine.state.player.current_mana = 100
+    monster = Entity(name="混合净化怪", entity_type="怪物", blood_limit=95, current_hp=20,
+                     mana_limit=10, current_mana=10, attack_count=1, attack_power=1,
+                     mutation_count=49)
+    monster.reversible_cost_layers.update({"血限": 1, "法限": 1})
+    engine.state.enemies[:] = [monster]
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "净化", "x": 2, "target_ref": "enemy:0",
+        "cost_choices": [{"type": "血限", "layers": 1}, {"type": "法限", "layers": 1}],
+        "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
+    })
+    assert result["success"], result
+    assert engine.state.pending_redemption["name"] == monster.name
+    assert monster.blood_limit == 96 and monster.mana_limit == 10
+    assert monster.reversible_cost_layers["法限"] == 1

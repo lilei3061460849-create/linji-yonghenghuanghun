@@ -63,3 +63,21 @@ def test_mediocrity_empty_focus_does_not_count_as_progress():
     result = engine.execute_action("focus", {})
     assert result["success"], result
     assert not actor.net_change_this_round
+
+
+def test_monster_action_credits_monster_not_player():
+    from tests.test_monster_phase_transaction import _arena
+    engine, monster, prepared = _arena()
+    actor = prepared["result"]["actors"][0]
+    monster.net_change_this_round = False
+    engine.state.player.net_change_this_round = False
+    option = next(d for d in actor["daowen_options"] if d["name"] == "烁金")
+    choice = {"actor_ref": actor["actor_ref"],
+              "daowen": {"name": "烁金", "dodge": False, "blood_shadow": False,
+                          "trigger_spell_choices": {}, "target_ref": "player:0"},
+              "attack_actions": []}
+    result = engine.execute_action("resolve_monster_phase", {
+        "token": prepared["result"]["token"], "choices": [choice]})
+    assert result["success"], (result, option)
+    assert monster.net_change_this_round
+    assert not engine.state.player.net_change_this_round

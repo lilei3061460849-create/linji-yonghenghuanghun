@@ -824,11 +824,11 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         activity_actor = None
         activity_before = None
         if self.state.phase == "in_combat":
-            refs = self.combat._combat_entity_refs()
             active_types = {"use_daowen", "cast", "consume_item", "use_resonance", "focus",
                             "resolve_attack", "attack_respond_hit", "resolve_monster_phase",
                             "lianxin_in_battle", "activate_resource", "release_spell"}
             if action_type in active_types:
+                refs = self.combat._combat_entity_refs()
                 actor_ref = params.get("actor_ref")
                 if action_type in {"resolve_attack", "attack_respond_hit"}:
                     actor_ref = (self.state.pending_attack or {}).get("options", {}).get("actor_ref")

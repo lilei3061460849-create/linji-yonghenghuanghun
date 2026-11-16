@@ -222,10 +222,10 @@ def test_jibian_death_skips_mediocrity_tick():
                     mana_limit=50, current_mana=0, speed_limit=10, current_speed=5)
     doomed = Entity("畸变者", "怪物", blood_limit=6, current_hp=6,
                     attack_count=2, attack_power=3)
-    doomed.no_action_rounds = 4
+    doomed.no_net_change_rounds = 4
     _give_jibian(doomed)
     ticking = Entity("平庸者", "怪物", blood_limit=50, current_hp=50)
-    ticking.no_action_rounds = 4
+    ticking.no_net_change_rounds = 4
     state.player = player
     state.enemies = [doomed, ticking]
     combat = CombatEngine(state, DiceEngine())
@@ -234,10 +234,10 @@ def test_jibian_death_skips_mediocrity_tick():
 
     # 畸变致死者：tick 被跳过（is_alive 前置），计数停在 4
     assert doomed.is_alive is False
-    assert doomed.no_action_rounds == 4
+    assert doomed.no_net_change_rounds == 4
     # 另一只正常 tick → 达阈值 → 凡庸触发（凡庸硬块与中断裁定不受影响）
     assert ticking.is_alive is False
-    assert ticking.no_action_rounds == 0
+    assert ticking.no_net_change_rounds == 0
     assert any(e.get("type") == "mediocrity" and e.get("entity") == "平庸者"
                for e in res["effects"])
 

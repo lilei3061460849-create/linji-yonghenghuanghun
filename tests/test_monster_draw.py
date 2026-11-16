@@ -172,6 +172,7 @@ def test_seven_battles_match_per_battle_draw_totals():
             assert prep["success"], prep
             engine.state.player.damage_dealt_this_round = 1
             engine.state.player.actions_used_this_round = 1
+            engine.state.player.net_change_this_round = True
             engine.execute_action("round_end", {})
         for enemy in engine.state.enemies:
             enemy.current_hp = 0

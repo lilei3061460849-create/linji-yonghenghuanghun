@@ -23,8 +23,7 @@ from .resolution import KIND_EFFECT, ResolutionContext, resolution_frame
 from .models import MONSTER_MANA_RELIC
 from .gamedata import REGION_EXCLUSIVE_DAOWEN as REGION_EXCLUSIVE_DAOWEN_DATA
 
-# 【凡庸】连续无所作为的回合阈值：连续 N 回合未出手、或连续 N 回合未能使敌对角色
-# 生命减少 → 凭空全身炸裂。这是**规则层**的反乌龟机制，必须优先于 sim 层的死锁
+# 【凡庸】连续无净变化的回合阈值：自身行动与触发链连续 N 回合未使战场净状态变化 → 炸裂。这是**规则层**的反乌龟机制，必须优先于 sim 层的死锁
 # 防护（后者只是防卡死的程序兜底，不得抢在规则之前结束战斗，更不得擅定胜负）。
 # sim/duel_pvp.py 直接导入本常量推导兜底阈值，避免两处硬编码各自漂移。
 # 阈值唯一事实源在 Entity（engine/models.py::Entity.MEDIOCRITY_ROUNDS）。
