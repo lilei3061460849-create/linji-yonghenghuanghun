@@ -230,7 +230,7 @@ class MonsterLifeMixin:
     def redemption_hp_threshold(self, monster: Entity) -> int:
         if monster is None or monster.blood_limit <= 0:
             return 0
-        return monster.blood_limit // 5
+        return (monster.blood_limit + 4) // 5
 
     def check_redemption(self, monster: Entity, *, force: bool = False) -> Optional[dict]:
         """救赎：生命不超过血限20%且异变不超过49；自由结晶保留强制例外。"""

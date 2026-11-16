@@ -1520,7 +1520,7 @@ class GameState:
     pending_derivative_choices: list[str] = field(default_factory=list)
     pending_derivative_parent: str = ""
     pending_derivative_recipient: str = ""
-    # 救赎：怪物融化后等待接纳/无视。
+    # 救赎：怪物融化后等待接纳/终结。
     pending_redemption: dict = field(default_factory=dict)
     # 消耗品【发现】候选（如扭曲都市完成事件后的工具发现）。
     pending_item_choices: list[str] = field(default_factory=list)

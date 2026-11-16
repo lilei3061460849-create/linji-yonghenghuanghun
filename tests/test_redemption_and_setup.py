@@ -411,12 +411,12 @@ def test_redemption_finish_is_not_double_counted_when_accepted():
 
 def test_redemption_health_mutation_and_original_boundaries():
     engine = _ready_combat(_engine("rd_new_boundaries"))
-    monster = Entity(name="边界怪", entity_type="怪物", blood_limit=101, current_hp=21,
+    monster = Entity(name="边界怪", entity_type="怪物", blood_limit=101, current_hp=22,
                      attack_count=1, attack_power=1, mutation_count=49)
     _give(monster, "全力")
     engine.state.enemies[:] = [monster]
-    assert engine.combat.check_redemption(monster) is None  # 21/101 > 20%
-    monster.current_hp = 20
+    assert engine.combat.check_redemption(monster) is None  # 22 > ceil(101 × 20%)
+    monster.current_hp = 21
     monster.mutation_count = 50
     assert engine.combat.check_redemption(monster) is None
     monster.mutation_count = 49
@@ -449,7 +449,7 @@ def test_purifying_blood_limit_can_trigger_redemption():
     player = engine.state.player
     _give(player, "净化")
     player.current_mana = 100
-    monster = Entity(name="血限怪", entity_type="怪物", blood_limit=99, current_hp=20,
+    monster = Entity(name="血限怪", entity_type="怪物", blood_limit=95, current_hp=20,
                      attack_count=1, attack_power=1, mutation_count=49)
     monster.reversible_cost_layers["血限"] = 1
     engine.state.enemies[:] = [monster]
@@ -459,5 +459,5 @@ def test_purifying_blood_limit_can_trigger_redemption():
         "blood_shadow": False, "trigger_spell_choices": {},
     })
     assert r["success"], r
-    assert monster.blood_limit == 100
+    assert monster.blood_limit == 96
     assert engine.state.pending_redemption["name"] == monster.name

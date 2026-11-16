@@ -53,10 +53,10 @@ class TestStructure20261108:
     def setup_method(self):
         DaoWenEngine.register_all()
 
-    def test_registry_is_85_and_new_names_registered(self):
+    def test_registry_is_87_and_new_names_registered(self):
         names = set(DaoWenEngine.list_all())
         # 2026-11-09 第二轮改造：衍生改名，删【竭伐】（枯竭通道）与【伪伐】、增【冲击】，
-        # 86 → 85。
+        # 后续扩展至87，以下断言与当前注册表同步。
         assert len(names) == 87
         for n in ("脆弱", "连击", "虚耗", "断脉", "买命", "冲击",
                   "燃命", "折年", "搏命", "献锋"):

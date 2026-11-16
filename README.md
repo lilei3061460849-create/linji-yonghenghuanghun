@@ -36,7 +36,7 @@ https://raw.githubusercontent.com/lilei3061460849-create/linji-yonghenghuanghun/
 ```text
 canonical_rules  = 规则正文.md          # 精确结算条文、通用道纹、通用事件
 playbook         = 推演规范.md          # 开局/战斗/死斗/战报的完整流程
-invariants       = 死者之书.md          # 6 条稳定逻辑；特殊事件的生成页
+invariants       = 死者之书.md          # 5 条稳定逻辑；特殊事件的生成页
 runtime_truth    = engine/              # 最终实际结算
 structured_rules = data/rules/*.toml    # 已迁移的结构化规则源
 validation       = tests/                # 文档、数据、引擎三方一致性

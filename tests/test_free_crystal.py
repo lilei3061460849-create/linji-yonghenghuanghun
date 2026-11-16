@@ -3,9 +3,9 @@
 规则口径（物品索引·自由结晶；规则正文·凡庸/救赎）：
 - 凡庸怪物炸裂掉落【自由结晶】（1/1）；
 - 对[目标]使用后，使其随机付出一种代价，共计10（随机池＝生命/血限/枯竭/
-  萎缩/速度/失忆/异变/冷却八种数值代价；唯一不入池）；
+  法限/速度/失忆/异变/冷却八种数值代价；唯一不入池）；
 - 若目标是生命≤20%[血限]的怪物，代价结算后仍存活的，强制触发救赎事件
-  （无视「没有原始怪物道纹」条件）；
+  （保留绕过常规异变条件的强制例外）；
 - 1/1 用完即耗尽。
 """
 from __future__ import annotations
@@ -104,7 +104,7 @@ def test_free_crystal_forces_redemption_on_low_hp_monster(tmp_path, single_cost)
     monster = Entity("垂死怪", "怪物", blood_limit=100, current_hp=20,
                      attack_count=1, attack_power=1,
                      speed_limit=10, current_speed=10)
-    # 持有原始道纹【全力】：常规救赎会被拦，自由结晶必须强制绕过
+    # 持有原始道纹【全力】不影响救赎
     monster.dao_wen["全力"] = DaoWenInstance(
         DaoWen("全力", "", "异变", "5X", "全力X"), x_value=1)
     engine.state.enemies.append(monster)
