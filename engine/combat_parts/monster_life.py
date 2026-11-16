@@ -250,6 +250,31 @@ class MonsterLifeMixin:
             return None
         return self._queue_redemption(monster, "free_crystal" if force else "low_hp_low_mutation")
 
+    def recheck_redemption_candidates(self) -> list[dict]:
+        """待决消除后重检仍在场的怪；同拍雕塑优先，最多新增一个救赎。"""
+        if self.state.pending_redemption or self.state.phase != "in_combat":
+            return []
+        effects = []
+        for monster in list(self.state.enemies):
+            if (monster.entity_type != "怪物" or not monster.is_alive
+                    or not getattr(monster, "in_combat", True)
+                    or monster.is_departed or monster.removed_without_kill
+                    or self.state.suppresses_special_events(monster)
+                    or monster.current_hp <= 0 or monster.blood_limit <= 0
+                    or monster.current_hp > self.redemption_hp_threshold(monster)
+                    or monster.mutation_count > self.REDEMPTION_MUTATION_MAX):
+                continue
+            if (self._can_be_sculptured(monster)
+                    and monster.effective_attack_count() <= 0
+                    and monster.effective_attack_power() <= 0):
+                effects.append(self._sculpture_monster(monster))
+                continue
+            redemption = self.check_redemption(monster)
+            if redemption:
+                effects.append(redemption)
+                break
+        return effects
+
     def _queue_redemption(self, monster: Entity, cause: str) -> dict:
         """怪物融化离场，等待【接纳】或【终结】（，终结取代旧「无视」）。
 

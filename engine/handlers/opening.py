@@ -72,10 +72,12 @@ class OpeningHandlersMixin:
             )
             self.state.employees.append(employee)
             self.state.pending_redemption = {}
+            rechecked = self.combat.recheck_redemption_candidates()
             return {
                 "success": True,
                 "action": "救赎·接纳",
-                "result": {"employee": employee.to_dict(), "from": pending["name"]},
+                "result": {"employee": employee.to_dict(), "from": pending["name"],
+                           "rechecked_events": rechecked},
             }
         if option in (2, "2", "终结"):
             self.state.pending_redemption = {}
@@ -88,9 +90,10 @@ class OpeningHandlersMixin:
                 dao_wen = pending.get("dao_wen") or {}
                 reward = math.ceil(blood_limit * 0.02) + len(dao_wen) * 5
                 self.state.shards += reward
+                rechecked = self.combat.recheck_redemption_candidates()
                 return {"success": True, "action": "救赎·终结",
                         "result": {"monster": pending.get("name"), "shard_reward": reward,
-                                   "total_shards": self.state.shards,
+                                   "rechecked_events": rechecked, "total_shards": self.state.shards,
                                    "note": "等同击杀，碎片已结算"}}
             # 还原为一次正常命零：清掉【离场】标记，让[战终]走普通击杀的奖励管线
             # （奖励公式与结算时点都由 battle_end 统一负责，引擎内只有一处口径）。
@@ -106,8 +109,9 @@ class OpeningHandlersMixin:
                 mechanic="death", subtype="redemption_finish",
                 tags={"death", "redemption"},
             ).to_dict()
+            rechecked = self.combat.recheck_redemption_candidates()
             return {"success": True, "action": "救赎·终结",
-                    "result": {"monster": monster.name,
+                    "result": {"monster": monster.name, "rechecked_events": rechecked,
                                "note": "昏迷的微光者被当场终结，等同击杀，碎片于[战终]按命零奖励结算",
                                "battle_start_blood_limit": monster.battle_start_blood_limit,
                                "dao_wen_count": len(monster.dao_wen)}}

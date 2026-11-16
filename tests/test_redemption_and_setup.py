@@ -505,3 +505,31 @@ def test_redemption_rounding_allows_monster_at_one_full_hp():
     engine.state.enemies[:] = [monster]
     assert engine.combat.redemption_hp_threshold(monster) == 1
     assert engine.combat.check_redemption(monster) is not None
+
+
+def test_redemption_rechecks_other_monsters_after_choice():
+    engine = _ready_combat(_engine("rd_next"))
+    first = Entity(name="先", entity_type="怪物", blood_limit=100, current_hp=20,
+                   attack_count=1, attack_power=1, mutation_count=49)
+    second = Entity(name="后", entity_type="怪物", blood_limit=100, current_hp=20,
+                    attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies[:] = [first, second]
+    assert engine.combat.check_redemption(first)
+    assert engine.combat.check_redemption(second) is None
+    result = engine.execute_action("resolve_redemption", {"option": "终结"})
+    assert result["success"]
+    assert engine.state.pending_redemption["name"] == "后"
+    assert result["result"]["rechecked_events"][0]["monster"] == "后"
+
+
+def test_redemption_recheck_uses_current_state():
+    engine = _ready_combat(_engine("rd_next_changed"))
+    first = Entity(name="先", entity_type="怪物", blood_limit=100, current_hp=20,
+                   attack_count=1, attack_power=1)
+    second = Entity(name="后", entity_type="怪物", blood_limit=100, current_hp=20,
+                    attack_count=1, attack_power=1)
+    engine.state.enemies[:] = [first, second]
+    assert engine.combat.check_redemption(first)
+    second.mutation_count = 50
+    assert engine.execute_action("resolve_redemption", {"option": "终结"})["success"]
+    assert not engine.state.pending_redemption and second.is_alive
