@@ -819,6 +819,27 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             return {id(entity): entity.actions_used_this_round for entity in entities}
 
         usage_before = action_usage()
+        # 一次真实行动的因果范围：行动者及其触发链；不将他人行动或回合自然变化记给该角色。
+        from .spell_execution import battlefield_fingerprint
+        activity_actor = None
+        activity_before = None
+        if self.state.phase == "in_combat":
+            refs = self.combat._combat_entity_refs()
+            active_types = {"use_daowen", "cast", "consume_item", "use_resonance", "focus",
+                            "resolve_attack", "attack_respond_hit", "resolve_monster_phase",
+                            "lianxin_in_battle", "activate_resource", "release_spell"}
+            if action_type in active_types:
+                actor_ref = params.get("actor_ref")
+                if action_type in {"resolve_attack", "attack_respond_hit"}:
+                    actor_ref = (self.state.pending_attack or {}).get("options", {}).get("actor_ref")
+                elif action_type == "resolve_monster_phase":
+                    choices = params.get("choices") or []
+                    actor_ref = choices[0].get("actor_ref") if len(choices) == 1 and isinstance(choices[0], dict) else None
+                activity_actor = refs.get(actor_ref) if actor_ref else (
+                    None if action_type in {"resolve_attack", "attack_respond_hit", "resolve_monster_phase"}
+                    else self.state.player)
+                if activity_actor is not None:
+                    activity_before = battlefield_fingerprint(self, exclude_mediocrity=True)
         nested_action = getattr(self, "_nested_action_count", 0) > 0
         side_capacity_before = {
             side: self._duel_side_can_act(side)
@@ -831,6 +852,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     self.state.player,
                     self.combat._combat_entity_refs().get(params.get("target_ref")))
             result = self._dispatch_action(action_type, params)
+            if (result.get("success") and activity_actor is not None and activity_before is not None
+                    and battlefield_fingerprint(self, exclude_mediocrity=True) != activity_before):
+                activity_actor.net_change_this_round = True
             usage_after = action_usage()
             action_spent = any(
                 usage_after.get(entity_id, used) > used
@@ -3793,6 +3817,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "forgotten_cost_daowen": [asdict(inst) for inst in getattr(e, "forgotten_cost_daowen", [])],
             # 致死进度：封存快照同样保留可读进度
             "no_action_rounds": e.no_action_rounds, "no_damage_rounds": e.no_damage_rounds,
+            "no_net_change_rounds": e.no_net_change_rounds,
+            "net_change_this_round": e.net_change_this_round,
             "lethal_counters": {k: list(v) for k, v in e.lethal_counters().items()},
             "lethal_progress": e.lethal_progress(),
             "dao_wen": {k: v.x_value for k, v in e.dao_wen.items()},
@@ -3847,6 +3873,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         e.forgotten_cost_daowen = [DaoWenInstance(
             **{**item, "dao_wen": DaoWen(**item["dao_wen"])})
             for item in d.get("forgotten_cost_daowen", [])]
+        e.no_net_change_rounds = int(d.get("no_net_change_rounds", 0) or 0)
+        e.net_change_this_round = bool(d.get("net_change_this_round", False))
         e.mutation_count = d.get("mutation_count", 0)   # ④修复：旧档无此键回退0
         from .daowen import normalize_daowen_name as _norm_dw
         for name, x in d.get("dao_wen", {}).items():

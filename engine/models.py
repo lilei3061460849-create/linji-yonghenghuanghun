@@ -540,7 +540,9 @@ class Entity:
     damage_dealt_this_round: int = 0
     # 特殊事件【凡庸】：连续五回合未出手 / 五回合未能使敌对角色生命减少时触发。
     # 两个条件是"或"关系，故分别计数。多个角色同时达阈值时，非轮回者优先结算。
-    no_action_rounds: int = 0   # 连续未出手回合数
+    no_net_change_rounds: int = 0  # 连续未由自身造成战场净变化的回合数
+    net_change_this_round: bool = False  # 本回合自身行动或触发链有净变化
+    no_action_rounds: int = 0   # 旧存档字段，不再作为凡庸条件
     no_damage_rounds: int = 0   # 连续未使敌方生命减少的回合数
     # 本场战斗内累计获得的[回复]量。规则正文：[战终]清除局内增益(包括回复)，
     # 故战终须把这部分回血扣除（不低于进场时的生命）。
@@ -1077,7 +1079,7 @@ class Entity:
         进度必须能被 AI 在面板上直接读到，不允许只留一个布尔结果。口径：
           * 迷失 = 异变层数 / MUTATION_COLLAPSE_THRESHOLD；
           * 癌变 = 本场累计回复量 / ⌈血限×CANCER_HEAL_MULTIPLIER⌉；
-          * 凡庸 = 连续未出手（或连续未致敌掉血）回合数 / MEDIOCRITY_ROUNDS，取更接近线的那条。
+          * 凡庸 = 连续未造成战场净变化回合数 / MEDIOCRITY_ROUNDS。
         """
         out: dict[str, tuple[int, int]] = {}
         if self.can_trigger_mutation_lost():
@@ -1088,13 +1090,9 @@ class Entity:
         elif self.blood_limit > 0:
             out["癌变"] = (int(self.total_healed),
                            int(math.ceil(self.blood_limit * self.CANCER_HEAL_MULTIPLIER)))
-        if self.no_action_rounds or self.no_damage_rounds:
-            # 显示键来自 data/rules/lethal_events.toml 的 progress_keys（[0]=未出手，[1]=未致敌掉血）
-            keys = lethal_events.progress_keys("fanyong") or ["凡庸·未出手", "凡庸·未致敌掉血"]
-            if self.no_action_rounds >= self.no_damage_rounds:
-                out[keys[0]] = (int(self.no_action_rounds), int(self.MEDIOCRITY_ROUNDS))
-            else:
-                out[keys[1]] = (int(self.no_damage_rounds), int(self.MEDIOCRITY_ROUNDS))
+        if self.no_net_change_rounds:
+            keys = lethal_events.progress_keys("fanyong") or ["凡庸·无净变化"]
+            out[keys[0]] = (int(self.no_net_change_rounds), int(self.MEDIOCRITY_ROUNDS))
         return out
 
     def lethal_progress(self) -> list[str]:
@@ -1361,6 +1359,8 @@ class Entity:
             "mutation_count": self.mutation_count,
             "no_action_rounds": self.no_action_rounds,
             "no_damage_rounds": self.no_damage_rounds,
+            "no_net_change_rounds": self.no_net_change_rounds,
+            "net_change_this_round": self.net_change_this_round,
             # 致死类特殊事件的进度：AI 必须能在面板上直接读到
             # 「迷失（10/50）」这种进度，禁止只给结果不给进度。
             "lethal_counters": {k: list(v) for k, v in self.lethal_counters().items()},

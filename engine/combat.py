@@ -1341,6 +1341,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                           or self._relic_active(e, MONSTER_MANA_RELIC))
             relic_unsealed = (e is not player
                               or self.state.sealed_relics.get(MONSTER_MANA_RELIC, 0) <= 0)
+            e.net_change_this_round = False
             if e.mana_limit > 0 and owns_relic and relic_unsealed:
                 amount = e.mana_limit
                 mana_before = e.current_mana
@@ -1505,7 +1506,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             "_blood_limit_events", "actions_used_this_round",
             "heavy_shackles_action_penalty",
             "blood_oath_used_this_round", "mana_inflicted_this_round",
-            "damage_dealt_this_round",
+            "damage_dealt_this_round", "net_change_this_round",
         )
         saved_fields = {}
         for field_name in cycle_fields:
@@ -1540,6 +1541,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                 target.actions_used_this_round = 0
                 target.heavy_shackles_action_penalty = 0
                 target.damage_dealt_this_round = 0
+                target.net_change_this_round = False
                 target.blood_oath_used_this_round = False
                 target.mana_inflicted_this_round = 0
 
@@ -1675,6 +1677,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             if not decided_before_tick and self._mediocrity_battle_decided():
                 entity.no_action_rounds = 0
                 entity.no_damage_rounds = 0
+                entity.no_net_change_rounds = 0
                 effects.append({
                     "type": "mediocrity_interrupted", "entity": entity.name,
                     "note": f"{why}，但战场已因先前的【凡庸】清空、战斗结束：剩余凡庸中断结算"})
@@ -2066,19 +2069,13 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
         return self.state.battle_over()
 
     def _tick_mediocrity_counters(self, entity: Entity) -> Optional[str]:
-        """更新凡庸连续计数；达阈值返回原因，不立刻结算。"""
-        if entity.actions_used_this_round <= 0:
-            entity.no_action_rounds += 1
+        """本角色本回合的行动及其触发链未使战场发生净变化则累加。"""
+        if entity.net_change_this_round:
+            entity.no_net_change_rounds = 0
         else:
-            entity.no_action_rounds = 0
-        if entity.damage_dealt_this_round <= 0:
-            entity.no_damage_rounds += 1
-        else:
-            entity.no_damage_rounds = 0
-        if (entity.no_action_rounds >= MEDIOCRITY_ROUNDS
-                or entity.no_damage_rounds >= MEDIOCRITY_ROUNDS):
-            return ("连续五回合未出手" if entity.no_action_rounds >= MEDIOCRITY_ROUNDS
-                    else "连续五回合未能使敌对角色生命减少")
+            entity.no_net_change_rounds += 1
+        if entity.no_net_change_rounds >= MEDIOCRITY_ROUNDS:
+            return "连续五回合未能使战场净状态变化"
         return None
 
     def _apply_mediocrity(self, entity: Entity, why: str) -> list[dict]:
@@ -2089,6 +2086,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
         if self.state.suppresses_special_events(entity):
             entity.no_action_rounds = 0
             entity.no_damage_rounds = 0
+            entity.no_net_change_rounds = 0
             return [{"type": "mediocrity", "entity": entity.name, "suppressed": True,
                      "note": f"{entity.name}受到【熄事】保护，本次不触发【凡庸】"}]
         self._hp_loss_recording += 1  # 凡庸直接命零=特殊死因，不触发「失去生命后」
@@ -2102,6 +2100,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             "amount": 0, "tags": {"system", "round_end", "mediocrity"}})
         entity.no_action_rounds = 0
         entity.no_damage_rounds = 0
+        entity.no_net_change_rounds = 0
         if entity is self.state.player:
             self.state.last_death_cause = "mediocrity"
         effects = [{"type": "mediocrity", "entity": entity.name,
