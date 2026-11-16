@@ -1037,6 +1037,12 @@ class CostPaymentMixin:
             detail["context_warning"] = "生命支付缺少EffectContext；需要来源上下文的监听不会触发"
         if detail.get("died"):
             self._check_hp_zero_death(payer, ctx=hp_loss_ctx or cost_context)
+        elif life_lost > 0 and payer.entity_type == "怪物":
+            # 代价失血抑制了模型层兜底钩子，需在失血事件入账后补检；
+            # 致死支付仍先按命零处理，与直接失血入口保持一致。
+            redemption = self.check_redemption(payer)
+            if redemption:
+                detail["redemption"] = redemption
         if (payer is self.state.player and actual > 0 and not payer.blood_oath_used_this_round
                 and self._relic_active(payer, "血誓戒")
                 and self._blood_oath_context_allows(cost_context)):

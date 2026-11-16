@@ -566,3 +566,24 @@ def test_purify_stops_other_costs_when_blood_limit_triggers_redemption():
     assert engine.state.pending_redemption["name"] == monster.name
     assert monster.blood_limit == 96 and monster.mana_limit == 10
     assert monster.reversible_cost_layers["法限"] == 1
+
+
+def test_life_cost_loss_triggers_redemption_after_accounting():
+    engine = _ready_combat(_engine("rd_cost_loss"))
+    monster = Entity(name="生命代价怪", entity_type="怪物", blood_limit=100, current_hp=25,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies[:] = [monster]
+    result = engine.combat.pay_numeric_cost(monster, "生命", 5)
+    assert result["owner"]["detail"]["redemption"]["type"] == "redemption"
+    assert engine.state.pending_redemption["name"] == monster.name
+    assert monster.is_departed
+
+
+def test_lethal_life_cost_does_not_trigger_redemption():
+    engine = _ready_combat(_engine("rd_cost_lethal"))
+    monster = Entity(name="代价命零怪", entity_type="怪物", blood_limit=100, current_hp=5,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies[:] = [monster]
+    engine.combat.pay_numeric_cost(monster, "生命", 5)
+    assert not engine.state.pending_redemption
+    assert not monster.is_alive and not monster.is_departed
