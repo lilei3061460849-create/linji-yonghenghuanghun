@@ -464,10 +464,17 @@ class SpellExecution:
         """执行剩余全部程序；兼容自动反应等不需要交互空档的调用方。"""
         if not self.is_running:
             return self.results
+        state = getattr(self.engine, "state", None)
+        before = (battlefield_fingerprint(self.engine, self.caster, self.attacker,
+                                         exclude_mediocrity=True)
+                  if not self._replay_mode and getattr(state, "phase", None) == "in_combat" else None)
         if self._driver is None:
             self._driver = self._drive()
         for _ in self._driver:
             pass
+        if (before is not None and battlefield_fingerprint(
+                self.engine, self.caster, self.attacker, exclude_mediocrity=True) != before):
+            self.caster.net_change_this_round = True
         return self.results
 
     def run_to_window(self) -> list[StepResult]:

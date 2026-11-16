@@ -188,3 +188,15 @@ def test_reaction_spell_counter_lands_when_target_has_no_speed():
 
     assert enemy.current_speed == 0, "速度为 0 不得闪避"
     assert enemy.current_hp < hp_before, "未闪避则反打应当造成伤害"
+
+
+def test_automatic_reaction_credits_its_holder():
+    _, combat, player, enemy = _state()
+    _add_spell(player, "杀伐", "受到伤害前", "发动杀伐 X于攻击者")
+    assert not player.net_change_this_round and not enemy.net_change_this_round
+    detail = combat._apply_hostile_damage(player, 8, source=enemy,
+                                          ctx=_daowen_ctx(enemy, player))
+    assert _has_execution(detail, "杀伐-受到伤害前")
+    assert player.net_change_this_round
+    # 直接调用伤害管线并非敌人的 API 行动；不能顺带把其行动记账。
+    assert not enemy.net_change_this_round
