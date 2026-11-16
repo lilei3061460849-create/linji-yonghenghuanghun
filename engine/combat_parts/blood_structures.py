@@ -29,7 +29,7 @@ BLOOD_STRUCTURES: dict[str, dict] = {
     "永焰": {"carry": 10, "material": "白磷四面体",
              "desc": "每回合（回始）目标生命-X"},
     "脆化": {"carry": 10, "material": "超低温液氮",
-             "desc": "目标下一次受到的伤害+X，触发后清空"},
+             "desc": "受到≥10点伤害时清空全部层数，使该次伤害+5×X"},
     "震爆": {"carry": 15, "material": "硝化甘油晶格",
              "desc": "目标下一次宣告招架时，清空层数并受X点伤害"},
     "粘滞": {"carry": 15, "material": "瞬干高分子链",
@@ -111,20 +111,30 @@ class BloodStructureMixin:
         return fallback if (fallback is not None and fallback.is_alive) else None
 
     # ---------------------------------------------------------------- 触发
-    def consume_cuihua_on_damage(self, target: Entity, amount: int) -> int:
-        """【脆化】：本次伤害>0 时加 X 点并清空全部层数；返回加成值。
+    # 【脆化】触发门槛与每层加成（2026-11-16 改版）。
+    CUIHUA_THRESHOLD = 10
+    CUIHUA_BONUS_PER_LAYER = 5
 
-        只加「受到的伤害」：直接失血与代价不走统一伤害入口，天然不触发；
-        空刀（amount=0）不触发。调用点在格挡/护盾之前（加成属于伤害本身）。
+    def consume_cuihua_on_damage(self, target: Entity, amount: int) -> int:
+        """【脆化】：本次伤害≥10 时清空全部层数，使该次伤害+5×X；返回加成值。
+
+        口径（2026-11-16 用户裁定）：
+        - 门槛看**加成前**的本次伤害是否≥10；不足 10 层数保留、等下一次。
+        - 层数可能分散在多个同名状态里（同名合并之外的来源），触发时
+          **全部**层数一起清空，X 取清空前的总层数。
+        - 只加「受到的伤害」：直接失血与代价不走统一伤害入口，天然不触发；
+          空刀（amount=0）不到门槛。调用点在格挡/护盾之前（加成属于伤害本身）。
         """
-        if amount <= 0:
+        if amount < self.CUIHUA_THRESHOLD:
             return 0
-        status = self._structure_status(target, "脆化")
-        if status is None:
+        statuses = [s for s in target.status_effects
+                    if s.name == "脆化" and not s.is_expired and s.value > 0]
+        if not statuses:
             return 0
-        bonus = int(status.value)
-        target.status_effects.remove(status)
-        return bonus
+        layers = sum(int(s.value) for s in statuses)
+        for status in statuses:
+            target.status_effects.remove(status)
+        return layers * self.CUIHUA_BONUS_PER_LAYER
 
     def consume_nianzhi_on_dodge(self, target: Entity) -> dict:
         """【粘滞】：闪避成功（已支付 1 点速度）后额外支付 X 点速度并清空。"""

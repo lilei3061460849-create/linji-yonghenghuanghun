@@ -228,8 +228,11 @@ def test_yongyan_respects_shelter():
 
 # ---------------------------------------------------------------- 脆化
 
-def test_cuihua_amplifies_next_damage_then_clears():
-    """脆化：下一击伤害+X后清空；空刀不触发；之后的伤害不再加成。"""
+def test_cuihua_triggers_only_on_damage_at_least_10():
+    """脆化：本次伤害≥10才触发，触发后伤害+5×X并清空全部层数。
+
+    门槛按**加成前**的本次伤害判定：9点不触发（层数保留），10点触发。
+    """
     engine = _engine("struct_cuihua")
     _fast_player(engine)
     m = _spiky_monster(engine, hp=100)
@@ -238,30 +241,35 @@ def test_cuihua_amplifies_next_damage_then_clears():
         {"target_ref": "enemy:0", "damage": 5, "dodge": False,
          "parry": False, "blood_shadow": False}])
     assert engine.combat.structure_layers(m, "脆化") == 1
-    hp_after_build = m.current_hp
-    assert hp_after_build == 100 - 5
-    # 空刀：脆化不触发、不清空
+    assert m.current_hp == 100 - 5
+    # 空刀：不到门槛、不清空
     token, _ = _prepare(engine)
     _resolve(engine, token, [
         {"target_ref": "enemy:0", "damage": 0, "dodge": False,
          "parry": False, "blood_shadow": False}])
     assert engine.combat.structure_layers(m, "脆化") == 1
-    assert m.current_hp == hp_after_build
-    # 下一击：伤害+1并清空
+    assert m.current_hp == 95
+    # 9点伤害：不到门槛，层数保留
     token, _ = _prepare(engine)
-    r = _resolve(engine, token, [
-        {"target_ref": "enemy:0", "damage": 5, "dodge": False,
+    _resolve(engine, token, [
+        {"target_ref": "enemy:0", "damage": 9, "dodge": False,
          "parry": False, "blood_shadow": False}])
-    assert m.current_hp == hp_after_build - 6
+    assert engine.combat.structure_layers(m, "脆化") == 1
+    assert m.current_hp == 95 - 9
+    # 10点伤害：+5×1，清空
+    token, _ = _prepare(engine)
+    _resolve(engine, token, [
+        {"target_ref": "enemy:0", "damage": 10, "dodge": False,
+         "parry": False, "blood_shadow": False}])
+    assert m.current_hp == 86 - 15
     assert engine.combat.structure_layers(m, "脆化") == 0
-    assert "cuihua" not in str(r)
 
 
-def test_cuihua_stacks_and_hits_daowen_damage():
-    """脆化多层叠加；道纹伤害（统一伤害入口）同样触发。
+def test_cuihua_multilayer_bonus_and_daowen_damage_triggers():
+    """脆化多层：+5×X一次结算，全部层数一起清空；道纹伤害（统一入口）同样触发。
 
-    字面规则口径：构建击本身造成伤害，目标已有的脆化层在下一击就会触发——
-    多段普攻会把自己的脆化层打出去（第一击+1层、第二击吃+1并清空）。
+    字面规则口径：构建击本身造成伤害，目标已有的脆化层在下一击≥10时就会触发——
+    多段普攻会把自己的脆化层打出去（第一击+1层、第二击≥10吃加成并清空）。
     要攒层就一击即止或用其他伤害来源后置触发。
     """
     engine = _engine("struct_cuihua_stack")
@@ -273,17 +281,32 @@ def test_cuihua_stacks_and_hits_daowen_damage():
          "parry": False, "blood_shadow": False}])
     assert engine.combat.structure_layers(m, "脆化") == 1
     assert m.current_hp == 100 - 5
-    # 直接再叠2层 → 3层；道纹【虚耗】伤害触发（统一伤害入口）
+    # 直接再叠2层 → 3层；道纹【虚耗】12点伤害触发（统一伤害入口）
     engine.combat.apply_structure_layer(p, m, "脆化")
     engine.combat.apply_structure_layer(p, m, "脆化")
     assert engine.combat.structure_layers(m, "脆化") == 3
     hp_before = m.current_hp
     from engine.daowen import DaoWenEngine
     calc = DaoWenEngine.resolve("虚耗", 1)
+    assert calc["target_damage"] >= 10
     engine.combat._apply_hostile_damage(m, calc["target_damage"], "普通", p)
-    # 12X伤害 + 脆化3层
-    assert m.current_hp == hp_before - calc["target_damage"] - 3
+    # 伤害 + 脆化 5×3
+    assert m.current_hp == hp_before - calc["target_damage"] - 15
     assert engine.combat.structure_layers(m, "脆化") == 0
+
+
+def test_cuihua_ignores_cost_channel_and_direct_hp_loss():
+    """脆化只放大「受到的伤害」：代价通道与直接失血不触发，层数保留。"""
+    engine = _engine("struct_cuihua_channels")
+    _fast_player(engine)
+    m = _spiky_monster(engine, hp=100)
+    engine.combat.apply_structure_layer(engine.state.player, m, "脆化")
+    hp_before = m.current_hp
+    engine.combat._apply_hostile_damage(m, 20, "代价", engine.state.player)
+    assert engine.combat.structure_layers(m, "脆化") == 1
+    engine.combat._raw_hp_loss(m, 20)
+    assert engine.combat.structure_layers(m, "脆化") == 1
+    assert m.current_hp < hp_before, "代价/直接失血照常落地，只是不被放大"
 
 
 # ---------------------------------------------------------------- 震爆
