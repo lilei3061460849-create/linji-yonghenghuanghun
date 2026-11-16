@@ -286,7 +286,7 @@ def test_redemption_fires_at_low_hp_even_with_transform_left():
 
 
 def test_redemption_skips_full_hp_or_remaining_original():
-    """边界：满血无原始道纹不救赎；残血仍持有原始道纹也不救赎。"""
+    """边界：满血不救赎；残血但异变50也不救赎。"""
     engine = _ready_combat(_engine("rd_blank"))
     exclusive = Entity(name="血肉巨囊", entity_type="怪物", blood_limit=258, current_hp=258,
                        attack_count=1, attack_power=8)
@@ -298,6 +298,7 @@ def test_redemption_skips_full_hp_or_remaining_original():
                      attack_count=2, attack_power=11)
     _give(wounded, "全力")
     engine.state.enemies[:] = [wounded]
+    wounded.mutation_count = 50
     assert engine.combat.check_redemption(wounded) is None
 
 
@@ -406,3 +407,19 @@ def test_redemption_finish_is_not_double_counted_when_accepted():
     assert end["success"]
     assert end["result"]["shard_reward"] == 0
     assert [d["name"] for d in end["result"]["removed_via_alt_path"]] == ["壳工"]
+
+
+def test_redemption_health_mutation_and_original_boundaries():
+    engine = _ready_combat(_engine("rd_new_boundaries"))
+    monster = Entity(name="边界怪", entity_type="怪物", blood_limit=101, current_hp=21,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    _give(monster, "全力")
+    engine.state.enemies[:] = [monster]
+    assert engine.combat.check_redemption(monster) is None  # 21/101 > 20%
+    monster.current_hp = 20
+    monster.mutation_count = 50
+    assert engine.combat.check_redemption(monster) is None
+    monster.mutation_count = 49
+    assert engine.combat.check_redemption(monster) is not None
+    assert engine.state.pending_redemption["mutation"] == 49
+    assert "全力" in engine.state.pending_redemption["dao_wen"]

@@ -225,22 +225,18 @@ class MonsterLifeMixin:
             return self._proliferate_monster(entity, ctx=cancer_ctx)
         return self._cancer_character(entity, ctx=cancer_ctx)
 
-    REDEMPTION_HP_RATIO = 0.10
-
-    def monster_has_original_daowen(self, monster: Entity) -> bool:
-        from ..gamedata import ORIGINAL_MONSTER_DAOWEN
-        return any(name in ORIGINAL_MONSTER_DAOWEN for name in monster.dao_wen)
+    REDEMPTION_MUTATION_MAX = 49
 
     def redemption_hp_threshold(self, monster: Entity) -> int:
         if monster is None or monster.blood_limit <= 0:
             return 0
-        return math.ceil(monster.blood_limit * self.REDEMPTION_HP_RATIO)
+        return monster.blood_limit // 5
 
     def check_redemption(self, monster: Entity, *, force: bool = False) -> Optional[dict]:
-        """救赎：通常要求残血且没有原始怪物道纹（全力／必中）；自由结晶可强制触发。"""
+        """救赎：生命不超过血限20%且异变不超过49；自由结晶保留强制例外。"""
         if monster is None or monster.entity_type != "怪物" or not monster.is_alive:
             return None
-        # 烬翼【熄事】本回合抑制所有落在该角色身上的特殊事件，救赎（含自由结晶强制救赎）也不例外。
+        # 熄事也抑制自由结晶强制救赎。
         if self.state.suppresses_special_events(monster):
             return None
         if monster.is_sculptured or monster.is_proliferated or monster.is_debt_bound:
@@ -249,11 +245,10 @@ class MonsterLifeMixin:
             return None
         if self.state.pending_redemption:
             return None
-        if not force and self.monster_has_original_daowen(monster):
+        if not force and (monster.current_hp > self.redemption_hp_threshold(monster)
+                          or monster.mutation_count > self.REDEMPTION_MUTATION_MAX):
             return None
-        if not force and monster.current_hp > self.redemption_hp_threshold(monster):
-            return None
-        return self._queue_redemption(monster, "free_crystal" if force else "low_hp_no_original")
+        return self._queue_redemption(monster, "free_crystal" if force else "low_hp_low_mutation")
 
     def _queue_redemption(self, monster: Entity, cause: str) -> dict:
         """怪物融化离场，等待【接纳】或【终结】（，终结取代旧「无视」）。
@@ -318,7 +313,7 @@ class MonsterLifeMixin:
                 results.append(self._sculpture_monster(monster))
                 continue
 
-            # 2. 救赎：残血且没有原始怪物道纹（全力／必中）
+            # 2. 救赎：生命≤血限20%且异变≤49
             redemption = self.check_redemption(monster)
             if redemption:
                 results.append(redemption)
