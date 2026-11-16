@@ -681,9 +681,9 @@ class DamageDeathMixin:
                 reason="negative_damage_after_multiplier_adjust",
                 original_damage=original_damage,
             )
-        # 法力结构【脆化】：目标下一次受到的伤害+X，触发后清空全部层数。
-        # 加成在目标侧伤害修正（癫狂之脑翻倍/震岳封顶）之前并入，属于"受到的
-        # 伤害"本身；空刀（amount=0）与代价通道不触发；直接失血不走本入口。
+        # 法力结构【脆化】：目标受到≥10点伤害时清空全部层数，使该次伤害+5×X。
+        # 门槛看加成前的本次伤害；加成在目标侧伤害修正（癫狂之脑翻倍/震岳封顶）
+        # 之前并入，属于"受到的伤害"本身；代价通道不触发；直接失血不走本入口。
         # 【永生】把伤害转为回复时在入口层提前返回，脆化不消费（无伤害可放大）。
         if damage_type != "代价":
             cuihua_bonus = self.consume_cuihua_on_damage(target, amount)
