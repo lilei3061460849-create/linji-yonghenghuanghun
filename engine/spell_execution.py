@@ -144,7 +144,7 @@ _BATTLE_COUNTER_FIELDS: tuple[str, ...] = (
 )
 
 
-def _entity_battle_token(entity) -> tuple:
+def _entity_battle_token(entity, *, exclude_mediocrity: bool = False) -> tuple:
     """单个实体的战场状态指纹（口径见 法术索引.md「中断规则」）。
 
     收「战场状态」：生命、法力、速度、格挡、飞行/离场标记、状态效果、
@@ -170,6 +170,7 @@ def _entity_battle_token(entity) -> tuple:
         ))
     counters = tuple(
         _counter_token(getattr(entity, name, 0)) for name in _BATTLE_COUNTER_FIELDS
+        if not (exclude_mediocrity and name in {"no_action_rounds", "no_damage_rounds"})
     )
     return (
         int(getattr(entity, "current_hp", 0) or 0),
@@ -196,12 +197,14 @@ def _counter_token(value) -> object:
     return str(value)
 
 
-def battlefield_fingerprint(engine, *extra_entities) -> tuple:
+def battlefield_fingerprint(engine, *extra_entities, exclude_mediocrity: bool = False) -> tuple:
     """本场所有参战实体的战场状态指纹（与实体顺序无关的稳定元组）。
 
     取自 GameState 的轮回者、朋友、员工、临时朋友、敌人与商人，再并上调用方
     明确点名的实体（施法者/对手，防止上限外的实体漏算）。拿不到 GameState 时
     只比对点名实体，绝不因取不到状态就静默判成"没有变化"。
+    exclude_mediocrity 供凡庸使用：仅排除凡庸自身旧计数，避免计数变化
+    被误当作角色造成的进展；法术循环默认仍使用原始完整口径。
     """
     pools: list = []
     state = getattr(engine, "state", None)
@@ -217,7 +220,7 @@ def battlefield_fingerprint(engine, *extra_entities) -> tuple:
         if entity is None:
             continue
         key = getattr(entity, "runtime_id", None) or f"#{id(entity)}"
-        tokens[key] = _entity_battle_token(entity)
+        tokens[key] = _entity_battle_token(entity, exclude_mediocrity=exclude_mediocrity)
     return tuple(sorted((str(key), token) for key, token in tokens.items()))
 
 
