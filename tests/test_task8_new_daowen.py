@@ -302,6 +302,18 @@ class TestPlagueCityNew:
         assert _layers(enemy, "血限") == 1 and _layers(enemy, "异变") == 2
 
 
+    def test_bingbian_redemption_after_conversion(self):
+        ge, ce, player = _player_with("病变")
+        enemy = monster(ge, ["全力"], hp=100)
+        enemy.current_hp = 20
+        enemy.mutation_count = 50
+        result = cast(ce, player, "病变", 1, target=enemy,
+                      from_kind="异变", to_kind="速度")
+        assert enemy.mutation_count == 49
+        assert any(e["type"] == "redemption" for e in result["effects"])
+        assert ge.state.pending_redemption["name"] == enemy.name
+
+
 def _layers(e, kind):
     if kind == "异变":
         return e.mutation_count

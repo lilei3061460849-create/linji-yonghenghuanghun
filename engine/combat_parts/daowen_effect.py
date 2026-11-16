@@ -1463,10 +1463,10 @@ class DaowenEffectMixin:
                     amount = int(reductions["异变"])
                     pay = wt.add_mutation(-amount)
                     applied["异变"] = {"requested": amount, "mutation_total": pay["mutation_total"]}
-                    if wt.entity_type == "怪物":
-                        redemption = self.check_redemption(wt)
-                        if redemption:
-                            result["effects"].append(redemption)
+                if wt.entity_type == "怪物" and (reductions.get("异变", 0) or reductions.get("血限", 0)):
+                    redemption = self.check_redemption(wt)
+                    if redemption:
+                        result["effects"].append(redemption)
                 result["effects"].append({"type": "cost_purified", "target": wt.name,
                                           "requested": reductions, "applied": applied})
         if "mutation_reduction" in calc:
@@ -2609,6 +2609,10 @@ class DaowenEffectMixin:
             result["effects"].append({
                 "type": "cost_converted", "target": target.name,
                 "from": src, "to": dst, "layers": layers})
+            if target.entity_type == "怪物" and ({src, dst} & {"异变", "血限"}):
+                redemption = self.check_redemption(target)
+                if redemption:
+                    result["effects"].append(redemption)
 
         if name == "共罪":
             # X 个非自身目标 + 发动者本身 = X+1 份名额；# 每个角色严格只占 1 份，同一 runtime_id 不得重复占位。

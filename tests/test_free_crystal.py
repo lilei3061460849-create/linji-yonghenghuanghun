@@ -236,3 +236,18 @@ def test_settle_free_crystal_cost_covers_all_eight_types(tmp_path):
     assert aged.mana_limit == 10 and aged.current_mana == 10
     assert aged.pending_exhaust_mana == 10
     assert aged.speed_limit == 8 and aged.current_speed == 0
+
+
+def test_free_crystal_retains_forced_mutation_exception(tmp_path, single_cost):
+    single_cost("速度")
+    engine = _engine(tmp_path)
+    _battle_state(engine)
+    monster = Entity("高异变怪", "怪物", blood_limit=100, current_hp=20,
+                     attack_count=1, attack_power=1, mutation_count=50,
+                     speed_limit=10, current_speed=10)
+    engine.state.enemies.append(monster)
+    _grant_crystal(engine)
+    r = engine.execute_action("consume_item", {
+        "name": "自由结晶", "target_ref": "enemy:0"})
+    assert r["success"] and r["result"]["redemption"] is not None
+    assert engine.state.pending_redemption["mutation"] == 50

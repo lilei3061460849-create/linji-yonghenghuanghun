@@ -423,3 +423,41 @@ def test_redemption_health_mutation_and_original_boundaries():
     assert engine.combat.check_redemption(monster) is not None
     assert engine.state.pending_redemption["mutation"] == 49
     assert "全力" in engine.state.pending_redemption["dao_wen"]
+
+
+def test_purifying_mutation_to_49_triggers_redemption():
+    engine = _ready_combat(_engine("rd_purify"))
+    player = engine.state.player
+    _give(player, "净化")
+    player.current_mana = 100
+    monster = Entity(name="净化怪", entity_type="怪物", blood_limit=100, current_hp=20,
+                     attack_count=1, attack_power=1, mutation_count=50)
+    _give(monster, "全力")
+    engine.state.enemies[:] = [monster]
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "净化", "x": 1, "target_ref": "enemy:0",
+        "cost_choices": [{"type": "异变"}], "dodge": False,
+        "blood_shadow": False, "trigger_spell_choices": {},
+    })
+    assert r["success"], r
+    assert monster.mutation_count == 49
+    assert engine.state.pending_redemption["name"] == monster.name
+
+
+def test_purifying_blood_limit_can_trigger_redemption():
+    engine = _ready_combat(_engine("rd_purify_blood"))
+    player = engine.state.player
+    _give(player, "净化")
+    player.current_mana = 100
+    monster = Entity(name="血限怪", entity_type="怪物", blood_limit=99, current_hp=20,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    monster.reversible_cost_layers["血限"] = 1
+    engine.state.enemies[:] = [monster]
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "净化", "x": 1, "target_ref": "enemy:0",
+        "cost_choices": [{"type": "血限"}], "dodge": False,
+        "blood_shadow": False, "trigger_spell_choices": {},
+    })
+    assert r["success"], r
+    assert monster.blood_limit == 100
+    assert engine.state.pending_redemption["name"] == monster.name
