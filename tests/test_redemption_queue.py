@@ -639,3 +639,67 @@ def test_lethal_blood_limit_payment_has_death_priority():
     result = e.combat.pay_numeric_cost(m, "血限", 100)
     assert result["owner"]["paid"] == 100 and m.current_hp == 0 and not m.is_alive
     assert not m.is_departed and not e.state.pending_redemption
+
+
+def test_compound_redemption_does_not_burn_shards_or_disable_relic():
+    from engine.models import Relic
+    e = _ready_combat(_engine("compound_resources_isolation"))
+    m = monster("待决资源")
+    m.mutation_count = 50
+    m.shards = 12
+    m.relics.append(Relic("测试遗物", ""))
+    e.state.enemies[:] = [m]
+    e.combat.apply_daowen_effect(
+        "探针", {"x": 1, "mutation_reduction": 1, "shard_burn": 5,
+                 "relic_disable": 1, "relic_names": ["测试遗物"]}, e.state.player, m)
+    assert m.departure_reason == "救赎" and m.shards == 12
+    assert m.relics[0].enabled
+
+
+def test_merge_does_not_modify_or_replace_redeemed_participant():
+    from engine.models import StatusEffect
+    e = _ready_combat(_engine("merge_isolation"))
+    caster = Entity("施法怪", "怪物", blood_limit=100, current_hp=100,
+                    attack_count=1, attack_power=1)
+    m = monster("合体候选")
+    m.mutation_count = 50
+    m.add_status(StatusEffect("化尸", remaining_rounds=2))
+    creation = Entity("其他造物", "造物", blood_limit=100, current_hp=100,
+                      attack_count=2, attack_power=3)
+    e.state.enemies[:] = [caster, m, creation]
+    result = e.combat.apply_daowen_effect(
+        "合体", {"x": 2, "merge_creations": 2, "mutation_reduction": 1}, caster, m)
+    assert m.departure_reason == "救赎" and m.blood_limit == 100
+    assert creation.is_alive and creation.blood_limit == 100
+    assert any(effect["type"] == "merge_interrupted" for effect in result["effects"])
+
+
+def test_diaoling_skips_queued_target_but_executes_other_targets():
+    e = _ready_combat(_engine("diaoling_queue_isolation"))
+    first, queued, other = monster("先"), monster("候选"), monster("正常")
+    e.state.enemies[:] = [first, queued, other]
+    e.combat.check_redemption(first)
+    e.combat.check_redemption(queued)
+    effects = e.combat._execute_diaoling(e.state.player, [e.state.player], 20)
+    assert queued.is_alive and e.combat.is_redemption_pending(queued)
+    assert not other.is_alive and not other.is_departed
+    assert any(effect.get("target") == other.name for effect in effects)
+
+
+def test_bingbian_relief_updates_ledger_before_redemption(monkeypatch):
+    from tests.test_task8_new_daowen import _player_with, monster as make_monster, cast
+    e, combat, player = _player_with("病变")
+    m = make_monster(e, hp=100, name="转换账本")
+    m.blood_limit, m.current_hp, m.mutation_count = 95, 20, 49
+    m.attack_count = m.attack_power = 1
+    m.reversible_cost_layers["血限"] = 1
+    real_check = combat.check_redemption
+    observed = []
+    def check(entity, **kwargs):
+        result = real_check(entity, **kwargs)
+        if result:
+            observed.append((entity.reversible_cost_layers["血限"], entity.mutation_count))
+        return result
+    monkeypatch.setattr(combat, "check_redemption", check)
+    cast(combat, player, "病变", 1, target=m, from_kind="血限", to_kind="异变")
+    assert observed == [(0, 49)] and m.departure_reason == "救赎"

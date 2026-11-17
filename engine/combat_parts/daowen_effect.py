@@ -1155,18 +1155,18 @@ class DaowenEffectMixin:
         # 每个伤害实例耗1层，这里只按结果回填 mengbi_blocked 标记供战报/测试读取。
         huaisi_block = self._heal_blocked(target) and "target_heal" in calc
 
-        # ---- 逆鳞加成（F2）：施法者若有层数，下次伤害+层数后清空 ----
-        nilin_bonus = 0
-        if hasattr(caster, "_nilin") and getattr(caster, "_nilin", 0) > 0 and any(k in calc for k in ("target_damage", "total_damage", "aoe_damage", "hp_percent_loss")):
-            nilin_bonus = caster._nilin
-            caster._nilin = 0
-            result["nilin_bonus"] = nilin_bonus
-            # 状态层数虽清空，但 status 本身仍按 duration 存在（仅清空计数）
-
         def target_effect_allowed(entity: Entity) -> bool:
             # 已完成的救赎离场及排队候选不再接受后续目标效果；不改变分摊份额。
             return bool(entity and entity.departure_reason != "救赎"
                         and not self.is_redemption_pending(entity))
+
+        # ---- 逆鳞加成（F2）：施法者若有层数，下次伤害+层数后清空 ----
+        nilin_bonus = 0
+        if target_effect_allowed(caster) and hasattr(caster, "_nilin") and getattr(caster, "_nilin", 0) > 0 and any(k in calc for k in ("target_damage", "total_damage", "aoe_damage", "hp_percent_loss")):
+            nilin_bonus = caster._nilin
+            caster._nilin = 0
+            result["nilin_bonus"] = nilin_bonus
+            # 状态层数虽清空，但 status 本身仍按 duration 存在（仅清空计数）
 
         # ---- 伤害类 ----
         if "target_life_loss" in calc:
@@ -1847,14 +1847,14 @@ class DaowenEffectMixin:
             self._settle_diandang_discovery(caster, calc["discover_daowen"], result)
 
         # ---- 碎片系（罪孽）----
-        if "shard_burn" in calc:
+        if "shard_burn" in calc and target_effect_allowed(target):
             # 【烁金】：目标碎片减少10X；不足时减到 0，不记负债（与已删的【勒索】不同）。
             burned = min(max(0, self._shards_of(target)), int(calc["shard_burn"]))
             if burned:
                 self._lose_shards_of(target, burned)
             result["effects"].append({"type": "shard_burn", "target": target.name,
                                       "lost": burned})
-        if "relic_enable" in calc:
+        if "relic_enable" in calc and target_effect_allowed(caster):
             names = [str(n) for n in (calc.get("relic_names") or []) if n]
             pool = self.state.relics if caster is self.state.player else getattr(caster, "relics", [])
             changed = []
@@ -1864,7 +1864,7 @@ class DaowenEffectMixin:
                     changed.append(relic.name)
             result["effects"].append({"type": "relic_enable", "target": caster.name,
                                       "enabled": changed})
-        if "relic_disable" in calc:
+        if "relic_disable" in calc and target_effect_allowed(target):
             names = [str(n) for n in (calc.get("relic_names") or []) if n]
             pool = self.state.relics if target is self.state.player else getattr(target, "relics", [])
             changed = []
@@ -1874,13 +1874,13 @@ class DaowenEffectMixin:
                     changed.append(relic.name)
             result["effects"].append({"type": "relic_disable", "target": target.name,
                                       "disabled": changed})
-        if "shard_gain" in calc:  # 点金：支付失忆X后获得80X真碎片
+        if "shard_gain" in calc and target_effect_allowed(caster):  # 点金：支付失忆X后获得80X真碎片
             if caster is self.state.player:
                 self.state.shards += calc["shard_gain"]
             else:
                 caster.shards += calc["shard_gain"]
             result["effects"].append({"type": "shard_gain", "gained": calc["shard_gain"]})
-        if "fake_shards" in calc:  # 假钞：获得10X假碎片（假碎片与真碎片分离存储）
+        if "fake_shards" in calc and target_effect_allowed(caster):  # 假钞：获得10X假碎片（假碎片与真碎片分离存储）
             if caster is self.state.player:
                 self.state.fake_shards += calc["fake_shards"]
             else:
@@ -1944,7 +1944,7 @@ class DaowenEffectMixin:
                     source=caster.name, controller_runtime_id=caster.runtime_id))
                 result["effects"].append({"type": "target_control", "target": recipient.name,
                     "controller_id": caster.runtime_id, "remaining": recipient.get_status_value("篡改")})
-        if calc.get("preserve_daowen_changes", 0) > 0:
+        if calc.get("preserve_daowen_changes", 0) > 0 and target_effect_allowed(caster):
             # 次数保存在value；remaining_rounds=-1只表示不按回合递减。
             caster.add_status(self._daowen_status(
                 daowen_order=daowen_order, name="出土", value=calc["preserve_daowen_changes"],
@@ -1952,7 +1952,7 @@ class DaowenEffectMixin:
             result["effects"].append({"type": "preserve_daowen_changes",
                                       "target": caster.name,
                                       "remaining": caster.get_status_value("出土")})
-        if "mana_gain" in calc:
+        if "mana_gain" in calc and target_effect_allowed(caster):
             # 2026-10-08：走统一入口，【勾魂】期间不生效（实际获得量可能与声明量不同）
             gained = caster.gain_mana(calc["mana_gain"])
             self.clamp_immortal_body(caster)
@@ -2122,7 +2122,7 @@ class DaowenEffectMixin:
 
         # ---- 旧必中（施法者自身次数型buff）入口已在 2026-09-28 改为自身持续X回合状态：
         #      保留兼容分支，防止老存档调用 calc["guaranteed_hits"]。
-        if "guaranteed_hits" in calc:
+        if "guaranteed_hits" in calc and target_effect_allowed(caster):
             self.grant_bizhong(caster, int(calc["guaranteed_hits"]))
             result["effects"].append({"type": "bizhong", "target": caster.name,
                                       "count": calc["guaranteed_hits"],
@@ -2130,7 +2130,7 @@ class DaowenEffectMixin:
         # 必中X：攻击者侧次数资源，不做目标 debuff。
         # 「你接下来的X次选中，[目标]无法进行被动行动」——每次选中扣1次，
         # 扣减与判定统一走 CombatEngine.consume_bizhong()。
-        if "bizhong_gain" in calc:
+        if "bizhong_gain" in calc and target_effect_allowed(caster):
             gained = self.grant_bizhong(caster, int(calc["bizhong_gain"]))
             result["effects"].append({
                 "type": "bizhong_charges", "count": gained, "entity": caster.name})
@@ -2205,8 +2205,6 @@ class DaowenEffectMixin:
             elif not self_targeted:
                 # 波及：状态类效果对每个拥有波及效果的目标（含本次[目标]）原样生效。
                 for et in wave_status_targets:
-                    if not target_effect_allowed(et):
-                        continue
                     if not target_effect_allowed(et) or not et.is_alive:
                         continue
                     et.add_status(self._daowen_status(daowen_order=daowen_order, name=status_name,
@@ -2463,39 +2461,42 @@ class DaowenEffectMixin:
             wanted_ids = set(calc.get("merge_creation_ids") or [])
             creations = [e for e in side if str(e.runtime_id) in wanted_ids
                          and e.treated_as_creation()][:int(calc.get("merge_creations") or calc.get("x", 1))]
+            # 只筛掉已被救赎隔离的既定参与者，不补选或改变初始顺序。
+            creations = [entity for entity in creations if target_effect_allowed(entity)]
             if len(creations) < 2:
-                raise ValueError("【合体】可合并的造物不足")
-            survivor, merged_away = creations[0], creations[1:]
-            for other in merged_away:
-                survivor.blood_limit += int(other.blood_limit)
-                survivor.mana_limit += int(other.mana_limit)
-                survivor.speed_limit += int(other.speed_limit)
-                survivor.current_hp += int(other.current_hp)
-                survivor.current_mana += int(other.current_mana)
-                survivor.current_speed += int(other.current_speed)
-                survivor.attack_count += int(other.attack_count)
-                survivor.attack_power += int(other.attack_power)
-                survivor.shield = int(getattr(survivor, "shield", 0)) + int(getattr(other, "shield", 0))
-                for status in list(other.status_effects):
-                    import copy as _copy
-                    survivor.add_status(_copy.deepcopy(status))
-            survivor.current_hp = min(survivor.current_hp, survivor.blood_limit) \
-                if not self.state.hp_overflow_exempt(survivor) else survivor.current_hp
-            for other in merged_away:
-                for container in (self.state.temp_friends, self.state.friends,
-                                  self.state.employees, self.state.enemies):
-                    if other in container:
-                        container.remove(other)
-                other.depart_battle("合体")
-            result["effects"].append({
-                "type": "creations_merged", "survivor": survivor.name,
-                "merged": [e.name for e in merged_away],
-                "blood_limit": survivor.blood_limit, "current_hp": survivor.current_hp,
-                "attack_power": survivor.attack_power, "attack_count": survivor.attack_count})
-            # 合体各面板、状态及其他造物离场是同一原子操作。
-            redemption = self.check_redemption(survivor)
-            if redemption:
-                result["effects"].append(redemption)
+                result["effects"].append({"type": "merge_interrupted", "reason": "救赎目标已失效"})
+            else:
+                survivor, merged_away = creations[0], creations[1:]
+                for other in merged_away:
+                    survivor.blood_limit += int(other.blood_limit)
+                    survivor.mana_limit += int(other.mana_limit)
+                    survivor.speed_limit += int(other.speed_limit)
+                    survivor.current_hp += int(other.current_hp)
+                    survivor.current_mana += int(other.current_mana)
+                    survivor.current_speed += int(other.current_speed)
+                    survivor.attack_count += int(other.attack_count)
+                    survivor.attack_power += int(other.attack_power)
+                    survivor.shield = int(getattr(survivor, "shield", 0)) + int(getattr(other, "shield", 0))
+                    for status in list(other.status_effects):
+                        import copy as _copy
+                        survivor.add_status(_copy.deepcopy(status))
+                survivor.current_hp = min(survivor.current_hp, survivor.blood_limit) \
+                    if not self.state.hp_overflow_exempt(survivor) else survivor.current_hp
+                for other in merged_away:
+                    for container in (self.state.temp_friends, self.state.friends,
+                                      self.state.employees, self.state.enemies):
+                        if other in container:
+                            container.remove(other)
+                    other.depart_battle("合体")
+                result["effects"].append({
+                    "type": "creations_merged", "survivor": survivor.name,
+                    "merged": [e.name for e in merged_away],
+                    "blood_limit": survivor.blood_limit, "current_hp": survivor.current_hp,
+                    "attack_power": survivor.attack_power, "attack_count": survivor.attack_count})
+                # 合体各面板、状态及其他造物离场是同一原子操作。
+                redemption = self.check_redemption(survivor)
+                if redemption:
+                    result["effects"].append(redemption)
 
         if name == "立冢" and (target is None or target_effect_allowed(target)):
             # 【立冢】：以[目标]为模板生成 X 具已击灭的尸体（写入尸体账本，
@@ -2693,10 +2694,15 @@ class DaowenEffectMixin:
                     0, int(getattr(target, "pending_exhaust_mana", 0) or 0) - layers)
                 ledger["枯竭"] = max(0, int(ledger.get("枯竭", 0) or 0) - layers)
             elif src == "血限":
-                change = self._apply_blood_limit_change(target, layers, name, "up",
-                                                       source_type="daowen", subtype="bingbian_relief")
-                ledger["血限"] = max(0, int(ledger.get("血限", 0) or 0) - layers)
-                redemption = change.get("redemption")
+                was_deferred = target.runtime_id in self._redemption_deferred
+                self._redemption_deferred.add(target.runtime_id)
+                try:
+                    self._apply_blood_limit_change(target, layers, name, "up",
+                                                   source_type="daowen", subtype="bingbian_relief")
+                    ledger["血限"] = max(0, int(ledger.get("血限", 0) or 0) - layers)
+                finally:
+                    if not was_deferred:
+                        self._redemption_deferred.discard(target.runtime_id)
             elif src == "法限":
                 target.mana_limit = int(target.mana_limit) + layers
                 ledger["法限"] = max(0, int(ledger.get("法限", 0) or 0) - layers)
@@ -2718,9 +2724,15 @@ class DaowenEffectMixin:
                 target.pending_exhaust_mana = int(getattr(target, "pending_exhaust_mana", 0) or 0) + layers
                 ledger["枯竭"] = int(ledger.get("枯竭", 0) or 0) + layers
             elif dst == "血限":
-                self._apply_blood_limit_change(target, -layers, name, "down",
-                                               source_type="daowen", subtype="bingbian_convert")
-                ledger["血限"] = int(ledger.get("血限", 0) or 0) + layers
+                was_deferred = target.runtime_id in self._redemption_deferred
+                self._redemption_deferred.add(target.runtime_id)
+                try:
+                    self._apply_blood_limit_change(target, -layers, name, "down",
+                                                   source_type="daowen", subtype="bingbian_convert")
+                    ledger["血限"] = int(ledger.get("血限", 0) or 0) + layers
+                finally:
+                    if not was_deferred:
+                        self._redemption_deferred.discard(target.runtime_id)
             elif dst == "法限":
                 target.mana_limit = max(0, int(target.mana_limit) - layers)
                 target.current_mana = min(target.current_mana, target.mana_limit)
@@ -2753,6 +2765,8 @@ class DaowenEffectMixin:
             encoded = json.dumps(group_ids, ensure_ascii=False)
             unique_members = list({str(entity.runtime_id): entity for entity in group_slots}.values())
             for entity in unique_members:
+                if not target_effect_allowed(entity):
+                    continue
                 entity.add_status(self._daowen_status(
                     daowen_order=daowen_order, name="共罪", value=1,
                     remaining_rounds=calc.get("duration", x), source=encoded,
@@ -2762,7 +2776,7 @@ class DaowenEffectMixin:
                 "members": [entity.name for entity in unique_members],
                 "duration": calc.get("duration", x)})
 
-        if name == "血契":
+        if name == "血契" and target_effect_allowed(caster) and (target is None or target_effect_allowed(target)):
             # 状态属于支付者；target_id 指向额外支付者，不是“目标代付你”。
             if target is None:
                 raise ValueError("血契缺少目标")
@@ -2831,6 +2845,8 @@ class DaowenEffectMixin:
 
         if "永恒的偏爱" in getattr(caster, "preferences", []):
             for entity in preference_entities:
+                if not target_effect_allowed(entity):
+                    continue
                 before = preference_status_before.get(entity.runtime_id, {})
                 for status in entity.status_effects:
                     old_rounds = before.get(id(status))

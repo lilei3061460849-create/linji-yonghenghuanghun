@@ -405,12 +405,13 @@ class DamageDeathMixin:
             entity for entity in entities
             if (id(entity) not in exempt
                 and not getattr(entity, "is_departed", False)
+                and not self.is_redemption_pending(entity)
                 and not getattr(entity, "_death_triggers_emitted", False)
                 and entity.current_hp <= threshold)
         ]
         effects = []
         for target in pending:
-            if not target.is_alive:
+            if not target.is_alive or self.is_redemption_pending(target):
                 continue
             ctx = make_context(
                 timing=self._current_context_timing(),
