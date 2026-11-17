@@ -3554,8 +3554,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     or amount > item.current_uses or target is None or not self.state.on_player_side(target)):
                 return {"success": False, "error": "龙血瓶需要合法amount和玩家侧target_ref"}
             item.current_uses -= amount
+            from .mechanisms.verbs import apply_verb
             result.update({"target": target.name, "extracted": amount,
-                           "heal": self.state.apply_heal(target, amount, ctx={
+                           "heal": apply_verb(self.combat, "heal", {"target": target, "amount": amount}, {
                                "timing": self.state.combat_subphase or self.state.phase,
                                "source": "龙血瓶", "source_type": "consumable",
                                "actor": self.state.player, "target": target, "owner": self.state.player,
