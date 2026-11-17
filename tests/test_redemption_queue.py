@@ -426,3 +426,35 @@ def test_mutation_payment_other_entity_types_do_not_redeem():
         assert result["owner"]["paid"] == 1 and "redemption" not in result["owner"]
     assert player.mutation_count == before + 1 and ally.mutation_count == 41
     assert player.is_alive and ally.is_alive and not e.state.pending_redemption
+
+
+def test_compound_mutation_redemption_blocks_later_target_effects():
+    e = _ready_combat(_engine("compound_mutation"))
+    m = monster("复合目标")
+    m.mutation_count = 50
+    e.state.enemies[:] = [m]
+    result = e.combat.apply_daowen_effect(
+        "探针", {"x": 1, "mutation_reduction": 1, "blood_limit_increase": 10,
+                 "attack_boost": 5, "target_shield": 3}, e.state.player, m)
+    assert m.departure_reason == "救赎" and m.mutation_count == 49
+    assert (m.blood_limit, m.attack_power, m.shield) == (100, 1, 0)
+    assert any(effect.get("type") == "redemption" for effect in result["effects"])
+
+
+def test_compound_wave_isolates_queued_candidate_and_keeps_other_shares():
+    from engine.models import StatusEffect
+
+    e = _ready_combat(_engine("compound_wave"))
+    first, queued, other = monster("已有待决"), monster("候选"), monster("其他")
+    queued.mutation_count = 50
+    other.current_hp = 80
+    other.mutation_count = 50
+    e.state.enemies[:] = [first, queued, other]
+    e.combat.check_redemption(first)
+    other.add_status(StatusEffect("波及", remaining_rounds=-1, source=e.state.player.name))
+    e.combat.apply_daowen_effect(
+        "探针", {"x": 2, "mutation_reduction": 2, "blood_limit_increase": 10,
+                 "attack_boost": 4}, e.state.player, queued)
+    assert e.combat.is_redemption_pending(queued)
+    assert queued.mutation_count == 49 and queued.blood_limit == 100 and queued.attack_power == 1
+    assert other.mutation_count == 49 and other.blood_limit == 105 and other.attack_power == 3
