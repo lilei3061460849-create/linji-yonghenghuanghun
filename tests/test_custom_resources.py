@@ -133,6 +133,62 @@ def test_examples_load_without_code_changes():
     assert len(registered) == 5
 
 
+def test_custom_relic_can_be_granted_to_and_trigger_on_monster():
+    engine = _engine()
+    monster = _enemy(engine)
+    spec = {
+        "name": "怪物残烛", "category": "遗物", "uniqueness": "测试怪物持有路径",
+        "summary": "回始获得2点法力",
+        "trigger": {"kind": "phase", "key": "round_start"},
+        "effects": [{"verb": "mana", "target": "self", "amount": 2}],
+    }
+    result = engine.execute_action("define_resource", {
+        "spec": spec, "recipient_ref": monster.runtime_id})
+    assert result["success"], result
+    assert any(r.name == "怪物残烛" for r in monster.relics)
+    assert not any(r.name == "怪物残烛" for r in engine.state.relics)
+
+    monster.current_mana = 0
+    engine.combat._dispatch_phase("round_start", target=monster)
+    assert monster.current_mana == 2
+
+
+def test_custom_passive_artifact_triggers_only_for_monster_holder():
+    engine = _engine()
+    monster = _enemy(engine)
+    spec = {
+        "name": "怪物潮铃", "category": "法器", "uniqueness": "测试怪物法器持有路径",
+        "trigger": {"kind": "phase", "key": "round_start"},
+        "effects": [{"verb": "mana", "target": "self", "amount": 2}],
+    }
+    result = engine.execute_action("define_resource", {
+        "spec": spec, "recipient_ref": monster.runtime_id})
+    assert result["success"], result
+    assert "怪物潮铃" in monster.artifacts
+    assert "怪物潮铃" not in engine.state.artifacts_owned
+
+    monster.current_mana = 0
+    engine.combat._dispatch_phase("round_start", target=monster)
+    assert monster.current_mana == 2
+
+
+def test_custom_active_artifact_can_be_activated_by_monster_holder():
+    engine = _engine()
+    monster = _enemy(engine)
+    monster.current_hp = 40
+    spec = {
+        "name": "怪物疗匣", "category": "法器", "uniqueness": "测试怪物主动法器路径",
+        "effects": [{"verb": "heal", "target": "self", "amount": 7}],
+    }
+    result = engine.execute_action("define_resource", {
+        "spec": spec, "recipient_ref": monster.runtime_id})
+    assert result["success"], result
+    used = engine.execute_action("activate_resource", {
+        "name": "怪物疗匣", "owner_ref": monster.runtime_id})
+    assert used["success"], used
+    assert monster.current_hp == 47
+
+
 # ==================== 边界 ====================
 
 def test_daowen_is_in_battle_only_unless_out_of_combat_true():
