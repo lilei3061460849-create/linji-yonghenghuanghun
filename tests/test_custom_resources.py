@@ -172,6 +172,15 @@ def test_custom_passive_artifact_triggers_only_for_monster_holder():
     assert monster.current_mana == 2
 
 
+def test_monster_resource_rejects_non_object_declaration_without_crashing():
+    engine = _engine()
+    monster = _enemy(engine)
+    result = engine.execute_action("define_resource", {
+        "specs": [None], "recipient_ref": monster.runtime_id})
+    assert not result["success"]
+    assert "怪物侧当前仅支持" in result["error"]
+
+
 def test_custom_active_artifact_can_be_activated_by_monster_holder():
     engine = _engine()
     monster = _enemy(engine)
