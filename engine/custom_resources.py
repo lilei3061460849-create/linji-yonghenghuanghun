@@ -427,6 +427,9 @@ def clear() -> None:
             derivative_rules.unregister_custom_derivative(resource.name)
     _REGISTRY.clear()
     _CUSTOM_DAOWEN.clear()
+    if _BRIDGED["installed"]:
+        from .daowen import DaoWenEngine
+        DaoWenEngine.register_all()
 
 
 # ---- 遗物 / 被动消耗品 → Mechanism ----
