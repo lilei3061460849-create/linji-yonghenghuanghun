@@ -62,6 +62,17 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
         self.assertIn('发动时一次性提出', row['note'])
         self.assertIn('未来发言监听', row['note'])
 
+    def test_mirage_is_a_map_entity_quantity_with_lifecycle_behavior(self):
+        row = next(r for r in self.rows if r['name'] == '蜃景')
+        self.assertEqual(row['review'], '暂未发现结构违规')
+        self.assertNotIn('状态边界待裁定', row['tags'])
+        calc = DaoWenEngine.resolve('蜃景', 3)
+        self.assertEqual(calc['map_illusions'], 3)
+        world = (ROOT / 'engine/world.py').read_text(encoding='utf-8')
+        for method in ('def _move_mirage_illusions', 'def _dispel_illusions_at',
+                       'def _clear_illusions_for_owner'):
+            self.assertIn(method, world)
+
     def test_shelter_is_a_pure_count_based_protection(self):
         by_name = {r['name']: r for r in self.rows}
         self.assertEqual(by_name['庇护']['review'], '暂未发现结构违规')
