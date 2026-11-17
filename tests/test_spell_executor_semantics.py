@@ -403,3 +403,14 @@ def test_same_interruption_reason_and_detail_as_use_daowen():
                        [{"x": 1, "dodge": False}], target=None)
     assert execution2.results[0].reason == InterruptReason.SHARDS_INSUFFICIENT
     assert "无法完整承担碎片1" in execution2.results[0].detail
+
+
+def test_legacy_non_loop_flow_executes_through_control_program():
+    state, combat, player, enemy = _state(player_hp=50)
+    _give(player, "再生", "杀伐", "庇护")
+    execution = _cast(combat, player, enemy,
+        "发动再生X于自身→若自身 生命 大于 60 则 发动杀伐X于目标 否则 发动庇护X于自身",
+        [{"x": 3}, {"x": 1, "dodge": False}, {"x": 1}])
+    assert execution._control_program is not None
+    assert _daowen_sequence(execution) == ["再生", "杀伐"]
+    assert player.current_hp == 62 and enemy.current_hp < 100

@@ -147,3 +147,38 @@ class ProgramCursor:
             elif isinstance(node, Jump):
                 self.position = node.target
         return None
+
+
+def compile_legacy_acyclic(steps):
+    """将旧无循环 AST 转换为跳转图；含循环或未知节点返回 None。"""
+    from .spell_dsl import IfStep, LoopStep
+
+    def supported(items):
+        return all(isinstance(item, ActionStep) or
+                   (isinstance(item, IfStep) and supported(item.then_steps)
+                    and supported(item.else_steps)) for item in items)
+
+    if not supported(steps):
+        return None
+    nodes = [Stop("$end")]
+
+    def compile_block(items, continuation, prefix):
+        dest = continuation
+        for index in range(len(items) - 1, -1, -1):
+            item = items[index]
+            path = f"{prefix}{index}"
+            if isinstance(item, ActionStep):
+                key = f"action:{path}"
+                nodes.append(Action(key, item, next=dest))
+            elif isinstance(item, IfStep):
+                then = compile_block(item.then_steps, dest, f"{path}T")
+                otherwise = compile_block(item.else_steps, dest, f"{path}E")
+                key = f"if:{path}"
+                nodes.append(Condition(key, item.condition, on_true=then, on_false=otherwise))
+            else:
+                raise TypeError(f"不支持的旧法术步骤: {type(item).__name__}")
+            dest = key
+        return dest
+
+    entry = compile_block(steps, "$end", "")
+    return SpellProgram(tuple(nodes), entry)

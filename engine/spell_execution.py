@@ -429,6 +429,9 @@ class SpellExecution:
 
         self._step_index = {id(step): idx for idx, step in iter_action_steps(definition.body)}
         self._if_paths = {id(node): key for key, node in _index_ifs(definition.body)}
+        # 先迁移无循环旧流程；含旧 LoopStep 仍走既有路径以保持循环规则。
+        from .spell_program import compile_legacy_acyclic
+        self._control_program = compile_legacy_acyclic(definition.body)
         # 事件级冻结：只认"本次执行开始前"已冻结的分支；同一次执行内部
         # （包括循环的每一轮）始终按当前状态重新求值。
         self._frozen_at_start = dict(request.branch_snapshot or {})
@@ -452,7 +455,10 @@ class SpellExecution:
     # -- 主驱动 --
     def _drive(self):
         """生成器驱动：每完成一个效果步骤就让出一次，保留全部控制栈。"""
-        yield from self._run_steps(self.definition.body, iteration=0)
+        if self._control_program is not None:
+            yield from self._run_control_program()
+        else:
+            yield from self._run_steps(self.definition.body, iteration=0)
         # 事件级分支冻结：把本次首轮做过的分支选择写回提交对象（原地）。
         if self.request.branch_snapshot is not None:
             for key, choice in self._run_decisions.items():
@@ -540,15 +546,43 @@ class SpellExecution:
                 self._stop(ExecutionStatus.FAILED, InterruptReason.INVALID_INPUT,
                            f"未知步骤类型: {step!r}")
 
-    def _run_if(self, node: IfStep, *, iteration: int) -> None:
-        key = self._if_paths.get(id(node), "")
+    def _choose_branch(self, key, expression):
         frozen = self._frozen_at_start.get(key)
         if frozen is not None:
-            taken = int(frozen)
-        else:
-            taken = 0 if self._evaluate_condition(node.condition) else 1
-            if self.is_running:
-                self._run_decisions.setdefault(key, taken)
+            return int(frozen)
+        taken = 0 if self._evaluate_condition(expression) else 1
+        if self.is_running:
+            self._run_decisions.setdefault(key, taken)
+        return taken
+
+    def _run_control_program(self):
+        from .spell_program import ProgramCursor
+        cursor = ProgramCursor(self._control_program)
+
+        def decide(node):
+            if not self._caster_alive():
+                self._stop(ExecutionStatus.INTERRUPTED, InterruptReason.CASTER_DEAD,
+                           f"{self.caster.name}已命零，后续步骤不再结算")
+                return False
+            return self._choose_branch(node.id.removeprefix("if:"), node.expression) == 0
+
+        while self.is_running:
+            node = cursor.next_action(decide)
+            if node is None or not self.is_running:
+                break
+            if not self._caster_alive():
+                self._stop(ExecutionStatus.INTERRUPTED, InterruptReason.CASTER_DEAD,
+                           f"{self.caster.name}已命零，后续步骤不再结算")
+                return
+            self._run_action(node.effect, iteration=0)
+            if self._replay_mode and not self._replay_results:
+                self._replay_mode = False
+            if not self._replay_mode:
+                yield self.results[-1] if self.results else None
+
+    def _run_if(self, node: IfStep, *, iteration: int) -> None:
+        key = self._if_paths.get(id(node), "")
+        taken = self._choose_branch(key, node.condition)
         branch = node.then_steps if taken == 0 else node.else_steps
         yield from self._run_steps(branch, iteration=iteration)
 
