@@ -111,3 +111,26 @@ def test_queued_candidate_interrupts_later_conversion():
     assert e.state.pending_redemption_candidates[0]["runtime_id"] == second.runtime_id
     assert e.execute_action("resolve_redemption", {"option": "终结"})["success"]
     assert second.departure_reason == "救赎"
+
+
+def test_one_area_effect_queues_every_eligible_monster():
+    from tests.test_task8_new_daowen import _player_with, monster as make_monster, cast
+    e, combat, player = _player_with("冲击")
+    target = make_monster(e, hp=100, name="主目标")
+    first = make_monster(e, hp=100, name="甲")
+    second = make_monster(e, hp=100, name="乙")
+    for m in (target, first, second):
+        m.attack_count = m.attack_power = 1
+    first.current_hp = second.current_hp = 21
+    player_before = player.current_hp
+    result = cast(combat, player, "冲击", 1, target=target)
+    assert result["effects"]
+    assert player.current_hp == player_before - 5
+    assert first.current_hp == second.current_hp == 16
+    assert first.departure_reason == "救赎" and second.is_alive
+    assert e.state.pending_redemption["runtime_id"] == first.runtime_id
+    assert [c["runtime_id"] for c in e.state.pending_redemption_candidates] == [second.runtime_id]
+    assert e.execute_action("resolve_redemption", {"option": "终结"})["success"]
+    assert second.departure_reason == "救赎"
+    assert e.execute_action("resolve_redemption", {"option": "终结"})["success"]
+    assert not e.state.pending_redemption and target.is_alive
