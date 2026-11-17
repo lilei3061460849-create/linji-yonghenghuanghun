@@ -247,7 +247,7 @@ def test_triggered_consumable_cannot_be_used_manually():
 # ==================== 错误输入 ====================
 
 @pytest.mark.parametrize("bad_spec, keyword", [
-    ({"name": "缺少基础", "category": "道纹", "uniqueness": "x",
+    ({"name": "缺基", "category": "道纹", "uniqueness": "x",
       "cost": {"type": "法力", "amount": "X"},
       "effects": [{"verb": "damage", "amount": "X"}]}, "base_daowen"),
     ({"name": "三字名", "category": "道纹", "base_daowen": "杀伐", "uniqueness": "x",
