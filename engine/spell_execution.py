@@ -517,10 +517,11 @@ class SpellExecution:
                 and loop_start_fingerprint is None):
             # 旧档缺少轮初快照；暂停点状态不等于轮初，不能伪造 NO_NET_CHANGE 判断。
             raise ValueError("旧暂停存档缺少循环轮初快照，无法可靠恢复；"
-                             "请使用保存时的旧版引擎继续结算该法术")
+                             "请保留原存档；旧版继续结算也可能误判")
         self._replay_results = list(results)
-        # 老存档没有逐次轨迹，沿用旧重放方式；新存档保留原始冻结状态。
-        self._frozen_at_start = dict(run_decisions if branch_trace is None
+        # 老档的 run_decisions 只记录首次选择，不能作为本实例所有轮次的冻结值。
+        # 暂停中的 request 保留执行开始前的提交快照；逐步轨迹可由历史动作推断时才恢复。
+        self._frozen_at_start = dict((self.request.branch_snapshot or {}) if branch_trace is None
                                      else (frozen_at_start or {}))
         self._run_decisions = dict(run_decisions)
         self._replay_branches = list(branch_trace) if branch_trace is not None else None
@@ -581,8 +582,10 @@ class SpellExecution:
                 self._stop(ExecutionStatus.FAILED, InterruptReason.INVALID_INPUT,
                            f"未知步骤类型: {step!r}")
 
-    def _choose_branch(self, key, expression):
-        if self._replay_mode and self._replay_branches is not None:
+    def _choose_branch(self, key, expression, legacy_choice=None):
+        if self._replay_mode and self._replay_branches is None and legacy_choice is not None:
+            taken = legacy_choice
+        elif self._replay_mode and self._replay_branches is not None:
             if not self._replay_branches:
                 raise ValueError("施法存档条件轨迹不足")
             recorded_key, taken = self._replay_branches.pop(0)
@@ -654,6 +657,54 @@ class SpellExecution:
             return True, None
         return False, None
 
+    def _infer_legacy_branch(self, cursor, node, key):
+        """从旧档的下一个动作槽推断分支；无法唯一推断时拒绝猜测。"""
+        frozen = self._frozen_at_start.get(key)
+        if frozen is not None:
+            return int(frozen)
+        if not self._replay_results:
+            raise ValueError("旧暂停存档缺少条件轨迹，无法确定历史分支")
+        expected = self._replay_results[0].step_key
+        from .spell_program import Action, Condition, Jump, Stop
+
+        def possible(start):
+            pending, seen, found = [start], set(), set()
+            while pending:
+                current = pending.pop()
+                if current is None or current in seen:
+                    continue
+                seen.add(current)
+                item = cursor.nodes[current]
+                if isinstance(item, Action):
+                    found.add(str(self._step_index[id(item.effect)]))
+                elif isinstance(item, Condition):
+                    following = cursor.fallthrough[item.id]
+                    pending.extend((item.on_true if item.on_true is not None else following,
+                                    item.on_false if item.on_false is not None else following))
+                elif isinstance(item, Jump):
+                    pending.append(item.target)
+                    if item.id in cursor.loop_exits:
+                        pending.append(cursor.loop_exits[item.id])
+                elif not isinstance(item, Stop):
+                    raise ValueError("旧暂停存档包含无法推断的事件等待")
+            return found
+
+        following = cursor.fallthrough[node.id]
+        true_steps = possible(node.on_true if node.on_true is not None else following)
+        false_steps = possible(node.on_false if node.on_false is not None else following)
+        matches = [taken for taken, candidates in ((0, true_steps), (1, false_steps))
+                   if expected in candidates]
+        first_visit = not any(seen == key for seen, _ in self._branch_trace)
+        first = self._run_decisions.get(key) if first_visit else None
+        if first is not None and first not in matches:
+            raise ValueError(f"旧暂停存档节点{key}的首次分支与历史动作不一致")
+        if len(matches) == 1:
+            return matches[0]
+        # 只有首次经过该节点时，run_decisions 才能证明当时的分支。
+        if first in matches:
+            return int(first)
+        raise ValueError(f"旧暂停存档缺少逐次条件轨迹，无法确定节点{key}的历史分支")
+
     def _run_control_program(self):
         from .spell_program import ProgramCursor
         cursor = ProgramCursor(self._control_program)
@@ -665,7 +716,10 @@ class SpellExecution:
                 self._stop(ExecutionStatus.INTERRUPTED, InterruptReason.CASTER_DEAD,
                            f"{self.caster.name}已命零，后续步骤不再结算")
                 return False
-            return self._choose_branch(node.id.removeprefix("if:"), node.expression) == 0
+            key = node.id.removeprefix("if:")
+            legacy_choice = (self._infer_legacy_branch(cursor, node, key)
+                             if self._replay_mode and self._replay_branches is None else None)
+            return self._choose_branch(key, node.expression, legacy_choice) == 0
 
         while self.is_running:
             node = cursor.next_action(decide, lambda key: self._control_loop_boundary(key, regions))

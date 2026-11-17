@@ -145,3 +145,84 @@ def test_builtin_loop_new_cursor_matches_legacy_steps(name):
                 enemy.current_hp)
 
     assert run(False) == run(True)
+
+
+def test_intermediate_dynamic_loop_without_branch_trace_infers_distinct_steps(tmp_path):
+    from engine.models import DaoWen, DaoWenInstance
+    engine, player, monster = _engine(player_extra=5)
+    player.current_hp, player.current_mana = 40, 0
+    player.dao_wen["燃命"] = DaoWenInstance(
+        DaoWen(name="燃命", formula="", cost_type="消耗", cost_formula="X", effect_formula=""),
+        x_value=0, x_free=True)
+    flow = "若自身 生命 大于 30 则 发动燃命X于自身 否则 发动再生X于自身→循环"
+    execution = engine.combat.build_instant_execution(player, flow, monster,
+        [{"x": 3}, {"x": 3}], engine.combat._combat_entity_refs(), max_iterations=4)
+    engine._bind_spell_step_payment(execution)
+    execution.run_to_window()
+    execution.run_to_window()
+    assert [r.daowen for r in execution.results] == ["燃命", "再生"]
+    before = (player.current_hp, player.current_mana, player.total_healed, player.actions_used_this_round)
+    engine._push_spell_frame(execution)
+    engine.save_dir = str(tmp_path)
+    assert engine.save_game("old_dynamic")["success"]
+    _strip_new_fields(tmp_path / "save_old_dynamic.json", "branch_trace", "frozen_at_start", "control_loop_frames")
+    loaded = GameEngine(autosave=False)
+    loaded.save_dir = str(tmp_path)
+    assert loaded.load_game("old_dynamic")["success"]
+    restored = loaded.combat._spell_stack[-1]["execution"]
+    lp = loaded.state.player
+    assert (lp.current_hp, lp.current_mana, lp.total_healed, lp.actions_used_this_round) == before
+    assert [taken for _, taken in restored._branch_trace] == [0, 1]
+    assert _skip(loaded, "enemy:0")["success"]
+    assert [r.daowen for r in restored.results] == ["燃命", "再生", "燃命", "再生"]
+    assert lp.actions_used_this_round == 4
+
+
+def test_nested_snapshot_with_only_one_loop_baseline_fails_atomically(tmp_path):
+    from engine.spell_execution import (SpellDefinition, SpellExecution, SpellCastRequest,
+                                        StepRequest, TriggerType, Lifecycle)
+    engine, player, enemy = _engine(player_extra=8)
+    body = [LoopStep((LoopStep((ActionStep("庇护", "self"),), 2),
+                      ActionStep("庇护", "self")), 2)]
+    definition = SpellDefinition("旧嵌套", ["庇护"], TriggerType.IMMEDIATE, Lifecycle.INSTANT, body)
+    execution = SpellExecution(engine.combat, definition, player, enemy,
+                               engine.combat._combat_entity_refs(),
+                               SpellCastRequest(steps=[StepRequest(x=1), StepRequest(x=1)]))
+    engine._bind_spell_step_payment(execution)
+    execution.run_to_window()
+    engine._push_spell_frame(execution)
+    engine.save_dir = str(tmp_path)
+    assert engine.save_game("old_nested")["success"]
+    _strip_new_fields(tmp_path / "save_old_nested.json", "control_loop_frames")
+    loaded = GameEngine(autosave=False)
+    loaded.save_dir = str(tmp_path)
+    before = loaded.state
+    result = loaded.load_game("old_nested")
+    assert not result["success"] and "缺少嵌套循环轮初快照" in result["error"]
+    assert loaded.state is before
+
+
+def test_replay_does_not_repeat_payment_effect_or_callback():
+    from tests.test_spell_executor_semantics import _state, _give
+    from engine.spell_execution import SpellExecution
+    _, combat, player, enemy = _state(player_hp=50, mana=20)
+    _give(player, "再生")
+    execution = combat.build_instant_execution(player, "发动再生X于自身→循环2次", enemy,
+                                              [{"x": 1}], combat._combat_entity_refs())
+    execution.run_to_window()
+    before = (player.current_hp, player.current_mana, player.total_healed)
+    def unexpected(*args, **kwargs):
+        raise AssertionError("重放不得支付、结算或调用回调")
+    restored = SpellExecution(combat, execution.definition, player, enemy,
+                              combat._combat_entity_refs(), execution.request,
+                              before_step=unexpected, on_step=unexpected)
+    original = combat._execute_single_daowen_step
+    combat._execute_single_daowen_step = unexpected
+    try:
+        restored.restore_paused(execution.results, execution._run_decisions,
+                                execution._branch_trace, execution._frozen_at_start,
+                                execution._loop_start_fingerprint, execution._control_loop_frames)
+    finally:
+        combat._execute_single_daowen_step = original
+    assert (player.current_hp, player.current_mana, player.total_healed) == before
+    assert len(restored.results) == 1
