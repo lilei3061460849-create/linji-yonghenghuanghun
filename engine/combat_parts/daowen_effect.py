@@ -995,6 +995,16 @@ class DaowenEffectMixin:
             everyone = self.state.get_all_player_side() + self.state.get_all_enemy_side()
             if not any(e is not target and e.treated_as_creation() for e in everyone):
                 raise ValueError("【勾魂】场上没有可接收道纹的[造物]，本次发动不成立，不支付代价")
+            # 锁定当次接收者，后续若它救赎不得改投或修改其道纹。
+            chosen = self._combat_entity_refs().get(str(calc.get("gouhun_creation_ref") or ""))
+            if chosen is None or chosen is target or not chosen.treated_as_creation():
+                side = (self.state.get_all_player_side() if not self.state.on_enemy_side(caster)
+                        else self.state.get_all_enemy_side())
+                chosen = next((e for e in side if e is not target and e.treated_as_creation()), None)
+                if chosen is None:
+                    chosen = next((e for e in everyone if e is not target and e.treated_as_creation()), None)
+            if chosen is not None:
+                calc["_gouhun_creation_id"] = str(chosen.runtime_id)
         if name == "借尸":
             corpses = [e for e in getattr(self.state, "dead_monsters", []) or []]
             if not corpses:
@@ -1951,13 +1961,19 @@ class DaowenEffectMixin:
         # ---- 乱葬岗（二阶）专属道纹效果 ----
         # 删除【镇尸】：与【坏死】是同一效果的两套实现，
         # 保留【坏死】为「无法获得[回复]」的唯一入口。
-        if name == "勾魂" and calc.get("transfer_daowen_count") and target_effect_allowed(target):
+        locked_creation = (self.state.entity_by_runtime_id(calc.get("_gouhun_creation_id", ""))
+                           if name == "勾魂" else None)
+        if (name == "勾魂" and calc.get("transfer_daowen_count")
+                and locked_creation is not None and not target_effect_allowed(locked_creation)):
+            result["effects"].append({"type": "daowen_transfer_interrupted",
+                                      "reason": "接收造物救赎待决或已离场"})
+        elif name == "勾魂" and calc.get("transfer_daowen_count") and target_effect_allowed(target):
             # 【勾魂】（重做）：把[目标]的 X 种道纹整只转移
             # 到 1 个[造物]身上，持续∞（本场内不自动返回）。旧「无法获得
             # [法力]」效果整条撤销。造物已持有同名时该种不转移、留在目标身上；
             # [目标]有【出土】余次时按次保留原纹、改为复制。
             refs_now = self._combat_entity_refs()
-            creation = refs_now.get(str(calc.get("gouhun_creation_ref") or ""))
+            creation = locked_creation or refs_now.get(str(calc.get("gouhun_creation_ref") or ""))
             if creation is None or creation is target or not creation.treated_as_creation():
                 side = (self.state.get_all_player_side()
                         if not self.state.on_enemy_side(caster)

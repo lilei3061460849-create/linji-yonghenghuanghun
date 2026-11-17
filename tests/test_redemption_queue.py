@@ -818,3 +818,23 @@ def test_round_start_mutation_isolates_pending_target_and_continues_others():
     assert b.hp_lost_this_round == 7 and b.blood_oath_used_this_round
     assert not c.blood_oath_used_this_round
     assert c.is_alive
+
+
+def test_gouhun_does_not_transfer_to_queued_creation():
+    from engine.models import DaoWen, DaoWenInstance, StatusEffect
+    e = _ready_combat(_engine("gouhun_creation_pending"))
+    first, donor, receiver = monster("先"), monster("供体"), monster("接收造物")
+    donor.current_hp = 90
+    receiver.mutation_count = 50
+    receiver.add_status(StatusEffect("化尸", remaining_rounds=2))
+    receiver.add_status(StatusEffect("波及", remaining_rounds=2, source=e.state.player.name))
+    donor.dao_wen["加害"] = DaoWenInstance(
+        DaoWen(name="加害", formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
+    e.state.enemies[:] = [first, donor, receiver]
+    e.combat.check_redemption(first)
+    result = e.combat.apply_daowen_effect("勾魂", {"x": 2, "mutation_reduction": 2,
+        "transfer_daowen_count": 1, "transfer_daowen_names": ["加害"],
+        "gouhun_creation_ref": "enemy:2"}, e.state.player, donor)
+    assert e.combat.is_redemption_pending(receiver)
+    assert "加害" in donor.dao_wen and "加害" not in receiver.dao_wen
+    assert any(effect["type"] == "daowen_transfer_interrupted" for effect in result["effects"])
