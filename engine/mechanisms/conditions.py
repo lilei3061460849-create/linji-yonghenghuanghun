@@ -133,6 +133,14 @@ def not_(cond: Condition) -> Condition:
     return lambda ctx: not cond(ctx)
 
 
+def entity_has_artifact(name: str, *, of: str = "target") -> Condition:
+    """实体自身持有指定法器；不继承阵营法器。"""
+    def cond(ctx: TriggerContext) -> bool:
+        entity = ctx.resolve(of)
+        return entity is not None and name in getattr(entity, "artifacts", ())
+    return cond
+
+
 def entity_has_relic(name: str, *, of: str = "target") -> Condition:
     """只查实体自己的遗物列表，不混入阵营遗物或封存规则。"""
     def cond(ctx: TriggerContext) -> bool:
