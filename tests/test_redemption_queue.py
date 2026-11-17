@@ -563,3 +563,79 @@ def test_merge_creation_checks_after_all_panels_and_departures():
     assert (m.blood_limit, m.current_hp, m.attack_power, m.attack_count) == (200, 22, 4, 3)
     assert creation.departure_reason == "合体" and m.departure_reason == "救赎"
     assert any(item.get("type") == "redemption" for item in result["effects"])
+
+
+def test_heal_verb_finishes_heal_ledger_before_redemption(monkeypatch):
+    from engine.mechanisms.verbs import apply_verb
+    e = _ready_combat(_engine("heal_verb_ledger"))
+    m = monster("回复目标")
+    m.current_hp = 10
+    e.state.enemies[:] = [m]
+    original = e.combat.check_redemption
+    seen = []
+    def check(entity, **kwargs):
+        seen.append((entity.current_hp, entity.total_healed, len(entity._heal_events)))
+        return original(entity, **kwargs)
+    monkeypatch.setattr(e.combat, "check_redemption", check)
+    result = apply_verb(e.combat, "heal", {"target": m, "amount": 1})
+    assert seen == [(11, 1, 1)]
+    assert result["actual_heal"] == 1 and result["redemption"]["type"] == "redemption"
+    assert m.departure_reason == "救赎"
+
+
+def test_blood_limit_cost_completes_callback_and_ledger_before_redemption(monkeypatch):
+    e = _ready_combat(_engine("blood_cost_ledger"))
+    m = monster("血限代价")
+    m.current_hp = 10
+    e.state.enemies[:] = [m]
+    seen = []
+    monkeypatch.setattr(e.combat, "_on_cost_paid", lambda who, ctx: seen.append(
+        (who.blood_limit, who.current_hp, who.reversible_cost_layers["血限"],
+         bool(e.state.pending_redemption))))
+    result = e.combat.pay_numeric_cost(m, "血限", 1)
+    assert seen == [(99, 10, 1, False)]
+    assert result["owner"]["paid"] == 1 and result["owner"]["redemption"]["type"] == "redemption"
+    assert m.departure_reason == "救赎"
+
+
+def test_shared_life_cost_completes_all_parts_before_redemption(monkeypatch):
+    from engine.models import StatusEffect
+    e = _ready_combat(_engine("shared_cost_order"))
+    a, b = monster("共罪甲"), monster("共罪乙")
+    a.current_hp = b.current_hp = 21
+    e.state.enemies[:] = [a, b]
+    ids = [a.runtime_id, b.runtime_id]
+    for entity in (a, b):
+        entity.add_status(StatusEffect("共罪", remaining_rounds=2, effect_data={"group_ids": ids}))
+    callbacks = []
+    monkeypatch.setattr(e.combat, "_on_cost_paid", lambda who, ctx: callbacks.append(
+        (who.name, a.current_hp, b.current_hp, bool(e.state.pending_redemption))))
+    result = e.combat.pay_numeric_cost(a, "生命", 2)
+    assert callbacks == [("共罪甲", 20, 21, False), ("共罪乙", 20, 20, False)]
+    assert result["actual_paid"] == 2
+    assert a.departure_reason == "救赎" and e.combat.is_redemption_pending(b)
+    assert [event["type"] for event in result["redemptions"]] == ["redemption", "redemption_pending"]
+    assert e.state.pending_redemption["runtime_id"] == ids[0]
+    assert e.state.pending_redemption_candidates[0]["runtime_id"] == ids[1]
+
+
+def test_heal_verb_cancer_precedes_redemption():
+    from engine.mechanisms.verbs import apply_verb
+    e = _ready_combat(_engine("heal_cancer_priority"))
+    m = monster("癌变优先")
+    m.current_hp = 10
+    m.total_healed = 199
+    e.state.enemies[:] = [m]
+    result = apply_verb(e.combat, "heal", {"target": m, "amount": 1})
+    assert result["actual_heal"] == 1 and result["cancer"]
+    assert m.is_proliferated and not e.state.pending_redemption
+    assert "redemption" not in result
+
+
+def test_lethal_blood_limit_payment_has_death_priority():
+    e = _ready_combat(_engine("lethal_blood_cost"))
+    m = monster("致死血限")
+    e.state.enemies[:] = [m]
+    result = e.combat.pay_numeric_cost(m, "血限", 100)
+    assert result["owner"]["paid"] == 100 and m.current_hp == 0 and not m.is_alive
+    assert not m.is_departed and not e.state.pending_redemption

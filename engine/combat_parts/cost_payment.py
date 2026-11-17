@@ -490,8 +490,13 @@ class CostPaymentMixin:
             paid = min(amount, int(detail.get("mana_before", detail.get("resource_before", amount))))
         elif cost_type == "速度":
             paid = int(detail["speed_before"]) - int(detail["speed_after"])
-        return {"payer": payer.name, "cost_type": cost_type, "paid": paid,
-                "brand_nail": nail, **detail}
+        result = {"payer": payer.name, "cost_type": cost_type, "paid": paid,
+                  "brand_nail": nail, **detail}
+        if cost_type == "血限" and payer.is_alive:
+            redemption = self.check_redemption(payer)
+            if redemption:
+                result["redemption"] = redemption
+        return result
 
     def settle_battle_start_exhaust(self) -> list[dict]:
         """下一次[战始]结算【枯竭】：当前法力-X，法限不变，待扣额度清零。"""
@@ -763,8 +768,17 @@ class CostPaymentMixin:
         # 结算生命周期记账（engine/resolution.py）：代价也是「效果」，同样受限。
         _cost_field = {"生命": "hp", "法力": "mana", "精力": "energy"}.get(cost_type, cost_type)
         _before = {f: getattr(payer, f, None) for f in ("current_hp", "mana", "energy")}
+        # 同一份代价的所有共罪承担者先完成扣费和回调，再依原分摊顺序检查。
+        # 不延迟组外实体；嵌套窗口及自由结晶已持有的屏障原样保留。
+        affected = (self._blood_pact_group(payer) if cost_type in RESOURCE_TYPES else []) or [payer]
+        if payer not in affected:
+            affected.append(payer)
+        before_values = {id(e): (e.current_hp, e.blood_limit, e.mutation_count) for e in affected}
+        owned_deferred = {e.runtime_id for e in affected
+                          if e.runtime_id not in self._redemption_deferred}
         with resolution_frame(self, KIND_COST, getattr(payer, "name", "?"),
                               cost_type, amount):
+            self._redemption_deferred.update(owned_deferred)
             try:
                 payment = self._pay_numeric_cost_inner(
                     payer, cost_type, amount,
@@ -776,12 +790,40 @@ class CostPaymentMixin:
                 if trigger_blood_pact and nominal > 0 and cost_type in RESOURCE_TYPES:
                     payment["blood_pact_effects"] = self._trigger_xueqi_payment(
                         payer, cost_type, nominal, normalized)
-                return payment
             finally:
+                self._redemption_deferred.difference_update(owned_deferred)
                 for attr, field in (("current_hp", "hp"), ("mana", "mana"),
                                     ("energy", "energy")):
                     note_delta(self, field if attr != "current_hp" else _cost_field,
                                _before[attr], getattr(payer, attr, None))
+            redemptions = []
+            shared_details = payment.get("shared_with") or []
+            if isinstance(shared_details, dict):
+                shared_details = [shared_details]
+            shared_iter = iter(shared_details)
+            for entity in affected:
+                if entity is payer:
+                    part_detail = payment["owner"]
+                else:
+                    part_detail = next(shared_iter, {})
+                paid_relevant = (cost_type in {"生命", "血限", "异变"}
+                                 and int(part_detail.get("paid", 0) or 0) > 0)
+                if (entity.runtime_id not in owned_deferred or not entity.is_alive
+                        or (not paid_relevant and before_values[id(entity)] ==
+                            (entity.current_hp, entity.blood_limit, entity.mutation_count))):
+                    continue
+                redemption = self.check_redemption(entity)
+                if redemption:
+                    redemptions.append(redemption)
+                    if entity is payer:
+                        owner = payment["owner"]
+                        if cost_type == "生命":
+                            owner["detail"]["redemption"] = redemption
+                        else:
+                            owner["redemption"] = redemption
+            if redemptions:
+                payment["redemptions"] = redemptions
+            return payment
 
     def pay_resource(
         self, payer: Entity, resource_type: str, amount: int, *,
@@ -1043,12 +1085,6 @@ class CostPaymentMixin:
             detail["context_warning"] = "生命支付缺少EffectContext；需要来源上下文的监听不会触发"
         if detail.get("died"):
             self._check_hp_zero_death(payer, ctx=hp_loss_ctx or cost_context)
-        elif life_lost > 0 and payer.entity_type == "怪物":
-            # 代价失血抑制了模型层兜底钩子，需在失血事件入账后补检；
-            # 致死支付仍先按命零处理，与直接失血入口保持一致。
-            redemption = self.check_redemption(payer)
-            if redemption:
-                detail["redemption"] = redemption
         if (payer is self.state.player and actual > 0 and not payer.blood_oath_used_this_round
                 and self._relic_active(payer, "血誓戒")
                 and self._blood_oath_context_allows(cost_context)):
@@ -1069,6 +1105,11 @@ class CostPaymentMixin:
             nail = self._on_cost_paid(payer, cost_context)
             if nail:
                 detail["brand_nail"] = nail
+        # 先完整执行失血账本、血誓、炼心与代价回调；外层共罪支付可继续延迟。
+        if life_lost > 0 and payer.is_alive:
+            redemption = self.check_redemption(payer)
+            if redemption:
+                detail["redemption"] = redemption
         return detail
 
     def _offset_with_dragon_heart(self, payer: Entity, cost_type: str, amount: int, dragon_heart_use: int) -> tuple:
