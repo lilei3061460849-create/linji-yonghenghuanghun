@@ -414,3 +414,25 @@ def test_legacy_non_loop_flow_executes_through_control_program():
     assert execution._control_program is not None
     assert _daowen_sequence(execution) == ["再生", "杀伐"]
     assert player.current_hp == 62 and enemy.current_hp < 100
+
+
+def test_restore_dynamic_loop_branch_trace_without_reapplying_effects():
+    state, combat, player, enemy = _state(player_hp=40, mana=0)
+    _give(player, "燃命", "再生")
+    flow = "若自身 生命 大于 30 则 发动燃命X于自身 否则 发动再生X于自身→循环"
+    def make_execution():
+        return combat.build_instant_execution(player, flow, enemy,
+            [{"x": 3}, {"x": 3}], combat._combat_entity_refs(), max_iterations=4)
+    execution = make_execution()
+    execution.run_to_window()
+    execution.run_to_window()
+    assert _daowen_sequence(execution) == ["燃命", "再生"]
+    assert [choice for _, choice in execution._branch_trace] == [0, 1]
+    before = (player.current_hp, player.current_mana, player.total_healed)
+    restored = make_execution()
+    restored.restore_paused(execution.results, execution._run_decisions,
+                            execution._branch_trace, execution._frozen_at_start,
+                            execution._loop_start_fingerprint)
+    assert (player.current_hp, player.current_mana, player.total_healed) == before
+    restored.run_to_window()
+    assert _daowen_sequence(restored) == ["燃命", "再生", "燃命"]

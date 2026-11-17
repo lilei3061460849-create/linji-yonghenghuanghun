@@ -260,3 +260,33 @@ def test_bizhong_blocks_counter_action_but_not_skip_or_own_continuation():
     assert player.actions_used_this_round == 2
     assert resumed["spell_progress"][-1]["execution_status"] == "completed"
     assert resumed.get("spell_window") is None
+
+
+def test_save_load_dynamic_loop_branches_do_not_replay_effects(tmp_path):
+    engine, player, monster = _engine(player_extra=5)
+    player.current_hp, player.current_mana = 40, 0
+    player.dao_wen["燃命"] = DaoWenInstance(
+        DaoWen(name="燃命", formula="", cost_type="消耗", cost_formula="X", effect_formula=""),
+        x_value=0, x_free=True)
+    flow = "若自身 生命 大于 30 则 发动燃命X于自身 否则 发动再生X于自身→循环"
+    execution = engine.combat.build_instant_execution(player, flow, monster,
+        [{"x": 3}, {"x": 3}], engine.combat._combat_entity_refs(), max_iterations=4)
+    engine._bind_spell_step_payment(execution)
+    execution.run_to_window()
+    execution.run_to_window()
+    assert [result.daowen for result in execution.results] == ["燃命", "再生"]
+    before = (player.current_hp, player.current_mana, player.total_healed, player.actions_used_this_round)
+    engine._push_spell_frame(execution)
+    engine.save_dir = str(tmp_path)
+    assert engine.save_game("branch_loop")["success"]
+    loaded = GameEngine(autosave=False)
+    loaded.save_dir = str(tmp_path)
+    assert loaded.load_game("branch_loop")["success"]
+    restored = loaded.combat._spell_stack[-1]["execution"]
+    lp = loaded.state.player
+    assert (lp.current_hp, lp.current_mana, lp.total_healed, lp.actions_used_this_round) == before
+    assert [result.daowen for result in restored.results] == ["燃命", "再生"]
+    result = _skip(loaded, "enemy:0")
+    assert result["success"], result
+    assert [r.daowen for r in restored.results] == ["燃命", "再生", "燃命", "再生"]
+    assert lp.actions_used_this_round == 4

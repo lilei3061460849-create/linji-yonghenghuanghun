@@ -418,6 +418,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "request": copy.deepcopy(execution.request),
                 "results": copy.deepcopy(execution.results),
                 "run_decisions": dict(execution._run_decisions),
+                "branch_trace": list(execution._branch_trace),
+                "frozen_at_start": dict(execution._frozen_at_start),
+                "loop_start_fingerprint": execution._loop_start_fingerprint,
                 "loop_stop_reason": execution.loop_stop_reason,
                 "loop_iterations": execution.loop_iterations,
                 "caster_key": caster_key,
@@ -503,7 +506,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 trigger_label="瞬发", policy=self.combat.CAST_STEP_POLICY,
                 target_resolver=resolver,
             )
-            execution.restore_paused(saved["results"], saved["run_decisions"])
+            execution.restore_paused(saved["results"], saved["run_decisions"],
+                                     saved.get("branch_trace"), saved.get("frozen_at_start"),
+                                     saved.get("loop_start_fingerprint"))
             execution.loop_stop_reason = saved.get("loop_stop_reason", "")
             self._bind_spell_step_payment(execution)
             self.combat._spell_stack.append({

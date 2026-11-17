@@ -436,6 +436,11 @@ class SpellExecution:
         # （包括循环的每一轮）始终按当前状态重新求值。
         self._frozen_at_start = dict(request.branch_snapshot or {})
         self._run_decisions: dict[str, int] = {}
+        # 按访问顺序记录条件，允许同一节点在循环中多次选择不同分支。
+        self._branch_trace: list[tuple[str, int]] = []
+        self._replay_branches: list[tuple[str, int]] | None = None
+        self._loop_start_fingerprint = None
+        self._restore_loop_fingerprint = None
         # 可暂停施法的生成器；只在首次推进时创建，暂停不会丢失控制流位置。
         self._driver = None
         # 读档恢复：只重放已记录的控制流/结果，不重新支付或执行效果。
@@ -497,15 +502,23 @@ class SpellExecution:
         return self.results[before:]
 
     def restore_paused(self, results: list[StepResult],
-                       run_decisions: dict[str, int]) -> None:
+                       run_decisions: dict[str, int],
+                       branch_trace: list[tuple[str, int]] | None = None,
+                       frozen_at_start: dict[str, int] | None = None,
+                       loop_start_fingerprint=None) -> None:
         """从存档记录重建到同一空档；重放不触发任何支付、效果或回调。"""
         if self._driver is not None or self.results or not self.is_running:
             raise ValueError("只能恢复尚未推进的新执行器")
         if not results:
             raise ValueError("暂停施法至少需要一条已结算步骤记录")
         self._replay_results = list(results)
-        self._frozen_at_start = dict(run_decisions)
+        # 老存档没有逐次轨迹，沿用旧重放方式；新存档保留原始冻结状态。
+        self._frozen_at_start = dict(run_decisions if branch_trace is None
+                                     else (frozen_at_start or {}))
         self._run_decisions = dict(run_decisions)
+        self._replay_branches = list(branch_trace) if branch_trace is not None else None
+        self._branch_trace = []
+        self._restore_loop_fingerprint = loop_start_fingerprint
         self._replay_mode = True
         self._driver = self._drive()
         while self._replay_results:
@@ -515,6 +528,9 @@ class SpellExecution:
                 self._replay_mode = False
                 raise ValueError("施法存档的控制流与步骤记录不一致") from exc
         self._replay_mode = False
+        if self._replay_branches:
+            raise ValueError("施法存档条件轨迹未完全重放")
+        self._replay_branches = None
         if not self.is_running:
             raise ValueError("暂停施法存档意外进入了终止状态")
 
@@ -547,12 +563,22 @@ class SpellExecution:
                            f"未知步骤类型: {step!r}")
 
     def _choose_branch(self, key, expression):
-        frozen = self._frozen_at_start.get(key)
-        if frozen is not None:
-            return int(frozen)
-        taken = 0 if self._evaluate_condition(expression) else 1
+        if self._replay_mode and self._replay_branches is not None:
+            if not self._replay_branches:
+                raise ValueError("施法存档条件轨迹不足")
+            recorded_key, taken = self._replay_branches.pop(0)
+            if recorded_key != key or taken not in (0, 1):
+                raise ValueError(f"施法存档条件轨迹错位: {recorded_key}/{taken}, 当前{key}")
+        else:
+            frozen = self._frozen_at_start.get(key)
+            if frozen is not None:
+                taken = int(frozen)
+            else:
+                taken = 0 if self._evaluate_condition(expression) else 1
+                if self.is_running:
+                    self._run_decisions.setdefault(key, taken)
         if self.is_running:
-            self._run_decisions.setdefault(key, taken)
+            self._branch_trace.append((key, taken))
         return taken
 
     def _run_control_program(self):
@@ -618,6 +644,7 @@ class SpellExecution:
             executed_before = self._executed_count()
             # 逐轮重取：循环体外的步骤也会改动战场，不能只在首次循环前取一次。
             battlefield_before = self._battlefield_now()
+            self._loop_start_fingerprint = battlefield_before
             yield from self._run_steps(
                 node.body, iteration=rounds if iteration == 0 else iteration)
             if not self.is_running:
@@ -626,6 +653,11 @@ class SpellExecution:
             # 变化 → 法术中断。零进展（本轮一步都没执行）与执行了步骤但没改动
             # 战场同归此条，不再作为"正常结束"返回。
             no_step_executed = self._executed_count() == executed_before
+            if not self._replay_mode and self._restore_loop_fingerprint is not None:
+                # 恢复时世界已是暂停点，而非本轮起点；沿用原轮起点快照。
+                battlefield_before = self._restore_loop_fingerprint
+                self._loop_start_fingerprint = battlefield_before
+                self._restore_loop_fingerprint = None
             # 读档重放不重新执行效果，此刻的 state 是暂停点状态而非当轮状态，
             # 比对指纹会误判；重放只按已记录的控制流/结果复原。
             no_net_change = (not self._replay_mode
