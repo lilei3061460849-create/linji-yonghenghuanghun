@@ -42,6 +42,7 @@ def _engine(tmp_path, seed: int = 20260822):
 def _monster(hp=40, power=3, speed=5):
     """脆弱怪：血少、攻低、速度够闪几次。"""
     return Entity("靶怪", "怪物", blood_limit=40, current_hp=hp,
+                  mutation_count=50,  # 仅验证闪避：残血夹具不应先触发常规救赎。
                   attack_count=speed, attack_power=power,
                   speed_limit=speed, current_speed=speed,
                   mana_limit=power, current_mana=power)

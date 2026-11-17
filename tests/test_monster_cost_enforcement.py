@@ -157,7 +157,9 @@ def test_monster_cannot_cast_when_hp_insufficient_for_cost(tmp_path):
         })
     started = begin_battle(e)
     assert started["success"], started
-    m = Entity("靶怪", "怪物", blood_limit=80, current_hp=10, attack_count=1, attack_power=1)
+    # 低血夹具用高异变隔离救赎，专测生命代价不足。
+    m = Entity("靶怪", "怪物", blood_limit=80, current_hp=10, attack_count=1, attack_power=1,
+               mutation_count=50)
     m.dao_wen["连击"] = DaoWenInstance(
         DaoWen(name="连击", formula="", cost_type="流血", cost_formula="X", effect_formula=""),
         x_value=50
