@@ -31,3 +31,26 @@ def test_condition_jumps_loop_and_wait_share_stable_node_references():
 def test_rejects_invalid_structure(nodes, entry):
     with pytest.raises(ValueError):
         validate_structure(SpellProgram(nodes, entry))
+
+
+def test_cursor_runs_actions_and_branches_without_effect_side_effects():
+    from engine.spell_program import ProgramCursor
+    expression = parse_condition("自身 生命 大于 10")
+    program = SpellProgram((
+        Condition("test", expression, on_true="a", on_false="b"),
+        Action("a", ActionStep("再生", "self"), next="end"),
+        Action("b", ActionStep("杀伐", "target"), next="end"),
+        Stop("end"),
+    ), "test")
+    for value, expected in [(True, "a"), (False, "b")]:
+        cursor = ProgramCursor(program)
+        assert cursor.next_action(lambda _: value).id == expected
+        assert cursor.next_action(lambda _: value) is None
+
+
+def test_cursor_rejects_cycles_and_wait_until_their_rules_are_implemented():
+    from engine.spell_program import ProgramCursor
+    with pytest.raises(ValueError, match="循环"):
+        ProgramCursor(SpellProgram((Jump("again", "again"),), "again"))
+    with pytest.raises(ValueError, match="事件等待"):
+        ProgramCursor(SpellProgram((WaitEvent("wait", "回始"),), "wait"))

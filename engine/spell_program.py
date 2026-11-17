@@ -14,6 +14,7 @@ from .spell_dsl import ActionStep, BoolOp, Cmp, Not
 class Action:
     id: str
     effect: ActionStep
+    next: str | None = None
 
 
 @dataclass(frozen=True)
@@ -75,7 +76,8 @@ def validate_structure(program: SpellProgram) -> None:
     if not isinstance(program.entry, str) or program.entry not in ids:
         raise ValueError(f"入口节点不存在: {program.entry}")
     for node in program.nodes:
-        refs = ((node.on_true, node.on_false) if isinstance(node, Condition)
+        refs = ((node.next,) if isinstance(node, Action)
+                else (node.on_true, node.on_false) if isinstance(node, Condition)
                 else (node.target,) if isinstance(node, Jump)
                 else (node.resume,) if isinstance(node, WaitEvent) else ())
         if isinstance(node, Jump) and node.target is None:
@@ -83,3 +85,65 @@ def validate_structure(program: SpellProgram) -> None:
         for ref in refs:
             if ref is not None and (not isinstance(ref, str) or ref not in ids):
                 raise ValueError(f"节点{node.id}引用不存在的节点: {ref}")
+
+
+class ProgramCursor:
+    """推进控制流，动作由调用方结算；不绕过原有战斗引擎。
+
+    此阶段只支持无环图；事件等待与循环检查尚未接入，不可用于真实循环。
+    """
+    def __init__(self, program: SpellProgram):
+        validate_structure(program)
+        self.program = program
+        self.nodes = {node.id: node for node in program.nodes}
+        self.fallthrough = {node.id: (program.nodes[i + 1].id
+                            if i + 1 < len(program.nodes) else None)
+                            for i, node in enumerate(program.nodes)}
+        self.position = program.entry
+        self._assert_acyclic()
+
+    def _successors(self, node):
+        following = self.fallthrough[node.id]
+        if isinstance(node, Action):
+            return (node.next if node.next is not None else following,)
+        if isinstance(node, Condition):
+            return (node.on_true if node.on_true is not None else following,
+                    node.on_false if node.on_false is not None else following)
+        if isinstance(node, Jump):
+            return (node.target,)
+        if isinstance(node, WaitEvent):
+            raise ValueError("事件等待尚未接入战斗事件调度")
+        return ()
+
+    def _assert_acyclic(self):
+        # 暂不开放无净变化检测尚未实现的循环，避免错误或无限结算。
+        visited, active = set(), set()
+        def walk(key):
+            if key is None or key in visited:
+                return
+            if key in active:
+                raise ValueError("流程循环尚未接入循环中断规则")
+            active.add(key)
+            for successor in self._successors(self.nodes[key]):
+                walk(successor)
+            active.remove(key)
+            visited.add(key)
+        walk(self.position)
+
+    def next_action(self, decide):
+        """执行控制节点直到动作或结束；decide(condition) 由战斗执行器提供。"""
+        while self.position is not None:
+            node = self.nodes[self.position]
+            following = self.fallthrough[node.id]
+            if isinstance(node, Stop):
+                self.position = None
+                return None
+            if isinstance(node, Action):
+                self.position = node.next if node.next is not None else following
+                return node
+            if isinstance(node, Condition):
+                target = node.on_true if decide(node) else node.on_false
+                self.position = target if target is not None else following
+            elif isinstance(node, Jump):
+                self.position = node.target
+        return None
