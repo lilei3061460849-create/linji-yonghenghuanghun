@@ -23,6 +23,7 @@ relic_active 条件——证明 Relic 可以成为普通 Mechanism 声明）、�
 from .conditions import (  # noqa: F401
     Condition, all_, any_, amount_positive, damage_type_not, entity_type,
     events_this_round, has_status, hp_at_least, is_alive, not_, relic_active,
+    entity_has_artifact,
     side_has,
 )
 from .registry import (  # noqa: F401
