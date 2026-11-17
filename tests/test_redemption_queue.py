@@ -782,3 +782,18 @@ def test_relic_after_damage_heals_other_monster_then_redeems_it():
     assert healer.current_hp == 11 and healer.departure_reason == "救赎"
     assert victim.current_hp == 95 and victim.is_alive
     assert e.state.pending_redemption["runtime_id"] == healer.runtime_id
+
+
+def test_corpse_borrow_one_blood_checks_after_status():
+    e = _ready_combat(_engine("corpse_borrow_one_blood"))
+    m = monster("借尸者")
+    m.current_hp = 21
+    corpse = Entity("尸体", "怪物", blood_limit=1, current_hp=0,
+                    attack_count=1, attack_power=1, is_alive=False)
+    e.state.dead_monsters = [corpse]
+    e.state.enemies[:] = [m]
+    result = e.combat.apply_daowen_effect("借尸", {"x": 1, "duration": 2,
+        "borrow_corpse_name": "尸体"}, e.state.player, m)
+    assert (m.current_hp, m.blood_limit) == (1, 1) and m.has_status("借尸")
+    assert m.departure_reason == "救赎"
+    assert any(effect.get("type") == "redemption" for effect in result["effects"])

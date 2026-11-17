@@ -410,8 +410,12 @@ class DaowenEffectMixin:
             return int(entity.gain_mana(amount))
         if kind == "生命":
             healed = self.state.apply_heal(entity, amount)
-            return int(healed.get("actual_heal", healed.get("healed", 0)) or 0) \
-                if isinstance(healed, dict) else amount
+            if isinstance(healed, dict):
+                self.check_cancer(entity)
+                if entity.is_alive and healed.get("actual_heal", 0) > 0:
+                    self.check_redemption(entity)
+                return int(healed.get("actual_heal", healed.get("healed", 0)) or 0)
+            return amount
         if kind == "碎片":
             if entity is self.state.player:
                 self.state.shards += amount
@@ -483,7 +487,10 @@ class DaowenEffectMixin:
                 target_hp = max(1, int(record))
                 if entity.is_alive and int(entity.current_hp) != target_hp:
                     if target_hp > entity.current_hp:
-                        self.state.apply_heal(entity, target_hp - int(entity.current_hp))
+                        heal = self.state.apply_heal(entity, target_hp - int(entity.current_hp))
+                        self.check_cancer(entity)
+                        if entity.is_alive and heal.get("actual_heal", 0) > 0:
+                            self.check_redemption(entity)
                     else:
                         self._raw_hp_loss(entity, int(entity.current_hp) - target_hp)
                     effects.append({"type": "nixue_expired", "entity": entity.name,
@@ -2537,6 +2544,12 @@ class DaowenEffectMixin:
                     "type": "corpse_borrowed", "target": recipient.name,
                     "corpse": corpse.name, "blood_limit": recipient.blood_limit,
                     "duration": calc.get("duration", x)})
+                if recipient.current_hp <= 0:
+                    self._check_hp_zero_death(recipient)
+                elif recipient.is_alive:
+                    redemption = self.check_redemption(recipient)
+                    if redemption:
+                        result["effects"].append(redemption)
 
         if name == "逆血":
             # 【逆血】（承原【永生】草案互换口径）：当前生命与已损生命互换，
@@ -2567,6 +2580,14 @@ class DaowenEffectMixin:
                     "type": "hp_swapped_with_lost", "target": recipient.name,
                     "hp_before": pre_swap, "hp_after": recipient.current_hp,
                     "duration": calc.get("duration", x)})
+                if new_hp > pre_swap:
+                    cancer = self.check_cancer(recipient)
+                    if cancer:
+                        result["effects"].append(cancer)
+                    if recipient.is_alive:
+                        redemption = self.check_redemption(recipient)
+                        if redemption:
+                            result["effects"].append(redemption)
 
         if name == "初拥":
             # 【初拥】：与施法者建立生命/血限同步关系（立即对齐一次，
@@ -2598,7 +2619,7 @@ class DaowenEffectMixin:
                      "source": name, "source_type": "daowen", "actor": caster,
                      "target": target, "tags": {"active_payment", "suoqu"}})
             paid = int(payment.get("actual_paid", 0) or 0)
-            gained = self._gain_resource_amount(caster, kind, paid)
+            gained = self._gain_resource_amount(caster, kind, paid) if target_effect_allowed(caster) else 0
             result["effects"].append({
                 "type": "resource_demanded", "target": target.name,
                 "resource": kind, "demanded": int(calc.get("demand_amount", x)),
