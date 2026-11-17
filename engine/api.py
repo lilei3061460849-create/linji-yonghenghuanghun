@@ -4836,6 +4836,15 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             restored = pickle.loads(base64.b64decode(save_data["payload"].encode("ascii")))
             if not isinstance(restored.get("state"), GameState) or not isinstance(restored.get("dice"), DiceEngine):
                 return {"success": False, "error": "存档内容类型无效"}
+            # 在替换当前游戏状态之前检查旧暂停循环档是否有轮初状态；
+            # 不能用暂停时的战场猜测轮初，否则会错误触发无净变化中断。
+            for frame in restored.get("combat_runtime", {}).get("spell_stack", []):
+                results = frame.get("results") or []
+                if (results and getattr(results[-1], "iteration", 0)
+                        and not frame.get("control_loop_frames")
+                        and frame.get("loop_start_fingerprint") is None):
+                    return {"success": False, "error": "旧暂停存档缺少循环轮初快照，无法可靠恢复；"
+                            "请使用保存时的旧版引擎继续结算该法术"}
         except Exception as exc:
             return {"success": False, "error": f"存档损坏: {exc}"}
 

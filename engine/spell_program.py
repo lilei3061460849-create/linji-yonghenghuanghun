@@ -183,17 +183,23 @@ class ProgramCursor:
 
 
 def compile_legacy(steps):
-    """将旧 AST 编译为回边图；未知节点保留旧执行路径。"""
+    """将旧 AST 编译为回边图；未知节点显式报错。"""
     from .spell_dsl import IfStep, LoopStep
 
-    def supported(items):
-        return all(isinstance(item, ActionStep) or
-                   (isinstance(item, IfStep) and supported(item.then_steps)
-                    and supported(item.else_steps)) or
-                   (isinstance(item, LoopStep) and supported(item.body)) for item in items)
+    def check_supported(items, prefix=""):
+        for index, item in enumerate(items):
+            path = f"{prefix}{index}"
+            if isinstance(item, ActionStep):
+                continue
+            if isinstance(item, IfStep):
+                check_supported(item.then_steps, path + "T")
+                check_supported(item.else_steps, path + "E")
+            elif isinstance(item, LoopStep):
+                check_supported(item.body, path + "L")
+            else:
+                raise ValueError(f"旧法术节点{path}的类型{type(item).__name__}无法编译为流程图")
 
-    if not supported(steps):
-        return None
+    check_supported(steps)
     nodes = [Stop("$end")]
     loops = []
 

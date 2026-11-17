@@ -429,7 +429,7 @@ class SpellExecution:
 
         self._step_index = {id(step): idx for idx, step in iter_action_steps(definition.body)}
         self._if_paths = {id(node): key for key, node in _index_ifs(definition.body)}
-        # 旧 DSL 编译为同一个流程图；未知节点才保留旧兼容路径。
+        # 旧 DSL 编译为同一个流程图；未知节点不静默回退。
         from .spell_program import compile_legacy
         self._control_program = compile_legacy(definition.body)
         self._control_loop_frames: list[dict] = []
@@ -513,6 +513,11 @@ class SpellExecution:
             raise ValueError("只能恢复尚未推进的新执行器")
         if not results:
             raise ValueError("暂停施法至少需要一条已结算步骤记录")
+        if (results[-1].iteration and not control_loop_frames
+                and loop_start_fingerprint is None):
+            # 旧档缺少轮初快照；暂停点状态不等于轮初，不能伪造 NO_NET_CHANGE 判断。
+            raise ValueError("旧暂停存档缺少循环轮初快照，无法可靠恢复；"
+                             "请使用保存时的旧版引擎继续结算该法术")
         self._replay_results = list(results)
         # 老存档没有逐次轨迹，沿用旧重放方式；新存档保留原始冻结状态。
         self._frozen_at_start = dict(run_decisions if branch_trace is None
@@ -541,6 +546,8 @@ class SpellExecution:
             self._restore_loop_fingerprint = None
         elif self._control_loop_frames and loop_start_fingerprint is not None:
             # 兼容迁移前的单循环暂停档：旧档只保存一个轮初快照。
+            if len(self._control_loop_frames) != 1:
+                raise ValueError("暂停存档缺少嵌套循环轮初快照，无法可靠恢复")
             self._control_loop_frames[-1]["before"] = loop_start_fingerprint
             self._restore_loop_fingerprint = None
         if not self.is_running:
