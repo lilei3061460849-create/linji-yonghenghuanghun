@@ -83,13 +83,14 @@ def test_define_relic_triggers_passively_on_round_start():
     assert engine.execute_action("define_resource", {"spec": spec})["success"]
     assert any(r.name == "残烛" for r in engine.state.relics)
 
-    # 当前法力不得超过[法限]，故取低于上限的值观察增量。
+    # 从0开始验证固定+2，而不是只验证法力被封顶后的结果。
     limit = engine.state.player.mana_limit
-    engine.state.player.current_mana = max(0, limit - 2)
+    engine.state.player.current_mana = 0
     engine.state.combat_subphase = "await_round_start"
     logs = engine.execute_action("round_start", {"relic_choices": {}})
     assert logs["success"], logs
-    assert engine.state.player.current_mana == limit, logs
+    assert engine.state.player.current_mana == 2, logs
+    assert engine.state.player.current_mana <= limit
     assert engine.state.player.actions_used_this_round == 0
 
 
