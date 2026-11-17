@@ -133,6 +133,44 @@ def test_examples_load_without_code_changes():
     assert len(registered) == 5
 
 
+def test_custom_resource_batch_rejects_all_items_without_partial_registration_or_grant():
+    engine = _engine()
+    monster = _enemy(engine)
+    valid = {
+        "name": "批量残烛", "category": "遗物", "uniqueness": "测试批量原子性",
+        "summary": "回始获得2点法力",
+        "trigger": {"kind": "phase", "key": "round_start"},
+        "effects": [{"verb": "mana", "target": "self", "amount": 2}],
+    }
+    invalid = {
+        "name": "批量坏器", "category": "法器", "uniqueness": "测试批量原子性",
+        "effects": [{"verb": "not_a_verb", "target": "self", "amount": 2}],
+    }
+
+    result = engine.execute_action("define_resource", {
+        "specs": [valid, invalid], "recipient_ref": monster.runtime_id})
+
+    assert not result["success"]
+    assert custom_resources.get("批量残烛") is None
+    assert custom_resources.get("批量坏器") is None
+    assert not any(r.name == "批量残烛" for r in monster.relics)
+    assert not any(r.name == "批量残烛" for r in engine.state.relics)
+
+
+def test_custom_resource_batch_rejects_duplicate_names_before_registration():
+    engine = _engine()
+    first = {
+        "name": "重名资源", "category": "遗物", "uniqueness": "测试批内重名",
+        "trigger": {"kind": "phase", "key": "round_start"},
+        "effects": [{"verb": "mana", "target": "self", "amount": 1}],
+    }
+    second = dict(first, summary="第二份同名声明")
+    result = engine.execute_action("define_resource", {"specs": [first, second]})
+    assert not result["success"]
+    assert custom_resources.get("重名资源") is None
+    assert not any(r.name == "重名资源" for r in engine.state.relics)
+
+
 def test_custom_relic_can_be_granted_to_and_trigger_on_monster():
     engine = _engine()
     monster = _enemy(engine)
