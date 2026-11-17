@@ -40,6 +40,6 @@ def test_merfolk_rewards_are_independent_options_not_resonance_nodes():
 
 def test_cost_only_x_is_not_effect_scaling():
     with pytest.raises(ValueError, match="X"):
-        validate_spec({"name": "伪缩", "category": "道纹", "uniqueness": "测试反例",
+        validate_spec({"name": "伪缩", "category": "道纹", "base_daowen": "杀伐", "uniqueness": "测试反例",
                        "cost": {"type": "法力", "amount": "X"},
                        "effects": [{"verb": "damage", "amount": 3}]})
