@@ -883,3 +883,78 @@ def test_damage_heal_cancer_precedes_redemption_after_damage_pipeline():
     result = e.combat._apply_hostile_damage(m, 2, source=e.state.player, ctx=ctx)
     assert result["huoxueyi_heal"]["actual"] == 1 and result["cancer"]
     assert m.is_proliferated and not e.state.pending_redemption
+
+
+def test_blood_pact_echo_finishes_before_all_shared_redemptions(monkeypatch):
+    from engine.models import StatusEffect
+    e = _ready_combat(_engine("echo_shared_order"))
+    a, b, echo = monster("甲"), monster("乙"), monster("回声")
+    for m in (a, b, echo):
+        m.current_hp = 21
+    e.state.enemies[:] = [a, b, echo]
+    ids = [a.runtime_id, b.runtime_id]
+    for m in (a, b):
+        m.add_status(StatusEffect("共罪", remaining_rounds=2, effect_data={"group_ids": ids}))
+    a.add_status(StatusEffect("血契", value=1, remaining_rounds=2, effect_data={"target_id": echo.runtime_id}))
+    observations = []
+    monkeypatch.setattr(e.combat, "_on_cost_paid", lambda who, ctx: observations.append(
+        (who.name, a.current_hp, b.current_hp, echo.current_hp, bool(e.state.pending_redemption))))
+    e.combat.pay_numeric_cost(a, "生命", 2)
+    assert observations == [("甲", 20, 21, 21, False), ("乙", 20, 20, 21, False),
+                            ("回声", 20, 20, 19, False)]
+    assert e.state.pending_redemption["runtime_id"] == a.runtime_id
+    assert [c["runtime_id"] for c in e.state.pending_redemption_candidates] == [b.runtime_id, echo.runtime_id]
+
+
+def test_nested_payment_preserves_outer_and_preexisting_barriers(monkeypatch):
+    e = _ready_combat(_engine("nested_barrier"))
+    m = monster("嵌套支付")
+    m.current_hp = 22
+    e.state.enemies[:] = [m]
+    called = []
+    def on_paid(who, ctx):
+        called.append((who.current_hp, who.runtime_id in e.combat._redemption_deferred))
+        if len(called) == 1:
+            e.combat.pay_numeric_cost(who, "生命", 1, trigger_blood_pact=False)
+            assert who.runtime_id in e.combat._redemption_deferred
+            assert not e.state.pending_redemption
+    monkeypatch.setattr(e.combat, "_on_cost_paid", on_paid)
+    e.combat.pay_numeric_cost(m, "生命", 1)
+    assert called == [(21, True), (20, True)]
+    assert m.departure_reason == "救赎" and not e.combat._redemption_deferred
+
+
+def test_share_ref_is_rejected_before_any_payment():
+    import pytest
+    from engine.models import StatusEffect
+    e = _ready_combat(_engine("share_ref_rejected"))
+    ally = monster("承担者")
+    ally.current_hp = 21
+    e.state.friends[:] = [ally]
+    player = e.state.player
+    ids = [player.runtime_id, ally.runtime_id]
+    player.add_status(StatusEffect("共罪", remaining_rounds=2, effect_data={"group_ids": ids}))
+    before = (player.current_hp, ally.current_hp)
+    with pytest.raises(ValueError, match="不接受单目标分担引用"):
+        e.combat.pay_numeric_cost(player, "生命", 2, cost_share_target_ref="friend:0")
+    assert (player.current_hp, ally.current_hp) == before
+    assert not e.state.pending_redemption and not e.combat._redemption_deferred
+
+
+def test_nested_payment_does_not_release_external_redemption_barrier(monkeypatch):
+    e = _ready_combat(_engine("nested_external_barrier"))
+    m = monster("外层屏障")
+    m.current_hp = 22
+    e.state.enemies[:] = [m]
+    e.combat._redemption_deferred.add(m.runtime_id)
+    calls = []
+    def on_paid(who, ctx):
+        calls.append(who.current_hp)
+        if len(calls) == 1:
+            e.combat.pay_numeric_cost(who, "生命", 1, trigger_blood_pact=False)
+    monkeypatch.setattr(e.combat, "_on_cost_paid", on_paid)
+    e.combat.pay_numeric_cost(m, "生命", 1)
+    assert calls == [21, 20] and m.runtime_id in e.combat._redemption_deferred
+    assert not e.state.pending_redemption
+    e.combat._redemption_deferred.remove(m.runtime_id)
+    assert e.combat.check_redemption(m)["type"] == "redemption"
