@@ -239,7 +239,8 @@ class MonsterLifeMixin:
 
     def check_redemption(self, monster: Entity, *, force: bool = False) -> Optional[dict]:
         """救赎：生命不超过血限20%且异变不超过49；自由结晶保留强制例外。"""
-        if monster is None or monster.entity_type != "怪物" or not monster.is_alive:
+        if (monster is None or monster.entity_type != "怪物" or not monster.is_alive
+                or monster.current_hp <= 0 or monster.blood_limit <= 0):
             return None
         if monster.runtime_id in getattr(self, "_redemption_deferred", ()):
             return None

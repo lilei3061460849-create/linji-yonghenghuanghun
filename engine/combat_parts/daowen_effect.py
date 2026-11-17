@@ -499,6 +499,12 @@ class DaowenEffectMixin:
                 entity.current_speed = max(0, min(int(entity.current_speed), int(entity.speed_limit)))
                 effects.append({"type": "jieshi_expired", "entity": entity.name,
                                 "blood_limit": entity.blood_limit})
+                if entity.current_hp <= 0 and entity.is_alive:
+                    self._check_hp_zero_death(entity)
+                elif entity.is_alive:
+                    redemption = self.check_redemption(entity)
+                    if redemption:
+                        effects.append(redemption)
         return effects
 
     @staticmethod

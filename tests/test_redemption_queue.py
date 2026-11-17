@@ -331,3 +331,26 @@ def test_paused_spell_and_redemption_queue_round_trip_no_repeated_effect(tmp_pat
     assert _skip(loaded, "enemy:2")["success"]
     assert [r.daowen for r in execution.results] == ["杀伐", "庇护"]
     assert first2.current_hp == 20 and loaded.state.player.actions_used_this_round == 2
+
+
+def test_restored_borrowed_corpse_snapshot_checks_after_all_fields():
+    e = _ready_combat(_engine("jieshi_redemption"))
+    m = monster("还原")
+    m.blood_limit = 95
+    m._jieshi_snapshot = {"blood_limit": 100, "mana_limit": 4, "speed_limit": 2,
+                          "attack_count": 1, "attack_power": 1}
+    e.state.enemies[:] = [m]
+    effects = e.combat._settle_daowen_status_expiry(m, ["借尸"])
+    assert (m.blood_limit, m.current_hp, m.mana_limit, m.speed_limit) == (100, 20, 4, 2)
+    assert m.departure_reason == "救赎"
+    assert [effect["type"] for effect in effects] == ["jieshi_expired", "redemption"]
+
+
+def test_mutation_verb_never_redeems_zero_hp_entity():
+    from engine.mechanisms.verbs import apply_verb
+    e = _ready_combat(_engine("mutation_zero_hp"))
+    m = monster("命零")
+    m.current_hp, m.mutation_count = 0, 50
+    e.state.enemies[:] = [m]
+    apply_verb(e.combat, "mutation", {"target": m, "layers": -1})
+    assert m.current_hp == 0 and not e.state.pending_redemption
