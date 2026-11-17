@@ -34,6 +34,9 @@ class ResourceHandlersMixin:
         player = self.state.player
         if not ref or (player is not None and ref in {"player", player.name, player.runtime_id}):
             return player
+        combat_refs = self.combat._combat_entity_refs()
+        if ref in combat_refs:
+            return combat_refs[ref]
         entities = []
         for group in (self.state.get_all_player_side(), self.state.get_all_enemy_side()):
             entities.extend(group)
