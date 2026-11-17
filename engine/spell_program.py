@@ -1,8 +1,4 @@
-"""法术流程图与无环控制流游标。
-
-既有 SpellExecution 将无循环旧流程编译到本游标，仍负责战斗结算与支付。
-循环和事件等待尚未接入；节点 ID 显式提供，跳转不依赖列表下标。
-"""
+"""法术流程图及游标；旧 DSL 循环通过回边和内部轮次元数据迁移。"""
 from dataclasses import dataclass
 from typing import Union
 
@@ -48,9 +44,19 @@ Node = Union[Action, Condition, Jump, WaitEvent, Stop]
 
 
 @dataclass(frozen=True)
+class LoopRegion:
+    """旧循环兼容的内部元数据，非玩家可见节点。"""
+    entry: str
+    backedge: str
+    exit: str
+    max_iterations: int | None = None
+
+
+@dataclass(frozen=True)
 class SpellProgram:
     nodes: tuple[Node, ...]
     entry: str
+    loops: tuple[LoopRegion, ...] = ()
 
 
 def validate_structure(program: SpellProgram) -> None:
@@ -74,6 +80,20 @@ def validate_structure(program: SpellProgram) -> None:
             raise ValueError(f"节点{node.id}必须指定事件")
     if not isinstance(program.entry, str) or program.entry not in ids:
         raise ValueError(f"入口节点不存在: {program.entry}")
+    regions = set()
+    for region in program.loops:
+        if not isinstance(region, LoopRegion) or region.entry in regions:
+            raise ValueError("循环区域标识重复或非法")
+        regions.add(region.entry)
+        if any(ref not in ids for ref in (region.entry, region.backedge, region.exit)):
+            raise ValueError("循环区域引用不存在的节点")
+        entry_node = next(node for node in program.nodes if node.id == region.entry)
+        back_node = next(node for node in program.nodes if node.id == region.backedge)
+        if not isinstance(entry_node, Jump) or not isinstance(back_node, Jump) or back_node.target != region.entry:
+            raise ValueError("循环入口或回边非法")
+        if region.max_iterations is not None and (not isinstance(region.max_iterations, int)
+                or isinstance(region.max_iterations, bool) or region.max_iterations < 1):
+            raise ValueError("循环次数上限非法")
     for node in program.nodes:
         refs = ((node.next,) if isinstance(node, Action)
                 else (node.on_true, node.on_false) if isinstance(node, Condition)
@@ -89,7 +109,7 @@ def validate_structure(program: SpellProgram) -> None:
 class ProgramCursor:
     """推进控制流，动作由调用方结算；不绕过原有战斗引擎。
 
-    此阶段只支持无环图；事件等待与循环检查尚未接入，不可用于真实循环。
+    仅支持带显式元数据的旧循环；任意图循环与事件等待仍未开放。
     """
     def __init__(self, program: SpellProgram):
         validate_structure(program)
@@ -99,6 +119,9 @@ class ProgramCursor:
                             if i + 1 < len(program.nodes) else None)
                             for i, node in enumerate(program.nodes)}
         self.position = program.entry
+        self.loop_backedges = {region.backedge for region in program.loops}
+        self.loop_boundaries = {key for region in program.loops
+                                for key in (region.entry, region.backedge)}
         self._assert_acyclic()
 
     def _successors(self, node):
@@ -123,17 +146,25 @@ class ProgramCursor:
             if key in active:
                 raise ValueError("流程循环尚未接入循环中断规则")
             active.add(key)
-            for successor in self._successors(self.nodes[key]):
+            for successor in (() if key in self.loop_backedges
+                              else self._successors(self.nodes[key])):
                 walk(successor)
             active.remove(key)
             visited.add(key)
         walk(self.position)
 
-    def next_action(self, decide):
-        """执行控制节点直到动作或结束；decide(condition) 由战斗执行器提供。"""
+    def next_action(self, decide, on_boundary=None):
+        """执行控制节点直到动作或结束；边界由战斗执行器负责轮次规则。"""
+        if self.program.loops and on_boundary is None:
+            raise ValueError("循环流程需要轮次检查处理器")
         while self.position is not None:
             node = self.nodes[self.position]
             following = self.fallthrough[node.id]
+            if node.id in self.loop_boundaries:
+                handled, destination = on_boundary(node.id)
+                if handled:
+                    self.position = destination
+                    continue
             if isinstance(node, Stop):
                 self.position = None
                 return None
@@ -148,18 +179,20 @@ class ProgramCursor:
         return None
 
 
-def compile_legacy_acyclic(steps):
-    """将旧无循环 AST 转换为跳转图；含循环或未知节点返回 None。"""
-    from .spell_dsl import IfStep
+def compile_legacy(steps):
+    """将旧 AST 编译为回边图；未知节点保留旧执行路径。"""
+    from .spell_dsl import IfStep, LoopStep
 
     def supported(items):
         return all(isinstance(item, ActionStep) or
                    (isinstance(item, IfStep) and supported(item.then_steps)
-                    and supported(item.else_steps)) for item in items)
+                    and supported(item.else_steps)) or
+                   (isinstance(item, LoopStep) and supported(item.body)) for item in items)
 
     if not supported(steps):
         return None
     nodes = [Stop("$end")]
+    loops = []
 
     def compile_block(items, continuation, prefix):
         dest = continuation
@@ -174,10 +207,17 @@ def compile_legacy_acyclic(steps):
                 otherwise = compile_block(item.else_steps, dest, f"{path}E")
                 key = f"if:{path}"
                 nodes.append(Condition(key, item.condition, on_true=then, on_false=otherwise))
+            elif isinstance(item, LoopStep):
+                key = f"loop:{path}:entry"
+                back = f"loop:{path}:back"
+                body = compile_block(item.body, back, f"{path}L")
+                nodes.append(Jump(back, key))
+                nodes.append(Jump(key, body))
+                loops.append(LoopRegion(key, back, dest, item.max_iterations))
             else:
                 raise TypeError(f"不支持的旧法术步骤: {type(item).__name__}")
             dest = key
         return dest
 
     entry = compile_block(steps, "$end", "")
-    return SpellProgram(tuple(nodes), entry)
+    return SpellProgram(tuple(nodes), entry, tuple(loops))

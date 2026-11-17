@@ -429,9 +429,10 @@ class SpellExecution:
 
         self._step_index = {id(step): idx for idx, step in iter_action_steps(definition.body)}
         self._if_paths = {id(node): key for key, node in _index_ifs(definition.body)}
-        # 先迁移无循环旧流程；含旧 LoopStep 仍走既有路径以保持循环规则。
-        from .spell_program import compile_legacy_acyclic
-        self._control_program = compile_legacy_acyclic(definition.body)
+        # 旧 DSL 编译为同一个流程图；未知节点才保留旧兼容路径。
+        from .spell_program import compile_legacy
+        self._control_program = compile_legacy(definition.body)
+        self._control_loop_frames: list[dict] = []
         # 事件级冻结：只认"本次执行开始前"已冻结的分支；同一次执行内部
         # （包括循环的每一轮）始终按当前状态重新求值。
         self._frozen_at_start = dict(request.branch_snapshot or {})
@@ -505,7 +506,8 @@ class SpellExecution:
                        run_decisions: dict[str, int],
                        branch_trace: list[tuple[str, int]] | None = None,
                        frozen_at_start: dict[str, int] | None = None,
-                       loop_start_fingerprint=None) -> None:
+                       loop_start_fingerprint=None,
+                       control_loop_frames: list[dict] | None = None) -> None:
         """从存档记录重建到同一空档；重放不触发任何支付、效果或回调。"""
         if self._driver is not None or self.results or not self.is_running:
             raise ValueError("只能恢复尚未推进的新执行器")
@@ -531,6 +533,16 @@ class SpellExecution:
         if self._replay_branches:
             raise ValueError("施法存档条件轨迹未完全重放")
         self._replay_branches = None
+        if control_loop_frames is not None:
+            if [(f["entry"], f["rounds"]) for f in self._control_loop_frames] != [
+                    (f["entry"], f["rounds"]) for f in control_loop_frames]:
+                raise ValueError("施法存档循环上下文错位")
+            self._control_loop_frames = copy.deepcopy(control_loop_frames)
+            self._restore_loop_fingerprint = None
+        elif self._control_loop_frames and loop_start_fingerprint is not None:
+            # 兼容迁移前的单循环暂停档：旧档只保存一个轮初快照。
+            self._control_loop_frames[-1]["before"] = loop_start_fingerprint
+            self._restore_loop_fingerprint = None
         if not self.is_running:
             raise ValueError("暂停施法存档意外进入了终止状态")
 
@@ -581,9 +593,65 @@ class SpellExecution:
             self._branch_trace.append((key, taken))
         return taken
 
+    def _control_loop_boundary(self, node_id, regions):
+        """旧循环的入口/回边检查；只有编译后的内部元数据会调用。"""
+        if not self.is_running:
+            return True, None
+        region = regions[node_id]
+        if node_id == region.entry:
+            if not self._caster_alive():
+                self._stop(ExecutionStatus.INTERRUPTED, InterruptReason.CASTER_DEAD,
+                           f"{self.caster.name}已命零，循环中止")
+                return True, None
+            if (not self._control_loop_frames or
+                    self._control_loop_frames[-1]["entry"] != region.entry):
+                self._control_loop_frames.append({"entry": region.entry, "rounds": 0})
+            frame = self._control_loop_frames[-1]
+            rounds = frame["rounds"]
+            bound = region.max_iterations
+            if self.request.max_iterations is not None:
+                bound = (self.request.max_iterations if bound is None
+                         else min(bound, self.request.max_iterations))
+            guard = getattr(self.engine, "spell_loop_guard", None)
+            if guard is not None and not self._replay_mode:
+                stop, reason = guard(self.definition, self.caster, self.attacker)
+                if stop:
+                    self.loop_stop_reason = reason
+                    self._control_loop_frames.pop()
+                    return True, region.exit
+            if bound is not None and rounds >= bound:
+                self.loop_stop_reason = "max_iterations"
+                self._control_loop_frames.pop()
+                return True, region.exit
+            if rounds >= MAX_SPELL_LOOP_ITERATIONS:
+                self._stop(ExecutionStatus.INTERRUPTED, InterruptReason.LOOP_GUARD,
+                           f"循环超过工程安全阀{MAX_SPELL_LOOP_ITERATIONS}次："
+                           f"程序可能不满足任何规则终止条件")
+                return True, None
+            frame["rounds"] = rounds + 1
+            self.loop_iterations = frame["rounds"]
+            frame["executed_before"] = self._executed_count()
+            frame["before"] = self._battlefield_now()
+            self._loop_start_fingerprint = frame["before"]
+            return False, None
+        if not self._control_loop_frames or self._control_loop_frames[-1]["entry"] != region.entry:
+            raise ValueError("法术循环回边与活动上下文不一致")
+        frame = self._control_loop_frames[-1]
+        no_step_executed = self._executed_count() == frame["executed_before"]
+        no_net_change = (not self._replay_mode and self._battlefield_now() == frame["before"])
+        if no_step_executed or no_net_change:
+            self.loop_stop_reason = "no_net_change"
+            detail = "本轮没有任何一步真正执行" if no_step_executed else "本轮前后战场状态无净变化"
+            self._stop(ExecutionStatus.INTERRUPTED, InterruptReason.NO_NET_CHANGE,
+                       f"第{frame['rounds']}轮{detail}，循环按中断规则中止")
+            return True, None
+        return False, None
+
     def _run_control_program(self):
         from .spell_program import ProgramCursor
         cursor = ProgramCursor(self._control_program)
+        regions = {key: region for region in self._control_program.loops
+                   for key in (region.entry, region.backedge)}
 
         def decide(node):
             if not self._caster_alive():
@@ -593,14 +661,16 @@ class SpellExecution:
             return self._choose_branch(node.id.removeprefix("if:"), node.expression) == 0
 
         while self.is_running:
-            node = cursor.next_action(decide)
+            node = cursor.next_action(decide, lambda key: self._control_loop_boundary(key, regions))
             if node is None or not self.is_running:
                 break
             if not self._caster_alive():
                 self._stop(ExecutionStatus.INTERRUPTED, InterruptReason.CASTER_DEAD,
                            f"{self.caster.name}已命零，后续步骤不再结算")
                 return
-            self._run_action(node.effect, iteration=0)
+            # 与旧 _run_loop 一致：嵌套循环的步骤沿用最外层 iteration。
+            iteration = self._control_loop_frames[0]["rounds"] if self._control_loop_frames else 0
+            self._run_action(node.effect, iteration=iteration)
             if self._replay_mode and not self._replay_results:
                 self._replay_mode = False
             if not self._replay_mode:

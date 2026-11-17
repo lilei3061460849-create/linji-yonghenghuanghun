@@ -421,6 +421,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "branch_trace": list(execution._branch_trace),
                 "frozen_at_start": dict(execution._frozen_at_start),
                 "loop_start_fingerprint": execution._loop_start_fingerprint,
+                "control_loop_frames": copy.deepcopy(execution._control_loop_frames),
                 "loop_stop_reason": execution.loop_stop_reason,
                 "loop_iterations": execution.loop_iterations,
                 "caster_key": caster_key,
@@ -508,7 +509,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             )
             execution.restore_paused(saved["results"], saved["run_decisions"],
                                      saved.get("branch_trace"), saved.get("frozen_at_start"),
-                                     saved.get("loop_start_fingerprint"))
+                                     saved.get("loop_start_fingerprint"),
+                                     saved.get("control_loop_frames"))
             execution.loop_stop_reason = saved.get("loop_stop_reason", "")
             self._bind_spell_step_payment(execution)
             self.combat._spell_stack.append({
