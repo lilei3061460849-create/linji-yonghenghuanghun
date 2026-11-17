@@ -741,3 +741,16 @@ def test_consumable_heal_redeems_before_following_mutation():
     result = consume_ordinary(e.combat, item, m)
     assert result["result"]["redemption"]["type"] == "redemption"
     assert m.current_hp == 11 and m.mutation_count == 49 and item.current_uses == 0
+
+
+def test_blood_pump_heal_finishes_shield_before_redemption():
+    from engine.models import Consumable
+    from engine.npc_consumables import consume_tool
+    e = _ready_combat(_engine("blood_pump_heal"))
+    m = monster("血泵怪")
+    m.blood_limit, m.current_hp = 1000, 10
+    e.state.enemies[:] = [m]
+    item = Consumable("备用血泵", "", 1, 1)
+    result = consume_tool(e.combat, item, {}, m, [e.state.player])
+    assert m.current_hp == 30 and m.shield == 30 and m.departure_reason == "救赎"
+    assert result["result"]["redemption"]["type"] == "redemption"
