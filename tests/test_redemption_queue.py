@@ -797,3 +797,24 @@ def test_corpse_borrow_one_blood_checks_after_status():
     assert (m.current_hp, m.blood_limit) == (1, 1) and m.has_status("借尸")
     assert m.departure_reason == "救赎"
     assert any(effect.get("type") == "redemption" for effect in result["effects"])
+
+
+def test_round_start_mutation_isolates_pending_target_and_continues_others():
+    from engine.models import MONSTER_MANA_RELIC, Relic
+    e = _ready_combat(_engine("round_start_queue_isolation"))
+    a, b, c = monster("回始甲"), monster("回始乙"), monster("回始丙")
+    c.current_hp = 80
+    for m in (a, b, c):
+        m.mana_limit = 1
+        m.current_mana = 0
+        m.mutation_count = 40
+        m.relics.append(Relic(MONSTER_MANA_RELIC, ""))
+        m.hp_lost_this_round = 7
+        m.blood_oath_used_this_round = True
+    e.state.enemies[:] = [a, b, c]
+    e.combat.round_start()
+    assert a.departure_reason == "救赎" and e.combat.is_redemption_pending(b)
+    assert a.mutation_count == b.mutation_count == c.mutation_count == 41
+    assert b.hp_lost_this_round == 7 and b.blood_oath_used_this_round
+    assert not c.blood_oath_used_this_round
+    assert c.is_alive

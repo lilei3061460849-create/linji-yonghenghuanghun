@@ -193,6 +193,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             return results
         mechanisms = MECHANISMS.phase_mechanisms(phase)
         for mechanism in sorted(mechanisms, key=lambda item: item.ordering_key(target)):
+            if target is not None and (target.departure_reason == "救赎" or self.is_redemption_pending(target)):
+                continue
             ctx = TriggerContext(combat=self, state=self.state, phase=phase,
                                  target=target, source=source,
                                  amount=amount, damage_type=damage_type, picks=dict(picks or {}))
@@ -225,6 +227,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
         ]
         pending.sort(key=lambda row: (*row[0].ordering_key(row[1]), row[2]))
         for mechanism, entity, _ in pending:
+            if entity.departure_reason == "救赎" or self.is_redemption_pending(entity):
+                continue
             if self._chenni_skips_phase(entity, phase):
                 continue
             ctx = TriggerContext(combat=self, state=self.state, phase=phase, target=entity)
@@ -1363,6 +1367,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                     "log": f"{e.name}的【{MONSTER_MANA_RELIC}】：法力+{mana_gained}，"
                            f"异变+{amount}（累计{mutation['mutation_total']}层）",
                 })
+            if e.departure_reason == "救赎" or self.is_redemption_pending(e):
+                continue
             apply_verb(self, "reset_fields", {"target": e, "fields": {
                 "hp_lost_this_round": 0,
                 "_hp_loss_events": [], "_speed_change_events": [], "_blood_limit_events": [],
@@ -1378,6 +1384,10 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
 
         # 延后的部分就是普通伤害：正常格挡、减伤、倍率，也正常再次触发沙漏。
         for entity, entries in deferred_due:
+            if entity.departure_reason == "救赎" or self.is_redemption_pending(entity):
+                # 尚未结算的延后伤害仍归该实体，避免因救赎候选而吞掉账本。
+                entity.deferred_damage = entries + entity.deferred_damage
+                continue
             effects.extend(self.settle_deferred_damage(entity, entries))
 
         # 遗物：回始触发（回锋刀按速限缺口造伤）。
@@ -1387,7 +1397,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
 
         # 结算回始效果
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
-            if self.chenni_round_blocked(entity):
+            if (self.chenni_round_blocked(entity) or entity.departure_reason == "救赎"
+                    or self.is_redemption_pending(entity)):
                 continue
             # 蓄锐（2026-09-28）：上回合施放蓄锐积攒的 pending 转成【蓄锐·增】1回 buff（+1出手）。
             pending = int(getattr(entity, "_xurui_pending", 0) or 0)
@@ -1415,7 +1426,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             if id(entity) in seen_yongyan:
                 continue
             seen_yongyan.add(id(entity))
-            if not entity.is_alive or self.chenni_round_blocked(entity):
+            if (not entity.is_alive or self.is_redemption_pending(entity)
+                    or self.chenni_round_blocked(entity)):
                 continue
             yongyan_log = self.tick_yongyan(entity)
             if yongyan_log:
