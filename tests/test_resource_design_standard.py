@@ -139,7 +139,7 @@ X_EFFECT_FIELDS = {
     "consumable_durability_loss", "consumable_effect_multiplier", "consumable_forge_uses",
     "corpse_copies", "creation_attack_count", "creation_attack_power",
     "creation_blood_limit", "creation_mana_limit", "creation_speed_limit",
-    "damage", "delay_rounds", "diaoling_threshold",
+    "damage", "target_damage", "others_life_loss", "total_damage", "delay_rounds", "diaoling_threshold",
     "duration", "extend_duration", "extra_target_rounds", "fake_shards",
     "fragile_repeats", "freeze_count", "heal_accumulation_doublings", "hits",
     "hunger_blood_limit", "infect_daowen_count", "infect_daowen_names",
