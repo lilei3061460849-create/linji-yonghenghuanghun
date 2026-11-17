@@ -405,12 +405,13 @@ class DamageDeathMixin:
             entity for entity in entities
             if (id(entity) not in exempt
                 and not getattr(entity, "is_departed", False)
+                and not self.is_redemption_pending(entity)
                 and not getattr(entity, "_death_triggers_emitted", False)
                 and entity.current_hp <= threshold)
         ]
         effects = []
         for target in pending:
-            if not target.is_alive:
+            if not target.is_alive or self.is_redemption_pending(target):
                 continue
             ctx = make_context(
                 timing=self._current_context_timing(),
@@ -572,6 +573,7 @@ class DamageDeathMixin:
         “血限压到 0 生命却仍然 is_alive=True”的非法状态。
         """
         parent = normalize_context(ctx)
+        hp_before = entity.current_hp
         applied = self._battle_delta(entity, "blood_limit", delta, source, polarity)
         bl_ctx = self._record_blood_limit_event(
             entity, applied, parent, source=source, source_type=source_type,
@@ -587,7 +589,14 @@ class DamageDeathMixin:
             if not self.state.hp_overflow_exempt(entity):
                 entity.current_hp = min(entity.current_hp, entity.effective_blood_limit())
         died = self._check_hp_zero_death(entity, ctx=bl_ctx or parent) if lethal else False
-        return {"applied": applied, "ctx": bl_ctx, "died": died}
+        result = {"applied": applied, "ctx": bl_ctx, "died": died}
+        # 只有完整的原子血限结算才在此检查；clamp_hp/lethal 关闭的调用方
+        # 正在处理复合效果，必须由该调用方在完成相应步骤后自行检查。
+        if clamp_hp and lethal and not died and (applied or entity.current_hp != hp_before):
+            redemption = self.check_redemption(entity)
+            if redemption:
+                result["redemption"] = redemption
+        return result
 
     def _apply_hostile_damage(self, target: Entity, amount: int,
                               damage_type: str = DamageType.NORMAL.value,
@@ -613,9 +622,13 @@ class DamageDeathMixin:
         # 回复照常过统一回复口（【坏死】等回复封锁照旧生效）。
         if amount > 0 and damage_type != "代价" and target.has_status("永生"):
             healed = self.state.apply_heal(target, amount, ctx=damage_ctx)
+            cancer = self.check_cancer(target)
+            redemption = (self.check_redemption(target)
+                          if healed.get("actual_heal", 0) > 0 and target.is_alive else None)
             return {"raw_damage": amount, "actual_damage": 0, "shield_absorbed": 0,
                     "hp_after": target.current_hp, "died": False,
-                    "converted_to_heal": True, "heal": healed}
+                    "converted_to_heal": True, "heal": healed,
+                    "cancer": cancer, "redemption": redemption}
         # 【强光探照灯·蒙蔽】：持有「蒙蔽」状态的施害者接下来N次「造成的伤害」
         # 无效——统一伤害入口拦截，凡能造成伤害的都算（普攻/道纹/法术步骤/消耗品）。
         # 每个伤害实例消耗1层；直接失血与代价不是伤害，不在此拦截。
@@ -979,6 +992,11 @@ class DamageDeathMixin:
 
         # 5. 落地后效果 (逆鳞 / 伤痕 / 寄生 / 负岳索 / 龙族血脉斩杀)
         self.hook_manager.apply_after_damage_pipeline(target, actual, detail.get("shield_absorbed", 0), detail, source, self)
+        if target.is_alive and any(detail.get(key, {}).get("actual", 0) > 0
+                                   for key in ("huoxueyi_heal", "zengsheng_heal")):
+            cancer = self.check_cancer(target)
+            if cancer:
+                detail["cancer"] = cancer
         if target.entity_type == "怪物" and target.is_alive:
             redemption = self.check_redemption(target)
             if redemption:
@@ -1159,6 +1177,10 @@ class DamageDeathMixin:
                 subtype="relic_reflect", tags={"relic", "reflect"},
                 parent_event_id=damage_ctx.event_id))
             result["died"] = True
+        elif lost > 0:
+            redemption = self.check_redemption(attacker)
+            if redemption:
+                result["redemption"] = redemption
         return result
 
     def _shards_of(self, entity: Entity) -> int:
@@ -1209,6 +1231,10 @@ class DamageDeathMixin:
             result["reaction_logs"] = reaction_logs
         if ctx is None and lost > 0:
             result["context_warning"] = "直接失去生命缺少EffectContext；已按legacy来源兼容记录"
+        if lost > 0 and not died and entity.entity_type == "怪物":
+            redemption = self.check_redemption(entity)
+            if redemption:
+                result["redemption"] = redemption
         return result
 
     def _seal_one_relic(self, target: Entity, rounds: int) -> str:

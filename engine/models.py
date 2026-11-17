@@ -538,10 +538,12 @@ class Entity:
 
     # 血族血脉（初拥之夜遗物）：本回合是否已造成过伤害（[回终]判定：造成过则回复等量，否则支付生命20）
     damage_dealt_this_round: int = 0
-    # 特殊事件【凡庸】：连续五回合未出手 / 五回合未能使敌对角色生命减少时触发。
-    # 两个条件是"或"关系，故分别计数。多个角色同时达阈值时，非轮回者优先结算。
-    no_action_rounds: int = 0   # 连续未出手回合数
-    no_damage_rounds: int = 0   # 连续未使敌方生命减少的回合数
+    # 特殊事件【凡庸】：连续五回合未由自身行动及其触发链造成战场净变化时触发。
+    # 多个角色同时达阈值时，非轮回者优先结算。
+    no_net_change_rounds: int = 0  # 连续未由自身造成战场净变化的回合数
+    net_change_this_round: bool = False  # 本回合自身行动或触发链有净变化
+    no_action_rounds: int = 0   # 旧存档字段，不再作为凡庸条件
+    no_damage_rounds: int = 0   # 旧存档兼容字段
     # 本场战斗内累计获得的[回复]量。规则正文：[战终]清除局内增益(包括回复)，
     # 故战终须把这部分回血扣除（不低于进场时的生命）。
     healed_this_battle: int = 0
@@ -1063,7 +1065,7 @@ class Entity:
     # [员工]出场并存活满这么多场战斗即转为[朋友]（唯一事实源）。
     EMPLOYEE_PROMOTION_BATTLES = 3
     CANCER_HEAL_MULTIPLIER = lethal_events.threshold_multiplier("aibian")  # 【癌变】：本场累计回复量 ≥ 血限×该系数 即命零
-    MEDIOCRITY_ROUNDS = lethal_events.threshold("fanyong")  # 【凡庸】：连续 N 回合未出手、或连续 N 回合未使敌对角色掉血 即命零
+    MEDIOCRITY_ROUNDS = lethal_events.threshold("fanyong")  # 【凡庸】：连续 N 回合未造成战场净变化即命零
 
     def can_trigger_mutation_lost(self) -> bool:
         """是否受【迷失】阈值约束（类型豁免来自结构化事实源）。"""
@@ -1077,7 +1079,7 @@ class Entity:
         进度必须能被 AI 在面板上直接读到，不允许只留一个布尔结果。口径：
           * 迷失 = 异变层数 / MUTATION_COLLAPSE_THRESHOLD；
           * 癌变 = 本场累计回复量 / ⌈血限×CANCER_HEAL_MULTIPLIER⌉；
-          * 凡庸 = 连续未出手（或连续未致敌掉血）回合数 / MEDIOCRITY_ROUNDS，取更接近线的那条。
+          * 凡庸 = 连续未造成战场净变化回合数 / MEDIOCRITY_ROUNDS。
         """
         out: dict[str, tuple[int, int]] = {}
         if self.can_trigger_mutation_lost():
@@ -1088,13 +1090,9 @@ class Entity:
         elif self.blood_limit > 0:
             out["癌变"] = (int(self.total_healed),
                            int(math.ceil(self.blood_limit * self.CANCER_HEAL_MULTIPLIER)))
-        if self.no_action_rounds or self.no_damage_rounds:
-            # 显示键来自 data/rules/lethal_events.toml 的 progress_keys（[0]=未出手，[1]=未致敌掉血）
-            keys = lethal_events.progress_keys("fanyong") or ["凡庸·未出手", "凡庸·未致敌掉血"]
-            if self.no_action_rounds >= self.no_damage_rounds:
-                out[keys[0]] = (int(self.no_action_rounds), int(self.MEDIOCRITY_ROUNDS))
-            else:
-                out[keys[1]] = (int(self.no_damage_rounds), int(self.MEDIOCRITY_ROUNDS))
+        if self.no_net_change_rounds:
+            keys = lethal_events.progress_keys("fanyong") or ["凡庸·无净变化"]
+            out[keys[0]] = (int(self.no_net_change_rounds), int(self.MEDIOCRITY_ROUNDS))
         return out
 
     def lethal_progress(self) -> list[str]:
@@ -1361,6 +1359,8 @@ class Entity:
             "mutation_count": self.mutation_count,
             "no_action_rounds": self.no_action_rounds,
             "no_damage_rounds": self.no_damage_rounds,
+            "no_net_change_rounds": self.no_net_change_rounds,
+            "net_change_this_round": self.net_change_this_round,
             # 致死类特殊事件的进度：AI 必须能在面板上直接读到
             # 「迷失（10/50）」这种进度，禁止只给结果不给进度。
             "lethal_counters": {k: list(v) for k, v in self.lethal_counters().items()},
@@ -1520,8 +1520,9 @@ class GameState:
     pending_derivative_choices: list[str] = field(default_factory=list)
     pending_derivative_parent: str = ""
     pending_derivative_recipient: str = ""
-    # 救赎：怪物融化后等待接纳/无视。
+    # 已融化者等待选择；其余候选按发现顺序保存稳定身份，轮到时重新核对资格。
     pending_redemption: dict = field(default_factory=dict)
+    pending_redemption_candidates: list[dict] = field(default_factory=list)
     # 消耗品【发现】候选（如扭曲都市完成事件后的工具发现）。
     pending_item_choices: list[str] = field(default_factory=list)
     pending_item_source: str = ""
@@ -2376,6 +2377,7 @@ class GameState:
             "pending_derivative_parent": getattr(self, "pending_derivative_parent", ""),
             "pending_derivative_recipient": getattr(self, "pending_derivative_recipient", ""),
             "pending_redemption": dict(self.pending_redemption),
+            "pending_redemption_candidates": [dict(candidate) for candidate in self.pending_redemption_candidates],
             "pending_item_choices": list(self.pending_item_choices),
             "pending_item_source": self.pending_item_source,
             "pending_monster_phase": self.pending_monster_phase,

@@ -313,3 +313,39 @@ def test_persistent_duration_buff_scales_with_expected_rounds(tmp_path):
     e, m, actor, prep = _preview_scenario(tmp_path, "全力", player_mana=30)
     short_x = _chosen_x(e, m, actor, prep, "全力")
     assert short_x <= long_x, f"濒死时不应买比长局更久的时长：{short_x} > {long_x}"
+
+
+def test_original_monster_mutation_cost_can_trigger_redemption(tmp_path):
+    e = _engine(tmp_path)
+    m = _monster(mana=14, free_daowen=("必中",))
+    m.blood_limit = 100
+    m.current_hp = 20
+    m.mutation_count = 40
+    _setup(e, m)
+    prep, actor = _prepare(e)
+    r = _resolve(e, prep, actor, 1, name="必中")
+    assert r["success"], r
+    assert m.mutation_count == 45 and m.departure_reason == "救赎"
+    assert e.state.pending_redemption["runtime_id"] == m.runtime_id
+    assert not m.has_status("必中")
+
+
+def test_original_monster_mutation_cost_queues_without_applying_effect(tmp_path):
+    e = _engine(tmp_path)
+    m = _monster(mana=14, free_daowen=("必中",))
+    m.blood_limit, m.current_hp, m.mutation_count = 100, 20, 40
+    _setup(e, m)
+    first = Entity("已待决", "怪物", blood_limit=100, current_hp=20,
+                   attack_count=1, attack_power=1, mutation_count=40)
+    e.state.enemies.insert(0, first)
+    prep = e.execute_action("prepare_monster_phase", {})
+    actor = next(a for a in prep["result"]["actors"] if a["actor_ref"] == "enemy:1")
+    option = _opt(actor, "必中")
+    e.combat.check_redemption(first)
+    choice = {"name": "必中", "x": 1, "dodge": False, "blood_shadow": False,
+              "trigger_spell_choices": {}}
+    r = e.combat._resolve_monster_daowen_choice(
+        m, choice, e.combat._combat_entity_refs(), set(), option)
+    assert r["interrupted_by_redemption"]
+    assert m.mutation_count == 45 and e.combat.is_redemption_pending(m)
+    assert not m.has_status("必中")

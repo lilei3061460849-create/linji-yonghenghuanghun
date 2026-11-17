@@ -86,9 +86,11 @@ def consume_tool(combat, item, params, actor, opponents):
             player.shield += 30
             shield_gained = 30
         cancer = combat.check_cancer(player)
+        redemption = (combat.check_redemption(player)
+                      if healed > 0 and player.is_alive else None)
         result.update({"healed": healed, "hp_after": player.current_hp,
                        "shield_gained": shield_gained, "heal": heal_detail,
-                       "cancer": cancer})
+                       "cancer": cancer, "redemption": redemption})
     # 3. 强光探照灯：目标蒙蔽2
     elif name == "强光探照灯":
         target = selected_enemy()
@@ -101,9 +103,12 @@ def consume_tool(combat, item, params, actor, opponents):
     elif name == "高压水枪":
         cleared = []
         for m in opponents:
-            before = len(m.status_effects)
+            if m.departure_reason == "救赎" or combat.is_redemption_pending(m):
+                continue
+            removed = [s for s in m.status_effects if s.remaining_rounds > 0]
             m.status_effects = [s for s in m.status_effects if s.remaining_rounds <= 0]
-            if len(m.status_effects) != before:
+            if removed:
+                combat._settle_removed_statuses(m, removed, moving=False)
                 cleared.append(m.name)
         result.update({"cleared_enemies": cleared})
     # 5. 储能电池：使用后立即获得12法力
@@ -125,8 +130,10 @@ def consume_tool(combat, item, params, actor, opponents):
             player.status_effects.remove(aid_status)
             removed = aid_status.name
         cancer = combat.check_cancer(player)
+        redemption = (combat.check_redemption(player)
+                      if healed > 0 and player.is_alive else None)
         result.update({"healed": healed, "removed_status": removed,
-                       "heal": heal_detail, "cancer": cancer})
+                       "heal": heal_detail, "cancer": cancer, "redemption": redemption})
     # 7. 干扰仪：全场敌方本回合无法发动道纹（加干扰1状态）
     elif name == "干扰仪":
         jammed = []
@@ -146,8 +153,11 @@ def consume_tool(combat, item, params, actor, opponents):
             "amount": 15, "tags": {"consumable"},
         })
         # 攻击次数-1：用状态标记，本回合内 _monster_attack_actions 会读取
-        target.add_status(StatusEffect(name="手雷减攻", value=1, remaining_rounds=1, source="高爆手雷"))
-        result.update({"target": target.name, "damage": 15, "detail": detail, "nade_minus": 1})
+        can_apply = target.departure_reason != "救赎" and not combat.is_redemption_pending(target)
+        if can_apply:
+            target.add_status(StatusEffect(name="手雷减攻", value=1, remaining_rounds=1, source="高爆手雷"))
+        result.update({"target": target.name, "damage": 15, "detail": detail,
+                       "nade_minus": int(can_apply)})
     else:
         result.update({"note": "未知工具"})
     return {"success": True, "action": f"使用工具【{name}】", "result": result, "state": combat._get_combat_state()}
@@ -233,6 +243,7 @@ def consume_ordinary(combat, item, actor):
     mutation_info = None
     heal_info = None
     cancer_info = None
+    redemption = None
     if actor:
         if heal_match:
             amount = int(heal_match.group(1))
@@ -247,8 +258,11 @@ def consume_ordinary(combat, item, actor):
                 if not actor.is_alive and not combat.state.last_death_cause:
                     if actor is combat.state.player:
                         combat.state.last_death_cause = "cancer"
+            if heal_info.get("actual_heal", 0) > 0 and actor.is_alive:
+                redemption = combat.check_redemption(actor)
     mut_match = re.search(r"获得异变(\d+)", effect)
-    if mut_match and actor:
+    if (mut_match and actor and actor.is_alive and not actor.is_departed
+            and not combat.is_redemption_pending(actor)):
         layers = int(mut_match.group(1))
         mut = actor.add_mutation(layers)
         mutation_info = {
@@ -307,11 +321,14 @@ def consume_ordinary(combat, item, actor):
                 mutation_info["note"] = (
                     f"异变达{mut['mutation_total']}层触发【迷失】，"
                     f"身边无可战之敌，{actor.name}直接命零")
+    if mutation_info and actor:
+        redemption = combat.check_redemption(actor) or redemption
     return {
         "success": True,
         "action": f"使用消耗品【{item.name}】",
         "result": {
             "effect": item.effect,
+            "redemption": redemption,
             "uses_remaining": remaining,
             "is_depleted": item.is_depleted,
             "heal": heal_info,
@@ -336,10 +353,12 @@ def consume_infinite_meat(combat, item, actor):
     })
     actor.total_healed = before_total
     actor.healed_this_battle = before_battle_total
+    redemption = (combat.check_redemption(actor)
+                  if heal.get("actual_heal", 0) > 0 and actor.is_alive else None)
     return {
         "success": True,
         "action": f"使用消耗品【{item.name}】",
-        "result": {"uses_remaining": remaining, "heal": heal,
+        "result": {"uses_remaining": remaining, "heal": heal, "redemption": redemption,
                    "excluded_from_cancer_accumulation": True},
         "state": combat._get_combat_state(),
     }

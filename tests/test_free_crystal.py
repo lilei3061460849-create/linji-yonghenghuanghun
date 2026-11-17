@@ -3,9 +3,9 @@
 规则口径（物品索引·自由结晶；规则正文·凡庸/救赎）：
 - 凡庸怪物炸裂掉落【自由结晶】（1/1）；
 - 对[目标]使用后，使其随机付出一种代价，共计10（随机池＝生命/血限/枯竭/
-  萎缩/速度/失忆/异变/冷却八种数值代价；唯一不入池）；
+  法限/速度/失忆/异变/冷却八种数值代价；唯一不入池）；
 - 若目标是生命≤20%[血限]的怪物，代价结算后仍存活的，强制触发救赎事件
-  （无视「没有原始怪物道纹」条件）；
+  （保留绕过常规异变条件的强制例外）；
 - 1/1 用完即耗尽。
 """
 from __future__ import annotations
@@ -104,7 +104,7 @@ def test_free_crystal_forces_redemption_on_low_hp_monster(tmp_path, single_cost)
     monster = Entity("垂死怪", "怪物", blood_limit=100, current_hp=20,
                      attack_count=1, attack_power=1,
                      speed_limit=10, current_speed=10)
-    # 持有原始道纹【全力】：常规救赎会被拦，自由结晶必须强制绕过
+    # 持有原始道纹【全力】不影响救赎
     monster.dao_wen["全力"] = DaoWenInstance(
         DaoWen("全力", "", "异变", "5X", "全力X"), x_value=1)
     engine.state.enemies.append(monster)
@@ -236,3 +236,49 @@ def test_settle_free_crystal_cost_covers_all_eight_types(tmp_path):
     assert aged.mana_limit == 10 and aged.current_mana == 10
     assert aged.pending_exhaust_mana == 10
     assert aged.speed_limit == 8 and aged.current_speed == 0
+
+
+def test_free_crystal_retains_forced_mutation_exception(tmp_path, single_cost):
+    single_cost("速度")
+    engine = _engine(tmp_path)
+    _battle_state(engine)
+    monster = Entity("高异变怪", "怪物", blood_limit=100, current_hp=20,
+                     attack_count=1, attack_power=1, mutation_count=50,
+                     speed_limit=10, current_speed=10)
+    engine.state.enemies.append(monster)
+    _grant_crystal(engine)
+    r = engine.execute_action("consume_item", {
+        "name": "自由结晶", "target_ref": "enemy:0"})
+    assert r["success"] and r["result"]["redemption"] is not None
+    assert engine.state.pending_redemption["mutation"] == 50
+
+
+def test_free_crystal_nonlethal_life_payment_finishes_before_forced_redemption(tmp_path, single_cost):
+    single_cost("生命")
+    engine = _engine(tmp_path)
+    _battle_state(engine)
+    monster = Entity("代价后融化", "怪物", blood_limit=100, current_hp=20,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies.append(monster)
+    _grant_crystal(engine)
+    result = engine.execute_action("consume_item", {"name": "自由结晶", "target_ref": "enemy:0"})
+    assert result["success"], result
+    assert monster.current_hp == 10
+    assert result["result"]["cost_detail"]["owner"]["paid"] == 10
+    assert result["result"]["redemption"]["cause"] == "free_crystal"
+    assert engine.state.pending_redemption["runtime_id"] == monster.runtime_id
+
+
+def test_crystal_mutation_payment_defers_regular_redemption(tmp_path, single_cost):
+    single_cost("异变")
+    engine = _engine(tmp_path)
+    _battle_state(engine)
+    monster = Entity("结晶异变", "怪物", blood_limit=100, current_hp=20,
+                     attack_count=1, attack_power=1, mutation_count=20)
+    engine.state.enemies.append(monster)
+    _grant_crystal(engine)
+    result = engine.execute_action("consume_item", {"name": "自由结晶", "target_ref": "enemy:0"})
+    assert result["success"] and monster.mutation_count == 30
+    assert result["result"]["cost_detail"]["owner"]["paid"] == 10
+    assert "redemption" not in result["result"]["cost_detail"]["owner"]
+    assert result["result"]["redemption"]["cause"] == "free_crystal"

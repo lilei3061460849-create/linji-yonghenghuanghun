@@ -234,30 +234,32 @@ class SculptAI(HarvestMixin, TacticalAI):
 
 
 class RedeemAI(TacticalAI):
-    """救赎雇员流：先剥怪物原始道纹（残韵），残血压到≤血限10%触发救赎并接纳为员工。"""
+    """救赎雇员流：低血目标异变过高时净化，再接纳为员工。"""
 
-    ORIGINALS = ("狂暴", "全力", "疯狂", "减速", "必中", "自愈", "飞行")
     ALLY_CAP = 2
 
-    def try_strip(self):
-        stock = {k: v for k, v in self.engine.state.resonance.items() if v > 0}
-        if not stock:
+    def try_purify_redemption(self):
+        if not self.player or "净化" not in self.player.dao_wen:
             return None
         for enemy in self.alive_enemies():
-            if enemy.entity_type != "怪物":
+            if (enemy.entity_type != "怪物" or enemy.mutation_count <= 49
+                    or enemy.current_hp > self.engine.combat.redemption_hp_threshold(enemy)):
                 continue
-            for src in self.ORIGINALS:
-                if src not in enemy.dao_wen:
-                    continue
-                from engine.daowen import ResonanceEngine
-                for path in ResonanceEngine.get_available_resonance(src):
-                    rt = path.get("resonance_type")
-                    if rt and stock.get(rt, 0) > 0:
-                        r = self.engine.execute_action("use_resonance", {
-                            "source_daowen": src, "resonance_type": rt,
-                            "target": enemy.name})
-                        if r.get("success"):
-                            return r
+            x = enemy.mutation_count - 49
+            if self.mana() < 20 * x:
+                continue
+            params = self._params("净化", x, enemy.name)
+            params["target_ref"] = self._target_ref_for(enemy)
+            params["cost_choices"] = [{"type": "异变", "layers": x}]
+            preview = self.previewer.preview("use_daowen", params)
+            from engine.ai_preview import ActionPreview
+            if (not (preview.get("result") or {}).get("success")
+                    or ActionPreview.would_kill_player(preview.get("diff", {}))):
+                continue
+            result = self.engine.execute_action("use_daowen", params)
+            if result.get("success"):
+                self.used["净化"] = self.used.get("净化", 0) + 1
+                return result
         return None
 
     def resolve_pending_redemption(self, option: str = "终结"):
@@ -267,7 +269,7 @@ class RedeemAI(TacticalAI):
             option = "接纳"
         return super().resolve_pending_redemption(option)
 
-    STRATEGIES = ("try_artifact", "try_strip", "try_survive", "try_buff",
+    STRATEGIES = ("try_artifact", "try_purify_redemption", "try_survive", "try_buff",
                   "try_resonance", "try_finish", "try_remove", "try_control",
                   "try_aoe", "try_debuff", "try_pressure", "try_ramp",
                   "try_reroll", "try_consumable")
@@ -288,7 +290,7 @@ ROWS = [
     ("雕塑流@罪孽",     "罪孽都市", "庇护", ["束缚", "杀伐", "再生"], SculptAI,
      {"relic_policy": "prefer_optional", "resonance": "反转",
       "policy": {**DEFAULT_POLICY, "雇佣": 30, "共鸣": 25}}),   # 原含 "领悟":25，已删除
-    ("救赎朋友流@扭曲", "扭曲都市", "庇护", ["杀伐", "再生", "束缚"], RedeemAI,    {}),
+    ("救赎员工流@扭曲", "扭曲都市", "庇护", ["杀伐", "再生", "束缚"], RedeemAI,    {}),
     ("伤害基准@罪孽",   "罪孽都市", "庇护", ["杀伐", "再生", "贯穿"], TacticalAI,  {}),
 ]
 

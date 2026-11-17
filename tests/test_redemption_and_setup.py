@@ -286,7 +286,7 @@ def test_redemption_fires_at_low_hp_even_with_transform_left():
 
 
 def test_redemption_skips_full_hp_or_remaining_original():
-    """边界：满血无原始道纹不救赎；残血仍持有原始道纹也不救赎。"""
+    """边界：满血不救赎；残血但异变50也不救赎。"""
     engine = _ready_combat(_engine("rd_blank"))
     exclusive = Entity(name="血肉巨囊", entity_type="怪物", blood_limit=258, current_hp=258,
                        attack_count=1, attack_power=8)
@@ -298,6 +298,7 @@ def test_redemption_skips_full_hp_or_remaining_original():
                      attack_count=2, attack_power=11)
     _give(wounded, "全力")
     engine.state.enemies[:] = [wounded]
+    wounded.mutation_count = 50
     assert engine.combat.check_redemption(wounded) is None
 
 
@@ -406,3 +407,183 @@ def test_redemption_finish_is_not_double_counted_when_accepted():
     assert end["success"]
     assert end["result"]["shard_reward"] == 0
     assert [d["name"] for d in end["result"]["removed_via_alt_path"]] == ["壳工"]
+
+
+def test_redemption_health_mutation_and_original_boundaries():
+    engine = _ready_combat(_engine("rd_new_boundaries"))
+    monster = Entity(name="边界怪", entity_type="怪物", blood_limit=101, current_hp=22,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    _give(monster, "全力")
+    engine.state.enemies[:] = [monster]
+    assert engine.combat.check_redemption(monster) is None  # 22 > ceil(101 × 20%)
+    monster.current_hp = 21
+    monster.mutation_count = 50
+    assert engine.combat.check_redemption(monster) is None
+    monster.mutation_count = 49
+    assert engine.combat.check_redemption(monster) is not None
+    assert engine.state.pending_redemption["mutation"] == 49
+    assert "全力" in engine.state.pending_redemption["dao_wen"]
+
+
+def test_purifying_mutation_to_49_triggers_redemption():
+    engine = _ready_combat(_engine("rd_purify"))
+    player = engine.state.player
+    _give(player, "净化")
+    player.current_mana = 100
+    monster = Entity(name="净化怪", entity_type="怪物", blood_limit=100, current_hp=20,
+                     attack_count=1, attack_power=1, mutation_count=50)
+    _give(monster, "全力")
+    engine.state.enemies[:] = [monster]
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "净化", "x": 1, "target_ref": "enemy:0",
+        "cost_choices": [{"type": "异变"}], "dodge": False,
+        "blood_shadow": False, "trigger_spell_choices": {},
+    })
+    assert r["success"], r
+    assert monster.mutation_count == 49
+    assert engine.state.pending_redemption["name"] == monster.name
+
+
+def test_purifying_blood_limit_can_trigger_redemption():
+    engine = _ready_combat(_engine("rd_purify_blood"))
+    player = engine.state.player
+    _give(player, "净化")
+    player.current_mana = 100
+    monster = Entity(name="血限怪", entity_type="怪物", blood_limit=95, current_hp=20,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    monster.reversible_cost_layers["血限"] = 1
+    engine.state.enemies[:] = [monster]
+    r = engine.execute_action("use_daowen", {
+        "daowen_name": "净化", "x": 1, "target_ref": "enemy:0",
+        "cost_choices": [{"type": "血限"}], "dodge": False,
+        "blood_shadow": False, "trigger_spell_choices": {},
+    })
+    assert r["success"], r
+    assert monster.blood_limit == 96
+    assert engine.state.pending_redemption["name"] == monster.name
+
+
+def test_redeem_ai_purifies_low_health_monster():
+    from sim.duels.victory_path_tournament import RedeemAI
+    engine = _ready_combat(_engine("rd_ai_purify"))
+    _give(engine.state.player, "净化")
+    engine.state.player.current_mana = 100
+    monster = Entity(name="救赎目标", entity_type="怪物", blood_limit=100,
+                     current_hp=20, mutation_count=50, attack_count=1, attack_power=1)
+    engine.state.enemies[:] = [monster]
+    ai = RedeemAI(engine)
+    result = ai.try_purify_redemption()
+    assert result and result["success"]
+    assert engine.state.pending_redemption["name"] == monster.name
+    assert ai.used["净化"] == 1
+
+
+def test_direct_life_loss_immediately_triggers_redemption():
+    engine = _ready_combat(_engine("rd_raw_loss"))
+    monster = Entity(name="失血怪", entity_type="怪物", blood_limit=100, current_hp=25,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies[:] = [monster]
+    result = engine.combat._raw_hp_loss(monster, 5)
+    assert result["redemption"]["type"] == "redemption"
+    assert engine.state.pending_redemption["name"] == monster.name
+
+
+def test_direct_lethal_loss_remains_death_not_redemption():
+    engine = _ready_combat(_engine("rd_raw_lethal"))
+    monster = Entity(name="命零怪", entity_type="怪物", blood_limit=100, current_hp=5,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies[:] = [monster]
+    result = engine.combat._raw_hp_loss(monster, 5)
+    assert result["died"] and not engine.state.pending_redemption
+    assert not monster.is_alive and not monster.is_departed
+
+
+def test_redemption_rounding_allows_monster_at_one_full_hp():
+    engine = _ready_combat(_engine("rd_one_full"))
+    monster = Entity(name="一血怪", entity_type="怪物", blood_limit=1, current_hp=1,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies[:] = [monster]
+    assert engine.combat.redemption_hp_threshold(monster) == 1
+    assert engine.combat.check_redemption(monster) is not None
+
+
+def test_redemption_rechecks_other_monsters_after_choice():
+    engine = _ready_combat(_engine("rd_next"))
+    first = Entity(name="先", entity_type="怪物", blood_limit=100, current_hp=20,
+                   attack_count=1, attack_power=1, mutation_count=49)
+    second = Entity(name="后", entity_type="怪物", blood_limit=100, current_hp=20,
+                    attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies[:] = [first, second]
+    assert engine.combat.check_redemption(first)
+    assert engine.combat.check_redemption(second)["type"] == "redemption_pending"
+    result = engine.execute_action("resolve_redemption", {"option": "终结"})
+    assert result["success"]
+    assert engine.state.pending_redemption["name"] == "后"
+    assert result["result"]["rechecked_events"][0]["monster"] == "后"
+
+
+def test_redemption_recheck_uses_current_state():
+    engine = _ready_combat(_engine("rd_next_changed"))
+    first = Entity(name="先", entity_type="怪物", blood_limit=100, current_hp=20,
+                   attack_count=1, attack_power=1)
+    second = Entity(name="后", entity_type="怪物", blood_limit=100, current_hp=20,
+                    attack_count=1, attack_power=1)
+    engine.state.enemies[:] = [first, second]
+    assert engine.combat.check_redemption(first)
+    second.mutation_count = 50
+    assert engine.execute_action("resolve_redemption", {"option": "终结"})["success"]
+    assert not engine.state.pending_redemption and second.is_alive
+
+
+def test_redemption_rechecked_when_suppression_expires():
+    from engine.models import StatusEffect
+    engine = _ready_combat(_engine("rd_suppress_expiry"))
+    monster = Entity(name="熄事怪", entity_type="怪物", blood_limit=100, current_hp=20,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    monster.add_status(StatusEffect(name="熄事", value=1, remaining_rounds=1))
+    engine.state.enemies[:] = [monster]
+    assert engine.combat.check_redemption(monster) is None
+    engine.combat.round_end()
+    assert not monster.has_status("熄事")
+    assert engine.state.pending_redemption["name"] == "熄事怪"
+
+
+def test_purify_stops_other_costs_when_blood_limit_triggers_redemption():
+    engine = _ready_combat(_engine("rd_mixed_purify"))
+    _give(engine.state.player, "净化")
+    engine.state.player.current_mana = 100
+    monster = Entity(name="混合净化怪", entity_type="怪物", blood_limit=95, current_hp=20,
+                     mana_limit=10, current_mana=10, attack_count=1, attack_power=1,
+                     mutation_count=49)
+    monster.reversible_cost_layers.update({"血限": 1, "法限": 1})
+    engine.state.enemies[:] = [monster]
+    result = engine.execute_action("use_daowen", {
+        "daowen_name": "净化", "x": 2, "target_ref": "enemy:0",
+        "cost_choices": [{"type": "血限", "layers": 1}, {"type": "法限", "layers": 1}],
+        "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
+    })
+    assert result["success"], result
+    assert engine.state.pending_redemption["name"] == monster.name
+    assert monster.blood_limit == 96 and monster.mana_limit == 10
+    assert monster.reversible_cost_layers["法限"] == 1
+
+
+def test_life_cost_loss_triggers_redemption_after_accounting():
+    engine = _ready_combat(_engine("rd_cost_loss"))
+    monster = Entity(name="生命代价怪", entity_type="怪物", blood_limit=100, current_hp=25,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies[:] = [monster]
+    result = engine.combat.pay_numeric_cost(monster, "生命", 5)
+    assert result["owner"]["detail"]["redemption"]["type"] == "redemption"
+    assert engine.state.pending_redemption["name"] == monster.name
+    assert monster.is_departed
+
+
+def test_lethal_life_cost_does_not_trigger_redemption():
+    engine = _ready_combat(_engine("rd_cost_lethal"))
+    monster = Entity(name="代价命零怪", entity_type="怪物", blood_limit=100, current_hp=5,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies[:] = [monster]
+    engine.combat.pay_numeric_cost(monster, "生命", 5)
+    assert not engine.state.pending_redemption
+    assert not monster.is_alive and not monster.is_departed

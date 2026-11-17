@@ -346,3 +346,23 @@ def test_pollution_error_message_names_the_path(engine):
     message = str(excinfo.value)
     assert "_monster_daowen_round_used" in message
     assert "路径可读性" in message
+
+
+def test_redemption_deferred_snapshot_and_preview_restore_in_place(engine, monkeypatch):
+    combat = engine.combat
+    retained = combat._redemption_deferred
+    retained.add("outer")
+    saved = sandbox.snapshot_engine_side(engine)
+    retained.clear()
+    retained.add("sandbox")
+    sandbox.restore_engine_side(engine, saved)
+    assert combat._redemption_deferred is retained and retained == {"outer"}
+
+    def mutate(action, params, *, transaction=False):
+        assert "outer" in combat._redemption_deferred
+        combat._redemption_deferred.clear()
+        combat._redemption_deferred.add("preview")
+        return {"success": True}
+    monkeypatch.setattr(engine, "_execute_action_core", mutate)
+    ActionPreview(engine).preview("probe", {})
+    assert combat._redemption_deferred is retained and retained == {"outer"}

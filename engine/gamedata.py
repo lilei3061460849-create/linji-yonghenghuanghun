@@ -56,7 +56,7 @@ SHAFA_LOOP_DAOWEN = (
     "操纵", "束缚", "迟滞", "封印",
 )
 
-# 原始 ∪ 转化。学习门禁与残韵归属用此并集。救赎只看原始怪物道纹（全力／必中），不含转化。
+# 原始 ∪ 转化。学习门禁与残韵归属用此并集。救赎不再以道纹种类为触发条件。
 MONSTER_DAOWEN = ORIGINAL_MONSTER_DAOWEN | MONSTER_TRANSFORM_DAOWEN
 
 # 所属副本尚未接入运行时，但计算已实现；局外学习仍按专属道纹拒绝。

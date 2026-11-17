@@ -23,8 +23,7 @@ from .resolution import KIND_EFFECT, ResolutionContext, resolution_frame
 from .models import MONSTER_MANA_RELIC
 from .gamedata import REGION_EXCLUSIVE_DAOWEN as REGION_EXCLUSIVE_DAOWEN_DATA
 
-# 【凡庸】连续无所作为的回合阈值：连续 N 回合未出手、或连续 N 回合未能使敌对角色
-# 生命减少 → 凭空全身炸裂。这是**规则层**的反乌龟机制，必须优先于 sim 层的死锁
+# 【凡庸】连续无净变化的回合阈值：自身行动与触发链连续 N 回合未使战场净状态变化 → 炸裂。这是**规则层**的反乌龟机制，必须优先于 sim 层的死锁
 # 防护（后者只是防卡死的程序兜底，不得抢在规则之前结束战斗，更不得擅定胜负）。
 # sim/duel_pvp.py 直接导入本常量推导兜底阈值，避免两处硬编码各自漂移。
 # 阈值唯一事实源在 Entity（engine/models.py::Entity.MEDIOCRITY_ROUNDS）。
@@ -102,6 +101,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
         #   _attack_after_window_target 是当前攻击中、其失血由 resolve_attack 的
         #     反应窗口结算的目标；该目标失血不再重复走 hook（避免与窗口双发）。
         self._resolving_life_lost_reactions = 0
+        # 自由结晶代价结算窗口内，仅延迟被支付对象的救赎。
+        self._redemption_deferred: set[str] = set()
         self._attack_after_window_target = None
         # 「失去生命后」统一拦截（2026-08-30）：
         #   _hp_loss_recording>0 表示当前正由既有降血入口（_record_hp_loss_event /
@@ -192,6 +193,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             return results
         mechanisms = MECHANISMS.phase_mechanisms(phase)
         for mechanism in sorted(mechanisms, key=lambda item: item.ordering_key(target)):
+            if target is not None and (target.departure_reason == "救赎" or self.is_redemption_pending(target)):
+                continue
             ctx = TriggerContext(combat=self, state=self.state, phase=phase,
                                  target=target, source=source,
                                  amount=amount, damage_type=damage_type, picks=dict(picks or {}))
@@ -224,6 +227,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
         ]
         pending.sort(key=lambda row: (*row[0].ordering_key(row[1]), row[2]))
         for mechanism, entity, _ in pending:
+            if entity.departure_reason == "救赎" or self.is_redemption_pending(entity):
+                continue
             if self._chenni_skips_phase(entity, phase):
                 continue
             ctx = TriggerContext(combat=self, state=self.state, phase=phase, target=entity)
@@ -1341,6 +1346,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                           or self._relic_active(e, MONSTER_MANA_RELIC))
             relic_unsealed = (e is not player
                               or self.state.sealed_relics.get(MONSTER_MANA_RELIC, 0) <= 0)
+            e.net_change_this_round = False
             if e.mana_limit > 0 and owns_relic and relic_unsealed:
                 amount = e.mana_limit
                 mana_before = e.current_mana
@@ -1361,6 +1367,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                     "log": f"{e.name}的【{MONSTER_MANA_RELIC}】：法力+{mana_gained}，"
                            f"异变+{amount}（累计{mutation['mutation_total']}层）",
                 })
+            if e.departure_reason == "救赎" or self.is_redemption_pending(e):
+                continue
             apply_verb(self, "reset_fields", {"target": e, "fields": {
                 "hp_lost_this_round": 0,
                 "_hp_loss_events": [], "_speed_change_events": [], "_blood_limit_events": [],
@@ -1376,6 +1384,10 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
 
         # 延后的部分就是普通伤害：正常格挡、减伤、倍率，也正常再次触发沙漏。
         for entity, entries in deferred_due:
+            if entity.departure_reason == "救赎" or self.is_redemption_pending(entity):
+                # 尚未结算的延后伤害仍归该实体，避免因救赎候选而吞掉账本。
+                entity.deferred_damage = entries + entity.deferred_damage
+                continue
             effects.extend(self.settle_deferred_damage(entity, entries))
 
         # 遗物：回始触发（回锋刀按速限缺口造伤）。
@@ -1385,7 +1397,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
 
         # 结算回始效果
         for entity in self.state.get_all_player_side() + self.state.get_all_enemy_side():
-            if self.chenni_round_blocked(entity):
+            if (self.chenni_round_blocked(entity) or entity.departure_reason == "救赎"
+                    or self.is_redemption_pending(entity)):
                 continue
             # 蓄锐（2026-09-28）：上回合施放蓄锐积攒的 pending 转成【蓄锐·增】1回 buff（+1出手）。
             pending = int(getattr(entity, "_xurui_pending", 0) or 0)
@@ -1413,7 +1426,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             if id(entity) in seen_yongyan:
                 continue
             seen_yongyan.add(id(entity))
-            if not entity.is_alive or self.chenni_round_blocked(entity):
+            if (not entity.is_alive or self.is_redemption_pending(entity)
+                    or self.chenni_round_blocked(entity)):
                 continue
             yongyan_log = self.tick_yongyan(entity)
             if yongyan_log:
@@ -1505,7 +1519,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             "_blood_limit_events", "actions_used_this_round",
             "heavy_shackles_action_penalty",
             "blood_oath_used_this_round", "mana_inflicted_this_round",
-            "damage_dealt_this_round",
+            "damage_dealt_this_round", "net_change_this_round",
         )
         saved_fields = {}
         for field_name in cycle_fields:
@@ -1540,6 +1554,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                 target.actions_used_this_round = 0
                 target.heavy_shackles_action_penalty = 0
                 target.damage_dealt_this_round = 0
+                target.net_change_this_round = False
                 target.blood_oath_used_this_round = False
                 target.mana_inflicted_this_round = 0
 
@@ -1558,6 +1573,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                 self._sync_chuyong(target)
                 expired = target.tick_status_effects()
                 effects.extend(self._settle_daowen_status_expiry(target, expired))
+                if "熄事" in expired and target.entity_type == "怪物":
+                    effects.extend(self.recheck_redemption_candidates())
                 if expired:
                     if "无限法限" in expired and not self.state.mana_overflow_exempt(target):
                         before_mana = target.current_mana
@@ -1603,6 +1620,12 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                         effects.append({"type": "bianxing_restore", "entity": target.name,
                                         "current_speed": target.current_speed, "current_mana": target.current_mana})
 
+                if "无限血限" in expired and target.is_alive:
+                    redemption = self.check_redemption(target)
+                    if redemption:
+                        effects.append(redemption)
+                if target.departure_reason == "救赎" or self.is_redemption_pending(target):
+                    continue
                 effects.extend(self._dispatch_phase(Phase.ROUND_END_POST_MEDIOCRITY, target=target))
                 effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=target))
                 # 【豪夺】的"持续X回合"跟随目标经历的回合递减：大梦额外回合里
@@ -1673,6 +1696,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             if not decided_before_tick and self._mediocrity_battle_decided():
                 entity.no_action_rounds = 0
                 entity.no_damage_rounds = 0
+                entity.no_net_change_rounds = 0
                 effects.append({
                     "type": "mediocrity_interrupted", "entity": entity.name,
                     "note": f"{why}，但战场已因先前的【凡庸】清空、战斗结束：剩余凡庸中断结算"})
@@ -1706,6 +1730,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             self._sync_chuyong(entity)
             expired = entity.tick_status_effects()
             effects.extend(self._settle_daowen_status_expiry(entity, expired))
+            if "熄事" in expired and entity.entity_type == "怪物":
+                effects.extend(self.recheck_redemption_candidates())
             if expired:
                 # 【涌潮】到期：当前法力压回原法限（无限法限只是"持续X回合"的豁免）。
                 if "无限法限" in expired and not self.state.mana_overflow_exempt(entity):
@@ -1770,6 +1796,12 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                                     "current_speed": entity.current_speed,
                                     "current_mana": entity.current_mana})
                 # 干扰/手雷减攻到期自动由 tick 清理，无需额外
+            if "无限血限" in expired and entity.is_alive:
+                redemption = self.check_redemption(entity)
+                if redemption:
+                    effects.append(redemption)
+            if entity.departure_reason == "救赎" or self.is_redemption_pending(entity):
+                continue
             # 通用回终对账相位，保留锚点，不再注册清算对账。
             effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=entity))
             # F2：抵扣封印/豪夺夺取回合递减统一走 _tick_sealed_and_stolen_relics，
@@ -2062,19 +2094,13 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
         return self.state.battle_over()
 
     def _tick_mediocrity_counters(self, entity: Entity) -> Optional[str]:
-        """更新凡庸连续计数；达阈值返回原因，不立刻结算。"""
-        if entity.actions_used_this_round <= 0:
-            entity.no_action_rounds += 1
+        """本角色本回合的行动及其触发链未使战场发生净变化则累加。"""
+        if entity.net_change_this_round:
+            entity.no_net_change_rounds = 0
         else:
-            entity.no_action_rounds = 0
-        if entity.damage_dealt_this_round <= 0:
-            entity.no_damage_rounds += 1
-        else:
-            entity.no_damage_rounds = 0
-        if (entity.no_action_rounds >= MEDIOCRITY_ROUNDS
-                or entity.no_damage_rounds >= MEDIOCRITY_ROUNDS):
-            return ("连续五回合未出手" if entity.no_action_rounds >= MEDIOCRITY_ROUNDS
-                    else "连续五回合未能使敌对角色生命减少")
+            entity.no_net_change_rounds += 1
+        if entity.no_net_change_rounds >= MEDIOCRITY_ROUNDS:
+            return "连续五回合未能使战场净状态变化"
         return None
 
     def _apply_mediocrity(self, entity: Entity, why: str) -> list[dict]:
@@ -2085,6 +2111,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
         if self.state.suppresses_special_events(entity):
             entity.no_action_rounds = 0
             entity.no_damage_rounds = 0
+            entity.no_net_change_rounds = 0
             return [{"type": "mediocrity", "entity": entity.name, "suppressed": True,
                      "note": f"{entity.name}受到【熄事】保护，本次不触发【凡庸】"}]
         self._hp_loss_recording += 1  # 凡庸直接命零=特殊死因，不触发「失去生命后」
@@ -2098,6 +2125,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             "amount": 0, "tags": {"system", "round_end", "mediocrity"}})
         entity.no_action_rounds = 0
         entity.no_damage_rounds = 0
+        entity.no_net_change_rounds = 0
         if entity is self.state.player:
             self.state.last_death_cause = "mediocrity"
         effects = [{"type": "mediocrity", "entity": entity.name,

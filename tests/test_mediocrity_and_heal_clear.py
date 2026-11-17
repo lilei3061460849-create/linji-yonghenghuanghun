@@ -82,8 +82,8 @@ def test_mediocrity_on_monster_grants_free_crystal():
 
 # ---------- 边界条件 ----------
 
-def test_idle_counter_resets_on_any_action():
-    """边界：第5回合前只要出手过一次，计数归零，不触发【凡庸】"""
+def test_idle_counter_resets_on_net_change():
+    """边界：第5回合前造成净变化，计数归零，不触发【凡庸】"""
     e = _engine()
     cm = e.combat
     cm.state.enemies = [_monster()]
@@ -94,6 +94,8 @@ def test_idle_counter_resets_on_any_action():
         m.damage_dealt_this_round = 2      # 一直有伤害，隔离出"未出手"这一分支
         # 第4回合出手一次，打断连续空转
         m.actions_used_this_round = 1 if r == 4 else 0
+        m.net_change_this_round = r == 4
+        p.net_change_this_round = True
         p.damage_dealt_this_round = 1   # 玩家保持有作为，隔离被测对象
         p.actions_used_this_round = 1
         res = cm.round_end()
@@ -102,7 +104,7 @@ def test_idle_counter_resets_on_any_action():
         assert not fired, f"第{r}回合不应触发【凡庸】（计数应在第4回合归零）"
     # 第4回合打断后重新计数，到第8回合只积累了4个空转回合，仍不触发
     assert m.is_alive, "打断后重新计数，第8回合仍不该触发"
-    assert m.no_action_rounds == 4
+    assert m.no_net_change_rounds == 4
 
 
 def test_mediocrity_non_reincarnator_fires_first():
@@ -156,6 +158,7 @@ def test_mediocrity_interrupt_requires_cleared_battlefield():
     for _ in range(5):
         idle_m.damage_dealt_this_round = 0
         idle_m.actions_used_this_round = 0
+        busy_m.net_change_this_round = True
         busy_m.damage_dealt_this_round = 3
         busy_m.actions_used_this_round = 1
         p.damage_dealt_this_round = 0
@@ -185,6 +188,7 @@ def test_mediocrity_interrupt_covers_multiple_monsters():
         p.damage_dealt_this_round = 0
         p.actions_used_this_round = 0
         # 朋友有出手且有伤害，不参与凡庸
+        friend.net_change_this_round = True
         friend.damage_dealt_this_round = 1
         friend.actions_used_this_round = 1
         cm.round_end()
@@ -205,6 +209,7 @@ def test_mediocrity_reincarnator_still_fires_when_alone():
     for _ in range(5):
         p.damage_dealt_this_round = 0
         p.actions_used_this_round = 0
+        m.net_change_this_round = True
         m.damage_dealt_this_round = 3
         m.actions_used_this_round = 1
         cm.round_end()
@@ -225,7 +230,9 @@ def test_mediocrity_priority_does_not_pull_unready_reincarnator():
         m.actions_used_this_round = 0
         p.damage_dealt_this_round = 1
         p.actions_used_this_round = 1
+        p.net_change_this_round = True
         cm.round_end()
+    p.net_change_this_round = False
     m.damage_dealt_this_round = 0
     m.actions_used_this_round = 0
     p.damage_dealt_this_round = 0
@@ -238,22 +245,18 @@ def test_mediocrity_priority_does_not_pull_unready_reincarnator():
     assert p.is_alive, "轮回者本拍才开始空转，不得被优先规则拖死"
 
 
-def test_no_action_branch_triggers_even_if_damage_dealt():
-    """边界：README 用"/"表示或——即便回回造成伤害，连续五回合未出手仍触发"""
+def test_actions_without_net_change_do_not_prevent_mediocrity():
+    """出手次数本身不是战场净变化，空操作不能清空凡庸计数。"""
     e = _engine()
     cm = e.combat
     cm.state.enemies = [_monster()]
     m = cm.state.enemies[0]
-
-    for _ in range(6):
-        m.damage_dealt_this_round = 3
-        m.actions_used_this_round = 0
-        cm.state.player.damage_dealt_this_round = 1
-        cm.state.player.actions_used_this_round = 1
+    for _ in range(5):
+        m.actions_used_this_round = 1
+        m.net_change_this_round = False
+        cm.state.player.net_change_this_round = True
         cm.round_end()
-
-    assert not m.is_alive, "连续五回合未出手，即便造成过伤害也应触发【凡庸】"
-    assert m.no_damage_rounds == 0
+    assert not m.is_alive
 
 
 # ---------- [战终] 清除回复类持续效果 ----------

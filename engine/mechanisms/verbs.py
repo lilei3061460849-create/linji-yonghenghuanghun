@@ -57,7 +57,18 @@ def _verb_damage(combat, spec, ctx):
 
 
 def _verb_heal(combat, spec, ctx):
-    return combat.state.apply_heal(spec["target"], spec["amount"], ctx=_ctx_of(spec, ctx))
+    target = spec["target"]
+    detail = combat.state.apply_heal(target, spec["amount"], ctx=_ctx_of(spec, ctx))
+    if detail.get("actual_heal", 0) > 0:
+        # 回复事件及溢出账本已经提交；癌变等先于不兼容的救赎离场。
+        cancer = combat.check_cancer(target)
+        if cancer:
+            detail["cancer"] = cancer
+        if target.is_alive:
+            redemption = combat.check_redemption(target)
+            if redemption:
+                detail["redemption"] = redemption
+    return detail
 
 
 def _verb_hp_loss(combat, spec, ctx):
@@ -139,6 +150,10 @@ def _verb_mutation(combat, spec, ctx):
     mut = target.add_mutation(layers)
     if mut.get("lost"):
         combat._resolve_mutation_lost(target, ctx)
+    if layers and target.is_alive:
+        redemption = combat.check_redemption(target)
+        if redemption:
+            mut["redemption"] = redemption
     return mut
 
 

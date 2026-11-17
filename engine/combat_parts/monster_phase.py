@@ -661,6 +661,7 @@ class MonsterPhaseMixin:
                         "reason": mana_error, "trigger_spell_logs": trigger_logs}
 
         # 残韵改写只替换本次结算：不支付源道纹代价，也不将源道纹记为已激活。
+        mutation_cost_paid = False
         if rewritten_as:
             consumed = self.consume_resonance_rewrite(monster, name)
             if consumed != rewritten_as:
@@ -671,6 +672,7 @@ class MonsterPhaseMixin:
             mutation_cost = (self.YUANCHU_COST_RATE * effective_x
                              if name in self.ORIGINAL_MONSTER_DAOWEN else effective_x)
             paid = monster.add_mutation(mutation_cost)
+            mutation_cost_paid = mutation_cost > 0
             if paid.get("lost"):
                 self._resolve_mutation_lost(monster, {
                     "timing": "monster_action", "source": name, "source_type": "daowen",
@@ -689,6 +691,13 @@ class MonsterPhaseMixin:
         monster.actions_used_this_round += 1
         self.consume_tamper(monster,tamper_rule)
         self.pay_daowen_cooldown(effective_name,calc,monster)
+        if mutation_cost_paid:
+            redemption = self.check_redemption(monster)
+            if redemption:
+                return {"monster": monster.name, "daowen_activated": name,
+                        "x": effective_x, "resolves_as": effective_name,
+                        "interrupted_by_redemption": True, "redemption": redemption,
+                        "trigger_spell_logs": trigger_logs}
 
         aoe_targets_override = None
         if effective_name == "波及":
@@ -1065,9 +1074,9 @@ class MonsterPhaseMixin:
                     monster, dao_obj, refs, activated, prepared_option,
                 )
                 results.append(dao_result)
-                if not monster.is_alive:
+                if not monster.is_alive or self.is_redemption_pending(monster):
                     break
-            if not monster.is_alive:
+            if not monster.is_alive or self.is_redemption_pending(monster):
                 continue
 
             attack_actions = choice.get("attack_actions")

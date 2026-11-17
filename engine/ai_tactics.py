@@ -895,7 +895,7 @@ class TacticalAI:
         连续未使敌掉血回合数），**不按道纹名特判、不改任何规则数值**：
           ① 癌变：本手后 total_healed ≥ combat.cancer_threshold_of(自己)；
           ② 迷失：本手后 mutation_count ≥ Entity.MUTATION_COLLAPSE_THRESHOLD；
-          ③ 凡庸：连续五回合未能使敌对角色掉血 → 越接近线，「能推进伤害」越值钱。
+          ③ 连续未伤害只作进攻倾向，不代表凡庸计数。
         致命原因非空 = 这一手就是自己把自己送走，与 LETHAL 同档一票否决。
         """
         me = self.player
@@ -928,13 +928,11 @@ class TacticalAI:
             if mut_after >= soft:
                 adj -= 25.0 * (mut_after - soft) / max(1.0, collapse - soft)
 
-        # ③ 凡庸线：连续五回合未使敌掉血就命零 → 空转越久，输出越紧迫
+        # ③ 进攻倾向：连续未伤害越久，鼓励伤害，但不把非伤害行动误判为凡庸。
         idle = self._rounds_since_damage
         if idle >= 3:
             if enemy_hp_loss > 0:
                 adj += 10.0 * idle           # 能让对手掉血的手段显著加值
-            else:
-                adj -= 10.0 * (idle - 2)     # 继续空转 = 自己走向凡庸
         return adj, None
 
     def _first_contact(self) -> bool:

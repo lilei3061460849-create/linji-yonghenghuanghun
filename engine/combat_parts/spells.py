@@ -887,7 +887,8 @@ class SpellReactionMixin:
                               reason=InterruptReason.INVALID_INPUT, detail=str(exc))
 
         # --- 目标失效：跳过本步，不中断整个法术 ---
-        if target is None or not getattr(target, "is_alive", False):
+        if (target is None or not getattr(target, "is_alive", False)
+                or self.is_redemption_pending(target)):
             return StepResult(
                 status=StepStatus.SKIPPED, daowen=daowen, x=x or 0,
                 target_ref=target_ref, target_name=target.name if target else "(none)",

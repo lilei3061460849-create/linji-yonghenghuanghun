@@ -95,3 +95,55 @@ def test_cancer_death_ctx_subtype_is_cancer_not_hp_zero():
     assert player.is_alive is False
     assert player._death_ctx["subtype"] == "cancer", "癌变死因必须写明，不得兜底为 hp_zero"
     assert player._death_ctx["source"] == "癌变"
+
+
+def test_bottle_heals_player_side_monster_then_redeems(tmp_path):
+    engine = GameEngine(db_path=str(tmp_path / "bottle_redemption.db"), rng_seed=1)
+    engine.state.player = Entity("P", "轮回者", blood_limit=100, current_hp=100)
+    m = Entity("M", "怪物", blood_limit=100, current_hp=15, mutation_count=49,
+               attack_count=1, attack_power=1)
+    engine.state.friends = [m]
+    engine.state.phase = "in_combat"
+    engine.state.combat_subphase = "player_actions"
+    bottle = Consumable("龙血瓶", "", current_uses=10, max_uses=10)
+    engine.state.consumables = [bottle]
+    result = engine.execute_action("consume_item", {"name": "龙血瓶", "amount": 4, "target_ref": "friend:0"})
+    assert result["success"], result
+    heal = result["result"]["heal"]
+    assert heal["actual_heal"] == 4 and m.total_healed == 4
+    assert heal["heal_ctx"]["subtype"] == "dragon_blood_bottle_extract"
+    assert heal["redemption"] and m.departure_reason == "救赎"
+    assert bottle.current_uses == 6
+
+
+def test_bottle_heals_ineligible_monster_normally(tmp_path):
+    engine = GameEngine(db_path=str(tmp_path / "bottle_normal.db"), rng_seed=1)
+    engine.state.player = Entity("P", "轮回者", blood_limit=100, current_hp=100)
+    m = Entity("M", "怪物", blood_limit=100, current_hp=20, mutation_count=49,
+               attack_count=1, attack_power=1)
+    engine.state.friends = [m]
+    engine.state.phase = "in_combat"
+    engine.state.combat_subphase = "player_actions"
+    bottle = Consumable("龙血瓶", "", current_uses=10, max_uses=10)
+    engine.state.consumables = [bottle]
+    result = engine.execute_action("consume_item", {"name": "龙血瓶", "amount": 4, "target_ref": "friend:0"})
+    assert result["success"], result
+    assert result["result"]["heal"]["actual_heal"] == 4 and m.current_hp == 24
+    assert m.total_healed == 4 and not engine.state.pending_redemption
+    assert bottle.current_uses == 6
+
+
+def test_bottle_cancer_precedes_redemption(tmp_path):
+    engine = GameEngine(db_path=str(tmp_path / "bottle_cancer.db"), rng_seed=1)
+    engine.state.player = Entity("P", "轮回者", blood_limit=100, current_hp=100)
+    m = Entity("M", "怪物", blood_limit=100, current_hp=15, mutation_count=49,
+               attack_count=1, attack_power=1)
+    m.total_healed = 199
+    engine.state.friends = [m]
+    engine.state.phase = "in_combat"
+    engine.state.combat_subphase = "player_actions"
+    engine.state.consumables = [Consumable("龙血瓶", "", current_uses=10, max_uses=10)]
+    result = engine.execute_action("consume_item", {"name": "龙血瓶", "amount": 4, "target_ref": "friend:0"})
+    assert result["success"], result
+    assert result["result"]["heal"]["cancer"] and m.is_proliferated
+    assert not engine.state.pending_redemption

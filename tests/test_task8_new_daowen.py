@@ -53,10 +53,10 @@ class TestStructure20261108:
     def setup_method(self):
         DaoWenEngine.register_all()
 
-    def test_registry_is_85_and_new_names_registered(self):
+    def test_registry_is_87_and_new_names_registered(self):
         names = set(DaoWenEngine.list_all())
         # 2026-11-09 第二轮改造：衍生改名，删【竭伐】（枯竭通道）与【伪伐】、增【冲击】，
-        # 86 → 85。
+        # 后续扩展至87，以下断言与当前注册表同步。
         assert len(names) == 87
         for n in ("脆弱", "连击", "虚耗", "断脉", "买命", "冲击",
                   "燃命", "折年", "搏命", "献锋"):
@@ -300,6 +300,31 @@ class TestPlagueCityNew:
         cast(ce, player, "病变", 2, target=enemy,
                                from_kind="血限", to_kind="异变")
         assert _layers(enemy, "血限") == 1 and _layers(enemy, "异变") == 2
+
+
+    def test_bingbian_redemption_after_conversion(self):
+        ge, ce, player = _player_with("病变")
+        enemy = monster(ge, ["全力"], hp=100)
+        enemy.current_hp = 20
+        enemy.mutation_count = 50
+        result = cast(ce, player, "病变", 1, target=enemy,
+                      from_kind="异变", to_kind="速度")
+        assert enemy.mutation_count == 49
+        assert any(e["type"] == "redemption" for e in result["effects"])
+        assert ge.state.pending_redemption["name"] == enemy.name
+
+
+    def test_bingbian_stops_when_intermediate_state_redeems(self):
+        ge, ce, player = _player_with("病变")
+        enemy = monster(ge, ["全力"], hp=100)
+        enemy.current_hp = 20
+        enemy.mutation_count = 50
+        result = cast(ce, player, "病变", 1, target=enemy,
+                      from_kind="异变", to_kind="血限")
+        assert enemy.mutation_count == 49
+        assert enemy.blood_limit == 100  # 后半段不得施加血限代价
+        assert any(e["type"] == "cost_conversion_interrupted" for e in result["effects"])
+        assert ge.state.pending_redemption["name"] == enemy.name
 
 
 def _layers(e, kind):

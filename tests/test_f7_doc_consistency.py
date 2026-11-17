@@ -39,7 +39,7 @@ def test_normal_auto_trigger_list_matches_rules_text():
     assert "累计回复属于局内减益追踪，[战终]清零" in book
     assert "迷失（非怪物角色【异变】达到" in book
     assert "怪物不会触发" in book
-    assert "救赎（怪物当前生命≤其[血限]10%" in book
+    assert "救赎（怪物当前生命≤⌈其[血限]×20%⌉" in book
     assert "### 特殊事件" in rules and "《死者之书.md》" in rules.split("### 特殊事件", 1)[1]
 
 def test_boundary_no_zengsheng_in_active_code():

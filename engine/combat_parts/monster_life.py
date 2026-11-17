@@ -132,7 +132,13 @@ class MonsterLifeMixin:
         self._monster_evolved.add(id(monster))
         log = [f"{monster.name}发动【原初{x}】：异变+{cost}（当前{pay['mutation_total']}层）"]
         
-        # 怪物只累计异变；进化不会因异变达到50层而中断。
+        # 代价与选择账本完成后再判定，已离场或待决的怪物不再借纹。
+        redemption = self.check_redemption(monster)
+        if redemption:
+            return {"success": True, "action": "进化·原初X", "collapsed": False,
+                    "interrupted_by_redemption": True, "redemption": redemption,
+                    "difficulty_signals": difficulty.get("signals", []),
+                    "log": log, "mutation": pay, "state": self._get_combat_state()}
 
         # 借用：战终前视为持有（enemies于[战终]清空，借用自动到期）
         borrowed = DaoWen(
@@ -225,35 +231,94 @@ class MonsterLifeMixin:
             return self._proliferate_monster(entity, ctx=cancer_ctx)
         return self._cancer_character(entity, ctx=cancer_ctx)
 
-    REDEMPTION_HP_RATIO = 0.10
-
-    def monster_has_original_daowen(self, monster: Entity) -> bool:
-        from ..gamedata import ORIGINAL_MONSTER_DAOWEN
-        return any(name in ORIGINAL_MONSTER_DAOWEN for name in monster.dao_wen)
+    REDEMPTION_MUTATION_MAX = 49
 
     def redemption_hp_threshold(self, monster: Entity) -> int:
         if monster is None or monster.blood_limit <= 0:
             return 0
-        return math.ceil(monster.blood_limit * self.REDEMPTION_HP_RATIO)
+        return (monster.blood_limit + 4) // 5
+
+    def is_redemption_pending(self, entity: Entity) -> bool:
+        """候选尚待选择时，禁止新的不兼容目标效果继续作用。"""
+        return bool(entity and any(item["runtime_id"] == entity.runtime_id
+                                   for item in self.state.pending_redemption_candidates))
 
     def check_redemption(self, monster: Entity, *, force: bool = False) -> Optional[dict]:
-        """救赎：通常要求残血且没有原始怪物道纹（全力／必中）；自由结晶可强制触发。"""
-        if monster is None or monster.entity_type != "怪物" or not monster.is_alive:
+        """救赎：生命不超过血限20%且异变不超过49；自由结晶保留强制例外。"""
+        if (monster is None or monster.entity_type != "怪物" or not monster.is_alive
+                or monster.current_hp <= 0 or monster.blood_limit <= 0):
             return None
-        # 烬翼【熄事】本回合抑制所有落在该角色身上的特殊事件，救赎（含自由结晶强制救赎）也不例外。
+        if monster.runtime_id in getattr(self, "_redemption_deferred", ()):
+            return None
+        # 熄事也抑制自由结晶强制救赎。
         if self.state.suppresses_special_events(monster):
             return None
         if monster.is_sculptured or monster.is_proliferated or monster.is_debt_bound:
             return None
         if getattr(monster, "removed_without_kill", False):
             return None
+        if not force and (monster.current_hp > self.redemption_hp_threshold(monster)
+                          or monster.mutation_count > self.REDEMPTION_MUTATION_MAX):
+            return None
         if self.state.pending_redemption:
-            return None
-        if not force and self.monster_has_original_daowen(monster):
-            return None
-        if not force and monster.current_hp > self.redemption_hp_threshold(monster):
-            return None
-        return self._queue_redemption(monster, "free_crystal" if force else "low_hp_no_original")
+            candidates = self.state.pending_redemption_candidates
+            existing = next((item for item in candidates if item["runtime_id"] == monster.runtime_id), None)
+            if existing is None:
+                candidates.append({"runtime_id": monster.runtime_id, "force": force})
+            elif force:
+                existing["force"] = True
+            # 告知复合效果中止针对该目标的后续部分；该目标轮到时仍须重新校验。
+            return {"type": "redemption_pending", "monster": monster.name,
+                    "runtime_id": monster.runtime_id, "cause": "free_crystal" if force else "low_hp_low_mutation"}
+        if (self._can_be_sculptured(monster) and monster.effective_attack_count() <= 0
+                and monster.effective_attack_power() <= 0):
+            return self._sculpture_monster(monster)
+        return self._queue_redemption(monster, "free_crystal" if force else "low_hp_low_mutation")
+
+    def recheck_redemption_candidates(self) -> list[dict]:
+        """待决消除后重检仍在场的怪；同拍雕塑优先，最多新增一个救赎。"""
+        if self.state.pending_redemption or self.state.phase != "in_combat":
+            return []
+        effects = []
+        # 已记录的候选优先，以入队顺序依次重检；死亡、离场、熄事或资格失效即丢弃。
+        while self.state.pending_redemption_candidates:
+            candidate = self.state.pending_redemption_candidates.pop(0)
+            monster = self.state.entity_by_runtime_id(candidate["runtime_id"])
+            if (monster is None or not monster.is_alive or monster.is_departed
+                    or monster.removed_without_kill or not getattr(monster, "in_combat", True)
+                    or self.state.suppresses_special_events(monster)
+                    or monster.current_hp <= 0 or monster.blood_limit <= 0):
+                continue
+            if not candidate["force"] and (monster.current_hp > self.redemption_hp_threshold(monster)
+                    or monster.mutation_count > self.REDEMPTION_MUTATION_MAX):
+                continue
+            if (self._can_be_sculptured(monster) and monster.effective_attack_count() <= 0
+                    and monster.effective_attack_power() <= 0):
+                effects.append(self._sculpture_monster(monster))
+                continue
+            redemption = self.check_redemption(monster, force=candidate["force"])
+            if redemption:
+                effects.append(redemption)
+                return effects
+        for monster in list(self.state.enemies):
+            if (monster.entity_type != "怪物" or not monster.is_alive
+                    or not getattr(monster, "in_combat", True)
+                    or monster.is_departed or monster.removed_without_kill
+                    or self.state.suppresses_special_events(monster)
+                    or monster.current_hp <= 0 or monster.blood_limit <= 0
+                    or monster.current_hp > self.redemption_hp_threshold(monster)
+                    or monster.mutation_count > self.REDEMPTION_MUTATION_MAX):
+                continue
+            if (self._can_be_sculptured(monster)
+                    and monster.effective_attack_count() <= 0
+                    and monster.effective_attack_power() <= 0):
+                effects.append(self._sculpture_monster(monster))
+                continue
+            redemption = self.check_redemption(monster)
+            if redemption:
+                effects.append(redemption)
+                break
+        return effects
 
     def _queue_redemption(self, monster: Entity, cause: str) -> dict:
         """怪物融化离场，等待【接纳】或【终结】（，终结取代旧「无视」）。
@@ -263,6 +328,7 @@ class MonsterLifeMixin:
         """
         snapshot = {
             "name": monster.name,
+            "runtime_id": monster.runtime_id,
             "attack_count": monster.attack_count,
             "attack_power": monster.attack_power,
             "blood_limit": monster.blood_limit,
@@ -318,7 +384,7 @@ class MonsterLifeMixin:
                 results.append(self._sculpture_monster(monster))
                 continue
 
-            # 2. 救赎：残血且没有原始怪物道纹（全力／必中）
+            # 2. 救赎：生命≤血限20%且异变≤49
             redemption = self.check_redemption(monster)
             if redemption:
                 results.append(redemption)

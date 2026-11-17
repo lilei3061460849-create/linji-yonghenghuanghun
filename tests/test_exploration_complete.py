@@ -147,7 +147,7 @@ def test_event_queue_survives_versioned_save(tmp_path):
     engine.execute_action("pre_battle_action", {"sub_action": "探索", "tier": 2})
     current = engine.event_pool.current
     queued = list(engine.state.pending_event_queue)
-    assert engine.save_game("event_queue")["version"] == 5
+    assert engine.save_game("event_queue")["version"] == engine.SAVE_FORMAT_VERSION
     engine.event_pool.current = None
     engine.state.pending_event_queue = []
 

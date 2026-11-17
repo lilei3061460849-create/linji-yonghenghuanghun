@@ -418,6 +418,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "request": copy.deepcopy(execution.request),
                 "results": copy.deepcopy(execution.results),
                 "run_decisions": dict(execution._run_decisions),
+                "branch_trace": list(execution._branch_trace),
+                "frozen_at_start": dict(execution._frozen_at_start),
+                "control_loop_frames": copy.deepcopy(execution._control_loop_frames),
                 "loop_stop_reason": execution.loop_stop_reason,
                 "loop_iterations": execution.loop_iterations,
                 "caster_key": caster_key,
@@ -449,6 +452,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "spell_window_serial": self.combat._spell_window_serial,
             "priority_passes": self.combat._priority_passes,
             "ended_turn_sides": set(self.combat._ended_turn_sides),
+            "redemption_deferred": set(self.combat._redemption_deferred),
         }
 
     def _restore_combat_runtime(self, snapshot: dict) -> None:
@@ -488,6 +492,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             current_ended.update(ended)
         else:
             self.combat._ended_turn_sides = ended
+        self.combat._redemption_deferred.clear()
+        self.combat._redemption_deferred.update(snapshot["redemption_deferred"])
         self.combat._resuming_spell_stack = False
         self.combat._spell_stack = []
         current_refs = self.combat._combat_entity_refs()
@@ -503,7 +509,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 trigger_label="瞬发", policy=self.combat.CAST_STEP_POLICY,
                 target_resolver=resolver,
             )
-            execution.restore_paused(saved["results"], saved["run_decisions"])
+            execution.restore_paused(saved["results"], saved["run_decisions"],
+                                     saved["branch_trace"], saved["frozen_at_start"],
+                                     saved["control_loop_frames"])
             execution.loop_stop_reason = saved.get("loop_stop_reason", "")
             self._bind_spell_step_payment(execution)
             self.combat._spell_stack.append({
@@ -819,6 +827,27 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             return {id(entity): entity.actions_used_this_round for entity in entities}
 
         usage_before = action_usage()
+        # 一次真实行动的因果范围：行动者及其触发链；不将他人行动或回合自然变化记给该角色。
+        from .spell_execution import battlefield_fingerprint
+        activity_actor = None
+        activity_before = None
+        if self.state.phase == "in_combat":
+            active_types = {"use_daowen", "cast", "consume_item", "use_resonance", "focus",
+                            "resolve_attack", "attack_respond_hit", "resolve_monster_phase",
+                            "lianxin_in_battle", "activate_resource", "release_spell"}
+            if action_type in active_types:
+                refs = self.combat._combat_entity_refs()
+                actor_ref = params.get("actor_ref")
+                if action_type in {"resolve_attack", "attack_respond_hit"}:
+                    actor_ref = (self.state.pending_attack or {}).get("options", {}).get("actor_ref")
+                elif action_type == "resolve_monster_phase":
+                    choices = params.get("choices") or []
+                    actor_ref = choices[0].get("actor_ref") if len(choices) == 1 and isinstance(choices[0], dict) else None
+                activity_actor = refs.get(actor_ref) if actor_ref else (
+                    None if action_type in {"resolve_attack", "attack_respond_hit", "resolve_monster_phase"}
+                    else self.state.player)
+                if activity_actor is not None:
+                    activity_before = battlefield_fingerprint(self, exclude_mediocrity=True)
         nested_action = getattr(self, "_nested_action_count", 0) > 0
         side_capacity_before = {
             side: self._duel_side_can_act(side)
@@ -831,6 +860,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     self.state.player,
                     self.combat._combat_entity_refs().get(params.get("target_ref")))
             result = self._dispatch_action(action_type, params)
+            if (result.get("success") and activity_actor is not None and activity_before is not None
+                    and battlefield_fingerprint(self, exclude_mediocrity=True) != activity_before):
+                activity_actor.net_change_this_round = True
             usage_after = action_usage()
             action_spent = any(
                 usage_after.get(entity_id, used) > used
@@ -3358,17 +3390,26 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             redemption_eligible = (
                 target.entity_type == "怪物"
                 and target.blood_limit > 0
-                and target.current_hp <= math.ceil(target.blood_limit * 0.2))
+                and target.current_hp <= self.combat.redemption_hp_threshold(target))
             remaining = item.use()
             roll = self.dice.auto_roll(
                 f"free_crystal_cost_{target.name}_{remaining}",
                 list(FREE_CRYSTAL_COST_POOL),
                 context=f"自由结晶：{target.name}随机付出一种代价，共计{FREE_CRYSTAL_COST_AMOUNT}")
             cost_type = roll["record"]["selected_value"]
-            cost_detail = self._settle_free_crystal_cost(target, cost_type, FREE_CRYSTAL_COST_AMOUNT)
+            # 强制救赎必须在整份代价结算后发生；仅延迟本目标，不抑制其他目标。
+            deferred = getattr(self.combat, "_redemption_deferred", set())
+            self.combat._redemption_deferred = deferred
+            already_deferred = target.runtime_id in deferred
+            deferred.add(target.runtime_id)
+            try:
+                cost_detail = self._settle_free_crystal_cost(target, cost_type, FREE_CRYSTAL_COST_AMOUNT)
+            finally:
+                if not already_deferred:
+                    deferred.discard(target.runtime_id)
             redemption = None
-            if redemption_eligible and target.is_alive:
-                redemption = self.combat.check_redemption(target, force=True)
+            if target.is_alive and not already_deferred:
+                redemption = self.combat.check_redemption(target, force=redemption_eligible)
             return {
                 "success": True,
                 "action": f"对【{target.name}】使用自由结晶",
@@ -3513,8 +3554,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     or amount > item.current_uses or target is None or not self.state.on_player_side(target)):
                 return {"success": False, "error": "龙血瓶需要合法amount和玩家侧target_ref"}
             item.current_uses -= amount
+            from .mechanisms.verbs import apply_verb
             result.update({"target": target.name, "extracted": amount,
-                           "heal": self.state.apply_heal(target, amount, ctx={
+                           "heal": apply_verb(self.combat, "heal", {"target": target, "amount": amount}, {
                                "timing": self.state.combat_subphase or self.state.phase,
                                "source": "龙血瓶", "source_type": "consumable",
                                "actor": self.state.player, "target": target, "owner": self.state.player,
@@ -3793,6 +3835,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "forgotten_cost_daowen": [asdict(inst) for inst in getattr(e, "forgotten_cost_daowen", [])],
             # 致死进度：封存快照同样保留可读进度
             "no_action_rounds": e.no_action_rounds, "no_damage_rounds": e.no_damage_rounds,
+            "no_net_change_rounds": e.no_net_change_rounds,
+            "net_change_this_round": e.net_change_this_round,
             "lethal_counters": {k: list(v) for k, v in e.lethal_counters().items()},
             "lethal_progress": e.lethal_progress(),
             "dao_wen": {k: v.x_value for k, v in e.dao_wen.items()},
@@ -3847,6 +3891,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         e.forgotten_cost_daowen = [DaoWenInstance(
             **{**item, "dao_wen": DaoWen(**item["dao_wen"])})
             for item in d.get("forgotten_cost_daowen", [])]
+        e.no_net_change_rounds = int(d.get("no_net_change_rounds", 0) or 0)
+        e.net_change_this_round = bool(d.get("net_change_this_round", False))
         e.mutation_count = d.get("mutation_count", 0)   # ④修复：旧档无此键回退0
         from .daowen import normalize_daowen_name as _norm_dw
         for name, x in d.get("dao_wen", {}).items():
@@ -3875,13 +3921,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             self.state.spell_completion_serial = max(
                 int(getattr(self.state, "spell_completion_serial", 0) or 0),
                 int(sp.get("completion_order", 0) or 0))
-        # 旧存档的 armed_spells 迁移为正式法术定义；新存档不再写入该字段。
-        for spell_name in d.get("armed_spells", []) or []:
-            if any(sp.name == spell_name for sp in e.spells):
-                continue
-            migrated = self.combat.spell_definition(e, spell_name)
-            if migrated is not None:
-                self.combat.complete_spell(e, migrated)
         for relic in d.get("relics", []):
             relic = {**relic, "name": "叠鳞甲" if relic.get("name") == "龙鳞" else relic.get("name")}
             e.relics.append(Relic(name=relic["name"], effect=relic.get("effect", ""),
@@ -4685,7 +4724,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
 
     # ==================== 存档系统 ====================
 
-    SAVE_FORMAT_VERSION = 5
+    SAVE_FORMAT_VERSION = 8
 
     def _migrate_legacy_daowen_status_order(self) -> None:
         """迁移旧 pickle：补齐历史碎片峰值与道纹序列字段，优先从状态来源角色恢复道纹位置。"""
@@ -4801,6 +4840,10 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             restored = pickle.loads(base64.b64decode(save_data["payload"].encode("ascii")))
             if not isinstance(restored.get("state"), GameState) or not isinstance(restored.get("dice"), DiceEngine):
                 return {"success": False, "error": "存档内容类型无效"}
+            for frame in restored.get("combat_runtime", {}).get("spell_stack", []):
+                if any(key not in frame or frame[key] is None for key in
+                       ("branch_trace", "frozen_at_start", "control_loop_frames")):
+                    return {"success": False, "error": "暂停施法存档缺少新格式数据"}
         except Exception as exc:
             return {"success": False, "error": f"存档损坏: {exc}"}
 

@@ -1196,6 +1196,8 @@ class CombatHandlersMixin:
             entity.total_healed = 0
             entity.no_action_rounds = 0
             entity.no_damage_rounds = 0
+            entity.no_net_change_rounds = 0
+            entity.net_change_this_round = False
         self.state.scoped_effect_ledger = []
         # 2026-10-14：【增殖】战终待决按场重置（逃跑/重开等未结算路径不得带入下场）。
         # 事件流按场重置：只在本场战斗内可观测，避免长模拟无界增长。
@@ -1513,6 +1515,8 @@ class CombatHandlersMixin:
             entity.damage_dealt_this_round = 0
             entity.no_action_rounds = 0
             entity.no_damage_rounds = 0
+            entity.no_net_change_rounds = 0
+            entity.net_change_this_round = False
             for attr in runtime_counter_attrs:
                 if hasattr(entity, attr):
                     delattr(entity, attr)

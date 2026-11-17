@@ -347,6 +347,13 @@ def apply_effects(combat, effects: Iterable[dict], *, actor, target, x: int = 1,
                          **({"random_roll": roll} if roll else {})})
             continue
         for entity in targets:
+            # 一个候选只能在当前原子效果结束后进入待决；后续效果不能继续
+            # 作用于该目标，其他目标仍按原顺序处理。
+            pending = combat.is_redemption_pending(entity)
+            if not entity.is_alive or entity.is_departed or pending:
+                logs.append({"verb": effect["verb"], "target": entity.name,
+                             "skipped": "目标已离场或待决救赎"})
+                continue
             spec = _verb_spec(effect, target=entity, actor=actor, amount=amount,
                               source=source)
             if effect["verb"] == "status" and "duration" in effect:
