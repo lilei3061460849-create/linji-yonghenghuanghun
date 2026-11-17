@@ -63,6 +63,13 @@ class ResourceHandlersMixin:
         if params.get("grant", True) and recipient is None:
             return {"success": False,
                     "error": "自定义资源接收者不存在或名称不唯一；请提交 recipient_ref/runtime_id"}
+        if recipient is not None and recipient.entity_type == "怪物":
+            unsupported = [spec.get("category") for spec in payload
+                           if not isinstance(spec, dict)
+                           or spec.get("category") not in {"遗物", "法器"}]
+            if unsupported:
+                return {"success": False,
+                        "error": "怪物侧当前仅支持自定义遗物与法器；道纹和消耗品仍走各自既有规则"}
         created: list[str] = []
         for spec in payload:
             try:
