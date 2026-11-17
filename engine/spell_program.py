@@ -1,8 +1,7 @@
-"""法术流程的结构化表示（设计阶段，尚未接入战斗执行）。
+"""法术流程图与无环控制流游标。
 
-此模块只提供控制流图及结构校验；不会结算道纹、判断可用性或注册事件。
-既有 SpellExecution 仍是唯一战斗执行器。节点 ID 由描述者显式提供，跳转
-不依赖列表下标；自然顺序则由 nodes 的顺序决定。
+既有 SpellExecution 将无循环旧流程编译到本游标，仍负责战斗结算与支付。
+循环和事件等待尚未接入；节点 ID 显式提供，跳转不依赖列表下标。
 """
 from dataclasses import dataclass
 from typing import Union
@@ -151,7 +150,7 @@ class ProgramCursor:
 
 def compile_legacy_acyclic(steps):
     """将旧无循环 AST 转换为跳转图；含循环或未知节点返回 None。"""
-    from .spell_dsl import IfStep, LoopStep
+    from .spell_dsl import IfStep
 
     def supported(items):
         return all(isinstance(item, ActionStep) or
