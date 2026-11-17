@@ -101,6 +101,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
         #   _attack_after_window_target 是当前攻击中、其失血由 resolve_attack 的
         #     反应窗口结算的目标；该目标失血不再重复走 hook（避免与窗口双发）。
         self._resolving_life_lost_reactions = 0
+        # 自由结晶代价结算窗口内，仅延迟被支付对象的救赎。
+        self._redemption_deferred: set[str] = set()
         self._attack_after_window_target = None
         # 「失去生命后」统一拦截（2026-08-30）：
         #   _hp_loss_recording>0 表示当前正由既有降血入口（_record_hp_loss_event /

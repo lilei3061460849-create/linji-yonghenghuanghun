@@ -3394,10 +3394,19 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 list(FREE_CRYSTAL_COST_POOL),
                 context=f"自由结晶：{target.name}随机付出一种代价，共计{FREE_CRYSTAL_COST_AMOUNT}")
             cost_type = roll["record"]["selected_value"]
-            cost_detail = self._settle_free_crystal_cost(target, cost_type, FREE_CRYSTAL_COST_AMOUNT)
+            # 强制救赎必须在整份代价结算后发生；仅延迟本目标，不抑制其他目标。
+            deferred = getattr(self.combat, "_redemption_deferred", set())
+            self.combat._redemption_deferred = deferred
+            already_deferred = target.runtime_id in deferred
+            deferred.add(target.runtime_id)
+            try:
+                cost_detail = self._settle_free_crystal_cost(target, cost_type, FREE_CRYSTAL_COST_AMOUNT)
+            finally:
+                if not already_deferred:
+                    deferred.discard(target.runtime_id)
             redemption = None
-            if redemption_eligible and target.is_alive:
-                redemption = self.combat.check_redemption(target, force=True)
+            if target.is_alive and not already_deferred:
+                redemption = self.combat.check_redemption(target, force=redemption_eligible)
             return {
                 "success": True,
                 "action": f"对【{target.name}】使用自由结晶",
@@ -4711,7 +4720,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
 
     # ==================== 存档系统 ====================
 
-    SAVE_FORMAT_VERSION = 6
+    SAVE_FORMAT_VERSION = 7
 
     def _migrate_legacy_daowen_status_order(self) -> None:
         """迁移旧 pickle：补齐历史碎片峰值与道纹序列字段，优先从状态来源角色恢复道纹位置。"""

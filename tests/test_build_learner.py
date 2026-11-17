@@ -727,8 +727,11 @@ def test_pending_redemption_is_cleared_by_pending_choices():
     assert chosen.get("success")
     bl._resolve_pending_choices(e)      # 清掉开局发现遗物等待结算池
     assert not e.state.pending_relic_choices and not e.state.pending_item_choices
-    e.state.pending_redemption = {"name": "微光者甲", "blood_limit": 40,
-                                  "attack_count": 2, "attack_power": 5}
+    from engine.models import Entity
+    monster = Entity(name="微光者甲", entity_type="怪物", blood_limit=40, current_hp=8,
+                     attack_count=2, attack_power=5)
+    e.state.enemies.append(monster)
+    assert e.combat.check_redemption(monster)
     bl._resolve_pending_choices(e)
     assert e.state.pending_redemption == {}, "救赎必须被结算清空"
     assert not e.state.friends, "驱动口径选【无视】，不得产生朋友盟友（防适应度污染）"

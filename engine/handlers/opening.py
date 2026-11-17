@@ -47,6 +47,14 @@ class OpeningHandlersMixin:
         pending = self.state.pending_redemption
         if not pending:
             return {"success": False, "error": "当前没有待结算的救赎"}
+        monster = next((m for m in self.state.enemies
+                        if m.runtime_id == pending.get("runtime_id")), None)
+        if (monster is None or monster.current_hp <= 0 or not monster.is_departed
+                or monster.departure_reason != "救赎" or not getattr(monster, "_redeemed", False)):
+            self.state.pending_redemption = {}
+            rechecked = self.combat.recheck_redemption_candidates()
+            return {"success": True, "action": "救赎·取消",
+                    "result": {"monster": pending.get("name"), "rechecked_events": rechecked}}
         option = params.get("option")
         if option in (1, "1", "接纳"):
             name = params.get("name", "")
@@ -81,20 +89,6 @@ class OpeningHandlersMixin:
             }
         if option in (2, "2", "终结"):
             self.state.pending_redemption = {}
-            monster = next((m for m in self.state.enemies
-                            if m.name == pending.get("name")), None)
-            if monster is None:
-                # 实体已不在敌方列表（异常/旧档）：保守起见仍按快照给出击杀口径奖励，
-                # 保证「等同击杀」不被静默降级成无事发生。
-                blood_limit = pending.get("blood_limit", 0)
-                dao_wen = pending.get("dao_wen") or {}
-                reward = math.ceil(blood_limit * 0.02) + len(dao_wen) * 5
-                self.state.shards += reward
-                rechecked = self.combat.recheck_redemption_candidates()
-                return {"success": True, "action": "救赎·终结",
-                        "result": {"monster": pending.get("name"), "shard_reward": reward,
-                                   "rechecked_events": rechecked, "total_shards": self.state.shards,
-                                   "note": "等同击杀，碎片已结算"}}
             # 还原为一次正常命零：清掉【离场】标记，让[战终]走普通击杀的奖励管线
             # （奖励公式与结算时点都由 battle_end 统一负责，引擎内只有一处口径）。
             monster.is_alive = False

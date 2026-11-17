@@ -236,6 +236,8 @@ class MonsterLifeMixin:
         """救赎：生命不超过血限20%且异变不超过49；自由结晶保留强制例外。"""
         if monster is None or monster.entity_type != "怪物" or not monster.is_alive:
             return None
+        if monster.runtime_id in getattr(self, "_redemption_deferred", ()):
+            return None
         # 熄事也抑制自由结晶强制救赎。
         if self.state.suppresses_special_events(monster):
             return None
@@ -243,11 +245,22 @@ class MonsterLifeMixin:
             return None
         if getattr(monster, "removed_without_kill", False):
             return None
-        if self.state.pending_redemption:
-            return None
         if not force and (monster.current_hp > self.redemption_hp_threshold(monster)
                           or monster.mutation_count > self.REDEMPTION_MUTATION_MAX):
             return None
+        if self.state.pending_redemption:
+            candidates = self.state.pending_redemption_candidates
+            existing = next((item for item in candidates if item["runtime_id"] == monster.runtime_id), None)
+            if existing is None:
+                candidates.append({"runtime_id": monster.runtime_id, "force": force})
+            elif force:
+                existing["force"] = True
+            # 告知复合效果中止针对该目标的后续部分；该目标轮到时仍须重新校验。
+            return {"type": "redemption_pending", "monster": monster.name,
+                    "runtime_id": monster.runtime_id, "cause": "free_crystal" if force else "low_hp_low_mutation"}
+        if (self._can_be_sculptured(monster) and monster.effective_attack_count() <= 0
+                and monster.effective_attack_power() <= 0):
+            return self._sculpture_monster(monster)
         return self._queue_redemption(monster, "free_crystal" if force else "low_hp_low_mutation")
 
     def recheck_redemption_candidates(self) -> list[dict]:
@@ -255,6 +268,27 @@ class MonsterLifeMixin:
         if self.state.pending_redemption or self.state.phase != "in_combat":
             return []
         effects = []
+        # 已记录的候选优先，以入队顺序依次重检；死亡、离场、熄事或资格失效即丢弃。
+        while self.state.pending_redemption_candidates:
+            candidate = self.state.pending_redemption_candidates.pop(0)
+            monster = next((m for m in self.state.enemies
+                            if m.runtime_id == candidate["runtime_id"]), None)
+            if (monster is None or not monster.is_alive or monster.is_departed
+                    or monster.removed_without_kill or not getattr(monster, "in_combat", True)
+                    or self.state.suppresses_special_events(monster)
+                    or monster.current_hp <= 0 or monster.blood_limit <= 0):
+                continue
+            if not candidate["force"] and (monster.current_hp > self.redemption_hp_threshold(monster)
+                    or monster.mutation_count > self.REDEMPTION_MUTATION_MAX):
+                continue
+            if (self._can_be_sculptured(monster) and monster.effective_attack_count() <= 0
+                    and monster.effective_attack_power() <= 0):
+                effects.append(self._sculpture_monster(monster))
+                continue
+            redemption = self.check_redemption(monster, force=candidate["force"])
+            if redemption:
+                effects.append(redemption)
+                return effects
         for monster in list(self.state.enemies):
             if (monster.entity_type != "怪物" or not monster.is_alive
                     or not getattr(monster, "in_combat", True)
@@ -283,6 +317,7 @@ class MonsterLifeMixin:
         """
         snapshot = {
             "name": monster.name,
+            "runtime_id": monster.runtime_id,
             "attack_count": monster.attack_count,
             "attack_power": monster.attack_power,
             "blood_limit": monster.blood_limit,

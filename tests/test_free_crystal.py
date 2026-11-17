@@ -251,3 +251,19 @@ def test_free_crystal_retains_forced_mutation_exception(tmp_path, single_cost):
         "name": "自由结晶", "target_ref": "enemy:0"})
     assert r["success"] and r["result"]["redemption"] is not None
     assert engine.state.pending_redemption["mutation"] == 50
+
+
+def test_free_crystal_nonlethal_life_payment_finishes_before_forced_redemption(tmp_path, single_cost):
+    single_cost("生命")
+    engine = _engine(tmp_path)
+    _battle_state(engine)
+    monster = Entity("代价后融化", "怪物", blood_limit=100, current_hp=20,
+                     attack_count=1, attack_power=1, mutation_count=49)
+    engine.state.enemies.append(monster)
+    _grant_crystal(engine)
+    result = engine.execute_action("consume_item", {"name": "自由结晶", "target_ref": "enemy:0"})
+    assert result["success"], result
+    assert monster.current_hp == 10
+    assert result["result"]["cost_detail"]["owner"]["paid"] == 10
+    assert result["result"]["redemption"]["cause"] == "free_crystal"
+    assert engine.state.pending_redemption["runtime_id"] == monster.runtime_id

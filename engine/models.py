@@ -1520,8 +1520,9 @@ class GameState:
     pending_derivative_choices: list[str] = field(default_factory=list)
     pending_derivative_parent: str = ""
     pending_derivative_recipient: str = ""
-    # 救赎：怪物融化后等待接纳/终结。
+    # 已融化者等待选择；其余候选按发现顺序保存稳定身份，轮到时重新核对资格。
     pending_redemption: dict = field(default_factory=dict)
+    pending_redemption_candidates: list[dict] = field(default_factory=list)
     # 消耗品【发现】候选（如扭曲都市完成事件后的工具发现）。
     pending_item_choices: list[str] = field(default_factory=list)
     pending_item_source: str = ""
@@ -2376,6 +2377,7 @@ class GameState:
             "pending_derivative_parent": getattr(self, "pending_derivative_parent", ""),
             "pending_derivative_recipient": getattr(self, "pending_derivative_recipient", ""),
             "pending_redemption": dict(self.pending_redemption),
+            "pending_redemption_candidates": [dict(candidate) for candidate in self.pending_redemption_candidates],
             "pending_item_choices": list(self.pending_item_choices),
             "pending_item_source": self.pending_item_source,
             "pending_monster_phase": self.pending_monster_phase,

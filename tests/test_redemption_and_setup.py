@@ -515,7 +515,7 @@ def test_redemption_rechecks_other_monsters_after_choice():
                     attack_count=1, attack_power=1, mutation_count=49)
     engine.state.enemies[:] = [first, second]
     assert engine.combat.check_redemption(first)
-    assert engine.combat.check_redemption(second) is None
+    assert engine.combat.check_redemption(second)["type"] == "redemption_pending"
     result = engine.execute_action("resolve_redemption", {"option": "终结"})
     assert result["success"]
     assert engine.state.pending_redemption["name"] == "后"
