@@ -244,3 +244,90 @@ def test_bingbian_blood_relief_interrupts_before_mutation_cost():
     assert m.reversible_cost_layers["血限"] == 0
     assert m.departure_reason == "救赎"
     assert any(effect["type"] == "cost_conversion_interrupted" for effect in result["effects"])
+
+
+def test_reflect_life_loss_redeems_only_after_nonlethal_loss():
+    from engine.effect_context import make_context
+    e = _ready_combat(_engine("reflect_redemption"))
+    m = monster("反噬怪")
+    m.current_hp = 24
+    e.state.enemies[:] = [m]
+    ctx = make_context(timing="combat", source="攻击", source_type="attack",
+                       actor=m, target=e.state.player, mechanic="damage")
+    result = e.combat._resolve_reflect_aftermath(m, 5, ctx, e.state.player)
+    assert result["reflected"] == 5 and m.current_hp == 19
+    assert result["redemption"]["type"] == "redemption"
+    assert m.departure_reason == "救赎"
+
+
+def test_combined_blood_and_hp_reduction_checks_after_both_values():
+    from tests.test_task8_new_daowen import _player_with, monster as make_monster
+    e, combat, player = _player_with("断脉")
+    m = make_monster(e, hp=100, name="组合降血")
+    m.current_hp, m.attack_count, m.attack_power = 25, 1, 1
+    result = combat.apply_daowen_effect("测试血限变化", {
+        "x": 1, "blood_limit_reduction": 4, "hp_reduction": 5,
+    }, player, m)
+    assert (m.blood_limit, m.current_hp) == (96, 20)
+    assert m.departure_reason == "救赎"
+    assert any(effect["type"] == "redemption" for effect in result["effects"])
+
+
+def test_spell_skips_redemption_candidate_without_affecting_other_target():
+    from engine.spell_execution import SpellCastRequest, StepRequest
+    from tests.test_spell_priority_windows import _engine as spell_engine
+    e, player, first = spell_engine()
+    first.blood_limit, first.current_hp, first.mutation_count = 100, 20, 49
+    pending = monster("待决")
+    e.state.enemies.append(pending)
+    e.combat.check_redemption(first)
+    e.combat.check_redemption(pending)
+    execution = e.combat.build_instant_execution(player, "发动杀伐X于目标", pending,
+                                                [{"x": 1}], e.combat._combat_entity_refs())
+    execution.run_all()
+    assert execution.results[0].status.value == "skipped"
+    assert pending.current_hp == 20 and pending.is_alive
+    assert first.departure_reason == "救赎"
+
+
+def test_atomic_blood_increase_effect_queues_each_monster():
+    from tests.test_task8_new_daowen import _player_with, monster as make_monster
+    e, combat, player = _player_with("庇护")
+    target = make_monster(e, hp=100, name="增血限")
+    target.blood_limit, target.current_hp = 95, 20
+    target.attack_count = target.attack_power = 1
+    result = combat.apply_daowen_effect("测试", {"x": 1, "blood_limit_increase": 1}, player, target)
+    assert target.blood_limit == 96 and target.departure_reason == "救赎"
+    assert any(effect["type"] == "redemption" for effect in result["effects"])
+
+
+def test_paused_spell_and_redemption_queue_round_trip_no_repeated_effect(tmp_path):
+    from tests.test_spell_priority_windows import _engine as spell_engine, _cast, _skip
+    e, player, first = spell_engine(player_extra=2)
+    first.blood_limit, first.current_hp, first.mutation_count = 100, 21, 49
+    second = monster("候选")
+    blocker = Entity("守场", "怪物", blood_limit=100, current_hp=100,
+                     attack_count=1, attack_power=1, mana_limit=10, current_mana=10)
+    e.state.enemies.extend([second, blocker])
+    flow = "发动杀伐X于目标→发动庇护X于自身"
+    result = _cast(e, "player:0", flow, "enemy:0", [1, 1])
+    assert result["success"] and first.current_hp == 20
+    assert e.state.pending_redemption["runtime_id"] == first.runtime_id
+    e.combat.check_redemption(second)
+    assert len(e.combat._spell_stack) == 1
+    e.save_dir = str(tmp_path)
+    assert e.save_game("spell_and_queue")["success"]
+    loaded = GameEngine(autosave=False)
+    loaded.save_dir = str(tmp_path)
+    assert loaded.load_game("spell_and_queue")["success"]
+    first2, second2, _ = loaded.state.enemies
+    assert first2.current_hp == 20 and loaded.state.player.actions_used_this_round == 1
+    assert len(loaded.combat._spell_stack[-1]["execution"].results) == 1
+    assert loaded.execute_action("resolve_redemption", {"option": "终结"})["success"]
+    assert second2.departure_reason == "救赎"
+    assert loaded.execute_action("resolve_redemption", {"option": "终结"})["success"]
+    assert first2.current_hp == 20 and loaded.state.player.actions_used_this_round == 1
+    execution = loaded.combat._spell_stack[-1]["execution"]
+    assert _skip(loaded, "enemy:2")["success"]
+    assert [r.daowen for r in execution.results] == ["杀伐", "庇护"]
+    assert first2.current_hp == 20 and loaded.state.player.actions_used_this_round == 2

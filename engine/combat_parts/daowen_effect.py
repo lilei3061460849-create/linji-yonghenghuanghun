@@ -1577,6 +1577,10 @@ class DaowenEffectMixin:
             result["effects"].append({"type": "blood_limit_reduction", "target": target.name,
                                       "new_blood_limit": target.blood_limit,
                                       "hp_reduced": _hp_cut})
+            if target.is_alive and (_blr["applied"] or _hp_cut):
+                redemption = self.check_redemption(target)
+                if redemption:
+                    result["effects"].append(redemption)
         if "blood_limit_increase" in calc:
             if "blood_limit_increase" in wave_pieces:
                 pieces = self._divide_flat(calc["blood_limit_increase"], len(wave_status_targets))
@@ -1593,6 +1597,10 @@ class DaowenEffectMixin:
                         actor=caster, owner=caster, clamp_hp=False, lethal=False)["applied"]
                     result["effects"].append({"type": "blood_limit_increase", "target": wt.name,
                                               "increase": increase})
+                    if increase:
+                        redemption = self.check_redemption(wt)
+                        if redemption:
+                            result["effects"].append(redemption)
             else:
                 # 不朽之躯（初拥之夜遗物）：血限无法增加，对该实体的增殖等血限增长一律归零
                 if self.state.side_has(target, "不朽之躯"):
@@ -1605,6 +1613,10 @@ class DaowenEffectMixin:
                         actor=caster, owner=caster, clamp_hp=False, lethal=False)["applied"]
                     result["effects"].append({"type": "blood_limit_increase", "target": target.name,
                                               "increase": increase})
+                    if increase:
+                        redemption = self.check_redemption(target)
+                        if redemption:
+                            result["effects"].append(redemption)
         # ---- 攻击面板修改 ----
         _panel_keys = ("attack_boost", "attack_bonus", "attack_reduction", "attack_fixed", "attack_count_fixed")
         # 波及扩散：attack_boost/reduction 数值平分；attack_fixed/attack_count_fixed

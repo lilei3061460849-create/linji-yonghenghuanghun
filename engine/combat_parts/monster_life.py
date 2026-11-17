@@ -232,6 +232,11 @@ class MonsterLifeMixin:
             return 0
         return (monster.blood_limit + 4) // 5
 
+    def is_redemption_pending(self, entity: Entity) -> bool:
+        """候选尚待选择时，禁止新的不兼容目标效果继续作用。"""
+        return bool(entity and any(item["runtime_id"] == entity.runtime_id
+                                   for item in self.state.pending_redemption_candidates))
+
     def check_redemption(self, monster: Entity, *, force: bool = False) -> Optional[dict]:
         """救赎：生命不超过血限20%且异变不超过49；自由结晶保留强制例外。"""
         if monster is None or monster.entity_type != "怪物" or not monster.is_alive:

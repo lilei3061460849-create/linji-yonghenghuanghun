@@ -1167,6 +1167,10 @@ class DamageDeathMixin:
                 subtype="relic_reflect", tags={"relic", "reflect"},
                 parent_event_id=damage_ctx.event_id))
             result["died"] = True
+        elif lost > 0:
+            redemption = self.check_redemption(attacker)
+            if redemption:
+                result["redemption"] = redemption
         return result
 
     def _shards_of(self, entity: Entity) -> int:
