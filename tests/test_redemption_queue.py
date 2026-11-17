@@ -703,3 +703,16 @@ def test_bingbian_relief_updates_ledger_before_redemption(monkeypatch):
     monkeypatch.setattr(combat, "check_redemption", check)
     cast(combat, player, "病变", 1, target=m, from_kind="血限", to_kind="异变")
     assert observed == [(0, 49)] and m.departure_reason == "救赎"
+
+
+def test_compound_heal_redeems_before_following_mutation_and_shield():
+    e = _ready_combat(_engine("compound_heal_boundary"))
+    m = monster("回复后")
+    m.current_hp = 10
+    e.state.enemies[:] = [m]
+    result = e.combat.apply_daowen_effect(
+        "探针", {"x": 1, "target_heal": 1, "mutation_reduction": 1,
+                 "target_shield": 5}, e.state.player, m)
+    assert (m.current_hp, m.mutation_count, m.shield) == (11, 49, 0)
+    assert m.departure_reason == "救赎"
+    assert [effect["type"] for effect in result["effects"]][:2] == ["heal", "redemption"]

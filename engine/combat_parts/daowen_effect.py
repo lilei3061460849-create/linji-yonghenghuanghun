@@ -1151,10 +1151,6 @@ class DaowenEffectMixin:
         # 导致 固执/束缚/畸变/全速 可在同一场里无限重复发动（束缚因此支配全局）。
         result.update(self.pay_daowen_cooldown(name,calc,caster))
 
-        # 蒙蔽已在统一伤害入口拦截（damage_death._apply_hostile_damage）：
-        # 每个伤害实例耗1层，这里只按结果回填 mengbi_blocked 标记供战报/测试读取。
-        huaisi_block = self._heal_blocked(target) and "target_heal" in calc
-
         def target_effect_allowed(entity: Entity) -> bool:
             # 已完成的救赎离场及排队候选不再接受后续目标效果；不改变分摊份额。
             return bool(entity and entity.departure_reason != "救赎"
@@ -1401,61 +1397,51 @@ class DaowenEffectMixin:
                                       "paid": amount, "scope": "round",
                                       "attack_power": caster.effective_attack_power()})
         # ---- 回复类 ----
+        def settle_target_heal(recipient: Entity, amount: int, *, percent: bool = False,
+                               wave: bool = False, count_multiplier: int = 1) -> None:
+            if not target_effect_allowed(recipient):
+                return
+            effect_type = "heal_pct" if percent else "heal"
+            if self._heal_blocked(recipient):
+                if wave:
+                    result["effects"].append({"type": effect_type, "target": recipient.name,
+                                              "blocked_by": "坏死"})
+                return
+            detail = self.state.apply_heal(recipient, amount, ctx={
+                "timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
+                "source": name, "source_type": "daowen", "actor": caster, "target": recipient,
+                "owner": caster, "mechanic": "heal", "subtype": "daowen_pct" if percent else "daowen",
+                "amount": amount, "tags": {"daowen", "wave"} if wave else {"daowen"},
+            }, count_multiplier=count_multiplier)
+            result["effects"].append({"type": effect_type, "target": recipient.name, **detail})
+            cancer = self.check_cancer(recipient)
+            if cancer:
+                result["effects"].append(cancer)
+            if detail.get("actual_heal", 0) > 0 and target_effect_allowed(recipient):
+                redemption = self.check_redemption(recipient)
+                if redemption:
+                    result["effects"].append(redemption)
+
         if "target_heal" in calc:
             if "target_heal" in wave_pieces:
                 pieces = self._divide_flat(calc["target_heal"], len(wave_status_targets))
                 wave_pieces["target_heal"] = pieces
                 for wt, piece in zip(wave_status_targets, pieces):
-                    if not target_effect_allowed(wt):
-                        continue
-                    if self._heal_blocked(wt):
-                        result["effects"].append(
-                            {"type": "heal", "target": wt.name, "blocked_by": "坏死"})
-                        continue
-                    result["effects"].append({"type": "heal", "target": wt.name, **self.state.apply_heal(wt, piece, ctx={
-                        "timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
-                        "source": name, "source_type": "daowen", "actor": caster, "target": wt,
-                        "owner": caster, "mechanic": "heal", "subtype": "daowen", "amount": piece,
-                        "tags": {"daowen", "wave"},
-                    })})
-            elif target_effect_allowed(target) and not huaisi_block:
-                heal_amount = calc["target_heal"]
-                # 【疯长】：实际回血照常，但计入本场累计治疗量时按双倍记（更快撞癌变线）。
-                heal_count_mult = int(calc.get("heal_count_multiplier", 1) or 1)
-                result["effects"].append({"type": "heal", "target": target.name, **self.state.apply_heal(target, heal_amount, ctx={
-                    "timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
-                    "source": name, "source_type": "daowen", "actor": caster, "target": target,
-                    "owner": caster, "mechanic": "heal", "subtype": "daowen", "amount": heal_amount,
-                    "tags": {"daowen"},
-                }, count_multiplier=heal_count_mult)})
+                    settle_target_heal(wt, piece, wave=True)
+            else:
+                settle_target_heal(target, calc["target_heal"],
+                    count_multiplier=int(calc.get("heal_count_multiplier", 1) or 1))
         if "heal_percent" in calc:
             if "heal_percent" in wave_pieces:
-                # 波及：总数值=各目标按血限×百分比之和，再平分。
                 total = sum(math.ceil(wt.blood_limit * calc["heal_percent"] / 100)
                             for wt in wave_status_targets)
                 pieces = self._divide_flat(total, len(wave_status_targets))
                 wave_pieces["heal_percent"] = pieces
                 for wt, piece in zip(wave_status_targets, pieces):
-                    if not target_effect_allowed(wt):
-                        continue
-                    if self._heal_blocked(wt):
-                        result["effects"].append(
-                            {"type": "heal_pct", "target": wt.name, "blocked_by": "坏死"})
-                        continue
-                    result["effects"].append({"type": "heal_pct", "target": wt.name, **self.state.apply_heal(wt, piece, ctx={
-                        "timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
-                        "source": name, "source_type": "daowen", "actor": caster, "target": wt,
-                        "owner": caster, "mechanic": "heal", "subtype": "daowen_pct", "amount": piece,
-                        "tags": {"daowen", "wave"},
-                    })})
-            elif target_effect_allowed(target) and not self._heal_blocked(target):
+                    settle_target_heal(wt, piece, percent=True, wave=True)
+            else:
                 h = math.ceil(target.blood_limit * calc["heal_percent"] / 100)
-                result["effects"].append({"type": "heal_pct", "target": target.name, **self.state.apply_heal(target, h, ctx={
-                    "timing": "monster_action" if caster.entity_type == "怪物" else "player_action",
-                    "source": name, "source_type": "daowen", "actor": caster, "target": target,
-                    "owner": caster, "mechanic": "heal", "subtype": "daowen_pct", "amount": h,
-                    "tags": {"daowen"},
-                })})
+                settle_target_heal(target, h, percent=True)
         if name == "净化" and calc.get("cost_reductions"):
             # 只逆转已承担的数值类代价；不返还失忆道纹，不改变冷却。
             reductions = calc["cost_reductions"]
@@ -1549,14 +1535,6 @@ class DaowenEffectMixin:
                     redemption = self.check_redemption(target)
                     if redemption:
                         result["effects"].append(redemption)
-
-        if "target_heal" in calc or "heal_percent" in calc:
-            for cancer_target in wave_status_targets:
-                if not target_effect_allowed(cancer_target):
-                    continue
-                cancer = self.check_cancer(cancer_target)
-                if cancer:
-                    result["effects"].append(cancer)
 
         # ---- 格挡/血限 ----
         if "target_shield" in calc:
