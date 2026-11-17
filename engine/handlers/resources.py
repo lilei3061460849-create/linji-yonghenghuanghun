@@ -29,8 +29,6 @@ class ResourceHandlersMixin:
         names |= {name for _, (name, _) in self.FIRST_EMBRACE_OPTIONS.items()}
         return names
 
-    @ACTION_REGISTRY.action("define_resource", group="resources",
-                          allowed_phases=("pre_battle", "in_combat"))
     def _resolve_custom_resource_recipient(self, ref: str = ""):
         """解析自定义资源接收者；默认玩家，也允许显式指定当前场上的实体。"""
         player = self.state.player
@@ -45,6 +43,8 @@ class ResourceHandlersMixin:
         matches = [entity for entity in unique.values() if entity.name == ref]
         return matches[0] if len(matches) == 1 else None
 
+    @ACTION_REGISTRY.action("define_resource", group="resources",
+                            allowed_phases=("pre_battle", "in_combat"))
     def _action_define_resource(self, params: dict) -> dict:
         """声明一条自定义资源（就地注册，可选就地授予）。
 
