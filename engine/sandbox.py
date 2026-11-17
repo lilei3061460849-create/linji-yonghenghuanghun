@@ -92,7 +92,8 @@ COMBAT_RUNTIME_ATTRS = (
     # 删【三相残韵盘】：_sanxiang_consumed 运行态一并移除。
     "_split_clones_spawned",       # 【分裂】本场已创生数量
     "_monster_evolved",            # 本场已进化怪物（每场一次）
-    "_effect_chain_depth",         # 效果链深度保险丝计数器
+    # _effect_chain_depth 是 resolution.depth 的视图，由 resolution 快照恢复。
+    "_redemption_deferred",        # 自由结晶代价窗口，预演必须原地恢复
     "_resolving_life_lost_reactions",  # 失去生命反应的再入保护计数
     "_hp_loss_recording",          # 失血事件记账计数（抑制兜底钩子）
     # 以下四项由 Phase 8 的随机压力测试**实测**发现会从预演泄漏出来

@@ -452,6 +452,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "spell_window_serial": self.combat._spell_window_serial,
             "priority_passes": self.combat._priority_passes,
             "ended_turn_sides": set(self.combat._ended_turn_sides),
+            "redemption_deferred": set(self.combat._redemption_deferred),
         }
 
     def _restore_combat_runtime(self, snapshot: dict) -> None:
@@ -491,6 +492,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             current_ended.update(ended)
         else:
             self.combat._ended_turn_sides = ended
+        self.combat._redemption_deferred.clear()
+        self.combat._redemption_deferred.update(snapshot["redemption_deferred"])
         self.combat._resuming_spell_stack = False
         self.combat._spell_stack = []
         current_refs = self.combat._combat_entity_refs()
@@ -4720,7 +4723,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
 
     # ==================== 存档系统 ====================
 
-    SAVE_FORMAT_VERSION = 7
+    SAVE_FORMAT_VERSION = 8
 
     def _migrate_legacy_daowen_status_order(self) -> None:
         """迁移旧 pickle：补齐历史碎片峰值与道纹序列字段，优先从状态来源角色恢复道纹位置。"""
