@@ -169,3 +169,78 @@ def test_chuyong_checks_redemption_after_both_values_are_synced():
     assert (m.blood_limit, m.current_hp) == (100, 20)
     assert m.departure_reason == "救赎"
     assert e.state.pending_redemption["runtime_id"] == m.runtime_id
+
+
+def test_mutation_verb_triggers_redemption_only_at_eligible_boundary():
+    from engine.mechanisms.verbs import apply_verb
+    e = _ready_combat(_engine("mutation_verb"))
+    a, b = monster("甲"), monster("乙")
+    a.mutation_count = 50
+    b.current_hp = 21
+    b.mutation_count = 50
+    e.state.enemies[:] = [a, b]
+    unchanged = apply_verb(e.combat, "mutation", {"target": b, "layers": -1})
+    assert unchanged["mutation_total"] == 49 and b.is_alive
+    assert not e.state.pending_redemption
+    paid = apply_verb(e.combat, "mutation", {"target": a, "layers": -1})
+    assert paid["mutation_total"] == 49 and paid["redemption"]["type"] == "redemption"
+    assert a.departure_reason == "救赎" and b.is_alive
+
+
+def test_custom_effect_stops_for_queued_target_but_not_other_target():
+    from engine.custom_resources import apply_effects
+    e = _ready_combat(_engine("mutation_compound"))
+    first, queued, other = monster("先"), monster("待决"), monster("正常")
+    queued.mutation_count = 50
+    other.current_hp = 50
+    other.mutation_count = 50
+    e.state.enemies[:] = [first, queued, other]
+    e.combat.check_redemption(first)
+    effects = [{"verb": "mutation", "target": "all_enemies", "amount": -1},
+               {"verb": "blood_limit", "target": "all_enemies", "amount": -5}]
+    apply_effects(e.combat, effects, actor=e.state.player, target=queued, source="复合测试")
+    assert queued.mutation_count == 49 and queued.blood_limit == 100
+    assert other.mutation_count == 49 and other.blood_limit == 95
+    assert [c["runtime_id"] for c in e.state.pending_redemption_candidates] == [queued.runtime_id]
+
+
+def test_mutation_verb_honors_free_crystal_defer_and_sculpture_priority():
+    from engine.mechanisms.verbs import apply_verb
+    e = _ready_combat(_engine("mutation_deferred"))
+    m = monster("延迟")
+    m.mutation_count = 50
+    e.state.enemies[:] = [m]
+    e.combat._redemption_deferred.add(m.runtime_id)
+    apply_verb(e.combat, "mutation", {"target": m, "layers": -1})
+    assert m.is_alive and not e.state.pending_redemption
+    e.combat._redemption_deferred.clear()
+    m.attack_count = m.attack_power = 0
+    event = e.combat.check_redemption(m, force=True)
+    assert event["type"] == "sculpture" and m.is_sculptured
+
+
+def test_mutation_raising_to_50_does_not_redeem_and_later_reduction_does():
+    from engine.mechanisms.verbs import apply_verb
+    e = _ready_combat(_engine("mutation_sequence"))
+    m = monster("连续异变")
+    e.state.enemies[:] = [m]
+    up = apply_verb(e.combat, "mutation", {"target": m, "layers": 1})
+    assert up["mutation_total"] == 50 and m.is_alive and not e.state.pending_redemption
+    down = apply_verb(e.combat, "mutation", {"target": m, "layers": -1})
+    assert down["mutation_total"] == 49 and m.departure_reason == "救赎"
+    assert e.state.pending_redemption["runtime_id"] == m.runtime_id
+    assert not e.state.pending_redemption_candidates
+
+
+def test_bingbian_blood_relief_interrupts_before_mutation_cost():
+    from tests.test_task8_new_daowen import _player_with, monster as make_monster, cast
+    e, combat, player = _player_with("病变")
+    m = make_monster(e, hp=100, name="血限转换")
+    m.blood_limit, m.current_hp, m.mutation_count = 95, 20, 49
+    m.attack_count = m.attack_power = 1
+    m.reversible_cost_layers["血限"] = 1
+    result = cast(combat, player, "病变", 1, target=m, from_kind="血限", to_kind="异变")
+    assert m.blood_limit == 96 and m.mutation_count == 49
+    assert m.reversible_cost_layers["血限"] == 0
+    assert m.departure_reason == "救赎"
+    assert any(effect["type"] == "cost_conversion_interrupted" for effect in result["effects"])

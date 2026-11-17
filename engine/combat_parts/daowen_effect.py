@@ -2589,6 +2589,7 @@ class DaowenEffectMixin:
             if not isinstance(ledger, dict):
                 ledger = {}
                 target.reversible_cost_layers = ledger
+            redemption = None
             if src == "异变":
                 target.add_mutation(-layers)
             elif src == "枯竭":
@@ -2596,9 +2597,10 @@ class DaowenEffectMixin:
                     0, int(getattr(target, "pending_exhaust_mana", 0) or 0) - layers)
                 ledger["枯竭"] = max(0, int(ledger.get("枯竭", 0) or 0) - layers)
             elif src == "血限":
-                self._apply_blood_limit_change(target, layers, name, "up",
-                                               source_type="daowen", subtype="bingbian_relief")
+                change = self._apply_blood_limit_change(target, layers, name, "up",
+                                                       source_type="daowen", subtype="bingbian_relief")
                 ledger["血限"] = max(0, int(ledger.get("血限", 0) or 0) - layers)
+                redemption = change.get("redemption")
             elif src == "法限":
                 target.mana_limit = int(target.mana_limit) + layers
                 ledger["法限"] = max(0, int(ledger.get("法限", 0) or 0) - layers)
@@ -2607,7 +2609,7 @@ class DaowenEffectMixin:
                 ledger["速度"] = max(0, int(ledger.get("速度", 0) or 0) - layers)
             # 用户裁定：逐次变化后立即检查；目标已救赎离场时，病变后半段不能再施加。
             if target.entity_type == "怪物" and src in {"异变", "血限"}:
-                redemption = self.check_redemption(target)
+                redemption = redemption or self.check_redemption(target)
                 if redemption:
                     result["effects"].append({"type": "cost_conversion_interrupted",
                                               "target": target.name, "from": src,

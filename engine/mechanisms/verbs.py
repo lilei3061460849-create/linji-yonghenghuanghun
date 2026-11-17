@@ -139,6 +139,10 @@ def _verb_mutation(combat, spec, ctx):
     mut = target.add_mutation(layers)
     if mut.get("lost"):
         combat._resolve_mutation_lost(target, ctx)
+    if layers and target.is_alive:
+        redemption = combat.check_redemption(target)
+        if redemption:
+            mut["redemption"] = redemption
     return mut
 
 
