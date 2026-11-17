@@ -110,3 +110,32 @@ def test_old_save_version_is_rejected(tmp_path):
     original = engine.state
     assert not engine.load_game("old")["success"]
     assert engine.state is original
+
+
+@pytest.mark.parametrize("name", sorted(SpellReactionMixin.SPELL_FLOWS))
+def test_each_builtin_runs_through_program_cursor(name, monkeypatch):
+    from engine.models import DaoWen, DaoWenInstance
+    from engine.spell_execution import SpellCastRequest, SpellExecution, StepRequest
+    from engine.spell_dsl import iter_action_steps
+    engine, player, enemy = _engine()
+    flow = engine.combat.SPELL_FLOWS[name]
+    definition = engine.combat._spell_definition_from_flow(name, flow, flow["trigger"])
+    for daowen in definition.required_daowen:
+        player.dao_wen[daowen] = DaoWenInstance(
+            DaoWen(name=daowen, formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
+    steps = [StepRequest(x=1, target_ref="enemy:0" if step.target == "any" else None)
+             for _, step in iter_action_steps(definition.body)]
+    calls = []
+    original = ProgramCursor.next_action
+    def track(cursor, *args, **kwargs):
+        calls.append(cursor.program)
+        return original(cursor, *args, **kwargs)
+    monkeypatch.setattr(ProgramCursor, "next_action", track)
+    execution = SpellExecution(engine.combat, definition, player, enemy,
+                               engine.combat._combat_entity_refs(),
+                               SpellCastRequest(steps=steps, max_iterations=1),
+                               target_resolver=engine.combat._instant_target_resolver(enemy))
+    execution.run_all()
+    assert calls and all(program is definition.program for program in calls)
+    assert execution.results, name
+    assert execution.status.value != "failed", (name, execution.interrupt_detail)

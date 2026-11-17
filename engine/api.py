@@ -3908,13 +3908,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             self.state.spell_completion_serial = max(
                 int(getattr(self.state, "spell_completion_serial", 0) or 0),
                 int(sp.get("completion_order", 0) or 0))
-        # 旧存档的 armed_spells 迁移为正式法术定义；新存档不再写入该字段。
-        for spell_name in d.get("armed_spells", []) or []:
-            if any(sp.name == spell_name for sp in e.spells):
-                continue
-            migrated = self.combat.spell_definition(e, spell_name)
-            if migrated is not None:
-                self.combat.complete_spell(e, migrated)
         for relic in d.get("relics", []):
             relic = {**relic, "name": "叠鳞甲" if relic.get("name") == "龙鳞" else relic.get("name")}
             e.relics.append(Relic(name=relic["name"], effect=relic.get("effect", ""),

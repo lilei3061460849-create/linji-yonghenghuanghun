@@ -405,7 +405,7 @@ def test_same_interruption_reason_and_detail_as_use_daowen():
     assert "无法完整承担碎片1" in execution2.results[0].detail
 
 
-def test_legacy_non_loop_flow_executes_through_control_program():
+def test_non_loop_flow_executes_through_control_program():
     state, combat, player, enemy = _state(player_hp=50)
     _give(player, "再生", "杀伐", "庇护")
     execution = _cast(combat, player, enemy,
@@ -438,7 +438,7 @@ def test_restore_dynamic_loop_branch_trace_without_reapplying_effects():
     assert _daowen_sequence(restored) == ["燃命", "再生", "燃命"]
 
 
-def _run_loop_differential(flow, steps, *, player_hp=50, mana=20, max_iterations=None):
+def _run_graph_loop(flow, steps, *, player_hp=50, mana=20, max_iterations=None):
     state, combat, player, enemy = _state(player_hp=player_hp, mana=mana)
     _give(player, "燃命", "再生", "庇护", "杀伐")
     execution = combat.build_instant_execution(player, flow, enemy, steps,
@@ -462,11 +462,11 @@ def _run_loop_differential(flow, steps, *, player_hp=50, mana=20, max_iterations
 
 
 def test_graph_loop_execution_and_interruption():
-    bounded = _run_loop_differential("发动庇护X于自身→循环2次", [{"x": 1}])
+    bounded = _run_graph_loop("发动庇护X于自身→循环2次", [{"x": 1}])
     assert len(bounded["steps"]) == 2 and bounded["stop"] == "max_iterations"
-    exhausted = _run_loop_differential("发动庇护X于自身→循环", [{"x": 1}], mana=2)
+    exhausted = _run_graph_loop("发动庇护X于自身→循环", [{"x": 1}], mana=2)
     assert exhausted["interrupt"] == "mana_insufficient"
-    dynamic = _run_loop_differential(
+    dynamic = _run_graph_loop(
         "若自身 生命 大于 30 则 发动燃命X于自身 否则 发动再生X于自身→循环",
         [{"x": 3}, {"x": 3}], player_hp=40, mana=0, max_iterations=4)
     assert [step[1] for step in dynamic["steps"]] == ["燃命", "再生", "燃命", "再生"]
@@ -475,12 +475,12 @@ def test_graph_loop_execution_and_interruption():
 def test_graph_loop_no_net_change(monkeypatch):
     import engine.spell_execution as spell_execution
     monkeypatch.setattr(spell_execution, "battlefield_fingerprint", lambda *args, **kwargs: ("fixed",))
-    graph = _run_loop_differential("发动庇护X于自身→循环", [{"x": 1}])
+    graph = _run_graph_loop("发动庇护X于自身→循环", [{"x": 1}])
     assert graph["interrupt"] == "no_net_change" and len(graph["steps"]) == 1
 
 
 def test_graph_loop_engineering_fuse(monkeypatch):
     import engine.spell_execution as spell_execution
     monkeypatch.setattr(spell_execution, "MAX_SPELL_LOOP_ITERATIONS", 3)
-    graph = _run_loop_differential("发动庇护X于自身→循环", [{"x": 1}], mana=100)
+    graph = _run_graph_loop("发动庇护X于自身→循环", [{"x": 1}], mana=100)
     assert graph["interrupt"] == "loop_guard" and len(graph["steps"]) == 3

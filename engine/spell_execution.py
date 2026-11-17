@@ -537,7 +537,7 @@ class SpellExecution:
         return taken
 
     def _control_loop_boundary(self, node_id, regions):
-        """旧循环的入口/回边检查；只有编译后的内部元数据会调用。"""
+        """循环的入口/回边检查；由流程图内部元数据调用。"""
         if not self.is_running:
             return True, None
         region = regions[node_id]
