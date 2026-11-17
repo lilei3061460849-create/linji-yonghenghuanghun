@@ -53,7 +53,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from .mechanisms import (
     MECHANISMS, Mechanism, Phase, Trigger,
-    apply_verb, relic_active, verb_names,
+    apply_verb, relic_active, entity_has_artifact, verb_names,
 )
 from .enums import normalize_payment_type, RESOURCE_TYPES
 from . import derivatives as derivative_rules
@@ -450,6 +450,8 @@ def _make_mechanism(spec: dict) -> Mechanism:
     condition = None
     if category == "遗物":
         condition = relic_active(name)
+    elif category == "法器":
+        condition = entity_has_artifact(name)
 
     trigger = spec["trigger"]
     return Mechanism(
