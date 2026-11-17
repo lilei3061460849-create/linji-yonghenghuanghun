@@ -177,6 +177,18 @@ class AfterDamageEffectsHook:
         damage_ctx = normalize_context(detail.get("ctx"))
         damage_event_id = damage_ctx.event_id if damage_ctx else None
 
+        def settle_other_healer(entity, heal_detail):
+            # 伤害目标的命零和其他伤后特殊事件尚未完成，由伤害管线末尾处理。
+            if entity is target or not entity.is_alive or combat.is_redemption_pending(entity):
+                return
+            cancer = combat.check_cancer(entity)
+            if cancer:
+                heal_detail["cancer"] = cancer
+            if entity.is_alive and heal_detail.get("actual_heal", 0) > 0:
+                redemption = combat.check_redemption(entity)
+                if redemption:
+                    heal_detail["redemption"] = redemption
+
         # 噬伤血囊订阅全场伤害落地信号：每个有效持有者回复该次实际伤害的20%。
         # 沿用原【寄生】的向上取整口径；治疗仍走 GameState.apply_heal，遵守坏死等统一规则。
         if actual_damage > 0 and combat._any_active_relic("噬伤血囊"):
@@ -192,7 +204,8 @@ class AfterDamageEffectsHook:
                 if id(holder) in seen_holders:
                     continue
                 seen_holders.add(id(holder))
-                if (holder.is_alive and combat._relic_active(holder, "噬伤血囊")
+                if (holder.is_alive and not combat.is_redemption_pending(holder)
+                        and combat._relic_active(holder, "噬伤血囊")
                         and not holder.has_status("坏死")):
                     heal_n = math.ceil(actual_damage * 0.2)
                     if heal_n > 0:
@@ -204,6 +217,7 @@ class AfterDamageEffectsHook:
                             "amount": heal_n, "tags": {"relic", "after_damage"},
                             "parent_event_id": damage_event_id,
                         })
+                        settle_other_healer(holder, healed)
                         res.setdefault("噬伤血囊", []).append({
                             "holder": holder.name, "requested": heal_n, **healed})
 
@@ -211,6 +225,7 @@ class AfterDamageEffectsHook:
         # 订阅同一条伤害落地信号；只认攻击者自己身上带【噬血】状态的情况。
         if (actual_damage > 0 and attacker is not None
                 and getattr(attacker, "is_alive", False)
+                and not combat.is_redemption_pending(attacker)
                 and attacker.has_status("噬血")
                 and not attacker.has_status("坏死")):
             healed = combat.state.apply_heal(attacker, actual_damage, ctx={
@@ -221,6 +236,7 @@ class AfterDamageEffectsHook:
                 "amount": actual_damage, "tags": {"consumable", "after_damage", "lifesteal"},
                 "parent_event_id": damage_event_id,
             })
+            settle_other_healer(attacker, healed)
             res.setdefault("血翼·噬血", []).append({
                 "holder": attacker.name, "requested": actual_damage, **healed})
 
@@ -247,6 +263,8 @@ class AfterDamageEffectsHook:
                 hp_after = int(detail.get("hp_after", target.current_hp))
                 actual_life_loss = max(0, hp_before - hp_after)
             if (creator is not None and creator.is_alive and creator.current_hp > 0
+                    and attacker.is_alive and not combat.is_redemption_pending(attacker)
+                    and not combat.is_redemption_pending(creator)
                     and actual_life_loss > 0
                     and combat._relic_active(creator, "共生血囊")
                     and not attacker.has_status("坏死")):
@@ -269,6 +287,9 @@ class AfterDamageEffectsHook:
                         "tags": {"relic", "after_damage", "split_clone", "overflow"},
                         "parent_event_id": damage_event_id,
                     })
+                settle_other_healer(attacker, clone_heal)
+                if creator_heal is not None:
+                    settle_other_healer(creator, creator_heal)
                 detail["split_clone_lifesteal"] = {
                     "creator": creator.name,
                     "damage_basis": actual_life_loss,
@@ -312,7 +333,8 @@ class AfterDamageEffectsHook:
             drain = math.ceil(actual_damage * 20 * xv / 100)
             src_name = next((s.source for s in getattr(target, "status_effects", []) if s.name == "寄生" and not getattr(s, "is_expired", False)), "")
             healer = combat._find_named(src_name)
-            if healer is not None and getattr(healer, "is_alive", False) and drain > 0 and not healer.has_status("坏死"):
+            if (healer is not None and getattr(healer, "is_alive", False) and drain > 0
+                    and not combat.is_redemption_pending(healer) and not healer.has_status("坏死")):
                 h = combat.state.apply_heal(healer, drain, ctx={
                     "timing": damage_ctx.timing if damage_ctx else "",
                     "source": "寄生", "source_type": "daowen", "actor": healer, "target": healer,
@@ -323,6 +345,10 @@ class AfterDamageEffectsHook:
                 cancer = combat.check_cancer(healer)
                 if cancer:
                     detail["jisheng_cancer"] = cancer
+                if healer is not target and healer.is_alive and h.get("actual_heal", 0) > 0:
+                    redemption = combat.check_redemption(healer)
+                    if redemption:
+                        detail["jisheng_redemption"] = redemption
 
         # 负岳索：[战始]选择一名朋友/员工；其首次受到伤害时，你[回复]等量生命。
         # 状态挂在被保护者身上，但回复对象是遗物持有者（玩家），不是受伤目标本人。

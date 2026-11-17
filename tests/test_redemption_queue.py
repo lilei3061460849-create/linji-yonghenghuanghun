@@ -768,3 +768,17 @@ def test_chuyong_synchronizing_zero_hp_resolves_death_first():
     assert e.combat._sync_chuyong(m)
     assert m.current_hp == 0 and not m.is_alive and not m.is_departed
     assert not e.state.pending_redemption
+
+
+def test_relic_after_damage_heals_other_monster_then_redeems_it():
+    from engine.models import Relic
+    e = _ready_combat(_engine("relic_heal_redemption"))
+    healer, victim = monster("血囊持有者"), monster("受伤者")
+    healer.current_hp = 10
+    healer.relics.append(Relic("噬伤血囊", ""))
+    victim.current_hp, victim.mutation_count = 100, 50
+    e.state.enemies[:] = [healer, victim]
+    e.combat._apply_hostile_damage(victim, 5, source=e.state.player)
+    assert healer.current_hp == 11 and healer.departure_reason == "救赎"
+    assert victim.current_hp == 95 and victim.is_alive
+    assert e.state.pending_redemption["runtime_id"] == healer.runtime_id
