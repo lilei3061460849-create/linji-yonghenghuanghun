@@ -572,6 +572,7 @@ class DamageDeathMixin:
         “血限压到 0 生命却仍然 is_alive=True”的非法状态。
         """
         parent = normalize_context(ctx)
+        hp_before = entity.current_hp
         applied = self._battle_delta(entity, "blood_limit", delta, source, polarity)
         bl_ctx = self._record_blood_limit_event(
             entity, applied, parent, source=source, source_type=source_type,
@@ -587,7 +588,14 @@ class DamageDeathMixin:
             if not self.state.hp_overflow_exempt(entity):
                 entity.current_hp = min(entity.current_hp, entity.effective_blood_limit())
         died = self._check_hp_zero_death(entity, ctx=bl_ctx or parent) if lethal else False
-        return {"applied": applied, "ctx": bl_ctx, "died": died}
+        result = {"applied": applied, "ctx": bl_ctx, "died": died}
+        # 只有完整的原子血限结算才在此检查；clamp_hp/lethal 关闭的调用方
+        # 正在处理复合效果，必须由该调用方在完成相应步骤后自行检查。
+        if clamp_hp and lethal and not died and (applied or entity.current_hp != hp_before):
+            redemption = self.check_redemption(entity)
+            if redemption:
+                result["redemption"] = redemption
+        return result
 
     def _apply_hostile_damage(self, target: Entity, amount: int,
                               damage_type: str = DamageType.NORMAL.value,

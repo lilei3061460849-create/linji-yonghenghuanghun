@@ -47,8 +47,7 @@ class OpeningHandlersMixin:
         pending = self.state.pending_redemption
         if not pending:
             return {"success": False, "error": "当前没有待结算的救赎"}
-        monster = next((m for m in self.state.enemies
-                        if m.runtime_id == pending.get("runtime_id")), None)
+        monster = self.state.entity_by_runtime_id(pending.get("runtime_id"))
         if (monster is None or monster.current_hp <= 0 or not monster.is_departed
                 or monster.departure_reason != "救赎" or not getattr(monster, "_redeemed", False)):
             self.state.pending_redemption = {}

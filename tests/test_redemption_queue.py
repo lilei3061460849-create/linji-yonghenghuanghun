@@ -134,3 +134,38 @@ def test_one_area_effect_queues_every_eligible_monster():
     assert second.departure_reason == "救赎"
     assert e.execute_action("resolve_redemption", {"option": "终结"})["success"]
     assert not e.state.pending_redemption and target.is_alive
+
+
+def test_complete_blood_limit_change_checks_after_clamp_and_death():
+    e = _ready_combat(_engine("queue_limit_change"))
+    m = monster("血限增长")
+    m.blood_limit = 95
+    e.state.enemies[:] = [m]
+    result = e.combat._apply_blood_limit_change(m, 1, "血限增长", "up")
+    assert result["applied"] == 1 and result["redemption"]["type"] == "redemption"
+    assert m.blood_limit == 96 and m.current_hp == 20 and m.departure_reason == "救赎"
+
+
+def test_lethal_blood_limit_change_is_death_not_redemption():
+    e = _ready_combat(_engine("queue_limit_lethal"))
+    m = monster("血限归零")
+    e.state.enemies[:] = [m]
+    result = e.combat._apply_blood_limit_change(m, -100, "血限归零", "down")
+    assert result["died"] and m.current_hp == 0 and not m.is_alive
+    assert not m.is_departed and not e.state.pending_redemption
+
+
+def test_chuyong_checks_redemption_after_both_values_are_synced():
+    from engine.models import StatusEffect
+    e = _ready_combat(_engine("queue_chuyong"))
+    caster = e.state.player
+    caster.blood_limit, caster.current_hp = 100, 20
+    m = monster("初拥同步")
+    m.blood_limit, m.current_hp = 80, 60
+    e.state.enemies[:] = [m]
+    m.add_status(StatusEffect(name="初拥", value=1, remaining_rounds=2,
+                              effect_data={"caster_id": caster.runtime_id}))
+    assert e.combat._sync_chuyong(m)
+    assert (m.blood_limit, m.current_hp) == (100, 20)
+    assert m.departure_reason == "救赎"
+    assert e.state.pending_redemption["runtime_id"] == m.runtime_id

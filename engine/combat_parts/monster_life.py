@@ -271,8 +271,7 @@ class MonsterLifeMixin:
         # 已记录的候选优先，以入队顺序依次重检；死亡、离场、熄事或资格失效即丢弃。
         while self.state.pending_redemption_candidates:
             candidate = self.state.pending_redemption_candidates.pop(0)
-            monster = next((m for m in self.state.enemies
-                            if m.runtime_id == candidate["runtime_id"]), None)
+            monster = self.state.entity_by_runtime_id(candidate["runtime_id"])
             if (monster is None or not monster.is_alive or monster.is_departed
                     or monster.removed_without_kill or not getattr(monster, "in_combat", True)
                     or self.state.suppresses_special_events(monster)
