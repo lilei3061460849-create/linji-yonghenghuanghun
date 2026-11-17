@@ -458,3 +458,19 @@ def test_compound_wave_isolates_queued_candidate_and_keeps_other_shares():
     assert e.combat.is_redemption_pending(queued)
     assert queued.mutation_count == 49 and queued.blood_limit == 100 and queued.attack_power == 1
     assert other.mutation_count == 49 and other.blood_limit == 105 and other.attack_power == 3
+
+
+def test_evolution_mutation_cost_checks_before_borrowing(monkeypatch):
+    from engine.models import DaoWen, DaoWenInstance
+
+    e = _ready_combat(_engine("evolution_cost_redemption"))
+    m = monster("进化怪")
+    m.mutation_count = 40
+    e.state.enemies[:] = [m]
+    e.state.player.dao_wen["加害"] = DaoWenInstance(
+        DaoWen(name="加害", formula="", cost_type="消耗", cost_formula="X", effect_formula=""))
+    monkeypatch.setattr(e.combat, "check_monster_difficulty", lambda _: {"signals": []})
+    outcome = e.combat.execute_evolution(m, "加害", 1)
+    assert outcome["success"] and outcome["interrupted_by_redemption"]
+    assert m.mutation_count == 45 and m.departure_reason == "救赎"
+    assert "加害" not in m.dao_wen and id(m) in e.combat._monster_evolved

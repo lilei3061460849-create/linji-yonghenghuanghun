@@ -132,7 +132,13 @@ class MonsterLifeMixin:
         self._monster_evolved.add(id(monster))
         log = [f"{monster.name}发动【原初{x}】：异变+{cost}（当前{pay['mutation_total']}层）"]
         
-        # 怪物只累计异变；进化不会因异变达到50层而中断。
+        # 代价与选择账本完成后再判定，已离场或待决的怪物不再借纹。
+        redemption = self.check_redemption(monster)
+        if redemption:
+            return {"success": True, "action": "进化·原初X", "collapsed": False,
+                    "interrupted_by_redemption": True, "redemption": redemption,
+                    "difficulty_signals": difficulty.get("signals", []),
+                    "log": log, "mutation": pay, "state": self._get_combat_state()}
 
         # 借用：战终前视为持有（enemies于[战终]清空，借用自动到期）
         borrowed = DaoWen(
