@@ -1608,6 +1608,12 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                         effects.append({"type": "bianxing_restore", "entity": target.name,
                                         "current_speed": target.current_speed, "current_mana": target.current_mana})
 
+                if "无限血限" in expired and target.is_alive:
+                    redemption = self.check_redemption(target)
+                    if redemption:
+                        effects.append(redemption)
+                if not target.is_alive or self.is_redemption_pending(target):
+                    continue
                 effects.extend(self._dispatch_phase(Phase.ROUND_END_POST_MEDIOCRITY, target=target))
                 effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=target))
                 # 【豪夺】的"持续X回合"跟随目标经历的回合递减：大梦额外回合里
@@ -1778,6 +1784,12 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                                     "current_speed": entity.current_speed,
                                     "current_mana": entity.current_mana})
                 # 干扰/手雷减攻到期自动由 tick 清理，无需额外
+            if "无限血限" in expired and entity.is_alive:
+                redemption = self.check_redemption(entity)
+                if redemption:
+                    effects.append(redemption)
+            if not entity.is_alive or self.is_redemption_pending(entity):
+                continue
             # 通用回终对账相位，保留锚点，不再注册清算对账。
             effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=entity))
             # F2：抵扣封印/豪夺夺取回合递减统一走 _tick_sealed_and_stolen_relics，

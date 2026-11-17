@@ -354,3 +354,18 @@ def test_mutation_verb_never_redeems_zero_hp_entity():
     e.state.enemies[:] = [m]
     apply_verb(e.combat, "mutation", {"target": m, "layers": -1})
     assert m.current_hp == 0 and not e.state.pending_redemption
+
+
+def test_infinite_blood_limit_removal_checks_after_clamping():
+    from engine.models import StatusEffect
+    e = _ready_combat(_engine("removed_infinite_redemption"))
+    m = Entity("过限", "怪物", blood_limit=1, current_hp=1,
+               attack_count=1, attack_power=1, mutation_count=49)
+    e.state.enemies[:] = [m]
+    status = StatusEffect(name="无限血限", value=1, remaining_rounds=1)
+    m.add_status(status)
+    m.current_hp = 2
+    m.status_effects.remove(status)
+    e.combat._settle_removed_statuses(m, [status])
+    assert m.current_hp == 1 and m.departure_reason == "救赎"
+    assert e.state.pending_redemption["runtime_id"] == m.runtime_id

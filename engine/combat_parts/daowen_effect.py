@@ -729,6 +729,9 @@ class DaowenEffectMixin:
             entity.current_speed, entity.current_mana = entity._bianxing_original
             delattr(entity, "_bianxing_original")
             self.clamp_immortal_body(entity)
+        # 各状态的清理、面板回滚及命零先完成，再处理解除无限血限带来的生命封顶。
+        if "无限血限" in names and entity.is_alive:
+            self.check_redemption(entity)
 
     def _apply_liudong_yiwang(self, name: str, calc: dict, recipients: list[Entity],
                               result: dict) -> None:
