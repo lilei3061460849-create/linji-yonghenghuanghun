@@ -754,3 +754,17 @@ def test_blood_pump_heal_finishes_shield_before_redemption():
     result = consume_tool(e.combat, item, {}, m, [e.state.player])
     assert m.current_hp == 30 and m.shield == 30 and m.departure_reason == "救赎"
     assert result["result"]["redemption"]["type"] == "redemption"
+
+
+def test_chuyong_synchronizing_zero_hp_resolves_death_first():
+    from engine.models import StatusEffect
+    e = _ready_combat(_engine("chuyong_zero_hp"))
+    caster = e.state.player
+    caster.current_hp = 0
+    m = monster("初拥命零")
+    e.state.enemies[:] = [m]
+    m.add_status(StatusEffect(name="初拥", remaining_rounds=2,
+                              effect_data={"caster_id": caster.runtime_id}))
+    assert e.combat._sync_chuyong(m)
+    assert m.current_hp == 0 and not m.is_alive and not m.is_departed
+    assert not e.state.pending_redemption

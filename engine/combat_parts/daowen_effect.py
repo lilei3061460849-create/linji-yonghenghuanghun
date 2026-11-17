@@ -459,8 +459,11 @@ class DaowenEffectMixin:
                 "初拥", "up", source_type="daowen", subtype="chuyong_sync",
                 clamp_hp=False, lethal=False)
         entity.current_hp = max(0, int(caster.current_hp))
-        # 初拥把血限与生命一起同步；两项完成后再判定救赎，避免中途打断同步。
-        self.check_redemption(entity)
+        # 初拥把血限与生命一起同步；两项完成后先命零，再判定救赎。
+        if entity.current_hp <= 0:
+            self._check_hp_zero_death(entity)
+        elif entity.is_alive:
+            self.check_redemption(entity)
         return True
 
     def _settle_daowen_status_expiry(self, entity, expired: list) -> list:
