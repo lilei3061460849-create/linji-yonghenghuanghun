@@ -293,9 +293,12 @@ class DaowenEffectMixin:
             plans=[dict(pool,steps=pool["candidates"][:part]) for pool,part in zip(plans,parts)]
         for pool in plans:
             holder=next((entity for entity in refs.values() if entity.runtime_id==pool["holder_id"]),None)
-            if holder is None or not holder.is_alive:
+            if holder is None or not holder.is_alive or self.is_redemption_pending(holder):
                 logs.append({"type":"catalysis_interrupted","reason":"持有者已失效"});continue
             for selected in pool["steps"]:
+                if not holder.is_alive or self.is_redemption_pending(holder):
+                    logs.append({"type":"catalysis_interrupted","reason":"持有者救赎待决或已离场"})
+                    break
                 entry=selected["entry"];name=entry["name"];inst=holder.dao_wen.get(name)
                 if inst is None or getattr(inst,"_catalysis_token",None)!=selected["token"]:
                     logs.append({"type":"catalysis_interrupted","reason":"选中的原道纹已变化"});return logs
@@ -303,6 +306,10 @@ class DaowenEffectMixin:
                     try:
                         target=refs.get(entry["target_ref"])
                         target,rule=self.resolve_tampered_target(holder,target,name,entry,refs)
+                        if target is not None and (target.departure_reason == "救赎"
+                                                   or self.is_redemption_pending(target)):
+                            logs.append({"type":"catalysis_interrupted","reason":"目标救赎待决或已离场"})
+                            continue
                         logs.append(self.catalyse_truth(holder,target,entry,inst))
                         self.consume_tamper(holder,rule)
                     except ValueError as exc:

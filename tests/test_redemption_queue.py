@@ -854,3 +854,16 @@ def test_compound_blood_pact_keeps_other_members_after_redemption():
     assert other.has_status("共罪")
     assert e.state.player.has_status("共罪")
     assert any(effect["type"] == "shared_payment" for effect in result["effects"])
+
+
+def test_catalysis_skips_pending_holder_without_interrupting_other_pools():
+    e = _ready_combat(_engine("catalysis_pending"))
+    a, b = monster("先"), monster("待决持有者")
+    e.state.enemies[:] = [a, b]
+    e.combat.check_redemption(a)
+    e.combat.check_redemption(b)
+    logs = e.combat.execute_catalysis({"catalysis_count": 0, "catalysis_plan": [
+        {"holder_id": b.runtime_id, "steps": []},
+        {"holder_id": e.state.player.runtime_id, "steps": []},
+    ]}, e.state.player)
+    assert logs == [{"type": "catalysis_interrupted", "reason": "持有者已失效"}]
