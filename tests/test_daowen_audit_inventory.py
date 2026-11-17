@@ -51,9 +51,16 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
 
     def test_persistent_relations_are_not_misclassified_as_triggers(self):
         by_name = {r['name']: r for r in self.rows}
-        for name in ('共罪', '波及', '坏死', '勾魂'):
+        for name in ('共罪', '波及', '坏死', '勾魂', '血契'):
             self.assertEqual(by_name[name]['review'], '暂未发现结构违规')
             self.assertNotIn('后续事件触发/改写', by_name[name]['tags'])
+
+    def test_shelter_is_a_pure_count_based_protection(self):
+        by_name = {r['name']: r for r in self.rows}
+        self.assertEqual(by_name['庇护']['review'], '暂未发现结构违规')
+        calc = DaoWenEngine.resolve('庇护', 3)
+        self.assertEqual(calc['shelter_charges'], 3)
+        self.assertNotIn('duration', calc)
 
     def test_retired_kuizeng_is_only_an_archived_design(self):
         self.assertNotIn('馈赠', {r['name'] for r in self.rows})
