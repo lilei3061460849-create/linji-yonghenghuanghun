@@ -757,11 +757,9 @@
         }
       ],
       "name": "蜃景",
-      "review": "边界复核",
-      "tags": [
-        "状态边界待裁定"
-      ],
-      "note": "支付枯竭X；创造数量随X变的幻象，其自动移动、接触消散与施术者死亡清除由地图生命周期结算。"
+      "review": "暂未发现结构违规",
+      "tags": [],
+      "note": "发动时即时创建X个独立地图幻象，X直接提升目标数量。幻象后续自主移动是已创建地图单位自身的世界行为；接触消散与施术者死亡清除属于实体生命周期处理，不是道纹在未来时机再次发动或另行产生独立效果。代码由GameEngine._action_shenjing创建地图单位，并由WorldState._move_mirage_illusions、_dispel_illusions_at、_clear_illusions_for_owner承接；幻象不参与战斗。"
     },
     {
       "runtime": true,
