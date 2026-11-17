@@ -195,7 +195,8 @@ def pool_of(parent: str) -> tuple[str, ...]:
 
 
 def known_parents() -> tuple[str, ...]:
-    return DERIVATIVE_PARENTS
+    custom = tuple(sorted(set(_CUSTOM_DERIVATIVE_PARENTS.values()) - set(DERIVATIVE_PARENTS)))
+    return DERIVATIVE_PARENTS + custom
 
 
 def spec_of(name: str) -> DerivativeSpec:
