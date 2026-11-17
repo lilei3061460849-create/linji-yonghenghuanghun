@@ -310,6 +310,9 @@ def test_custom_daowen_is_indexed_as_derivative_of_its_base():
     assert derivatives.parent_of("试锋") == "杀伐"
     assert "试锋" in derivatives.pool_of("杀伐")
     assert "试锋" not in derivatives.pool_of("再生")
+    from engine.daowen import ResonanceEngine
+    for resonance in ("转换", "反转", "曲解"):
+        assert ResonanceEngine.find_transformations("试锋", resonance) == []
 
 
 def test_resources_survive_registry_rebuild():
