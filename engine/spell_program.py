@@ -120,6 +120,7 @@ class ProgramCursor:
                             for i, node in enumerate(program.nodes)}
         self.position = program.entry
         self.loop_backedges = {region.backedge for region in program.loops}
+        self.loop_exits = {region.entry: region.exit for region in program.loops}
         self.loop_boundaries = {key for region in program.loops
                                 for key in (region.entry, region.backedge)}
         self._assert_acyclic()
@@ -146,8 +147,10 @@ class ProgramCursor:
             if key in active:
                 raise ValueError("流程循环尚未接入循环中断规则")
             active.add(key)
-            for successor in (() if key in self.loop_backedges
-                              else self._successors(self.nodes[key])):
+            successors = (() if key in self.loop_backedges else self._successors(self.nodes[key]))
+            if key in self.loop_exits:
+                successors += (self.loop_exits[key],)
+            for successor in successors:
                 walk(successor)
             active.remove(key)
             visited.add(key)

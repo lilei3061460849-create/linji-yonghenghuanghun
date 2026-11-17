@@ -436,3 +436,86 @@ def test_restore_dynamic_loop_branch_trace_without_reapplying_effects():
     assert (player.current_hp, player.current_mana, player.total_healed) == before
     restored.run_to_window()
     assert _daowen_sequence(restored) == ["燃命", "再生", "燃命"]
+
+
+def _run_loop_differential(flow, steps, *, player_hp=50, mana=20, max_iterations=None,
+                           legacy=False):
+    state, combat, player, enemy = _state(player_hp=player_hp, mana=mana)
+    _give(player, "燃命", "再生", "庇护", "杀伐")
+    execution = combat.build_instant_execution(player, flow, enemy, steps,
+                         combat._combat_entity_refs(), max_iterations=max_iterations)
+    assert execution._control_program is not None
+    assert execution._control_program.loops
+    if legacy:
+        execution._control_program = None  # 使用保留的旧路径作为独立对照
+    execution.run_all()
+    return {
+        "steps": [(r.status.value, r.daowen, r.x, r.cost_paid, r.iteration,
+                   r.reason.value) for r in execution.results],
+        "status": execution.status.value,
+        "interrupt": execution.interrupt_reason.value,
+        "detail": execution.interrupt_detail,
+        "stop": execution.loop_stop_reason,
+        "iterations": execution.loop_iterations,
+        "hp": player.current_hp, "mana": player.current_mana,
+        "healed": player.total_healed, "enemy_hp": enemy.current_hp,
+        "charges": _shelter_charges(player),
+        "decisions": execution._run_decisions,
+    }
+
+
+def test_graph_loop_matches_legacy_execution_and_interruption():
+    cases = [
+        ("发动庇护X于自身→循环2次", [{"x": 1}], {}),
+        ("发动庇护X于自身→循环", [{"x": 1}], {"mana": 2}),
+        ("若自身 生命 小于 0 则 发动杀伐X于目标→循环",
+         [{"x": 1, "dodge": False}], {}),
+        ("若自身 生命 大于 30 则 发动燃命X于自身 否则 发动再生X于自身→循环",
+         [{"x": 3}, {"x": 3}], {"player_hp": 40, "mana": 0, "max_iterations": 4}),
+    ]
+    for flow, steps, options in cases:
+        assert _run_loop_differential(flow, steps, **options) == \
+               _run_loop_differential(flow, steps, legacy=True, **options)
+
+
+def test_nested_legacy_loop_graph_matches_old_control_flow():
+    from engine.spell_dsl import ActionStep, LoopStep
+    from engine.spell_execution import SpellDefinition, SpellExecution, SpellCastRequest, StepRequest
+    from engine.spell_execution import TriggerType, Lifecycle
+
+    def run(legacy):
+        state, combat, player, enemy = _state(mana=20)
+        _give(player, "庇护")
+        body = [LoopStep((LoopStep((ActionStep("庇护", "self"),), 2),
+                          ActionStep("庇护", "self")), 2)]
+        definition = SpellDefinition("嵌套对照", ["庇护"], TriggerType.IMMEDIATE,
+                                     Lifecycle.INSTANT, body)
+        execution = SpellExecution(combat, definition, player, enemy, combat._combat_entity_refs(),
+                                  SpellCastRequest(steps=[StepRequest(x=1), StepRequest(x=1)]))
+        if legacy:
+            execution._control_program = None
+        else:
+            assert len(execution._control_program.loops) == 2
+        execution.run_all()
+        return ([(r.daowen, r.status.value, r.iteration, r.cost_paid) for r in execution.results],
+                execution.status, execution.interrupt_reason, execution.loop_iterations,
+                execution.loop_stop_reason, player.current_mana, _shelter_charges(player))
+    assert run(False) == run(True)
+
+
+def test_graph_loop_matches_legacy_no_net_change(monkeypatch):
+    import engine.spell_execution as spell_execution
+    monkeypatch.setattr(spell_execution, "battlefield_fingerprint", lambda *args, **kwargs: ("fixed",))
+    graph = _run_loop_differential("发动庇护X于自身→循环", [{"x": 1}])
+    legacy = _run_loop_differential("发动庇护X于自身→循环", [{"x": 1}], legacy=True)
+    assert graph == legacy
+    assert graph["interrupt"] == "no_net_change" and len(graph["steps"]) == 1
+
+
+def test_graph_loop_matches_legacy_engineering_fuse(monkeypatch):
+    import engine.spell_execution as spell_execution
+    monkeypatch.setattr(spell_execution, "MAX_SPELL_LOOP_ITERATIONS", 3)
+    graph = _run_loop_differential("发动庇护X于自身→循环", [{"x": 1}], mana=100)
+    legacy = _run_loop_differential("发动庇护X于自身→循环", [{"x": 1}], mana=100, legacy=True)
+    assert graph == legacy
+    assert graph["interrupt"] == "loop_guard" and len(graph["steps"]) == 3

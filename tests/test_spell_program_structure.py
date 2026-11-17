@@ -54,3 +54,13 @@ def test_cursor_rejects_cycles_and_wait_until_their_rules_are_implemented():
         ProgramCursor(SpellProgram((Jump("again", "again"),), "again"))
     with pytest.raises(ValueError, match="事件等待"):
         ProgramCursor(SpellProgram((WaitEvent("wait", "回始"),), "wait"))
+
+
+def test_loop_exit_is_checked_for_unsupported_wait():
+    from engine.spell_program import LoopRegion, ProgramCursor
+    program = SpellProgram((
+        Jump("entry", "back"), Jump("back", "entry"),
+        WaitEvent("wait", "回始"),
+    ), "entry", (LoopRegion("entry", "back", "wait", 1),))
+    with pytest.raises(ValueError, match="事件等待"):
+        ProgramCursor(program)

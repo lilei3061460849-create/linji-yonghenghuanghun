@@ -290,3 +290,35 @@ def test_save_load_dynamic_loop_branches_do_not_replay_effects(tmp_path):
     assert result["success"], result
     assert [r.daowen for r in restored.results] == ["燃命", "再生", "燃命", "再生"]
     assert lp.actions_used_this_round == 4
+
+
+def test_nested_loop_resume_keeps_each_round_baseline(tmp_path):
+    from engine.spell_dsl import ActionStep, LoopStep
+    from engine.spell_execution import (SpellDefinition, SpellExecution, SpellCastRequest,
+                                        StepRequest, TriggerType, Lifecycle)
+    engine, player, monster = _engine(player_extra=8)
+    body = [LoopStep((LoopStep((ActionStep("庇护", "self"),), 2),
+                      ActionStep("庇护", "self")), 2)]
+    definition = SpellDefinition("嵌套轮次", ["庇护"], TriggerType.IMMEDIATE,
+                                 Lifecycle.INSTANT, body)
+    execution = SpellExecution(engine.combat, definition, player, monster,
+                               engine.combat._combat_entity_refs(),
+                               SpellCastRequest(steps=[StepRequest(x=1), StepRequest(x=1)]))
+    engine._bind_spell_step_payment(execution)
+    execution.run_to_window()
+    assert len(execution._control_loop_frames) == 2
+    baseline = [(f["entry"], f["rounds"], f["before"]) for f in execution._control_loop_frames]
+    before = (player.current_mana, player.actions_used_this_round)
+    engine._push_spell_frame(execution)
+    engine.save_dir = str(tmp_path)
+    assert engine.save_game("nested")["success"]
+    loaded = GameEngine(autosave=False)
+    loaded.save_dir = str(tmp_path)
+    assert loaded.load_game("nested")["success"]
+    restored = loaded.combat._spell_stack[-1]["execution"]
+    assert [(f["entry"], f["rounds"], f["before"]) for f in restored._control_loop_frames] == baseline
+    assert (loaded.state.player.current_mana, loaded.state.player.actions_used_this_round) == before
+    result = _skip(loaded, "enemy:0")
+    assert result["success"], result
+    assert len(restored.results) == 6
+    assert loaded.state.player.actions_used_this_round == 6
