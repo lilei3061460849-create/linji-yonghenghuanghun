@@ -40,7 +40,7 @@ def _plight(name: str, hp=30, limit=120) -> Entity:
 # ========================================================================
 
 def test_evolution_skips_sealed_corpse_and_hits_living_namesake():
-    """正常路径：先封印同名尸体，活着的同名困境怪仍可进化。"""
+    """跳过同名尸体：选中活怪先付异变，满足救赎则不得继续借纹。"""
     engine = _engine("evo_happy")
     dead = _plight("孢子母体", hp=0, limit=252)
     dead.is_alive = False
@@ -52,9 +52,12 @@ def test_evolution_skips_sealed_corpse_and_hits_living_namesake():
         "monster": "孢子母体", "daowen": "杀伐", "x": 1,
     })
     assert r["success"], r
-    assert "杀伐" in live.dao_wen
-    assert "杀伐" not in dead.dao_wen
-    assert live.mutation_count == 5
+    assert r["interrupted_by_redemption"] and r["redemption"]["type"] == "redemption"
+    assert engine.state.pending_redemption["runtime_id"] == live.runtime_id
+    assert live.departure_reason == "救赎" and live.mutation_count == 5
+    assert id(live) in engine.combat._monster_evolved
+    assert "杀伐" not in live.dao_wen and "杀伐" not in dead.dao_wen
+    assert dead.mutation_count == 0 and id(dead) not in engine.combat._monster_evolved
 
 
 def test_evolution_two_living_namesakes_picks_first_alive():
@@ -68,8 +71,28 @@ def test_evolution_two_living_namesakes_picks_first_alive():
         "monster": "血肉巨囊", "daowen": "杀伐", "x": 1,
     })
     assert r["success"], r
-    assert "杀伐" in a.dao_wen
-    assert "杀伐" not in b.dao_wen
+    assert r["interrupted_by_redemption"] and r["redemption"]["type"] == "redemption"
+    assert engine.state.pending_redemption["runtime_id"] == a.runtime_id
+    assert a.mutation_count == 5 and a.departure_reason == "救赎"
+    assert id(a) in engine.combat._monster_evolved
+    assert b.mutation_count == 0 and b.is_alive and id(b) not in engine.combat._monster_evolved
+    assert "杀伐" not in a.dao_wen and "杀伐" not in b.dao_wen
+
+
+
+def test_evolution_ineligible_after_payment_still_borrows():
+    """异变45→50 超出救赎上限，原有借纹与每场一次账本仍然生效。"""
+    engine = _engine("evo_no_redemption")
+    live = _plight("孢子母体", hp=30, limit=252)
+    live.mutation_count = 45
+    engine.state.enemies = [live]
+    engine.state.phase = "in_combat"
+    result = engine.execute_action("declare_evolution", {
+        "monster": live.name, "daowen": "杀伐", "x": 1})
+    assert result["success"] and result["borrowed"] == {"name": "杀伐", "x": 1}
+    assert live.mutation_count == 50 and live.is_alive and not live.is_departed
+    assert "杀伐" in live.dao_wen and id(live) in engine.combat._monster_evolved
+    assert not engine.state.pending_redemption
 
 
 def test_evolution_only_corpses_rejected():
