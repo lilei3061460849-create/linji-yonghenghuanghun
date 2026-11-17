@@ -152,7 +152,7 @@ X_EFFECT_FIELDS = {
     "split_creations", "tamper_activations", "target_heal",
     "target_life_loss", "targets", "temp_hp", "transfer_daowen_count",
     "transfer_daowen_names", "transfer_status_count", "truth_sentences",
-    "convert_cost_layers", "cost_reductions", "layers",
+    "convert_cost_layers", "cost_reductions", "layers", "demand_amount",
     "discover_daowen",
 }
 
