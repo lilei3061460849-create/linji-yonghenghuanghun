@@ -72,17 +72,27 @@ class ResourceHandlersMixin:
             if unsupported:
                 return {"success": False,
                         "error": "怪物侧当前仅支持自定义遗物与法器；道纹和消耗品仍走各自既有规则"}
-        created: list[str] = []
+        # 先校验整批声明，再开始注册/授予。不能让后续非法项把前面的
+        # 成功项留在注册表或实体持有栏里，造成“动作失败但状态已改变”。
+        validated: list[dict] = []
+        seen_names: set[str] = set()
+        existing_names = self._builtin_resource_names()
+        existing_names.update(r.name for r in custom_resources.all_resources())
         for spec in payload:
             try:
-                builtin = self._builtin_resource_names()
-                name = spec.get("name") if isinstance(spec, dict) else None
-                if name in builtin:
+                normalized = custom_resources.validate_spec(spec)
+                name = normalized["name"]
+                if name in existing_names or name in seen_names:
                     return {"success": False,
-                            "error": f"【{name}】与现有资源重名：命名在全宇宙内唯一"}
-                resource = custom_resources.register(spec)
+                            "error": f"【{name}】与现有资源或本批声明重名：命名在全宇宙内唯一"}
+                seen_names.add(name)
+                validated.append(normalized)
             except custom_resources.CustomResourceError as exc:
                 return {"success": False, "error": f"声明被拒绝：{exc}"}
+
+        created: list[str] = []
+        for spec in validated:
+            resource = custom_resources.register(spec)
             if params.get("grant", True):
                 self._grant_custom_resource(resource, recipient=recipient)
             created.append(f"{resource.category}【{resource.name}】")
