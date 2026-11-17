@@ -485,7 +485,8 @@ class DaowenEffectMixin:
                         self._raw_hp_loss(entity, int(entity.current_hp) - target_hp)
                     effects.append({"type": "nixue_expired", "entity": entity.name,
                                     "hp_after": entity.current_hp})
-        if "借尸" in expired:
+        if ("借尸" in expired and entity.departure_reason != "救赎"
+                and not self.is_redemption_pending(entity)):
             snapshot = getattr(entity, "_jieshi_snapshot", None)
             if snapshot is not None:
                 del entity._jieshi_snapshot
@@ -738,6 +739,8 @@ class DaowenEffectMixin:
         refs = self._combat_entity_refs()
         destination = refs.get(calc.get("flow_target_ref")) if name == "流动" else None
         for recipient in recipients:
+            if recipient.departure_reason == "救赎" or self.is_redemption_pending(recipient):
+                continue
             tokens = calc.get("status_transfer_selected", {}).get(recipient.runtime_id, [])
             selected = [status for status in recipient.status_effects
                         if getattr(status, "_status_move_token", None) in tokens
@@ -749,6 +752,8 @@ class DaowenEffectMixin:
             if not selected:
                 continue
             if name == "流动" and (destination is None or not destination.is_alive
+                                   or destination.departure_reason == "救赎"
+                                   or self.is_redemption_pending(destination)
                                    or destination is recipient):
                 result["effects"].append({"type": "status_transfer_missed",
                                           "target": recipient.name,
@@ -1927,6 +1932,8 @@ class DaowenEffectMixin:
         if calc.get("tamper_activations", 0) > 0:
             amounts = wave_pieces.get("tamper_activations", [calc["tamper_activations"]])
             for recipient, amount in zip(wave_status_targets, amounts):
+                if not target_effect_allowed(recipient):
+                    continue
                 if amount <= 0:
                     continue
                 # 不同控制者的选择权不能同时成立：后生效者覆盖，不比较X。
@@ -1956,7 +1963,7 @@ class DaowenEffectMixin:
         # ---- 乱葬岗（二阶）专属道纹效果 ----
         # 删除【镇尸】：与【坏死】是同一效果的两套实现，
         # 保留【坏死】为「无法获得[回复]」的唯一入口。
-        if name == "勾魂" and calc.get("transfer_daowen_count"):
+        if name == "勾魂" and calc.get("transfer_daowen_count") and target_effect_allowed(target):
             # 【勾魂】（重做）：把[目标]的 X 种道纹整只转移
             # 到 1 个[造物]身上，持续∞（本场内不自动返回）。旧「无法获得
             # [法力]」效果整条撤销。造物已持有同名时该种不转移、留在目标身上；
@@ -2006,6 +2013,8 @@ class DaowenEffectMixin:
                 "copied_by_chutu": copied, "skipped_owned": skipped})
         if name == "冥气" and calc.get("speed_loss_speed_limit"):
             for st_target in wave_status_targets:
+                if not target_effect_allowed(st_target):
+                    continue
                 st_target.add_status(self._daowen_status(daowen_order=daowen_order, name="冥气", value=calc["speed_loss_speed_limit"],
                                                   remaining_rounds=calc.get("duration", 1),
                                                   source=caster.name))
@@ -2059,7 +2068,11 @@ class DaowenEffectMixin:
                 pieces = self._divide_flat(calc["self_attack_count"], len(wave_status_targets))
                 wave_pieces["self_attack_count"] = pieces
                 for wt, piece in zip(wave_status_targets, pieces):
+                    if not target_effect_allowed(wt):
+                        continue
                     for _ in range(piece):
+                        if not target_effect_allowed(wt):
+                            break
                         result["effects"].append({"type": "self_attack", "target": wt.name,
                             **self._apply_hostile_damage(wt, wt.attack_power, source=wt, ctx={
                                 "timing": "player_action" if caster is self.state.player else "monster_action",
@@ -2069,6 +2082,8 @@ class DaowenEffectMixin:
                             })})
             else:
                 for _ in range(calc["self_attack_count"]):
+                    if not target_effect_allowed(target):
+                        break
                     result["effects"].append({"type": "self_attack", "target": target.name,
                         **self._apply_hostile_damage(target, target.attack_power, source=target, ctx={
                             "timing": "player_action" if caster is self.state.player else "monster_action",
@@ -2076,7 +2091,7 @@ class DaowenEffectMixin:
                             "mechanic": "damage", "subtype": "self_attack", "amount": target.attack_power,
                             "tags": {"daowen", "self_damage"},
                         })})
-        if calc.get("delay_monster_reentry"):
+        if calc.get("delay_monster_reentry") and (target is None or target_effect_allowed(target)):
             # 【封印X】：目标由 use_daowen 的显式 target_ref/target 绑定，进入暂离队列。
             # 暂离不写离场/死亡上下文，也不产生碎片分类。
             #
@@ -2120,7 +2135,7 @@ class DaowenEffectMixin:
             result["effects"].append({
                 "type": "bizhong_charges", "count": gained, "entity": caster.name})
 
-        if name == "冰冻":
+        if name == "冰冻" and (target is None or target_effect_allowed(target)):
             selected = list(calc.get("freeze_daowen") or [])
             for daowen_name in selected:
                 target.dao_wen[daowen_name].ice_frozen = True
@@ -2180,16 +2195,18 @@ class DaowenEffectMixin:
                 status_name = "无限法限"
             else:
                 status_name = name
-            if self_targeted:
+            if self_targeted and target_effect_allowed(caster):
                 et = caster
                 et.add_status(self._daowen_status(daowen_order=daowen_order, name=status_name,
                     remaining_rounds=duration, value=x, source=caster.name,
                     effect_data={"source_daowen": name}))
                 result["effects"].append({"type": "status_added", "target": et.name,
                                           "status": status_name, "duration": duration, "value": x})
-            else:
+            elif not self_targeted:
                 # 波及：状态类效果对每个拥有波及效果的目标（含本次[目标]）原样生效。
                 for et in wave_status_targets:
+                    if not target_effect_allowed(et):
+                        continue
                     if not target_effect_allowed(et) or not et.is_alive:
                         continue
                     et.add_status(self._daowen_status(daowen_order=daowen_order, name=status_name,
@@ -2202,6 +2219,8 @@ class DaowenEffectMixin:
             # 次数只在目标即将进入普通/额外回合时消费；不能随本次施加后的
             # 当前回终或普通状态递减再自动扣一次。
             for et in wave_status_targets:
+                if not target_effect_allowed(et):
+                    continue
                 for status in et.get_status_effects("沉溺"):
                     status.effect_data["manual_round_countdown"] = True
 
@@ -2211,6 +2230,8 @@ class DaowenEffectMixin:
         if name == "回响":
             amounts = wave_pieces.get("extend_duration", [calc["extend_duration"]])
             for recipient, amount in zip(wave_status_targets, amounts):
+                if not target_effect_allowed(recipient):
+                    continue
                 selected_id = calc.get("huixiang_selected", {}).get(recipient.runtime_id)
                 status = None if selected_id is None else next(
                     (s for s in recipient.status_effects
@@ -2237,12 +2258,14 @@ class DaowenEffectMixin:
         if name == "大梦" and calc.get("extra_target_rounds"):
             # 大梦：目标额外经历回合，推进目标回合事件、凡庸与自身限时状态。
             for st_target in wave_status_targets:
+                if not target_effect_allowed(st_target):
+                    continue
                 if not target_effect_allowed(st_target) or not st_target.is_alive:
                     continue
                 advanced = self.advance_target_rounds(st_target, int(calc["extra_target_rounds"]), source="大梦")
                 result["effects"].extend(advanced)
 
-        if name == "怜悯":
+        if name == "怜悯" and (target is None or target_effect_allowed(target)):
             kind = calc.get("blocked_payment_type")
             if not kind:
                 raise ValueError("怜悯缺少封锁的支付途径")
@@ -2256,7 +2279,7 @@ class DaowenEffectMixin:
                                       "blocked_type": kind,
                                       "duration": calc.get("duration", x)})
 
-        if name == "迟滞":
+        if name == "迟滞" and (target is None or target_effect_allowed(target)):
             # 【迟滞】：每一次行动所需出手+1（含闪避/招架这类零出手的回合外行动）。
             if target is None:
                 raise ValueError("迟滞需要显式目标")
@@ -2269,7 +2292,7 @@ class DaowenEffectMixin:
             result["effects"].append({"type": "action_cost_penalty", "target": target.name,
                                       "penalty": penalty, "duration": duration})
 
-        if name == "操纵":
+        if name == "操纵" and (target is None or target_effect_allowed(target)):
             # 【操纵】（，旧【操作】改名）：把目标接下来 **X 次**
             # 非施法行动交给施法者控制。指令由状态记录，每执行一次扣 1 次名额。
             # 未给指令时 order=None——到目标该行动时作废，代价不退。
@@ -2289,7 +2312,7 @@ class DaowenEffectMixin:
                                       "caster": caster.name, "order": order,
                                       "uses": uses})
 
-        if name == "饥饿":
+        if name == "饥饿" and (target is None or target_effect_allowed(target)):
             # 【饥饿】（，补回漏项）：使[目标]的[血限]等同其当前
             # 生命，持续X；到期把施加前的[血限]还原。血限下降走统一入口，压到当前
             # 生命以下才会产生"失去生命"窗口——这里恰好压到当前生命，不会掉血。
@@ -2318,7 +2341,7 @@ class DaowenEffectMixin:
                 "blood_limit": new_limit, "previous_blood_limit": previous_limit,
                 "duration": duration})
 
-        if name == "扭曲":
+        if name == "扭曲" and (target is None or target_effect_allowed(target)):
             # 【扭曲】（新增）：目标累积治疗量翻倍X次（×2^X）。
             # 累积治疗量就是[癌变]用的 total_healed；翻倍后立即按阈值复核一次，
             # 否则"把对手推过癌变线"这条唯一意义会被拖到下一次回复才兑现。
@@ -2335,7 +2358,7 @@ class DaowenEffectMixin:
             if cancer:
                 result["effects"].append({"type": "cancer_check", "result": cancer})
 
-        if name == "淬火":
+        if name == "淬火" and (target is None or target_effect_allowed(target)):
             # 【淬火】：目标所有消耗品当前耐久 +X，不超过各自的耐久上限。
             # 2026-11-10 取消抬耐久上限：满耐久条目淬火无收益，当前耐久只向上
             # 钳到既有 max_uses，上限本身不变（与 docstring/正文/索引口径一致）。
@@ -2356,7 +2379,7 @@ class DaowenEffectMixin:
                 "type": "consumable_durability_gain", "target": target.name,
                 "gain": gain, "items": touched})
 
-        if name in ("炽热", "熔化"):
+        if name in ("炽热", "熔化") and (target is None or target_effect_allowed(target)):
             # 【炽热】【熔化】（实装）：
             #   炽热：目标所有消耗品当前耐久 -X，最低 0，条目保留（0 耐久只是不能用）。
             #   熔化：直接销毁目标当前耐久 ≤ X 的条目（含 0 耐久），切断后续恢复/同名合并。
@@ -2398,7 +2421,7 @@ class DaowenEffectMixin:
             self._offer_forge_discovery(caster, uses, result)
 
         # ---- 2026-11-08 四副本补齐道纹结算 ----
-        if name == "重铸":
+        if name == "重铸" and (target is None or target_effect_allowed(target)):
             # 【重铸】：选中条目的当前耐久与耐久上限同取 X～2X 的随机整数。
             items = self._consumable_holder_list(target)
             item = next((i for i in items if i.name == calc.get("recast_item_name")), None)
@@ -2416,7 +2439,7 @@ class DaowenEffectMixin:
                 "type": "consumable_recast", "target": target.name, "item": item.name,
                 "durability": rolled, "max_durability": rolled})
 
-        if name == "回炉":
+        if name == "回炉" and (target is None or target_effect_allowed(target)):
             # 【回炉】：销毁选中条目，再为[目标]发现 1 个耐久为 X 的消耗品（锻造同池）。
             items = self._consumable_holder_list(target)
             item = next((i for i in items if i.name == calc.get("reforge_destroy_item_name")), None)
@@ -2469,8 +2492,12 @@ class DaowenEffectMixin:
                 "merged": [e.name for e in merged_away],
                 "blood_limit": survivor.blood_limit, "current_hp": survivor.current_hp,
                 "attack_power": survivor.attack_power, "attack_count": survivor.attack_count})
+            # 合体各面板、状态及其他造物离场是同一原子操作。
+            redemption = self.check_redemption(survivor)
+            if redemption:
+                result["effects"].append(redemption)
 
-        if name == "立冢":
+        if name == "立冢" and (target is None or target_effect_allowed(target)):
             # 【立冢】：以[目标]为模板生成 X 具已击灭的尸体（写入尸体账本，
             # 供【招魂】【借尸】使用；不触发任何死亡结算）。
             if not getattr(self.state, "dead_monsters", None):
@@ -2500,6 +2527,8 @@ class DaowenEffectMixin:
             if corpse is None:
                 raise ValueError("【借尸】选中的尸体已不存在")
             for recipient in wave_status_targets:
+                if not target_effect_allowed(recipient):
+                    continue
                 if not recipient.is_alive:
                     continue
                 if not hasattr(recipient, "_jieshi_snapshot"):
@@ -2531,6 +2560,8 @@ class DaowenEffectMixin:
             # 【逆血】（承原【永生】草案互换口径）：当前生命与已损生命互换，
             # 最低保留 1；增加按回复、减少按失血结算；到期恢复互换前记录值。
             for recipient in wave_status_targets:
+                if not target_effect_allowed(recipient):
+                    continue
                 if not recipient.is_alive:
                     continue
                 pre_swap = int(recipient.current_hp)
@@ -2544,6 +2575,8 @@ class DaowenEffectMixin:
                     self.state.apply_heal(recipient, new_hp - pre_swap)
                 elif new_hp < pre_swap:
                     self._raw_hp_loss(recipient, pre_swap - new_hp)
+                if not target_effect_allowed(recipient):
+                    continue
                 recipient.add_status(self._daowen_status(
                     daowen_order=daowen_order, name="逆血", value=x,
                     remaining_rounds=calc.get("duration", x), source=caster.name,
@@ -2557,6 +2590,8 @@ class DaowenEffectMixin:
             # 【初拥】：与施法者建立生命/血限同步关系（立即对齐一次，
             # 持续期间每逢回合结算再对齐，见 _sync_chuyong 调用点）。
             for recipient in wave_status_targets:
+                if not target_effect_allowed(recipient):
+                    continue
                 if not recipient.is_alive or recipient is caster:
                     continue
                 recipient.add_status(self._daowen_status(
@@ -2571,7 +2606,7 @@ class DaowenEffectMixin:
                     "current_hp": recipient.current_hp,
                     "duration": calc.get("duration", x)})
 
-        if name == "索取":
+        if name == "索取" and (target is None or target_effect_allowed(target)):
             # 【索取】：[目标]被迫支付 X 点所选资源，施法者获得其实际支付量。
             kind = calc.get("demand_resource_type", "法力")
             payment = self.pay_resource(
@@ -2587,7 +2622,7 @@ class DaowenEffectMixin:
                 "resource": kind, "demanded": int(calc.get("demand_amount", x)),
                 "paid": paid, "gained": gained, "gainer": caster.name})
 
-        if name == "感染":
+        if name == "感染" and (target is None or target_effect_allowed(target)):
             # 【感染】：把选中的道纹替换为【感染】并保留原实例（供尘封图书馆
             # 恢复）；目标身上有【出土】余次时按次保留原道纹、只追加【感染】。
             originals = target.__dict__.setdefault("infected_daowen_originals", {})
@@ -2615,7 +2650,7 @@ class DaowenEffectMixin:
                 "type": "daowen_infected", "target": target.name,
                 "infected": infected, "preserved_by_chutu": preserved})
 
-        if name == "原初":
+        if name == "原初" and (target is None or target_effect_allowed(target)):
             # 【原初】：从[目标]未被自身拥有的道纹中随机借走 X 种（借用期间
             # 真正持有可发动；不占承载页，与【豪夺】夺取同口径）。
             candidates = [n for n in target.dao_wen if n not in caster.dao_wen]
@@ -2640,7 +2675,7 @@ class DaowenEffectMixin:
                 "type": "daowen_borrowed", "target": target.name,
                 "borrower": caster.name, "borrowed": borrowed})
 
-        if name == "病变":
+        if name == "病变" and (target is None or target_effect_allowed(target)):
             # 【病变】：先按【净化】同口径退掉源代价层数，再把等量层数
             # 作为目标代价真正压到[目标]身上（两侧都走可逆代价账本）。
             src, dst = calc["convert_cost_from"], calc["convert_cost_to"]
@@ -2744,17 +2779,23 @@ class DaowenEffectMixin:
         # 逆鳞X：目标每失去1HP积1层，下次伤害+全部层后清空，持续X（已通过 duration 加状态，此处初始化计数）
         if name == "逆鳞":
             for st_target in wave_status_targets:
+                if not target_effect_allowed(st_target):
+                    continue
                 if not hasattr(st_target, "_nilin"):
                     st_target._nilin = 0
                 result["effects"].append({"type": "nilin_setup", "target": st_target.name, "x": x})
         # 伤痕X：目标每次掉血后血限-X，永久（已通过 duration 加伤痕状态，此处仅补日志）
         elif name == "伤痕":
             for st_target in wave_status_targets:
+                if not target_effect_allowed(st_target):
+                    continue
                 result["effects"].append({"type": "shanghen", "target": st_target.name, "x": x})
 
         # 抵扣X（旧名）：封印[目标]拥有的一件遗物，持续X
         if name == "抵扣":
             for st_target in wave_status_targets:
+                if not target_effect_allowed(st_target):
+                    continue
                 sealed = self._seal_one_relic(st_target, x)
                 result["effects"].append({"type": "dikou", "target": st_target.name,
                                           "sealed": sealed or None, "rounds": x})
@@ -2766,6 +2807,8 @@ class DaowenEffectMixin:
             wanted = str(calc.get("haoduo_relic_name") or "")
             wanted_kind = str(calc.get("haoduo_item_kind") or "relic")
             for st_target in wave_status_targets:
+                if not target_effect_allowed(st_target):
+                    continue
                 pool = self._item_steal_candidates(st_target)
                 names = [n for _k, n in pool]
                 if not pool or st_target is not target:

@@ -474,3 +474,92 @@ def test_evolution_mutation_cost_checks_before_borrowing(monkeypatch):
     assert outcome["success"] and outcome["interrupted_by_redemption"]
     assert m.mutation_count == 45 and m.departure_reason == "救赎"
     assert "加害" not in m.dao_wen and id(m) in e.combat._monster_evolved
+
+
+def test_compound_named_status_does_not_affect_redeemed_target():
+    e = _ready_combat(_engine("compound_named_status"))
+    m = monster("目标")
+    m.mutation_count = 50
+    e.state.enemies[:] = [m]
+    e.combat.apply_daowen_effect(
+        "怜悯", {"x": 1, "mutation_reduction": 1, "blocked_payment_type": "生命"},
+        e.state.player, m)
+    assert m.departure_reason == "救赎" and not m.has_status("怜悯")
+
+
+def test_compound_wave_named_status_keeps_other_target():
+    from engine.models import StatusEffect
+
+    e = _ready_combat(_engine("compound_wave_named_status"))
+    m, other = monster("目标"), monster("其他")
+    m.mutation_count = 50
+    other.current_hp = 80
+    other.add_status(StatusEffect("波及", remaining_rounds=-1, source=e.state.player.name))
+    e.state.enemies[:] = [m, other]
+    e.combat.apply_daowen_effect(
+        "冥气", {"x": 2, "mutation_reduction": 2, "speed_loss_speed_limit": 1, "duration": 2},
+        e.state.player, m)
+    assert m.departure_reason == "救赎" and not m.has_status("冥气")
+    assert other.has_status("冥气")
+
+
+def test_ordinary_consumable_mutation_triggers_redemption():
+    from engine.models import Consumable
+    from engine.npc_consumables import consume_ordinary
+
+    e = _ready_combat(_engine("consumable_mutation"))
+    m = monster("用药怪")
+    m.mutation_count = 40
+    e.state.enemies[:] = [m]
+    item = Consumable("异变药", "获得异变1", 1, 1)
+    outcome = consume_ordinary(e.combat, item, m)
+    assert outcome["result"]["redemption"]["type"] == "redemption"
+    assert m.mutation_count == 41 and item.current_uses == 0
+
+
+def test_grenade_does_not_debuff_redeemed_target():
+    from engine.models import Consumable
+    from engine.npc_consumables import consume_tool
+
+    e = _ready_combat(_engine("grenade_redemption"))
+    m = monster("手雷目标")
+    m.current_hp = 30
+    e.state.enemies[:] = [m]
+    item = Consumable("高爆手雷", "", 1, 1)
+    outcome = consume_tool(e.combat, item, {"target_ref": "enemy:0"}, e.state.player, [m])
+    assert m.departure_reason == "救赎" and not m.has_status("手雷减攻")
+    assert outcome["result"]["nade_minus"] == 0 and item.current_uses == 0
+
+
+def test_water_gun_removes_infinite_blood_limit_before_redemption():
+    from engine.models import Consumable, StatusEffect
+    from engine.npc_consumables import consume_tool
+
+    e = _ready_combat(_engine("watergun_redemption"))
+    m = monster("水枪目标")
+    m.blood_limit, m.current_hp = 1, 2
+    m.add_status(StatusEffect("无限血限", remaining_rounds=2))
+    e.state.enemies[:] = [m]
+    item = Consumable("高压水枪", "", 1, 1)
+    outcome = consume_tool(e.combat, item, {}, e.state.player, [m])
+    assert outcome["success"] and m.current_hp == 1 and m.departure_reason == "救赎"
+
+
+def test_merge_creation_checks_after_all_panels_and_departures():
+    from engine.models import StatusEffect
+
+    e = _ready_combat(_engine("merge_redemption"))
+    m = monster("合体怪")
+    m.current_hp = 21
+    m.add_status(StatusEffect("化尸", remaining_rounds=2))
+    creation = Entity("待合并", "造物", blood_limit=100, current_hp=1,
+                      attack_count=2, attack_power=3)
+    caster = Entity("施法怪", "怪物", blood_limit=100, current_hp=100,
+                    attack_count=1, attack_power=1)
+    e.state.enemies[:] = [caster, m, creation]
+    result = e.combat.apply_daowen_effect(
+        "合体", {"x": 2, "merge_creations": 2,
+                 "merge_creation_ids": [m.runtime_id, creation.runtime_id]}, caster, m)
+    assert (m.blood_limit, m.current_hp, m.attack_power, m.attack_count) == (200, 22, 4, 3)
+    assert creation.departure_reason == "合体" and m.departure_reason == "救赎"
+    assert any(item.get("type") == "redemption" for item in result["effects"])

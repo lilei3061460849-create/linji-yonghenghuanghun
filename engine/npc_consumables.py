@@ -101,9 +101,10 @@ def consume_tool(combat, item, params, actor, opponents):
     elif name == "高压水枪":
         cleared = []
         for m in opponents:
-            before = len(m.status_effects)
+            removed = [s for s in m.status_effects if s.remaining_rounds > 0]
             m.status_effects = [s for s in m.status_effects if s.remaining_rounds <= 0]
-            if len(m.status_effects) != before:
+            if removed:
+                combat._settle_removed_statuses(m, removed, moving=False)
                 cleared.append(m.name)
         result.update({"cleared_enemies": cleared})
     # 5. 储能电池：使用后立即获得12法力
@@ -146,8 +147,11 @@ def consume_tool(combat, item, params, actor, opponents):
             "amount": 15, "tags": {"consumable"},
         })
         # 攻击次数-1：用状态标记，本回合内 _monster_attack_actions 会读取
-        target.add_status(StatusEffect(name="手雷减攻", value=1, remaining_rounds=1, source="高爆手雷"))
-        result.update({"target": target.name, "damage": 15, "detail": detail, "nade_minus": 1})
+        can_apply = target.departure_reason != "救赎" and not combat.is_redemption_pending(target)
+        if can_apply:
+            target.add_status(StatusEffect(name="手雷减攻", value=1, remaining_rounds=1, source="高爆手雷"))
+        result.update({"target": target.name, "damage": 15, "detail": detail,
+                       "nade_minus": int(can_apply)})
     else:
         result.update({"note": "未知工具"})
     return {"success": True, "action": f"使用工具【{name}】", "result": result, "state": combat._get_combat_state()}
@@ -307,11 +311,13 @@ def consume_ordinary(combat, item, actor):
                 mutation_info["note"] = (
                     f"异变达{mut['mutation_total']}层触发【迷失】，"
                     f"身边无可战之敌，{actor.name}直接命零")
+    redemption = combat.check_redemption(actor) if mutation_info and actor else None
     return {
         "success": True,
         "action": f"使用消耗品【{item.name}】",
         "result": {
             "effect": item.effect,
+            "redemption": redemption,
             "uses_remaining": remaining,
             "is_depleted": item.is_depleted,
             "heal": heal_info,
