@@ -1612,7 +1612,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                     redemption = self.check_redemption(target)
                     if redemption:
                         effects.append(redemption)
-                if not target.is_alive or self.is_redemption_pending(target):
+                if target.departure_reason == "救赎" or self.is_redemption_pending(target):
                     continue
                 effects.extend(self._dispatch_phase(Phase.ROUND_END_POST_MEDIOCRITY, target=target))
                 effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=target))
@@ -1788,7 +1788,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                 redemption = self.check_redemption(entity)
                 if redemption:
                     effects.append(redemption)
-            if not entity.is_alive or self.is_redemption_pending(entity):
+            if entity.departure_reason == "救赎" or self.is_redemption_pending(entity):
                 continue
             # 通用回终对账相位，保留锚点，不再注册清算对账。
             effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=entity))
