@@ -56,6 +56,7 @@ from .mechanisms import (
     apply_verb, relic_active, verb_names,
 )
 from .enums import normalize_payment_type, RESOURCE_TYPES
+from . import derivatives as derivative_rules
 
 CATEGORIES = ("道纹", "遗物", "法器", "消耗品")
 
@@ -193,6 +194,16 @@ def validate_spec(spec: dict) -> dict:
 
     if category == "道纹":
         _require(len(name) == 2, f"道纹名称仅二字，收到「{name}」（{len(name)} 字）")
+        base_daowen = spec.get("base_daowen")
+        _require(isinstance(base_daowen, str) and base_daowen.strip(),
+                 "自定义道纹必须指定 base_daowen（非衍生基础道纹）")
+        from .daowen import DaoWenEngine
+        DaoWenEngine.register_all()
+        _require(base_daowen in DaoWenEngine._registry,
+                 f"基础道纹【{base_daowen}】不存在")
+        _require(not derivative_rules.is_derivative(base_daowen),
+                 f"基础道纹【{base_daowen}】属于衍生道纹，不能作为自定义道纹母本")
+        spec["base_daowen"] = base_daowen.strip()
         cost = spec.get("cost")
         _require(isinstance(cost, dict), "道纹必须声明 cost")
         _require(cost.get("type") in SUPPORTED_COST_TYPES,
@@ -412,6 +423,8 @@ def clear() -> None:
     for resource in list(_REGISTRY.values()):
         if resource.mechanism is not None:
             MECHANISMS.unregister(resource.mechanism.name)
+        if resource.category == "道纹":
+            derivative_rules.unregister_custom_derivative(resource.name)
     _REGISTRY.clear()
     _CUSTOM_DAOWEN.clear()
 
@@ -474,6 +487,8 @@ def _daowen_calculator(spec: dict) -> Callable[..., dict]:
         cost_amount = evaluate(cost.get("amount", "X"), x)
         calc = {
             "dao_wen": name,
+            "derivative_of": spec["base_daowen"],
+            "custom_derivative": True,
             "x": x,
             "cost_type": "消耗" if cost["type"] == "法力" else cost["type"],
             "cost": cost_amount,
@@ -513,6 +528,7 @@ def register(spec: dict) -> CustomResource:
 
     resource = CustomResource(spec=spec)
     if spec["category"] == "道纹":
+        derivative_rules.register_custom_derivative(name, spec["base_daowen"])
         install_daowen_bridge()
         _CUSTOM_DAOWEN[name] = _daowen_calculator(spec)
         from .daowen import DaoWenEngine
