@@ -716,3 +716,28 @@ def test_compound_heal_redeems_before_following_mutation_and_shield():
     assert (m.current_hp, m.mutation_count, m.shield) == (11, 49, 0)
     assert m.departure_reason == "救赎"
     assert [effect["type"] for effect in result["effects"]][:2] == ["heal", "redemption"]
+
+
+def test_immortality_converted_damage_heal_checks_redemption():
+    from engine.models import StatusEffect
+    e = _ready_combat(_engine("immortal_heal_redemption"))
+    m = monster("永生回复")
+    m.current_hp = 10
+    m.add_status(StatusEffect("永生", remaining_rounds=2))
+    e.state.enemies[:] = [m]
+    result = e.combat._apply_hostile_damage(m, 1, source=e.state.player)
+    assert result["converted_to_heal"] and result["heal"]["actual_heal"] == 1
+    assert result["redemption"]["type"] == "redemption" and m.current_hp == 11
+
+
+def test_consumable_heal_redeems_before_following_mutation():
+    from engine.models import Consumable
+    from engine.npc_consumables import consume_ordinary
+    e = _ready_combat(_engine("item_heal_redemption"))
+    m = monster("回复异变药")
+    m.current_hp = 10
+    e.state.enemies[:] = [m]
+    item = Consumable("复合药", "恢复1生命，获得异变1", 1, 1)
+    result = consume_ordinary(e.combat, item, m)
+    assert result["result"]["redemption"]["type"] == "redemption"
+    assert m.current_hp == 11 and m.mutation_count == 49 and item.current_uses == 0

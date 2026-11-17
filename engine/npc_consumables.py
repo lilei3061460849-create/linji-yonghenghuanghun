@@ -237,6 +237,7 @@ def consume_ordinary(combat, item, actor):
     mutation_info = None
     heal_info = None
     cancer_info = None
+    redemption = None
     if actor:
         if heal_match:
             amount = int(heal_match.group(1))
@@ -251,8 +252,11 @@ def consume_ordinary(combat, item, actor):
                 if not actor.is_alive and not combat.state.last_death_cause:
                     if actor is combat.state.player:
                         combat.state.last_death_cause = "cancer"
+            if heal_info.get("actual_heal", 0) > 0 and actor.is_alive:
+                redemption = combat.check_redemption(actor)
     mut_match = re.search(r"获得异变(\d+)", effect)
-    if mut_match and actor:
+    if (mut_match and actor and actor.is_alive and not actor.is_departed
+            and not combat.is_redemption_pending(actor)):
         layers = int(mut_match.group(1))
         mut = actor.add_mutation(layers)
         mutation_info = {
@@ -311,7 +315,8 @@ def consume_ordinary(combat, item, actor):
                 mutation_info["note"] = (
                     f"异变达{mut['mutation_total']}层触发【迷失】，"
                     f"身边无可战之敌，{actor.name}直接命零")
-    redemption = combat.check_redemption(actor) if mutation_info and actor else None
+    if mutation_info and actor:
+        redemption = combat.check_redemption(actor) or redemption
     return {
         "success": True,
         "action": f"使用消耗品【{item.name}】",
@@ -342,10 +347,12 @@ def consume_infinite_meat(combat, item, actor):
     })
     actor.total_healed = before_total
     actor.healed_this_battle = before_battle_total
+    redemption = (combat.check_redemption(actor)
+                  if heal.get("actual_heal", 0) > 0 and actor.is_alive else None)
     return {
         "success": True,
         "action": f"使用消耗品【{item.name}】",
-        "result": {"uses_remaining": remaining, "heal": heal,
+        "result": {"uses_remaining": remaining, "heal": heal, "redemption": redemption,
                    "excluded_from_cancer_accumulation": True},
         "state": combat._get_combat_state(),
     }

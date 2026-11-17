@@ -622,9 +622,13 @@ class DamageDeathMixin:
         # 回复照常过统一回复口（【坏死】等回复封锁照旧生效）。
         if amount > 0 and damage_type != "代价" and target.has_status("永生"):
             healed = self.state.apply_heal(target, amount, ctx=damage_ctx)
+            cancer = self.check_cancer(target)
+            redemption = (self.check_redemption(target)
+                          if healed.get("actual_heal", 0) > 0 and target.is_alive else None)
             return {"raw_damage": amount, "actual_damage": 0, "shield_absorbed": 0,
                     "hp_after": target.current_hp, "died": False,
-                    "converted_to_heal": True, "heal": healed}
+                    "converted_to_heal": True, "heal": healed,
+                    "cancer": cancer, "redemption": redemption}
         # 【强光探照灯·蒙蔽】：持有「蒙蔽」状态的施害者接下来N次「造成的伤害」
         # 无效——统一伤害入口拦截，凡能造成伤害的都算（普攻/道纹/法术步骤/消耗品）。
         # 每个伤害实例消耗1层；直接失血与代价不是伤害，不在此拦截。
