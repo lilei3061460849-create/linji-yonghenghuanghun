@@ -420,7 +420,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "run_decisions": dict(execution._run_decisions),
                 "branch_trace": list(execution._branch_trace),
                 "frozen_at_start": dict(execution._frozen_at_start),
-                "loop_start_fingerprint": execution._loop_start_fingerprint,
                 "control_loop_frames": copy.deepcopy(execution._control_loop_frames),
                 "loop_stop_reason": execution.loop_stop_reason,
                 "loop_iterations": execution.loop_iterations,
@@ -432,37 +431,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "huangfu_temp_granted": list(frame.get("huangfu_temp_granted", [])),
             })
         return frames
-
-    @staticmethod
-    def _preflight_legacy_spell_frames(state, dice, frames) -> None:
-        """在隔离状态重建旧暂停帧，拒绝不能可靠重放的档案。"""
-        if not any(frame.get("branch_trace") is None or
-                   frame.get("control_loop_frames") is None for frame in frames):
-            return
-        state_copy = copy.deepcopy(state)
-        probe = CombatEngine(state_copy, copy.deepcopy(dice))
-        groups = {"player": [state_copy.player] if state_copy.player else [],
-                  "friend": state_copy.friends, "employee": state_copy.employees,
-                  "temp_friend": state_copy.temp_friends, "enemy": state_copy.enemies}
-        entities = {(kind, i): entity for kind, group in groups.items()
-                    for i, entity in enumerate(group)}
-        refs = probe._combat_entity_refs()
-        for frame in frames:
-            if frame.get("branch_trace") is not None and frame.get("control_loop_frames") is not None:
-                continue
-            caster = entities.get(frame.get("caster_key"))
-            if caster is None:
-                raise ValueError("存档中的施法者已不在战斗实体表中")
-            attacker = entities.get(frame.get("attacker_key"))
-            execution = SpellExecution(
-                engine=probe, definition=copy.deepcopy(frame["definition"]), caster=caster,
-                attacker=attacker, refs=refs, request=copy.deepcopy(frame["request"]),
-                trigger_label="瞬发", policy=probe.CAST_STEP_POLICY,
-                target_resolver=probe._instant_target_resolver(attacker))
-            execution.restore_paused(frame["results"], frame["run_decisions"],
-                                     frame.get("branch_trace"), frame.get("frozen_at_start"),
-                                     frame.get("loop_start_fingerprint"),
-                                     frame.get("control_loop_frames"))
 
     def _snapshot_combat_runtime(self) -> dict:
         """保存不在GameState内、但会被行动修改的战斗运行态，供失败事务回滚。"""
@@ -539,9 +507,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 target_resolver=resolver,
             )
             execution.restore_paused(saved["results"], saved["run_decisions"],
-                                     saved.get("branch_trace"), saved.get("frozen_at_start"),
-                                     saved.get("loop_start_fingerprint"),
-                                     saved.get("control_loop_frames"))
+                                     saved["branch_trace"], saved["frozen_at_start"],
+                                     saved["control_loop_frames"])
             execution.loop_stop_reason = saved.get("loop_stop_reason", "")
             self._bind_spell_step_payment(execution)
             self.combat._spell_stack.append({
@@ -4751,7 +4718,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
 
     # ==================== 存档系统 ====================
 
-    SAVE_FORMAT_VERSION = 5
+    SAVE_FORMAT_VERSION = 6
 
     def _migrate_legacy_daowen_status_order(self) -> None:
         """迁移旧 pickle：补齐历史碎片峰值与道纹序列字段，优先从状态来源角色恢复道纹位置。"""
@@ -4867,21 +4834,10 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             restored = pickle.loads(base64.b64decode(save_data["payload"].encode("ascii")))
             if not isinstance(restored.get("state"), GameState) or not isinstance(restored.get("dice"), DiceEngine):
                 return {"success": False, "error": "存档内容类型无效"}
-            # 在替换当前游戏状态之前检查旧暂停循环档是否有轮初状态；
-            # 不能用暂停时的战场猜测轮初，否则会错误触发无净变化中断。
             for frame in restored.get("combat_runtime", {}).get("spell_stack", []):
-                results = frame.get("results") or []
-                if (results and getattr(results[-1], "iteration", 0)
-                        and not frame.get("control_loop_frames")
-                        and frame.get("loop_start_fingerprint") is None):
-                    return {"success": False, "error": "旧暂停存档缺少循环轮初快照，无法可靠恢复；"
-                            "请保留原存档；旧版继续结算也可能误判"}
-            try:
-                self._preflight_legacy_spell_frames(
-                    restored["state"], restored["dice"],
-                    restored.get("combat_runtime", {}).get("spell_stack", []))
-            except ValueError as exc:
-                return {"success": False, "error": f"旧暂停存档无法可靠恢复: {exc}"}
+                if any(key not in frame or frame[key] is None for key in
+                       ("branch_trace", "frozen_at_start", "control_loop_frames")):
+                    return {"success": False, "error": "暂停施法存档缺少新格式数据"}
         except Exception as exc:
             return {"success": False, "error": f"存档损坏: {exc}"}
 

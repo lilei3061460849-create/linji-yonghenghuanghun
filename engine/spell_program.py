@@ -45,7 +45,7 @@ Node = Union[Action, Condition, Jump, WaitEvent, Stop]
 
 @dataclass(frozen=True)
 class LoopRegion:
-    """旧循环兼容的内部元数据，非玩家可见节点。"""
+    """循环区域的内部元数据，非玩家可见节点。"""
     entry: str
     backedge: str
     exit: str
@@ -182,8 +182,8 @@ class ProgramCursor:
         return None
 
 
-def compile_legacy(steps):
-    """将旧 AST 编译为回边图；未知节点显式报错。"""
+def compile_program(steps):
+    """将 DSL 语法树编译为回边图；未知节点显式报错。"""
     from .spell_dsl import IfStep, LoopStep
 
     def check_supported(items, prefix=""):
@@ -197,7 +197,7 @@ def compile_legacy(steps):
             elif isinstance(item, LoopStep):
                 check_supported(item.body, path + "L")
             else:
-                raise ValueError(f"旧法术节点{path}的类型{type(item).__name__}无法编译为流程图")
+                raise ValueError(f"法术节点{path}的类型{type(item).__name__}无法编译为流程图")
 
     check_supported(steps)
     nodes = [Stop("$end")]
@@ -224,7 +224,7 @@ def compile_legacy(steps):
                 nodes.append(Jump(key, body))
                 loops.append(LoopRegion(key, back, dest, item.max_iterations))
             else:
-                raise TypeError(f"不支持的旧法术步骤: {type(item).__name__}")
+                raise TypeError(f"不支持的法术步骤: {type(item).__name__}")
             dest = key
         return dest
 
