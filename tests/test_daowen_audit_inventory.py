@@ -55,6 +55,13 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
             self.assertEqual(by_name[name]['review'], '暂未发现结构违规')
             self.assertNotIn('后续事件触发/改写', by_name[name]['tags'])
 
+    def test_truth_is_immediate_adjudication_with_persistent_duration(self):
+        row = next(r for r in self.rows if r['name'] == '真理')
+        self.assertEqual(row['review'], '暂未发现结构违规')
+        self.assertNotIn('状态边界待裁定', row['tags'])
+        self.assertIn('发动时一次性提出', row['note'])
+        self.assertIn('未来发言监听', row['note'])
+
     def test_shelter_is_a_pure_count_based_protection(self):
         by_name = {r['name']: r for r in self.rows}
         self.assertEqual(by_name['庇护']['review'], '暂未发现结构违规')
