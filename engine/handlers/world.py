@@ -1040,6 +1040,33 @@ class WorldHandlersMixin:
                 "恶魔医务室": ("恶魔医务室", "手术灯仍在运转，器械台上摆着不该存在的工具。"),
             }
             event_labels = {**generic_event_labels, **twisted_event_labels}
+            # 沉沦海救助基地以一片连续3×3区域生成；每格都是同一地点区域的一部分。
+            # 先从可用格中整体挑选，避免普通事件/单位占据区域内部。
+            if self.state.current_region == "沉沦海":
+                available_set = set(available)
+                rescue_origins = [
+                    (x, y) for y in range(height - 2) for x in range(width - 2)
+                    if all((x + dx, y + dy) in available_set
+                           and world.map.is_passable((x + dx, y + dy))
+                           for dy in range(3) for dx in range(3))
+                ]
+                if not rescue_origins:
+                    raise ValueError("沉沦海地图没有可放置潮下基地3×3区域的连续空地")
+                rescue_roll = self.dice.auto_roll(
+                    "open_world_rescue_base_region", rescue_origins,
+                    context="沉沦海开放地图：潮下基地3×3区域位置")
+                rescue_x, rescue_y = rescue_roll["selected"]
+                for dy in range(3):
+                    for dx in range(3):
+                        pos = (rescue_x + dx, rescue_y + dy)
+                        cell_index = dy * 3 + dx
+                        world.map.add_location(f"rescue_base_{cell_index + 1}", {
+                            "kind": "rest_area", "area_id": "rescue_base",
+                            "name": "潮下基地" if cell_index == 4 else "潮下基地范围",
+                            "description": "由废弃潜水舱、沉船残骸和密封管道拼成的水下基地。普通微光者在此生活，珍珠泪与碎片维持照明、过滤和药物；疫病仍在狭小舱室间蔓延。",
+                            "x": pos[0], "y": pos[1], "discovered": False, "active": True,
+                        })
+                        available.remove(pos)
             for event_name in location_names:
                 if not available:
                     break
