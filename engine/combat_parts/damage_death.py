@@ -171,6 +171,12 @@ class DamageDeathMixin:
             source_override=source_override, source_type_override=source_type_override,
             actor_override=actor_override, owner_override=owner_override,
             tags_extra=tags_extra)
+        parent = normalize_context(parent_ctx)
+        source_actor = actor_override
+        if source_actor is None and parent is not None:
+            source_actor = parent.actor if parent.actor is not None else (owner_override or parent.owner)
+        if isinstance(source_actor, Entity) and source_actor is not entity:
+            source_actor.other_entity_life_reduced_this_round = True
         # 蚀命刻尺订阅统一失血账：每次实际失去生命，受损角色支付血限1。
         # 支付继续走统一资源总线；共罪、血契、可净化层数与命零判定不另开旁路。
         if self._any_active_relic("蚀命刻尺"):

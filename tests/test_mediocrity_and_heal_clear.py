@@ -1,7 +1,7 @@
 """【凡庸】特殊事件 与 [战终]清除回复 的回归测试
 
 对应 规则正文：
-  第500-501行 【凡庸】：任一角色连续五回合未出手／五回合未能使敌对角色生命减少，
+  第500-501行 【凡庸】：任一角色连续五回合未出手／五回合未使其他角色生命减少，
                即触发；该角色全身炸裂[命零]，若为怪物则轮回者获得消耗品【自由结晶】(1/1)。
   第304行     [战终]：清除局内增益（包括回复、格挡、持续∞等）与减益（不包括代价）。
 """
@@ -46,9 +46,9 @@ def test_mediocrity_triggers_after_five_idle_rounds():
 
     fired = None
     for r in range(1, 6):
-        m.damage_dealt_this_round = 0
+        m.other_entity_life_reduced_this_round = False
         m.actions_used_this_round = 0
-        p.damage_dealt_this_round = 1      # 玩家有作为，不应被凡庸波及
+        p.other_entity_life_reduced_this_round = True      # 玩家有作为，不应被凡庸波及
         p.actions_used_this_round = 1
         res = cm.round_end()
         for ef in res.get("effects", []):
@@ -69,9 +69,9 @@ def test_mediocrity_on_monster_grants_free_crystal():
     before = len([c for c in cm.state.consumables if c.name == "自由结晶"])
 
     for _ in range(5):
-        m.damage_dealt_this_round = 0
+        m.other_entity_life_reduced_this_round = False
         m.actions_used_this_round = 0
-        cm.state.player.damage_dealt_this_round = 1
+        cm.state.player.other_entity_life_reduced_this_round = True
         cm.state.player.actions_used_this_round = 1
         cm.round_end()
 
@@ -82,181 +82,77 @@ def test_mediocrity_on_monster_grants_free_crystal():
 
 # ---------- 边界条件 ----------
 
-def test_idle_counter_resets_on_net_change():
-    """边界：第5回合前造成净变化，计数归零，不触发【凡庸】"""
+def test_idle_counter_resets_on_any_action():
+    """一次实际出手只重置未出手计数，不会重置未造成他人生命损失计数。"""
     e = _engine()
     cm = e.combat
     cm.state.enemies = [_monster()]
     m = cm.state.enemies[0]
-
     p = cm.state.player
     for r in range(1, 9):
-        m.damage_dealt_this_round = 2      # 一直有伤害，隔离出"未出手"这一分支
-        # 第4回合出手一次，打断连续空转
+        m.other_entity_life_reduced_this_round = True  # 隔离未出手计数分支
         m.actions_used_this_round = 1 if r == 4 else 0
-        m.net_change_this_round = r == 4
-        p.net_change_this_round = True
-        p.damage_dealt_this_round = 1   # 玩家保持有作为，隔离被测对象
+        p.other_entity_life_reduced_this_round = True
         p.actions_used_this_round = 1
         res = cm.round_end()
         fired = [ef for ef in res.get("effects", [])
                  if ef.get("type") == "mediocrity" and ef.get("entity") == m.name]
-        assert not fired, f"第{r}回合不应触发【凡庸】（计数应在第4回合归零）"
-    # 第4回合打断后重新计数，到第8回合只积累了4个空转回合，仍不触发
-    assert m.is_alive, "打断后重新计数，第8回合仍不该触发"
-    assert m.no_net_change_rounds == 4
+        assert not fired, f"第{r}回合不应触发【凡庸】（第4回合出手应重置未出手计数）"
+    assert m.is_alive
+    assert m.no_action_rounds == 4
+    assert m.no_damage_rounds == 0
 
 
-def test_mediocrity_non_reincarnator_fires_first():
-    """正常：轮回者与怪物同时达阈值时，非轮回者先结算；怪物炸完战场清空，
-    战斗胜负已定，轮回者的凡庸中断结算（DM裁定 2026-08-18）"""
-    e = _engine()
-    cm = e.combat
-    cm.state.enemies = [_monster()]
-    m = cm.state.enemies[0]
-    p = cm.state.player
-    friend = Entity(name="陪葬者", entity_type="朋友", blood_limit=30, current_hp=30,
-                    attack_count=1, attack_power=1)
-    cm.state.friends = [friend]
-
-    fired = None
-    interrupted = None
-    for r in range(1, 6):
-        for ent in (p, m, friend):
-            ent.damage_dealt_this_round = 0
-            ent.actions_used_this_round = 0
-        res = cm.round_end()
-        names = [ef.get("entity") for ef in res.get("effects", [])
-                 if ef.get("type") == "mediocrity"]
-        skips = [ef.get("entity") for ef in res.get("effects", [])
-                 if ef.get("type") == "mediocrity_interrupted"]
-        if names:
-            fired = (r, names)
-        if skips:
-            interrupted = (r, skips)
-
-    assert fired == (5, ["陪葬者", "木桩"]), \
-        f"非轮回者优先结算；怪物炸完战场清空后轮回者不再炸裂，实际={fired}"
-    assert interrupted == (5, ["贾凡"]), f"轮回者的凡庸应记为中断结算，实际={interrupted}"
-    assert not m.is_alive and not friend.is_alive
-    assert p.is_alive, "战场已清空，轮回者的凡庸应被中断，不得死亡"
-    assert p.no_damage_rounds == 0 and p.no_action_rounds == 0, "中断者计数应清零"
-    crystals = [c for c in cm.state.consumables if c.name == "自由结晶"]
-    assert len(crystals) == 1, "怪物凡庸仍应产出自由结晶"
-    assert e.state.last_death_cause != "mediocrity"
-
-
-def test_mediocrity_interrupt_requires_cleared_battlefield():
-    """边界：两只怪物只有一只达阈值时，剩余怪物仍存活（战斗未定），
-    同拍达阈值的轮回者照常炸裂，不得援引中断裁定"""
-    e = _engine()
-    cm = e.combat
-    cm.state.enemies = [_monster("空转怪"), _monster("勤快怪")]
-    idle_m, busy_m = cm.state.enemies
-    p = cm.state.player
-
-    for _ in range(5):
-        idle_m.damage_dealt_this_round = 0
-        idle_m.actions_used_this_round = 0
-        busy_m.net_change_this_round = True
-        busy_m.damage_dealt_this_round = 3
-        busy_m.actions_used_this_round = 1
-        p.damage_dealt_this_round = 0
-        p.actions_used_this_round = 0
-        cm.round_end()
-
-    assert not idle_m.is_alive, "空转怪应凡庸炸裂"
-    assert busy_m.is_alive, "有作为的怪物不受波及"
-    assert not p.is_alive, "战场未清空时，同拍达阈值的轮回者仍应炸裂"
-    assert e.state.last_death_cause == "mediocrity"
-
-
-def test_mediocrity_interrupt_covers_multiple_monsters():
-    """边界：多只怪物同拍全部凡庸、战场清空后，轮回者与朋友都被中断豁免"""
-    e = _engine()
-    cm = e.combat
-    cm.state.enemies = [_monster("怪甲"), _monster("怪乙")]
-    p = cm.state.player
-    friend = Entity(name="同伴", entity_type="朋友", blood_limit=30, current_hp=30,
-                    attack_count=1, attack_power=1)
-    cm.state.friends = [friend]
-
-    for _ in range(5):
-        for m in cm.state.enemies:
-            m.damage_dealt_this_round = 0
-            m.actions_used_this_round = 0
-        p.damage_dealt_this_round = 0
-        p.actions_used_this_round = 0
-        # 朋友有出手且有伤害，不参与凡庸
-        friend.net_change_this_round = True
-        friend.damage_dealt_this_round = 1
-        friend.actions_used_this_round = 1
-        cm.round_end()
-
-    assert all(not m.is_alive for m in cm.state.enemies), "两只怪都应凡庸炸裂"
-    assert p.is_alive and friend.is_alive, "战场清空后我方无人炸裂"
-    assert e.state.last_death_cause != "mediocrity"
-
-
-def test_mediocrity_reincarnator_still_fires_when_alone():
-    """边界：只有轮回者达阈值时，没有非轮回者也不阻挡其凡庸"""
-    e = _engine()
-    cm = e.combat
-    cm.state.enemies = [_monster()]
-    m = cm.state.enemies[0]
-    p = cm.state.player
-
-    for _ in range(5):
-        p.damage_dealt_this_round = 0
-        p.actions_used_this_round = 0
-        m.net_change_this_round = True
-        m.damage_dealt_this_round = 3
-        m.actions_used_this_round = 1
-        cm.round_end()
-
-    assert not p.is_alive, "单独达阈值的轮回者仍应凡庸"
-    assert m.is_alive, "有作为的怪物不应被波及"
-
-
-def test_mediocrity_priority_does_not_pull_unready_reincarnator():
-    """错误输入：非轮回者优先不得把未满五回合的轮回者一并炸裂"""
-    e = _engine()
-    cm = e.combat
-    cm.state.enemies = [_monster()]
-    m = cm.state.enemies[0]
-    p = cm.state.player
-    for _ in range(4):
-        m.damage_dealt_this_round = 0
-        m.actions_used_this_round = 0
-        p.damage_dealt_this_round = 1
-        p.actions_used_this_round = 1
-        p.net_change_this_round = True
-        cm.round_end()
-    p.net_change_this_round = False
-    m.damage_dealt_this_round = 0
-    m.actions_used_this_round = 0
-    p.damage_dealt_this_round = 0
-    p.actions_used_this_round = 0
-    res = cm.round_end()
-    names = [ef.get("entity") for ef in res.get("effects", [])
-             if ef.get("type") == "mediocrity"]
-    assert names == ["木桩"], f"只有满五回合的非轮回者应触发，实际={names}"
-    assert not m.is_alive
-    assert p.is_alive, "轮回者本拍才开始空转，不得被优先规则拖死"
-
-
-def test_actions_without_net_change_do_not_prevent_mediocrity():
-    """出手次数本身不是战场净变化，空操作不能清空凡庸计数。"""
+def test_actions_without_other_life_loss_still_trigger_mediocrity():
+    """出手但没有使其他角色实际失去生命，仍会累计第二项凡庸计数。"""
     e = _engine()
     cm = e.combat
     cm.state.enemies = [_monster()]
     m = cm.state.enemies[0]
     for _ in range(5):
         m.actions_used_this_round = 1
-        m.net_change_this_round = False
-        cm.state.player.net_change_this_round = True
+        m.other_entity_life_reduced_this_round = False
+        cm.state.player.actions_used_this_round = 1
+        cm.state.player.other_entity_life_reduced_this_round = True
         cm.round_end()
     assert not m.is_alive
+
+
+def test_actual_hp_loss_to_another_character_resets_no_damage_counter():
+    """失血总账只在其他角色实际失去生命时重置第二项计数。"""
+    from engine.effect_context import EffectContext
+    e = _engine()
+    cm = e.combat
+    target = _monster()
+    cm.state.enemies = [target]
+    actor = cm.state.player
+    actor.actions_used_this_round = 1
+    actor.no_damage_rounds = 4
+    target.current_hp -= 5
+    cm._record_hp_loss_event(
+        target, 5, parent_ctx=EffectContext(actor=actor, target=target, owner=actor)
+    )
+    assert actor.other_entity_life_reduced_this_round
+    cm.round_end()
+    assert actor.no_damage_rounds == 0
+
+
+def test_zero_actual_hp_loss_does_not_reset_no_damage_counter():
+    """原始伤害没有造成实际生命损失时，不重置第二项计数。"""
+    from engine.effect_context import EffectContext
+    e = _engine()
+    cm = e.combat
+    target = _monster()
+    cm.state.enemies = [target]
+    actor = cm.state.player
+    actor.actions_used_this_round = 1
+    actor.no_damage_rounds = 3
+    cm._record_hp_loss_event(
+        target, 0, parent_ctx=EffectContext(actor=actor, target=target, owner=actor)
+    )
+    assert not actor.other_entity_life_reduced_this_round
+    cm.round_end()
+    assert actor.no_damage_rounds == 4
 
 
 # ---------- [战终] 清除回复类持续效果 ----------

@@ -538,12 +538,14 @@ class Entity:
 
     # 血族血脉（初拥之夜遗物）：本回合是否已造成过伤害（[回终]判定：造成过则回复等量，否则支付生命20）
     damage_dealt_this_round: int = 0
-    # 特殊事件【凡庸】：连续五回合未由自身行动及其触发链造成战场净变化时触发。
-    # 多个角色同时达阈值时，非轮回者优先结算。
-    no_net_change_rounds: int = 0  # 连续未由自身造成战场净变化的回合数
-    net_change_this_round: bool = False  # 本回合自身行动或触发链有净变化
-    no_action_rounds: int = 0   # 旧存档字段，不再作为凡庸条件
-    no_damage_rounds: int = 0   # 旧存档兼容字段
+    # 凡庸第二项条件：本角色本回合是否使其他角色实际失去生命；仅实际HP损失计入。
+    other_entity_life_reduced_this_round: bool = False
+    # 特殊事件【凡庸】：以下两项是独立连续计数，任一达到阈值即触发。
+    no_action_rounds: int = 0  # 连续未出手的角色回合数
+    no_damage_rounds: int = 0  # 连续未使其他角色实际生命减少的角色回合数
+    # 旧存档兼容字段：不再作为凡庸条件；net_change_this_round 仍供法术中断指纹使用。
+    no_net_change_rounds: int = 0
+    net_change_this_round: bool = False
     # 本场战斗内累计获得的[回复]量。规则正文：[战终]清除局内增益(包括回复)，
     # 故战终须把这部分回血扣除（不低于进场时的生命）。
     healed_this_battle: int = 0
@@ -1071,28 +1073,26 @@ class Entity:
         """是否受【迷失】阈值约束（类型豁免来自结构化事实源）。"""
         return lethal_events.applies_to("mishi", self.entity_type)
 
-    def lethal_counters(self) -> dict:
-        """致死类特殊事件的进度：{名称: (当前值, 阈值)}。
-
-        非怪物异变达阈值：有队友→变怪物开战；无队友→命零。
-        2026-10-13：怪物不触发迷失，因此不输出虚假的迷失致死进度。
-        进度必须能被 AI 在面板上直接读到，不允许只留一个布尔结果。口径：
-          * 迷失 = 异变层数 / MUTATION_COLLAPSE_THRESHOLD；
-          * 癌变 = 本场累计回复量 / ⌈血限×CANCER_HEAL_MULTIPLIER⌉；
-          * 凡庸 = 连续未造成战场净变化回合数 / MEDIOCRITY_ROUNDS。
-        """
+    def lethal_counters(self) -> dict[str, tuple[int, int]]:
+        """致死类特殊事件的进度：{名称: (当前值, 阈值)}。"""
         out: dict[str, tuple[int, int]] = {}
         if self.can_trigger_mutation_lost():
             out["迷失"] = (int(self.mutation_count), int(self.MUTATION_COLLAPSE_THRESHOLD))
         if self.has_status("无限血限"):
-            # -1 是结构化数据中的无限阈值哨兵；展示层统一渲染为 ∞。
             out["癌变"] = (int(self.total_healed), -1)
         elif self.blood_limit > 0:
-            out["癌变"] = (int(self.total_healed),
-                           int(math.ceil(self.blood_limit * self.CANCER_HEAL_MULTIPLIER)))
-        if self.no_net_change_rounds:
-            keys = lethal_events.progress_keys("fanyong") or ["凡庸·无净变化"]
-            out[keys[0]] = (int(self.no_net_change_rounds), int(self.MEDIOCRITY_ROUNDS))
+            out["癌变"] = (
+                int(self.total_healed),
+                int(math.ceil(self.blood_limit * self.CANCER_HEAL_MULTIPLIER)),
+            )
+        if self.no_action_rounds or self.no_damage_rounds:
+            keys = lethal_events.progress_keys("fanyong") or [
+                "凡庸·未出手", "凡庸·未使其他角色生命减少"
+            ]
+            if self.no_action_rounds >= self.no_damage_rounds:
+                out[keys[0]] = (int(self.no_action_rounds), int(self.MEDIOCRITY_ROUNDS))
+            else:
+                out[keys[1]] = (int(self.no_damage_rounds), int(self.MEDIOCRITY_ROUNDS))
         return out
 
     def lethal_progress(self) -> list[str]:
@@ -1360,6 +1360,7 @@ class Entity:
             "no_action_rounds": self.no_action_rounds,
             "no_damage_rounds": self.no_damage_rounds,
             "no_net_change_rounds": self.no_net_change_rounds,
+            "other_entity_life_reduced_this_round": self.other_entity_life_reduced_this_round,
             "net_change_this_round": self.net_change_this_round,
             # 致死类特殊事件的进度：AI 必须能在面板上直接读到
             # 「迷失（10/50）」这种进度，禁止只给结果不给进度。

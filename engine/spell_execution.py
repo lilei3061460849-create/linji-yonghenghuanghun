@@ -141,7 +141,7 @@ _BATTLE_COUNTER_FIELDS: tuple[str, ...] = (
     "fake_shards",
     "no_action_rounds",      # 旧档兼容
     "no_damage_rounds",      # 旧档兼容
-    "no_net_change_rounds",  # 凡庸：连续未造成净变化回合
+    "other_entity_life_reduced_this_round",  # 凡庸：连续未造成净变化回合
 )
 
 
@@ -171,7 +171,7 @@ def _entity_battle_token(entity, *, exclude_mediocrity: bool = False) -> tuple:
         ))
     counters = tuple(
         _counter_token(getattr(entity, name, 0)) for name in _BATTLE_COUNTER_FIELDS
-        if not (exclude_mediocrity and name in {"no_action_rounds", "no_damage_rounds", "no_net_change_rounds"})
+        if not (exclude_mediocrity and name in {"no_action_rounds", "no_damage_rounds", "other_entity_life_reduced_this_round"})
     )
     return (
         int(getattr(entity, "current_hp", 0) or 0),

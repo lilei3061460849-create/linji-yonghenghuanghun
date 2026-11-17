@@ -12,6 +12,8 @@ def test_mediocrity_fingerprint_ignores_only_own_clock():
     before = battlefield_fingerprint(engine, exclude_mediocrity=True)
     actor.no_action_rounds += 1
     enemy.no_damage_rounds += 1
+    actor.other_entity_life_reduced_this_round = True
+    enemy.other_entity_life_reduced_this_round = True
     assert battlefield_fingerprint(engine, exclude_mediocrity=True) == before
     enemy.shield += 1
     assert battlefield_fingerprint(engine, exclude_mediocrity=True) != before
@@ -25,18 +27,31 @@ def test_spell_fingerprint_still_tracks_existing_counters():
     assert battlefield_fingerprint(engine) != before
 
 
-def test_mediocrity_five_no_change_rounds_and_reset():
+def test_mediocrity_tracks_two_independent_counters():
     from tests.test_redemption_and_setup import _engine, _ready_combat
-    engine = _ready_combat(_engine("mediocrity_new_tick"))
+    engine = _ready_combat(_engine("mediocrity_two_counters"))
     actor = engine.state.player
-    actor.no_net_change_rounds = 3
-    actor.net_change_this_round = True
+    actor.no_action_rounds = 3
+    actor.no_damage_rounds = 4
+    actor.actions_used_this_round = 1
+    actor.other_entity_life_reduced_this_round = True
     assert engine.combat._tick_mediocrity_counters(actor) is None
-    assert actor.no_net_change_rounds == 0
-    actor.net_change_this_round = False
+    assert actor.no_action_rounds == 0
+    assert actor.no_damage_rounds == 0
+
+    actor.actions_used_this_round = 1
+    actor.other_entity_life_reduced_this_round = False
     for _ in range(4):
         assert engine.combat._tick_mediocrity_counters(actor) is None
-    assert "连续五回合" in engine.combat._tick_mediocrity_counters(actor)
+    assert actor.no_action_rounds == 0
+    assert actor.no_damage_rounds == 4
+    assert "未使其他角色生命减少" in engine.combat._tick_mediocrity_counters(actor)
+
+    actor.no_action_rounds = 4
+    actor.no_damage_rounds = 0
+    actor.actions_used_this_round = 0
+    actor.other_entity_life_reduced_this_round = True
+    assert "未出手" in engine.combat._tick_mediocrity_counters(actor)
 
 
 def test_mediocrity_tracks_real_focus_without_crediting_other_actor():

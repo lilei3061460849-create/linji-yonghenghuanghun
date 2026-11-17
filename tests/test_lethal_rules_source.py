@@ -73,13 +73,16 @@ def test_progress_format_is_taken_from_the_toml():
 
 
 def test_fanyong_display_keys_come_from_the_toml():
-    """凡庸净变化计数的显示键由 TOML 提供。"""
+    """凡庸两项独立计数的显示键由 TOML 提供。"""
     keys = lethal_events.progress_keys("fanyong")
-    assert keys and len(keys) == 1
+    assert keys == ["凡庸·未出手", "凡庸·未使其他角色生命减少"]
     entity = Entity(name="测", entity_type="轮回者", blood_limit=60, current_hp=60)
-    entity.no_net_change_rounds = 3
+    entity.no_action_rounds = 3
     assert keys[0] in entity.lethal_counters()
-    assert any(keys[0] in item for item in entity.lethal_progress())
+    entity.no_action_rounds = 0
+    entity.no_damage_rounds = 3
+    assert keys[1] in entity.lethal_counters()
+    assert any(keys[1] in item for item in entity.lethal_progress())
 
 
 # ============================================================================

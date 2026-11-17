@@ -244,6 +244,14 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                 results.append(result)
         return results
 
+    def _dispatch_role_round_phase(self, phase, target, **kwargs) -> list[dict]:
+        """单个角色经历的回合相位；普通回合与额外角色回合共用此入口。"""
+        return self._dispatch_phase(phase, target=target, **kwargs)
+
+    def _dispatch_role_round_phase_all(self, phase, targets) -> list[dict]:
+        """普通世界回合的批量角色相位，保留机制全局排序。"""
+        return self._dispatch_phase_all(phase, targets)
+
     def _battle_delta(self, entity: Entity, field_name: str, delta: int,
                       source: str, polarity: str) -> int:
         """战斗中未注明永久且不是代价/伤害的面板变化统一登记为局内效果。"""
@@ -1315,7 +1323,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                 entity.deferred_damage = []
         player = self.state.player
         if player is not None:
-            effects.extend(self._dispatch_phase(Phase.ROUND_START_PREPARE, target=player))
+            effects.extend(self._dispatch_role_round_phase(Phase.ROUND_START_PREPARE, player))
 
         # 活血追踪归零 + 出手预算归零（回始重置本回合已用出手次数）+ 血誓戒每回合限一次归零 + 血族血脉判定归零
         seen_entities: set[int] = set()
@@ -1374,7 +1382,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                 "_hp_loss_events": [], "_speed_change_events": [], "_blood_limit_events": [],
                 "actions_used_this_round": 0, "heavy_shackles_action_penalty": 0,
                 "blood_oath_used_this_round": False,
-                "mana_inflicted_this_round": 0, "damage_dealt_this_round": 0}})
+                "mana_inflicted_this_round": 0, "damage_dealt_this_round": 0,
+                "other_entity_life_reduced_this_round": False}})
         # DM裁定 2026-09-09：[回始]不再回填法力。法力改为**一池制**——[战始]给满
         # 等同[法限]的一池，整场只出不进，[战终]复原（与[速度]同口径）。
         # 因这一段，"[回始]不获得法力"曾一度失去作用对象，【勾魂】在 2026-09-09
@@ -1416,7 +1425,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             # 机制系统：ROUND_START 相位分发。自愈删除后不再有回始回血机制。
             # round_start 只负责宣布时点，具体机制由声明层按 priority 执行；
             # 机制的报告条目并入 effects，战报格式与迁移前一致。
-            effects.extend(self._dispatch_phase(Phase.ROUND_START, target=entity))
+            effects.extend(self._dispatch_role_round_phase(Phase.ROUND_START, entity))
 
         # 法力结构【永焰】回始结算：每回始目标失去 X 点生命（X=层数；直接失血，
         # 走统一失血钩子，受【庇护】等失血规则约束）。独立循环自带去重（迷失
@@ -1440,7 +1449,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
 
         self.state.current_round += 1
         # 【回增】统一相位：回合序号增加后触发，守夜灯等效果走声明机制层。
-        effects.extend(self._dispatch_phase_all(
+        effects.extend(self._dispatch_role_round_phase_all(
             Phase.ROUND_INCREASE,
             self.state.get_all_player_side() + self.state.get_all_enemy_side()))
 
@@ -1519,7 +1528,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             "_blood_limit_events", "actions_used_this_round",
             "heavy_shackles_action_penalty",
             "blood_oath_used_this_round", "mana_inflicted_this_round",
-            "damage_dealt_this_round", "net_change_this_round",
+            "damage_dealt_this_round", "other_entity_life_reduced_this_round", "net_change_this_round",
         )
         saved_fields = {}
         for field_name in cycle_fields:
@@ -1554,83 +1563,32 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                 target.actions_used_this_round = 0
                 target.heavy_shackles_action_penalty = 0
                 target.damage_dealt_this_round = 0
+                target.other_entity_life_reduced_this_round = False
                 target.net_change_this_round = False
                 target.blood_oath_used_this_round = False
                 target.mana_inflicted_this_round = 0
 
-                effects.extend(self._dispatch_phase(Phase.ROUND_START_PREPARE, target=target))
-                effects.extend(self._dispatch_phase(Phase.ROUND_START, target=target))
+                effects.extend(self._dispatch_role_round_phase(Phase.ROUND_START_PREPARE, target))
+                effects.extend(self._dispatch_role_round_phase(Phase.ROUND_START, target))
 
                 # 回增机制按角色经历回合触发，但读取的 current_round 始终是世界回合数。
-                effects.extend(self._dispatch_phase(Phase.ROUND_INCREASE, target=target))
-                effects.extend(self._dispatch_phase(Phase.ROUND_END, target=target))
+                effects.extend(self._dispatch_role_round_phase(Phase.ROUND_INCREASE, target))
+                effects.extend(self._dispatch_role_round_phase(Phase.ROUND_END, target))
 
                 why = self._tick_mediocrity_counters(target) if target.is_alive else None
                 if why:
                     effects.extend(self._apply_mediocrity(target, why))
 
                 # 【初拥】：额外回合结算前先与施法者对齐生命/血限（同回终口径）。
-                self._sync_chuyong(target)
-                expired = target.tick_status_effects()
-                effects.extend(self._settle_daowen_status_expiry(target, expired))
-                if "熄事" in expired and target.entity_type == "怪物":
-                    effects.extend(self.recheck_redemption_candidates())
-                if expired:
-                    if "无限法限" in expired and not self.state.mana_overflow_exempt(target):
-                        before_mana = target.current_mana
-                        target.current_mana = min(target.current_mana, target.mana_limit)
-                        effects.append({
-                            "type": "infinite_mana_limit_expired",
-                            "entity": target.name,
-                            "mana_limit": target.mana_limit,
-                            "mana_before": before_mana,
-                            "mana_after": target.current_mana,
-                        })
-                    if "饥饿" in expired and hasattr(target, "_hunger_original_blood_limit"):
-                        restored_limit = int(target._hunger_original_blood_limit)
-                        del target._hunger_original_blood_limit
-                        self._apply_blood_limit_change(
-                            target, restored_limit - int(target.blood_limit), "饥饿", "up",
-                            source_type="daowen", subtype="hunger_expire",
-                            tags={"daowen", "hunger"})
-                        effects.append({
-                            "type": "hunger_expired", "entity": target.name,
-                            "blood_limit": target.blood_limit,
-                        })
-                    if "无限血限" in expired and not self.state.hp_overflow_exempt(target):
-                        before_hp = target.current_hp
-                        target.current_hp = min(target.current_hp, target.blood_limit)
-                        if target.current_hp <= 0 and target.is_alive:
-                            self._check_hp_zero_death(target)
-                        effects.append({"type": "infinite_blood_limit_expired", "entity": target.name,
-                                        "blood_limit": target.blood_limit, "hp_before": before_hp,
-                                        "hp_after": target.current_hp})
-                    panel_modifier_sources = {"全力", "弱化"}
-                    rolled_back = self.state.rollback_scoped_sources(target, set(expired) & panel_modifier_sources)
-                    effects.append({"type": "status_expired", "entity": target.name,
-                                    "expired_effects": expired, "rolled_back_deltas": rolled_back})
-                    if "逆鳞" in expired and hasattr(target, "_nilin"):
-                        target._nilin = 0
-                    if "飞行" in expired and not self._is_flying(target):
-                        target.is_flying = False
-                    if "变形" in expired and hasattr(target, "_bianxing_original"):
-                        target.current_speed, target.current_mana = target._bianxing_original
-                        delattr(target, "_bianxing_original")
-                        self.clamp_immortal_body(target)
-                        effects.append({"type": "bianxing_restore", "entity": target.name,
-                                        "current_speed": target.current_speed, "current_mana": target.current_mana})
-
-                if "无限血限" in expired and target.is_alive:
-                    redemption = self.check_redemption(target)
-                    if redemption:
-                        effects.append(redemption)
+                effects.extend(self._dispatch_role_round_phase(Phase.ROUND_END_POST_MEDIOCRITY, target))
+                effects.extend(self._settle_role_round_statuses(target))
                 if target.departure_reason == "救赎" or self.is_redemption_pending(target):
                     continue
-                effects.extend(self._dispatch_phase(Phase.ROUND_END_POST_MEDIOCRITY, target=target))
-                effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=target))
+                effects.extend(self._dispatch_role_round_phase(Phase.ROUND_END_RECONCILE, target))
                 # 【豪夺】的"持续X回合"跟随目标经历的回合递减：大梦额外回合里
                 # 目标（或夺了他遗物的一方）同样到期归还，不再只认世界回终。
                 stolen_returned = self._tick_stolen_relics(target)
+                effects.extend(self._dispatch_role_round_phase(Phase.ROUND_END_TRACKING, target))
                 if stolen_returned:
                     effects.append({"type": "haoduo_returned", "entity": target.name,
                                     "returned": stolen_returned, "source": source})
@@ -1677,7 +1635,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             # 机制系统：ROUND_END 相位分发。锚定语义：回终第一循环顶部、凡庸 tick 之前
             # （原畸变·结算位置）。凡庸之后的回终机制禁止注册到 ROUND_END
             # （会改变既有顺序），详见机制迁移台账。
-            effects.extend(self._dispatch_phase(Phase.ROUND_END, target=entity))
+            effects.extend(self._dispatch_role_round_phase(Phase.ROUND_END, entity))
             # 凡庸只在此拍更新计数；达阈值者稍后按「非轮回者优先」结算。
             if entity.is_alive:
                 why = self._tick_mediocrity_counters(entity)
@@ -1707,8 +1665,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             if self.chenni_round_blocked(entity):
                 continue
             # 凡庸之后的原第二实体循环；保持实体优先，不能提前到 ROUND_END。
-            effects.extend(self._dispatch_phase(
-                Phase.ROUND_END_POST_MEDIOCRITY, target=entity,
+            effects.extend(self._dispatch_role_round_phase(
+                Phase.ROUND_END_POST_MEDIOCRITY, entity,
                 picks={"blood_lineage_cost_share_target_ref": blood_lineage_cost_share_target_ref}))
 
             # DM裁定 2026-09-10：格挡不再[敌回终]每回合清除。
@@ -1727,83 +1685,11 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             if self.chenni_round_blocked(entity):
                 continue
             # 【初拥】：持续期间每逢回终结算先与施法者对齐生命/血限，再递减。
-            self._sync_chuyong(entity)
-            expired = entity.tick_status_effects()
-            effects.extend(self._settle_daowen_status_expiry(entity, expired))
-            if "熄事" in expired and entity.entity_type == "怪物":
-                effects.extend(self.recheck_redemption_candidates())
-            if expired:
-                # 【涌潮】到期：当前法力压回原法限（无限法限只是"持续X回合"的豁免）。
-                if "无限法限" in expired and not self.state.mana_overflow_exempt(entity):
-                    before_mana = entity.current_mana
-                    entity.current_mana = min(entity.current_mana, entity.mana_limit)
-                    effects.append({
-                        "type": "infinite_mana_limit_expired",
-                        "entity": entity.name,
-                        "mana_limit": entity.mana_limit,
-                        "mana_before": before_mana,
-                        "mana_after": entity.current_mana,
-                    })
-                # 【饥饿】到期：把施加前的[血限]还原（血限上涨不产生失血）。
-                if "饥饿" in expired and hasattr(entity, "_hunger_original_blood_limit"):
-                    restored_limit = int(entity._hunger_original_blood_limit)
-                    del entity._hunger_original_blood_limit
-                    self._apply_blood_limit_change(
-                        entity, restored_limit - int(entity.blood_limit), "饥饿", "up",
-                        source_type="daowen", subtype="hunger_expire",
-                        tags={"daowen", "hunger"})
-                    effects.append({
-                        "type": "hunger_expired", "entity": entity.name,
-                        "blood_limit": entity.blood_limit,
-                    })
-                # 【增殖】到期后恢复基础血限；若当前生命超出基础血限，按恢复后的血限封顶。
-                if "无限血限" in expired and not self.state.hp_overflow_exempt(entity):
-                    before_hp = entity.current_hp
-                    entity.current_hp = min(entity.current_hp, entity.blood_limit)
-                    if entity.current_hp <= 0 and entity.is_alive:
-                        self._check_hp_zero_death(entity)
-                    effects.append({
-                        "type": "infinite_blood_limit_expired",
-                        "entity": entity.name,
-                        "blood_limit": entity.blood_limit,
-                        "hp_before": before_hp,
-                        "hp_after": entity.current_hp,
-                    })
-                # 只有“持续期间直接改写面板”的效果到期即还原；畸变/伤痕等
-                # 已经产生的累计局内后果保留到战终，再由battle作用域统一回滚。
-                panel_modifier_sources = {"全力", "弱化"}
-                rolled_back = self.state.rollback_scoped_sources(
-                    entity, set(expired) & panel_modifier_sources)
-                effects.append({
-                    "type": "status_expired",
-                    "entity": entity.name,
-                    "expired_effects": expired,
-                    "rolled_back_deltas": rolled_back,
-                })
-                # 逆鳞（F2）：状态到期时清空计层
-                if "逆鳞" in expired and hasattr(entity, "_nilin"):
-                    entity._nilin = 0
-                if "飞行" in expired and not self._is_flying(entity):
-                    entity.is_flying = False
-                if "变形" in expired and hasattr(entity, "_bianxing_original"):
-                    # 2026-09-17 重做：还原的是互换前的**当前速度与当前法力**
-                    # （旧版还原遗留字段 attack_power/attack_count）。
-                    # 注意：互换时被上限钳掉的部分不会随还原回来——那是永久损失。
-                    entity.current_speed, entity.current_mana = entity._bianxing_original
-                    delattr(entity, "_bianxing_original")
-                    self.clamp_immortal_body(entity)
-                    effects.append({"type": "bianxing_restore", "entity": entity.name,
-                                    "current_speed": entity.current_speed,
-                                    "current_mana": entity.current_mana})
-                # 干扰/手雷减攻到期自动由 tick 清理，无需额外
-            if "无限血限" in expired and entity.is_alive:
-                redemption = self.check_redemption(entity)
-                if redemption:
-                    effects.append(redemption)
+            effects.extend(self._settle_role_round_statuses(entity))
             if entity.departure_reason == "救赎" or self.is_redemption_pending(entity):
                 continue
             # 通用回终对账相位，保留锚点，不再注册清算对账。
-            effects.extend(self._dispatch_phase(Phase.ROUND_END_RECONCILE, target=entity))
+            effects.extend(self._dispatch_role_round_phase(Phase.ROUND_END_RECONCILE, entity))
             # F2：抵扣封印/豪夺夺取回合递减统一走 _tick_sealed_and_stolen_relics，
             # 不再在此处逐实体递减。
         # 统一处理：玩家侧 + 每个存活实体的封印/豪夺遗物回终递减与归还
@@ -1823,7 +1709,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                             "remaining": self.state.opponent_dragon_body_shield_rounds})
 
         # 原皮衣记录→原逐实体追踪清理，保持机制优先的两个独立锚点顺序。
-        effects.extend(self._dispatch_phase_all(
+        effects.extend(self._dispatch_role_round_phase_all(
             Phase.ROUND_END_TRACKING,
             self.state.get_all_player_side() + self.state.get_all_enemy_side()))
 
@@ -2094,13 +1980,19 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
         return self.state.battle_over()
 
     def _tick_mediocrity_counters(self, entity: Entity) -> Optional[str]:
-        """本角色本回合的行动及其触发链未使战场发生净变化则累加。"""
-        if entity.net_change_this_round:
-            entity.no_net_change_rounds = 0
+        """分别累计未出手、未使其他角色实际生命减少的连续角色回合。"""
+        if entity.actions_used_this_round > 0:
+            entity.no_action_rounds = 0
         else:
-            entity.no_net_change_rounds += 1
-        if entity.no_net_change_rounds >= MEDIOCRITY_ROUNDS:
-            return "连续五回合未能使战场净状态变化"
+            entity.no_action_rounds += 1
+        if entity.other_entity_life_reduced_this_round:
+            entity.no_damage_rounds = 0
+        else:
+            entity.no_damage_rounds += 1
+        if entity.no_action_rounds >= MEDIOCRITY_ROUNDS:
+            return "连续五回合未出手"
+        if entity.no_damage_rounds >= MEDIOCRITY_ROUNDS:
+            return "连续五回合未使其他角色生命减少"
         return None
 
     def _apply_mediocrity(self, entity: Entity, why: str) -> list[dict]:

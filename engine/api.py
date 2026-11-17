@@ -3836,6 +3836,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             # 致死进度：封存快照同样保留可读进度
             "no_action_rounds": e.no_action_rounds, "no_damage_rounds": e.no_damage_rounds,
             "no_net_change_rounds": e.no_net_change_rounds,
+            "other_entity_life_reduced_this_round": e.other_entity_life_reduced_this_round,
             "net_change_this_round": e.net_change_this_round,
             "lethal_counters": {k: list(v) for k, v in e.lethal_counters().items()},
             "lethal_progress": e.lethal_progress(),
@@ -3891,6 +3892,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         e.forgotten_cost_daowen = [DaoWenInstance(
             **{**item, "dao_wen": DaoWen(**item["dao_wen"])})
             for item in d.get("forgotten_cost_daowen", [])]
+        e.no_action_rounds = int(d.get("no_action_rounds", 0) or 0)
+        e.no_damage_rounds = int(d.get("no_damage_rounds", 0) or 0)
+        e.other_entity_life_reduced_this_round = bool(d.get("other_entity_life_reduced_this_round", False))
         e.no_net_change_rounds = int(d.get("no_net_change_rounds", 0) or 0)
         e.net_change_this_round = bool(d.get("net_change_this_round", False))
         e.mutation_count = d.get("mutation_count", 0)   # ④修复：旧档无此键回退0

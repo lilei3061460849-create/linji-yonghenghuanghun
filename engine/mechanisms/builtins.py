@@ -507,7 +507,8 @@ def _leather_record_effect(ctx: TriggerContext, targets: list):
 
 def _round_tracking_reset_effect(ctx: TriggerContext, targets: list):
     apply_verb(ctx.combat, "reset_fields", {"target": ctx.target, "fields": {
-        "hp_lost_this_round": 0, "_hp_loss_events": [], "_speed_change_events": [], "_blood_limit_events": []}})
+        "hp_lost_this_round": 0, "other_entity_life_reduced_this_round": False,
+        "_hp_loss_events": [], "_speed_change_events": [], "_blood_limit_events": []}})
 
 
 def _bulletproof_effect(ctx: TriggerContext, targets: list) -> str:
