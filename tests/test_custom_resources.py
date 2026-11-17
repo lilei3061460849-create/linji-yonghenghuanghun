@@ -191,13 +191,16 @@ def test_triggered_consumable_cannot_be_used_manually():
 # ==================== 错误输入 ====================
 
 @pytest.mark.parametrize("bad_spec, keyword", [
-    ({"name": "三字名", "category": "道纹", "uniqueness": "x",
+    ({"name": "缺少基础", "category": "道纹", "uniqueness": "x",
+      "cost": {"type": "法力", "amount": "X"},
+      "effects": [{"verb": "damage", "amount": "X"}]}, "base_daowen"),
+    ({"name": "三字名", "category": "道纹", "base_daowen": "杀伐", "uniqueness": "x",
       "cost": {"type": "法力", "amount": "X"},
       "effects": [{"verb": "damage", "amount": "X"}]}, "二字"),
-    ({"name": "缺X", "category": "道纹", "uniqueness": "x",
+    ({"name": "缺X", "category": "道纹", "base_daowen": "杀伐", "uniqueness": "x",
       "cost": {"type": "法力", "amount": 1},
       "effects": [{"verb": "damage", "amount": 3}]}, "X"),
-    ({"name": "怪词", "category": "道纹", "uniqueness": "x",
+    ({"name": "怪词", "category": "道纹", "base_daowen": "杀伐", "uniqueness": "x",
       "cost": {"type": "法力", "amount": "X"},
       "effects": [{"verb": "not_a_verb", "amount": "X"}]}, "未注册"),
     ({"name": "无时机", "category": "遗物", "uniqueness": "x",
@@ -217,7 +220,7 @@ def test_illegal_declarations_are_rejected(bad_spec, keyword):
 def test_builtin_name_collision_is_rejected():
     """错误：与内建资源重名必须拒绝（命名全宇宙唯一）。"""
     engine = _engine()
-    spec = {"name": "杀伐", "category": "道纹", "uniqueness": "重名测试",
+    spec = {"name": "杀伐", "category": "道纹", "base_daowen": "杀伐", "uniqueness": "重名测试",
             "cost": {"type": "法力", "amount": "X"},
             "effects": [{"verb": "damage", "amount": "X"}]}
     result = engine.execute_action("define_resource", {"spec": spec})
@@ -229,6 +232,24 @@ def test_expression_engine_rejects_code_execution():
     for expression in ("__import__('os').system('true')", "open('/tmp/x')", "X.real"):
         with pytest.raises(custom_resources.CustomResourceError):
             custom_resources.evaluate(expression, 1)
+
+
+def test_custom_daowen_requires_existing_non_derived_base():
+    spec = json.loads((EXAMPLES / "dao_wen_shifeng.json").read_text(encoding="utf-8"))
+    for invalid_base, expected in (("不存在", "不存在"), ("连击", "衍生道纹")):
+        invalid = dict(spec, name="试验", base_daowen=invalid_base)
+        with pytest.raises(custom_resources.CustomResourceError, match=expected):
+            custom_resources.register(invalid)
+
+
+def test_custom_daowen_is_indexed_as_derivative_of_its_base():
+    spec = json.loads((EXAMPLES / "dao_wen_shifeng.json").read_text(encoding="utf-8"))
+    custom_resources.register(spec)
+    from engine import derivatives
+    assert derivatives.is_derivative("试锋")
+    assert derivatives.parent_of("试锋") == "杀伐"
+    assert "试锋" in derivatives.pool_of("杀伐")
+    assert "试锋" not in derivatives.pool_of("再生")
 
 
 def test_resources_survive_registry_rebuild():
