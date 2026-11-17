@@ -292,7 +292,8 @@ def test_expression_engine_rejects_code_execution():
 
 def test_custom_daowen_requires_existing_non_derived_base():
     spec = json.loads((EXAMPLES / "dao_wen_shifeng.json").read_text(encoding="utf-8"))
-    for invalid_base, expected in (("不存在", "不存在"), ("连击", "衍生道纹")):
+    for invalid_base, expected in (("不存在", "不存在"), ("连击", "衍生道纹"),
+                                   ("试锋", "衍生道纹")):
         invalid = dict(spec, name="试验", base_daowen=invalid_base)
         with pytest.raises(custom_resources.CustomResourceError, match=expected):
             custom_resources.register(invalid)
