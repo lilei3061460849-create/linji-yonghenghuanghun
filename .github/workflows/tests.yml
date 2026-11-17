@@ -111,3 +111,40 @@ jobs:
         # 全量约 2~3 分钟。历史上这里只跑 14 个文件，导致"CI 绿但仓库红"，
         # 已改为默认全量；不再需要 workflow_dispatch 的 full_suite 开关。
         run: python -m pytest -q
+
+  # 临时维护步骤：在 issue-95 工作分支上执行项目要求的生成器，修复已存在的 AI_CONTEXT 源文件漂移。
+  # 生成完成并提交 AI_CONTEXT 后，此 job 会从工作分支移除，不进入最终 PR。
+  regenerate_ai_context:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/issue-95-custom-resource-extensions'
+    name: 临时生成 AI_CONTEXT（仅工作分支）
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the PR head branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run the authoritative generator and check
+        run: |
+          python3 sim/gen_ai_context.py
+          python3 sim/gen_ai_context.py --check
+
+      - name: Commit generated file if it changed
+        run: |
+          if git diff --quiet -- AI_CONTEXT.md; then
+            echo "AI_CONTEXT.md already matches its sources"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add AI_CONTEXT.md
+          git commit -m "docs: regenerate AI context from sources"
+          git push origin "HEAD:${GITHUB_HEAD_REF}"
