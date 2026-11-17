@@ -1,8 +1,8 @@
 """自定义资源（v1）：声明 → 注册 → 真结算。
 
 覆盖四类资源的正常路径、边界与错误输入，并证明「不改代码、只改数据」：
-`data/custom_resources/examples/` 下的 5 份 JSON 覆盖三类道纹/遗物/法器/消耗品，
-全部由同一个 `define_resource` 入口吃进去。
+`data/custom_resources/examples/` 下的 4 份 JSON 覆盖道纹、遗物与消耗品；法器由独立内联测试覆盖，
+避免把未经确认的演示道具当成机制样例。
 """
 from __future__ import annotations
 
@@ -94,17 +94,24 @@ def test_define_relic_triggers_passively_on_round_start():
 
 
 def test_define_artifact_activates_via_action():
-    """法器：主动激活，默认不占出手。"""
+    """法器：主动激活，默认不占出手；用内联测试声明，不依赖演示道具。"""
     engine = _engine()
     _enemy(engine)
-    spec = json.loads((EXAMPLES / "artifact_huixiang.json").read_text(encoding="utf-8"))
+    engine.state.player.current_hp = 40
+    spec = {
+        "name": "测试法器", "category": "法器",
+        "uniqueness": "覆盖自定义法器的主动激活入口",
+        "summary": "为自身回复3点生命",
+        "costs_action": False,
+        "effects": [{"verb": "heal", "target": "self", "amount": 3}],
+    }
     assert engine.execute_action("define_resource", {"spec": spec})["success"]
-    assert "回响铃" in engine.state.artifacts_owned
+    assert "测试法器" in engine.state.artifacts_owned
 
     before = engine.state.player.actions_used_this_round
-    used = engine.execute_action("activate_resource", {"name": "回响铃"})
+    used = engine.execute_action("activate_resource", {"name": "测试法器"})
     assert used["success"], used
-    assert engine.state.player.has_status("回响")
+    assert engine.state.player.current_hp == 43
     assert engine.state.player.actions_used_this_round == before
 
 
@@ -126,11 +133,11 @@ def test_define_consumable_uses_declared_effects_and_durability():
 
 
 def test_examples_load_without_code_changes():
-    """数据驱动：整个目录一次载入，四类资源各至少一件。"""
+    """数据驱动：整个目录一次载入，示例覆盖道纹、遗物与消耗品。"""
     registered = custom_resources.load_specs(EXAMPLES)
     categories = {resource.category for resource in registered}
-    assert categories == {"道纹", "遗物", "法器", "消耗品"}
-    assert len(registered) == 5
+    assert categories == {"道纹", "遗物", "消耗品"}
+    assert len(registered) == 4
 
 
 # ==================== 边界 ====================
