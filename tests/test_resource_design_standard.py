@@ -139,7 +139,7 @@ X_EFFECT_FIELDS = {
     "consumable_durability_loss", "consumable_effect_multiplier", "consumable_forge_uses",
     "corpse_copies", "creation_attack_count", "creation_attack_power",
     "creation_blood_limit", "creation_mana_limit", "creation_speed_limit",
-    "damage", "damage_converted_to_heal", "delay_rounds", "diaoling_threshold",
+    "damage", "delay_rounds", "diaoling_threshold",
     "duration", "extend_duration", "extra_target_rounds", "fake_shards",
     "fragile_repeats", "freeze_count", "heal_accumulation_doublings", "hits",
     "hunger_blood_limit", "infect_daowen_count", "infect_daowen_names",
@@ -149,10 +149,10 @@ X_EFFECT_FIELDS = {
     "relic_discovery", "relic_disable", "relic_enable", "relic_names", "relic_steal",
     "remove_status_count", "replay_numeric", "shard_burn", "shard_gain",
     "share_slots", "shelter_charges", "silence_rounds", "speed_boost",
-    "split_creations", "swap_hp_with_lost", "tamper_activations", "target_heal",
+    "split_creations", "tamper_activations", "target_heal",
     "target_life_loss", "targets", "temp_hp", "transfer_daowen_count",
     "transfer_daowen_names", "transfer_status_count", "truth_sentences",
-    "borrow_corpse_name", "convert_cost_layers", "cost_reductions", "layers",
+    "convert_cost_layers", "cost_reductions", "layers",
     "discover_daowen",
 }
 
