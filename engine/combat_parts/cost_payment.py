@@ -472,8 +472,14 @@ class CostPaymentMixin:
                 self._resolve_mutation_lost(payer, cost_context)
             self._bank_lianxin(payer, cost_type, amount)
             nail = self._on_cost_paid(payer, cost_context)
-            return {"payer": payer.name, "cost_type": cost_type, "paid": amount,
-                    "mutation": mutation, "brand_nail": nail}
+            result = {"payer": payer.name, "cost_type": cost_type, "paid": amount,
+                      "mutation": mutation, "brand_nail": nail}
+            # 变化、迷失、炼心及代价回调全部结算后才检查；自由结晶的
+            # 延迟窗口由 check_redemption 统一识别，不额外支付或重发回调。
+            redemption = self.check_redemption(payer)
+            if redemption:
+                result["redemption"] = redemption
+            return result
         else:
             raise ValueError(f"未知支付类型：{cost_type}")
 

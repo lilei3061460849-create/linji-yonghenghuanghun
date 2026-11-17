@@ -369,3 +369,60 @@ def test_infinite_blood_limit_removal_checks_after_clamping():
     e.combat._settle_removed_statuses(m, [status])
     assert m.current_hp == 1 and m.departure_reason == "救赎"
     assert e.state.pending_redemption["runtime_id"] == m.runtime_id
+
+
+def test_mutation_payment_completes_before_redemption():
+    e = _ready_combat(_engine("cost_mutation"))
+    m = monster("支付异变")
+    m.mutation_count = 40
+    e.state.enemies[:] = [m]
+    payment = e.combat.pay_numeric_cost(m, "异变", 1)
+    assert payment["owner"]["paid"] == 1 and m.mutation_count == 41
+    assert payment["owner"]["redemption"]["type"] == "redemption"
+    assert m.departure_reason == "救赎"
+
+
+def test_mutation_payment_ineligible_and_sculpture_priority():
+    e = _ready_combat(_engine("cost_mutation_ineligible"))
+    m = monster("未满足")
+    m.mutation_count = 49
+    e.state.enemies[:] = [m]
+    payment = e.combat.pay_numeric_cost(m, "异变", 1)
+    assert payment["owner"]["paid"] == 1 and m.mutation_count == 50
+    assert m.is_alive and not e.state.pending_redemption
+    m.mutation_count = 40
+    m.attack_count = m.attack_power = 0
+    payment = e.combat.pay_numeric_cost(m, "异变", 1)
+    assert payment["owner"]["redemption"]["type"] == "sculpture"
+    assert m.departure_reason == "雕塑" and not e.state.pending_redemption
+
+
+def test_mutation_payment_callback_occurs_once_and_redeems_its_target():
+    e = _ready_combat(_engine("cost_callback"))
+    caster = e.state.player
+    victim = monster("钉目标")
+    victim.current_hp = 25
+    e.state.enemies[:] = [victim]
+    e.state.event_modifiers["brand_nail_target_ref"] = "enemy:0"
+    before = caster.mutation_count
+    payment = e.combat.pay_numeric_cost(caster, "异变", 1)
+    assert caster.mutation_count == before + 1
+    assert victim.current_hp == 15 and victim.departure_reason == "救赎"
+    assert payment["owner"]["brand_nail"]["actual_damage"] == 10
+    assert e.state.pending_redemption["runtime_id"] == victim.runtime_id
+    assert not e.state.pending_redemption_candidates
+
+
+def test_mutation_payment_other_entity_types_do_not_redeem():
+    e = _ready_combat(_engine("cost_other_types"))
+    player = e.state.player
+    player.current_hp = 1
+    ally = Entity("同伴", "朋友", blood_limit=100, current_hp=20,
+                  attack_count=1, attack_power=1, mutation_count=40)
+    e.state.friends.append(ally)
+    before = player.mutation_count
+    for entity in (player, ally):
+        result = e.combat.pay_numeric_cost(entity, "异变", 1)
+        assert result["owner"]["paid"] == 1 and "redemption" not in result["owner"]
+    assert player.mutation_count == before + 1 and ally.mutation_count == 41
+    assert player.is_alive and ally.is_alive and not e.state.pending_redemption
