@@ -992,6 +992,11 @@ class DamageDeathMixin:
 
         # 5. 落地后效果 (逆鳞 / 伤痕 / 寄生 / 负岳索 / 龙族血脉斩杀)
         self.hook_manager.apply_after_damage_pipeline(target, actual, detail.get("shield_absorbed", 0), detail, source, self)
+        if target.is_alive and any(detail.get(key, {}).get("actual", 0) > 0
+                                   for key in ("huoxueyi_heal", "zengsheng_heal")):
+            cancer = self.check_cancer(target)
+            if cancer:
+                detail["cancer"] = cancer
         if target.entity_type == "怪物" and target.is_alive:
             redemption = self.check_redemption(target)
             if redemption:

@@ -867,3 +867,19 @@ def test_catalysis_skips_pending_holder_without_interrupting_other_pools():
         {"holder_id": e.state.player.runtime_id, "steps": []},
     ]}, e.state.player)
     assert logs == [{"type": "catalysis_interrupted", "reason": "持有者已失效"}]
+
+
+def test_damage_heal_cancer_precedes_redemption_after_damage_pipeline():
+    from engine.effect_context import make_context
+    from engine.models import Relic
+    e = _ready_combat(_engine("damage_heal_cancer"))
+    m = monster("活血癌变")
+    m.current_hp = 20
+    m.total_healed = 199
+    m.relics.append(Relic("活血衣", ""))
+    e.state.enemies[:] = [m]
+    ctx = make_context(timing="player_action", source="攻击", source_type="attack",
+                       actor=e.state.player, target=m, mechanic="damage", subtype="attack", amount=2)
+    result = e.combat._apply_hostile_damage(m, 2, source=e.state.player, ctx=ctx)
+    assert result["huoxueyi_heal"]["actual"] == 1 and result["cancer"]
+    assert m.is_proliferated and not e.state.pending_redemption
