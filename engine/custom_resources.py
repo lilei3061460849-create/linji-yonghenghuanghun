@@ -197,13 +197,16 @@ def validate_spec(spec: dict) -> dict:
         base_daowen = spec.get("base_daowen")
         _require(isinstance(base_daowen, str) and base_daowen.strip(),
                  "自定义道纹必须指定 base_daowen（非衍生基础道纹）")
+        base_daowen = base_daowen.strip()
         from .daowen import DaoWenEngine
         DaoWenEngine.register_all()
         _require(base_daowen in DaoWenEngine._registry,
                  f"基础道纹【{base_daowen}】不存在")
         _require(not derivative_rules.is_derivative(base_daowen),
                  f"基础道纹【{base_daowen}】属于衍生道纹，不能作为自定义道纹母本")
-        spec["base_daowen"] = base_daowen.strip()
+        _require(name not in DaoWenEngine._registry,
+                 f"自定义道纹【{name}】与现有道纹重名")
+        spec["base_daowen"] = base_daowen
         cost = spec.get("cost")
         _require(isinstance(cost, dict), "道纹必须声明 cost")
         _require(cost.get("type") in SUPPORTED_COST_TYPES,
