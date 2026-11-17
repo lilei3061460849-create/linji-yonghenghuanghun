@@ -838,3 +838,19 @@ def test_gouhun_does_not_transfer_to_queued_creation():
     assert e.combat.is_redemption_pending(receiver)
     assert "加害" in donor.dao_wen and "加害" not in receiver.dao_wen
     assert any(effect["type"] == "daowen_transfer_interrupted" for effect in result["effects"])
+
+
+def test_compound_blood_pact_keeps_other_members_after_redemption():
+    e = _ready_combat(_engine("pact_compound_isolation"))
+    m = monster("共罪目标")
+    m.mutation_count = 50
+    other = Entity("其他同伴", "朋友", blood_limit=100, current_hp=100)
+    e.state.enemies[:] = [m]
+    e.state.friends.append(other)
+    result = e.combat.apply_daowen_effect("共罪", {
+        "x": 2, "mutation_reduction": 1, "targets": [m, other], "duration": 2,
+    }, e.state.player, m)
+    assert m.departure_reason == "救赎" and not m.has_status("共罪")
+    assert other.has_status("共罪")
+    assert e.state.player.has_status("共罪")
+    assert any(effect["type"] == "shared_payment" for effect in result["effects"])

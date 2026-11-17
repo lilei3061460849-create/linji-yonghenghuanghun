@@ -2775,7 +2775,7 @@ class DaowenEffectMixin:
                     or (expected and len(targets) != expected)
                     or any(entity is None for entity in targets)
                     or len({id(entity) for entity in targets}) != len(targets)
-                    or any(not entity.is_alive for entity in targets)
+                    or any(not entity.is_alive and target_effect_allowed(entity) for entity in targets)
                     or any(entity is caster for entity in targets)):
                 raise ValueError("共罪需要X个互不相同的存活非自身目标")
             group_slots = targets + [caster]
