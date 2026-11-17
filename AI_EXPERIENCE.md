@@ -555,46 +555,24 @@ python3 sim/blade_session.py status | log
   于是怪物也能招架、也能被招架，伤害可按击杀分配，不再有"怪物一刀固定面板攻力"的旧路。白板敌方（0 道纹）只有普攻。
 - **驱动器走真实 `battle_start`**，但先把 `engine.monster_pool[当前副本]` 清空：战始快照照常建立（`restart_battle` 全靠它），却不抽随机怪，敌方再按指定面板注入。因此 `restart_battle` 在白板对局里同样可用；重来会清空 `state.enemies`，驱动器随后按原面板重新注入并 `round_start`。
 
-### 现场新增道纹/遗物/法术与「重来」的配合（实测口径）
+### 当场设计资源与「重来」的配合
 
-**结论先行**：新道纹**可以现场造出来并真结算**；新遗物**只能是牌子**；而「重来」是**回到战始快照**，所以新东西必须**在 `battle_start` 之前**就给角色——战中才给、再重来，会被快照整体抹掉（实测两种顺序结果相反）。
+**当前实现**：统一入口 `define_resource` 支持四类自定义资源声明与真实结算；资源授予默认给玩家，也可用 `recipient_ref` 指定当前场上的实体（包括怪物）。
 
-| 要加什么 | 能不能现场加 | 依据 |
-| --- | --- | --- |
-| **道纹** | **能，真结算**，但要挂在 `register_all` 后面（见下）。实测新道纹【试锋】（消耗X，对目标造成3X伤害）：X=2 打出 6 点伤害、扣 2 法力；`restart_battle` 后仍持有、X=3 再打出 9 点 | `engine/daowen.py` 的 `_registry`；实测注册数 58→59 |
-| **遗物** | **只能加牌子，效果不生效**。`Relic` 只有 `name/effect/tags` 三个字段，行为靠引擎按遗物名硬接线 | `engine/models.py` 的 `Relic`；实测「[回始]获得2点法力」过【回始】后法力不升（4→1 只是攻力扣蓝） |
-| **法术**（用已持有道纹组合） | **能，真结算**。战斗中 `define_spell` 提交 `{name, required_daowen, trigger_condition, effect_flow}`，阶数＝引用道纹种类数、消耗等量出手；触发时机未接线会返回 `wired=false` 并明确警告不会触发 | `engine/api.py` 的 `_action_define_spell`；实测 `wired=True`、扣 1 出手 |
-
-**新道纹的正确加法（两步，缺一不可）**：
-
-```python
-from engine.daowen import DaoWenEngine, CostType
-
-def calculate_shifeng(x, target=None):        # ① 效果本体：返回结算字典
-    return {"dao_wen": "试锋", "x": x, "cost_type": CostType.MANA.value, "cost": x,
-            "target_damage": 3 * x, "damage_type": "普通",
-            "summary": f"消耗{x}法力，对{target.name}造成{3 * x}点伤害"}
-
-_orig = DaoWenEngine.register_all.__func__     # ② 必须挂在 register_all 之后
-def register_all_patched(cls):
-    _orig(cls)
-    cls._registry["试锋"] = calculate_shifeng
-DaoWenEngine.register_all = classmethod(register_all_patched)
-DaoWenEngine.register_all()
-```
-
-工具侧已封装成 `--fresh-daowen 名字:倍数`（`sim/blade_session.py` 的 `register_fresh_daowen`，效果口径固定为「消耗X法力，对[目标]造成 倍数×X 伤害」）；要更复杂的效果必须写正式实现，不要往这个口子里塞。
-
-只写 `DaoWenEngine._registry["试锋"] = ...` **会失败**：`_action_use_daowen` 每次都调 `DaoWenEngine.register_all()`，而它整体重建 `_registry`，现场注册的名字会被冲掉，报错就是光秃秃的道纹名（`success=False, error='试锋'`）。怪物阶段同样只认 `DaoWenEngine.list_all()`，注册后才不会被跳过。
-
-**顺序（实测）**：
-
-| 顺序 | 结果 |
+| 资源 | 当前运行路径 |
 | --- | --- |
-| 战中给予 → `restart_battle` | ❌ 新道纹/新遗物**全部消失**（重来＝`deepcopy` 战始快照） |
-| 战前给予 → `battle_start` → 打 → `restart_battle` | ✅ 新道纹/新遗物**保留**，敌方血量与回合复位，随机源一并回滚（同一批怪、同一血量重新开） |
+| **道纹** | 声明必须填写 `base_daowen`，且基础必须是已注册的非衍生道纹；计算结果携带 `derivative_of`，并进入运行期衍生身份索引和对应母本的衍生池。发动仍走 `use_daowen`。 |
+| **遗物** | 编译为 `Mechanism`，通过既有触发相位分发；玩家侧复用遗物持有/封存判定，怪物等实体读取自身 `relics`。 |
+| **法器** | 无 `trigger` 时由 `activate_resource` 主动激活；带 `trigger` 时编译为被动机制，并要求触发实体自身持有该法器。可通过 `owner_ref` 指定持有者。 |
+| **消耗品** | 复用 `consume_item` 与耐久；被动型沿既有机制触发。 |
 
-**推演中允许的做法**：① 用已持有道纹自创法术（随时可用）；② 新道纹按上面两步注册，并在 `battle_start` 前授予角色；③ 牌子级遗物随时可加，但战报里必须显式标注「仅叙事、不结算」。要让新**遗物**真正生效＝一次正式开发（效果实现＋`物品索引.md`/`全道纹索引.md` 同步＋测试）。
+**自定义道纹的法则边界**：必须先选择一个非衍生基础道纹，再在该基础道纹的法则领域内设计合理效果。代码负责校验基础存在、拒绝衍生道纹作母本、记录衍生归属；效果是否符合母本法则仍须在设计时对照正式道纹规则审查，不能把“字段填对”误当作语义自动验证。自定义道纹不进入残韵闭环，也不为它虚构残韵边。
+
+**怪物资源支持**：`define_resource` 的 `recipient_ref` 可指定场上实体的 `runtime_id`；`activate_resource` 的 `owner_ref` 可指定法器持有者。怪物的自定义遗物和法器分别进入其自身持有栏，触发时复用同一机制分发，不修改怪物面板或预算。
+
+**明确不做**：唯一代价已删除，不实现；自定义道纹不进入残韵闭环；数值表达式继续限定为 X、整数、四则运算与括号，不增加函数调用。
+
+**「重来」边界仍然成立**：新资源若在 `battle_start` 前授予，会进入战始快照；战斗中才授予，再执行 `restart_battle` 会随战始快照整体回滚。该边界不因自定义资源机制化而改变。
 
 ## 知识库维护
 
