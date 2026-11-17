@@ -958,3 +958,27 @@ def test_nested_payment_does_not_release_external_redemption_barrier(monkeypatch
     assert not e.state.pending_redemption
     e.combat._redemption_deferred.remove(m.runtime_id)
     assert e.combat.check_redemption(m)["type"] == "redemption"
+
+
+def test_shared_member_echo_does_not_interrupt_later_payer(monkeypatch):
+    from engine.models import StatusEffect
+    e = _ready_combat(_engine("shared_member_echo"))
+    payer, first, echo = monster("付款者"), monster("先承担者"), monster("回声目标")
+    for m in (payer, first, echo):
+        m.current_hp = 21
+    e.state.enemies[:] = [payer, first, echo]
+    ids = [first.runtime_id, payer.runtime_id]
+    for m in (payer, first):
+        m.add_status(StatusEffect("共罪", remaining_rounds=2, effect_data={"group_ids": ids}))
+    first.add_status(StatusEffect("血契", value=1, remaining_rounds=2,
+                                  effect_data={"target_id": echo.runtime_id}))
+    events = []
+    monkeypatch.setattr(e.combat, "_on_cost_paid", lambda who, ctx: events.append(
+        (who.name, payer.current_hp, first.current_hp, echo.current_hp,
+         bool(e.state.pending_redemption))))
+    result = e.combat.pay_numeric_cost(payer, "生命", 2)
+    assert events == [("先承担者", 21, 20, 21, False), ("回声目标", 21, 20, 20, False),
+                      ("付款者", 20, 20, 20, False)]
+    assert result["actual_paid"] == 2
+    assert e.state.pending_redemption["runtime_id"] == first.runtime_id
+    assert [c["runtime_id"] for c in e.state.pending_redemption_candidates] == [payer.runtime_id, echo.runtime_id]
