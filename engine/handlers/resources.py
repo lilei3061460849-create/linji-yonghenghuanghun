@@ -31,6 +31,20 @@ class ResourceHandlersMixin:
 
     @ACTION_REGISTRY.action("define_resource", group="resources",
                           allowed_phases=("pre_battle", "in_combat"))
+    def _resolve_custom_resource_recipient(self, ref: str = ""):
+        """解析自定义资源接收者；默认玩家，也允许显式指定当前场上的实体。"""
+        player = self.state.player
+        if not ref or (player is not None and ref in {"player", player.name, player.runtime_id}):
+            return player
+        entities = []
+        for group in (self.state.get_all_player_side(), self.state.get_all_enemy_side()):
+            entities.extend(group)
+        unique = {entity.runtime_id: entity for entity in entities if entity is not None}
+        if ref in unique:
+            return unique[ref]
+        matches = [entity for entity in unique.values() if entity.name == ref]
+        return matches[0] if len(matches) == 1 else None
+
     def _action_define_resource(self, params: dict) -> dict:
         """声明一条自定义资源（就地注册，可选就地授予）。
 
@@ -41,6 +55,11 @@ class ResourceHandlersMixin:
         if specs is None:
             return {"success": False, "error": "缺少 spec 或 specs"}
         payload = specs if isinstance(specs, list) else [specs]
+        recipient = self._resolve_custom_resource_recipient(
+            str(params.get("recipient_ref") or "")) if params.get("grant", True) else None
+        if params.get("grant", True) and recipient is None:
+            return {"success": False,
+                    "error": "自定义资源接收者不存在或名称不唯一；请提交 recipient_ref/runtime_id"}
         created: list[str] = []
         for spec in payload:
             try:
@@ -53,38 +72,50 @@ class ResourceHandlersMixin:
             except custom_resources.CustomResourceError as exc:
                 return {"success": False, "error": f"声明被拒绝：{exc}"}
             if params.get("grant", True):
-                self._grant_custom_resource(resource)
+                self._grant_custom_resource(resource, recipient=recipient)
             created.append(f"{resource.category}【{resource.name}】")
         return {"success": True, "action": "声明自定义资源",
                 "result": {"created": created,
                            "resources": [r.name for r in custom_resources.all_resources()]}}
 
-    def _grant_custom_resource(self, resource) -> dict:
-        """把自定义资源装进当前局：道纹进道纹栏、遗物进遗物栏、消耗品进背包。"""
+    def _grant_custom_resource(self, resource, recipient=None) -> dict:
+        """把自定义资源授予指定实体；默认玩家，怪物等实体使用自身持有栏。"""
         spec, category, name = resource.spec, resource.category, resource.name
-        player = self.state.player
-        if player is None:
-            return {"granted": False, "reason": "没有玩家"}
+        recipient = recipient or self.state.player
+        if recipient is None:
+            return {"granted": False, "reason": "没有合法接收者"}
         if category == "道纹":
-            if name in player.dao_wen:
+            if name in recipient.dao_wen:
                 return {"granted": False, "reason": "已持有"}
-            player.dao_wen[name] = DaoWenInstance(DaoWen(
+            recipient.dao_wen[name] = DaoWenInstance(DaoWen(
                 name=name, formula=f"{name}X",
                 cost_type=spec["cost"]["type"],
                 cost_formula=str(spec["cost"].get("amount", "X")),
                 effect_formula=spec.get("summary", "")))
-            return {"granted": True, "slot": "dao_wen"}
+            return {"granted": True, "slot": "dao_wen", "recipient": recipient.name}
         if category == "遗物":
-            self.state.grant_relic(name, spec.get("summary", ""))
-            return {"granted": True, "slot": "relics"}
+            if recipient is self.state.player:
+                self.state.grant_relic(name, spec.get("summary", ""), tag="自定义")
+            else:
+                if any(relic.name == name for relic in recipient.relics):
+                    return {"granted": False, "reason": "已持有"}
+                recipient.relics.append(Relic(name=name, effect=spec.get("summary", ""),
+                                               tags=["自定义"]))
+            return {"granted": True, "slot": "relics", "recipient": recipient.name}
         if category == "消耗品":
             uses = int(spec.get("uses", 1))
-            self.state.consumables.append(Consumable(
-                name=name, effect=spec.get("summary", ""),
-                current_uses=uses, max_uses=uses, kind="custom"))
-            return {"granted": True, "slot": "consumables"}
-        self.state.artifacts_owned.append(name)
-        return {"granted": True, "slot": "artifacts"}
+            item = Consumable(name=name, effect=spec.get("summary", ""),
+                              current_uses=uses, max_uses=uses, kind="custom")
+            if recipient is self.state.player:
+                self.state.consumables.append(item)
+            else:
+                recipient.consumables.append(item)
+            return {"granted": True, "slot": "consumables", "recipient": recipient.name}
+        if name not in recipient.artifacts:
+            recipient.artifacts.append(name)
+        if recipient is self.state.player and name not in self.state.artifacts_owned:
+            self.state.artifacts_owned.append(name)
+        return {"granted": True, "slot": "artifacts", "recipient": recipient.name}
 
     @ACTION_REGISTRY.action("activate_resource", group="resources",
                           allowed_phases=("pre_battle", "in_combat"))
@@ -105,11 +136,15 @@ class ResourceHandlersMixin:
             return {"success": False, "error": "遗物是被动触发，不能主动激活"}
 
         spec = resource.spec
-        player = self.state.player
+        player = self._resolve_custom_resource_recipient(
+            str(params.get("owner_ref") or params.get("recipient_ref") or ""))
+        if player is None:
+            return {"success": False, "error": "法器持有者不存在或名称不唯一"}
         if spec.get("trigger") is not None:
             return {"success": False, "error": f"【{name}】是触发式资源，不能主动激活"}
-        if name not in self.state.artifacts_owned:
-            return {"success": False, "error": f"未持有法器【{name}】"}
+        if name not in getattr(player, "artifacts", ()) and not (
+                player is self.state.player and name in self.state.artifacts_owned):
+            return {"success": False, "error": f"【{player.name}】未持有法器【{name}】"}
         if spec.get("costs_action") and self.state.phase == "in_combat":
             budget_error = self._consume_action_or_error(player)
             if budget_error:
