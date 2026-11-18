@@ -279,7 +279,7 @@ class AvailableActionsMixin:
                         "统一自定义施法（define_spell，消耗1次主动出手）"}},
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "共鸣",
-                "tier": {1: "随机列3件候选并显式选择1件", 2: "额外1精力+15碎片自选"},
+                "tier": {1: "随机列3件候选并显式选择1件", 2: "支付15碎片自选"},
                 "name": "2档必填，当前遗物池名称"}},
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "探索", "tier": {1: "发现1个未遇事件", 2: "30碎片发现2个未遇事件"}}},
@@ -326,22 +326,18 @@ class AvailableActionsMixin:
         if any(entity.name == "医生" and entity.is_alive for entity in self.state.employees):
             actions.append({"action_type": "upgrade_doctor",
                             "params_schema": {"mode": ["attack_count", "attack_power"]},
-                            "cost": "5碎片，不消耗精力"})
+                            "cost": "5碎片"})
         # 删除局外【忘忧】行动；忘忧香效果为溢出回复转格挡。
         player = self.state.player
         blood_pact_cost_targets = ([
             {"ref": ref, "name": entity.name}
             for ref, entity in self.combat.blood_pact_targets().items()
         ] if player and self.combat._has_active_blood_pact(player) else [])
-        if self.state.has_sacrifice_action:
-            actions.append({"action_type": "pre_battle_action",
-                            "params_schema": {"sub_action": "献祭", "tier": [1, 2, 3],
-                                              "cost_share_target_ref": blood_pact_cost_targets}})
         if self.state.pending_diandang_discoveries:
             actions.append({"action_type": "choose_diandang_daowen",
                             "params_schema": {"daowen_name": list(self.state.pending_diandang_discoveries[0])},
                             "remaining_groups": len(self.state.pending_diandang_discoveries),
-                            "note": "领取【典当】发现：从当前组3选1里选1种获得，不消耗出手/精力"})
+                            "note": "领取【典当】发现：从当前组3选1里选1种获得，不消耗出手"})
         if "真龙之心" in self.state.artifacts_owned:
             # 龙性货币废除。数值型代价自动入账，
             # 满 12 点可直接换 1 件龙族遗物；不再有「换取龙性」这一步。
@@ -366,25 +362,6 @@ class AvailableActionsMixin:
         if self.state.pending_first_embrace:
             actions.append({"action_type": "choose_first_embrace",
                             "params_schema": {"choice": "1..9"}})
-        if self.state.energy <= 0:
-            battle_start_schema: dict[str, Any] = {
-                "relic_choices": "逐件显式提交可选战始遗物",
-                "active_relics": "可选：本场生效的遗物名列表（自定义启用，不另限生效数量）；不提交则沿用当前启用集合"}
-            global_spells_start = self.combat.prepare_global_trigger_spells(TriggerTiming.BATTLE_START.value)
-            if global_spells_start:
-                battle_start_schema["spell_choices"] = {
-                    "_instruction": "存在【战始】全局法术候选，须逐一显式提交use/steps（循环法术可另附 max_iterations）"
-                                    "（实际结算发生在战始遗物与法力重置之后，届时可能因法力变化而改变可承担的X）",
-                    "candidates": global_spells_start,
-                }
-            actions.append({"action_type": "battle_start", "params_schema": battle_start_schema,
-                            "note": "旧线性副本入口；默认应先执行列表首项world_initialize，"
-                                    "仅在用户明确要求线性流程时使用"})
-        if self.state.endless_mode:
-            # 无尽模式「无法探索」：不出现在可用行动里，
-            # 保证 get_available_actions 的输出仍可原样执行（开发规则 13）。
-            actions = [a for a in actions
-                       if a.get("params_schema", {}).get("sub_action") != "探索"]
         if getattr(self.state, "world_state", {}):
             # 开放世界中不再提供独立「探索」菜单；事件由地图地点触发，旧附煞已由造生取代。
             actions = [action for action in actions
@@ -393,7 +370,7 @@ class AvailableActionsMixin:
             actions.insert(0, {"action_type": "world_initialize",
                                "params_schema": {"width": "integer (default 21)", "height": "integer (default 21)"},
                                "note": "默认副本入口：初始化开放世界地图（21×21）；地图种子由引擎骰子产生并记录。"
-                                       "只有用户明确要求旧线性流程时才跳过此项，继续旧线性局外行动并在精力耗尽后使用battle_start。"})
+                                       "只有用户明确要求旧线性流程时才跳过此项，继续旧线性局外行动并使用battle_start。"})
         else:
             if player is not None and "唤潮" in player.dao_wen:
                 actions.append({"action_type": "use_daowen", "available": True,
@@ -456,7 +433,7 @@ class AvailableActionsMixin:
                 # 开放世界不允许脱离地图遭遇随机开启旧式战斗。
                 actions = [action for action in actions
                            if action.get("action_type") != "battle_start"]
-        return {"phase": GamePhase.PRE_BATTLE.value, "energy": self.state.energy, "actions": actions}
+        return {"phase": GamePhase.PRE_BATTLE.value, "actions": actions}
 
     def _get_region_actions(self) -> list[dict]:
         if self.state.current_region == "扭曲都市":
