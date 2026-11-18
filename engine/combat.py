@@ -57,7 +57,8 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
     }
     
     # 原始怪物道纹（道纹归属规则：各组起点）——【原初X】可借用范围
-    ORIGINAL_MONSTER_DAOWEN = ("全力", "必中", "飞行")  # 2026-10-29：飞行恢复为冷却X道纹
+    MONSTER_MUTATION_COST_DAOWEN = ("全力", "必中", "飞行")  # 保留怪物发动这三种异变代价道纹时的专用代价倍率
+    ORIGINAL_MONSTER_DAOWEN = MONSTER_MUTATION_COST_DAOWEN  # 旧代码/测试兼容别名
     # 原始怪物道纹每次实际发动时支付异变5X（X 恒为面板/借用时写定的值；
     # 道纹递增机制已废止）；效果持续期间（未再次发动）不再重复计费。
     # 必中为次数型（下X次选择[目标]无法闪避），余数记在 entity._bizhong_left。
