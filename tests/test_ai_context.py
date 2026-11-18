@@ -80,7 +80,7 @@ def test_action_digest_is_only_the_combat_action_section():
     不许夹带别的规则章节。"""
     rule_blocks = {role: body for role, relpath, body, _ in context_blocks()
                    if relpath == "规则正文.md"}
-    assert set(rule_blocks) == {"机制速查·行动", "机制速查·法力结构"}, set(rule_blocks)
+    assert set(rule_blocks) == {"机制速查·行动", "机制速查·构造术"}, set(rule_blocks)
     body = rule_blocks["机制速查·行动"]
     assert "攻击（占1次主动出手）" in body
     assert "招架（回合外，不占出手，仅对攻击）" in body
@@ -88,7 +88,7 @@ def test_action_digest_is_only_the_combat_action_section():
     assert len(body) < 3000, f"行动摘录过长，疑似整篇规则被塞进来：{len(body)} 字"
     for other in ("基础定义", "道纹体系", "核心规则", "怪物准则", "特殊事件", "通用事件池"):
         assert other not in body, f"行动摘录混入了《规则正文》其它章节：{other}"
-    structure_body = rule_blocks["机制速查·法力结构"]
+    structure_body = rule_blocks["机制速查·构造术"]
     assert "承载" in structure_body and "永焰X" in structure_body
     for other in ("基础定义", "道纹体系", "核心规则", "怪物准则", "特殊事件", "通用事件池"):
         assert other not in structure_body, f"结构摘录混入了《规则正文》其它章节：{other}"
