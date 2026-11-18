@@ -16,7 +16,7 @@ on:
       runs:
         description: "Number of randomized duels"
         required: true
-        default: "1"
+        default: "30"
         type: string
       seed:
         description: "First deterministic seed"
@@ -69,7 +69,7 @@ jobs:
 
       - name: Run real-engine randomized PvP
         env:
-          RUNS: ${{ github.event.inputs.runs || '1' }}
+          RUNS: ${{ github.event.inputs.runs || '30' }}
           SEED: ${{ github.event.inputs.seed || '20261118' }}
         run: |
           python sim/audits/random_pvp_lab.py \
