@@ -41,18 +41,19 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
       - name: Run paired real-engine matches
         env:
-          EXPERIMENT_RUNS: \${{ github.event.inputs.runs || '8' }}
+          EXPERIMENT_RUNS: ${{ github.event.inputs.runs || '8' }}
         run: |
+          set -o pipefail
           mkdir -p artifacts/fengjian-rate
           python sim/audits/fengjian_rate_experiment.py \
-            --runs "\${EXPERIMENT_RUNS}" \
+            --runs "${EXPERIMENT_RUNS}" \
             --output-dir artifacts/fengjian-rate \
             2>&1 | tee artifacts/fengjian-rate/run.log
       - name: Upload results and problem log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fengjian-rate-ab-\${{ github.run_number }}
+          name: fengjian-rate-ab-${{ github.run_number }}
           path: artifacts/fengjian-rate/**
           if-no-files-found: warn
           retention-days: 30
