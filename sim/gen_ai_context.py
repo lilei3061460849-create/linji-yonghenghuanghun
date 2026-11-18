@@ -204,10 +204,10 @@ def extract_actions(root: Path, relpath: str) -> str:
 
 
 def extract_structures(root: Path, relpath: str) -> str:
-    """法力结构速查：整段摘录规则正文·法力结构节（与行动速查同一口径）。"""
+    """构造术速查：整段摘录规则正文·构造术节（与行动速查同一口径）。"""
     raw = _read_raw(root, relpath)
     match = re.search(
-        r"^###\s+法力结构（血液结构）\s*$(?P<body>.*?)(?=^###\s|^##\s|\Z)",
+        r"^###\s+构造术\s*$(?P<body>.*?)(?=^###\s|^##\s|\Z)",
         raw, re.MULTILINE | re.DOTALL)
     if not match:
         return ""
@@ -292,7 +292,7 @@ def digest_sources() -> list[DigestSource]:
     """机制速查与角色名单：只摘名称与一行效果，供外部 AI 避免凭空编造。"""
     return [
         DigestSource("机制速查·行动", "规则正文.md", extract_actions),
-        DigestSource("机制速查·法力结构", "规则正文.md", extract_structures),
+        DigestSource("机制速查·构造术", "规则正文.md", extract_structures),
         DigestSource("机制速查·道纹", "全道纹索引.md", extract_daowen, count_label="条"),
         DigestSource("机制速查·物品", "物品索引.md", extract_relics, count_label="件"),
         DigestSource("机制速查·法术", "法术索引.md", extract_spells, count_label="式"),
