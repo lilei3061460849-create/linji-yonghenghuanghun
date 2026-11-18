@@ -31,9 +31,9 @@ def legal_attribute_splits() -> list[tuple[int, int, int]]:
     """合法的（血限属性点、速限属性点、法限属性点）分配，总额固定25。"""
     return [
         (blood, speed, mana)
-        for blood in range(ATTRIBUTE_BUDGET + 1)
-        for speed in range(0, ATTRIBUTE_BUDGET - blood + 1, 2)
-        for mana in range(0, ATTRIBUTE_BUDGET - blood - speed + 1, 2)
+        for blood in range(1, ATTRIBUTE_BUDGET + 1)
+        for speed in range(2, ATTRIBUTE_BUDGET - blood + 1, 2)
+        for mana in range(2, ATTRIBUTE_BUDGET - blood - speed + 1, 2)
         if blood + speed + mana == ATTRIBUTE_BUDGET
     ]
 
@@ -148,7 +148,7 @@ def assemble_duel(challenger_engine: GameEngine, defender_engine: GameEngine,
     return first
 
 
-def run_one(seed: int, output_dir: Path, max_rounds: int, max_wall_seconds: float) -> dict:
+def run_one(seed: int, max_rounds: int, max_wall_seconds: float) -> dict:
     with tempfile.TemporaryDirectory(prefix=f"random-pvp-{seed}-") as tmp:
         workdir = Path(tmp)
         challenger_engine, challenger_build = create_random_character(
@@ -175,6 +175,7 @@ def run_one(seed: int, output_dir: Path, max_rounds: int, max_wall_seconds: floa
             "battle_log": log,
             "battle_channel": copy.deepcopy(challenger_engine.state.battle_channel),
             "combat_event_count": len(challenger_engine.state.combat_events),
+            "action_history": copy.deepcopy(challenger_engine.get_action_history()),
         }
 
 
@@ -195,7 +196,7 @@ def main() -> None:
     for index in range(args.runs):
         seed = args.seed + index
         try:
-            row = run_one(seed, output, args.max_rounds, args.max_wall_seconds)
+            row = run_one(seed, args.max_rounds, args.max_wall_seconds)
             results.append(row)
             duel = row["duel"]
             print(f"[DUEL] seed={seed} winner={duel.get('winner')} "
