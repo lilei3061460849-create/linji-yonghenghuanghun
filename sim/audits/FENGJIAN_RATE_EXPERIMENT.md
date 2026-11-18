@@ -43,3 +43,10 @@
 - 原因：生成 workflow YAML 时把 GitHub Actions 的表达式转义符也写进了文件。
 - 修复：移除多余反斜杠，并在执行命令中启用 pipefail，避免 Python 失败被 tee 的成功状态掩盖。
 - 状态：已提交修复，待重跑验证。
+
+### P-007：重复处理开局遗物发现（已定位）
+
+- 现象：每个样本报错“当前没有待选择的遗物发现”。
+- 原因：finish_initial_daowen() 内部已调用 resolve_opening_relic() 完成开局遗物选择；实验脚本随后又按 setup_choose_region 返回的历史候选列表重复提交选择。
+- 修复：移除第二次 choose_discovered_relic，沿用开局 helper 已完成的真实选择。
+- 状态：已提交修复，待重跑验证。
