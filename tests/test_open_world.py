@@ -2261,6 +2261,21 @@ def test_seeded_open_world_run_reaches_crown_ending_and_exports_engine_events():
         for battle in replay["battles"]]
 
 
+def test_eight_reincarnators_compete_in_one_open_world_for_the_crown():
+    replay = run_playthrough(seed=20261118, reincarnator_count=8)
+    final = replay["final_state"]
+
+    assert replay["run_config"]["reincarnator_count"] == 8
+    assert replay["initial_population"]["other_reincarnators"] == 7
+    assert final["stop_reason"] in {"crown carried out", "crown lost"}
+    assert final["crown_exit"]["reason"] == "最终的冠冕"
+    assert final["crown_taken_by"]
+    assert any(event["type"] == "crown_taken"
+               for event in replay["world_event_log"])
+    assert any(event["type"] in {"dungeon_exited", "crown_left_world"}
+               for event in replay["world_event_log"])
+
+
 def test_replay_terminates_on_a_crown_ending_instead_of_hanging():
     """没有可达敌人时回放会"等待"而不是提前收工；终局必须落在冠冕离场上。
 
