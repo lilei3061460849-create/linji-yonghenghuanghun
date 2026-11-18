@@ -281,8 +281,6 @@ class AvailableActionsMixin:
                 "sub_action": "共鸣",
                 "tier": {1: "随机列3件候选并显式选择1件", 2: "支付15碎片自选"},
                 "name": "2档必填，当前遗物池名称"}},
-            {"action_type": "pre_battle_action", "params_schema": {
-                "sub_action": "探索", "tier": {1: "发现1个未遇事件", 2: "30碎片发现2个未遇事件"}}},
             {"action_type": "set_active_relics", "params_schema": {
                 "relic_names": "生效遗物名列表（自定义启用）：持有占死者之页，生效数不另限；"
                                "未列名遗物仍持有、只是不生效；也可改在 battle_start 时用 active_relics 提交"},
@@ -363,9 +361,9 @@ class AvailableActionsMixin:
             actions.append({"action_type": "choose_first_embrace",
                             "params_schema": {"choice": "1..9"}})
         if getattr(self.state, "world_state", {}):
-            # 开放世界中不再提供独立「探索」菜单；事件由地图地点触发，旧附煞已由造生取代。
+            # 开放世界事件由地图地点触发；旧附煞已由造生取代。
             actions = [action for action in actions
-                       if action.get("params_schema", {}).get("sub_action") not in {"探索", "附煞"}]
+                       if action.get("params_schema", {}).get("sub_action") not in {"附煞"}]
         if not getattr(self.state, "world_state", {}):
             actions.insert(0, {"action_type": "world_initialize",
                                "params_schema": {"width": "integer (default 21)", "height": "integer (default 21)"},
