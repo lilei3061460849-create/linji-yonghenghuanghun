@@ -2784,7 +2784,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _grant_transformed_daowen(self, player: Entity, dest: str) -> bool:
         """残韵获得变化后道纹。X不从原道纹拷贝；同名不重复。
 
-        残韵路径双向 + 完全放开——变化结果是原始怪物道纹时
+        残韵路径双向 + 完全放开——变化结果为任一道纹时
         施法者同样永久获得（旧版在此处直接拒绝授予，与「双向 + 可永久持有」冲突）。
         """
         if dest in player.dao_wen:
