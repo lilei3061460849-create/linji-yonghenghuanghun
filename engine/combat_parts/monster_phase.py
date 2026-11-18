@@ -670,7 +670,7 @@ class MonsterPhaseMixin:
         elif ((name in self.MONSTER_MUTATION_COST_DAOWEN and calc.get("cost_type") != "冷却")
               or name == "封印"):
             mutation_cost = (self.YUANCHU_COST_RATE * effective_x
-                             if name in self.ORIGINAL_MONSTER_DAOWEN else effective_x)
+                             if name in self.MONSTER_MUTATION_COST_DAOWEN else effective_x)
             paid = monster.add_mutation(mutation_cost)
             mutation_cost_paid = mutation_cost > 0
             if paid.get("lost"):
