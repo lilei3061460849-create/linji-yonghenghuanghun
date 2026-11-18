@@ -1,6 +1,6 @@
 import random
 
-from sim.audits.random_pvp_lab import (
+from sim.random_pvp_support import (
     assemble_duel,
     create_random_character,
     legal_attribute_splits,
