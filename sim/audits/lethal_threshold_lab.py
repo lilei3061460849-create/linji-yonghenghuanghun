@@ -11,11 +11,14 @@ import csv
 import json
 import statistics
 import sys
+import os as _os
 from contextlib import contextmanager
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_ROOT))
+_ROOT = str(Path(__file__).resolve().parents[2])
+if not _os.path.isdir(_os.path.join(_ROOT, "engine")):
+    raise RuntimeError(f"找不到仓库根目录：{_ROOT}")
+sys.path.insert(0, _ROOT)
 
 import engine.combat as combat_module
 import sim.duel_pvp as duel_pvp
