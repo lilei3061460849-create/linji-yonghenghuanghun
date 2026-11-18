@@ -13,10 +13,13 @@ import json
 import random
 import tempfile
 import sys
+import os as _os
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_ROOT))
+_ROOT = str(Path(__file__).resolve().parents[2])
+if not _os.path.isdir(_os.path.join(_ROOT, "engine")):
+    raise RuntimeError(f"找不到仓库根目录：{_ROOT}")
+sys.path.insert(0, _ROOT)
 
 from engine.api import GameEngine
 from engine.ai_tactics import TacticalAI
