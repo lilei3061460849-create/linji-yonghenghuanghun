@@ -21,8 +21,6 @@ from engine.daowen import DaoWenEngine, ResonanceEngine, display_resonance_node 
 from engine import derivatives as derivative_rules  # noqa: E402
 from engine.rule_engine import DAOWEN_RULES, UNMIGRATED_REASON  # noqa: E402
 from engine.gamedata import (  # noqa: E402
-    MONSTER_TRANSFORM_DAOWEN,
-    ORIGINAL_MONSTER_DAOWEN,
     REGION_EXCLUSIVE_DAOWEN,
     REGION_TIERS,
     SHAFA_LOOP_DAOWEN,
@@ -249,8 +247,6 @@ A("- [总览表](#总览表)")
 A(f"- [通用核心（四面体一·二，{len(SHAFA_LOOP_DAOWEN)}）](#通用核心四面体一二{len(SHAFA_LOOP_DAOWEN)})")
 A(f"- [其他通用道纹（{len(OTHER_DAOWEN)}）](#其他通用道纹{len(OTHER_DAOWEN)})")
 A(f"- [衍生道纹（{len(derivative_rules.DERIVATIVE_SPECS)}）](#衍生道纹{len(derivative_rules.DERIVATIVE_SPECS)})")
-A(f"- [原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）](#原始怪物道纹{len(ORIGINAL_MONSTER_DAOWEN)})")
-A(f"- [怪物转化道纹（{len(MONSTER_TRANSFORM_DAOWEN)}）](#怪物转化道纹{len(MONSTER_TRANSFORM_DAOWEN)})")
 for _r in REGION_EXCLUSIVE_DAOWEN:
     A(f"- [{_r}专属（{len(region_daowen_order(_r))}）](#{_r}专属{len(region_daowen_order(_r))})")
 for _race, _pool in RACE_EXCLUSIVE_DAOWEN.items():
@@ -269,7 +265,7 @@ A("")
 A("| 道纹 | 分类 | 支付方式 | [目标] | 残韵路径（双向） | 承载怪物 |")
 A("| --- | --- | --- | --- | --- | --- |")
 CAT_LABEL = {
-    "shaifa": "通用核心", "original": "原始", "transform": "转化",
+    "shaifa": "通用核心", "common": "通用",
     "扭曲都市": "扭曲专属", "罪孽都市": "罪孽专属", "龙心谷": "龙心专属",
     "乱葬岗": "乱葬专属", "沉沦海": "沉沦海专属", "荒疫古城": "荒疫专属", "鲛族": "鲛族专属",
     "bloodline": "血族专属", "other": "其他通用", "first_embrace": "初拥专属", "unimpl": "副本未开放",
@@ -277,8 +273,7 @@ CAT_LABEL = {
 }
 for name in sorted(DaoWenEngine._registry, key=lambda n: (list(CATEGORY).index(n), n)):
     pass
-order = (list(SHAFA_LOOP_DAOWEN) + ["共罪", "怜悯"] + sorted(ORIGINAL_MONSTER_DAOWEN)
-         + sorted(MONSTER_TRANSFORM_DAOWEN)
+order = (list(SHAFA_LOOP_DAOWEN) + ["全力", "必中", "飞行", "全速", "压迫", "弱化", "强化"] + ["共罪", "怜悯"]
          + [n for r in REGION_EXCLUSIVE_DAOWEN for n in region_daowen_order(r)]
          + [n for pool in RACE_EXCLUSIVE_DAOWEN.values() for n in sorted(pool)]
          + sorted(BLOODLINE_EXCLUSIVE_DAOWEN)
@@ -350,28 +345,12 @@ section(f"衍生道纹（{len(DERIVATIVE_NAMES)}）", DERIVATIVE_NAMES,
             "多途径道纹一律只留一条途径：母本【杀伐】法力X→生命-X²、【透支】枯竭X→X法力、【再生】法力X→回复4X生命；其余同效果途径全部列为衍生道纹。",
         ])
 
-section(f"原始怪物道纹（{len(ORIGINAL_MONSTER_DAOWEN)}）", sorted(ORIGINAL_MONSTER_DAOWEN),
-        note_lines=[
-            "原始怪物道纹是各转化分支的起点：**不消耗法力**，每次实际发动按条目支付对应代价"
-            "（全力为【异变5X】，必中为【异变X】；减速／疯狂已改为遗物）；"
-            "与转化道纹互为残韵双向路径（转化道纹可反向变回原始道纹），"
-            "人类与怪物均可经残韵永久获得；"
-            "【原初X】随机借用目标身上自身未拥有的X种道纹，不限原始怪物道纹池。",
-            "怪物重复发动同一道纹按同一X计费，不存在「发动越多X越大」的递增。"
-            "怪物使用冷却代价类的道纹（束缚、全速）"
-            "X 值只能≤1，一律按 X=1 结算（规则正文·怪物准则·共用面板）。",
-        ])
-A("分支结构（原始 ⇄ 转化，残韵双向）：")
-A("")
-for src in sorted(ORIGINAL_MONSTER_DAOWEN):
-    ds = out_edges.get(src, [])
-    A(f"- {src}：{'、'.join(ds) if ds else '—'}")
-A("")
-
-section(f"怪物转化道纹（{len(MONSTER_TRANSFORM_DAOWEN)}）", sorted(MONSTER_TRANSFORM_DAOWEN),
-        note_lines=["转化道纹与原始怪物道纹互为残韵双向路径：对持有原始道纹的角色发动残韵，"
-                    "该道纹永久变为转化道纹，施法者同时永久获得；对持有转化道纹的角色发动同种残韵，"
-                    "亦可把它反向变回原始道纹。转化道纹不可由局外【学习】直接习得，只能经此路径取得。"])
+section("通用道纹（四面体三·四，7）",
+        ["全力", "必中", "飞行", "全速", "压迫", "弱化", "强化"],
+        note_lines=["七种道纹均属于通用道纹，可通过局外【学习】直接习得，也可经残韵获得。",
+                    "残韵关系（双向）：四面体三：反转 强化⇄弱化、全力⇄全速；转换 强化⇄全力、弱化⇄全速；曲解 强化⇄全速、弱化⇄全力。",
+                    "四面体四：反转 必中⇄飞行、压迫⇄篡改；转换 必中⇄压迫、飞行⇄篡改；曲解 必中⇄篡改、飞行⇄压迫。",
+                    "怪物重复发动同一道纹按同一X计费；怪物使用冷却代价类道纹时X≤1。"])
 A("> 原转化道纹【愤怒】已转换为消耗品【怒火针】，固定使指定目标法力消耗减半，持续2回合；详见[物品索引](物品索引.md#怒火针)。")
 A("")
 
