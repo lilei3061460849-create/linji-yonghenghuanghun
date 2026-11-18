@@ -3,7 +3,7 @@
 
 数据源（全部取当前版本引擎/文档事实，不抄旧数据）：
 - 效果正文/支付方式：运行时道纹取 engine/rule_engine.py 或 DaoWenEngine.calculate_*；DRAFT_DAOWEN 仅预留给未来的纯草案节点
-- 归属分类：engine/gamedata.py（通用核心 / ORIGINAL / TRANSFORM / REGION_EXCLUSIVE / RACE_EXCLUSIVE / BLOODLINE_EXCLUSIVE / UNIMPLEMENTED）
+- 归属分类：engine/gamedata.py（通用核心 / REGION_EXCLUSIVE / RACE_EXCLUSIVE / BLOODLINE_EXCLUSIVE / UNIMPLEMENTED）；原始/转化怪物分类已取消
 - 残韵闭环：engine/daowen.py DaoWenEngine.CLOSED_LOOPS
 - 承载怪物：已实现副本文档及沉沦海专属网络草案的全部面板行（怪物池 + 事件/雇佣面板）
 """
@@ -165,10 +165,8 @@ CATEGORY["篡改"] = "other"
 # 2026-11-09：衍生道纹不属任何四面体，单列一节；事实源是 engine/derivatives.py。
 for _n in derivative_rules.DERIVED_DAOWEN:
     CATEGORY[_n] = "derivative"
-for n in ORIGINAL_MONSTER_DAOWEN:
-    CATEGORY[n] = "original"
-for n in MONSTER_TRANSFORM_DAOWEN:
-    CATEGORY[n] = "transform"
+for n in ("全力", "必中", "飞行", "全速", "强化", "弱化", "压迫"):
+    CATEGORY[n] = "common"
 for region in REGION_EXCLUSIVE_DAOWEN:
     for n in region_daowen_order(region):
         CATEGORY[n] = region
@@ -233,7 +231,6 @@ A("规则的完整叙述以[规则正文](规则正文.md)为准，这里只做�
 A("")
 A(f"本索引收录 {len(DaoWenEngine._registry) + len(DRAFT_DAOWEN)} 条道纹："
   f"通用核心（四面体一·二）{len(SHAFA_LOOP_DAOWEN)}、衍生道纹 {len(derivative_rules.DERIVATIVE_SPECS)}、"
-  f"原始怪物 {len(ORIGINAL_MONSTER_DAOWEN)}、怪物转化 {len(MONSTER_TRANSFORM_DAOWEN)}、"
   f"副本专属 {sum(len(region_daowen_order(r)) for r in REGION_EXCLUSIVE_DAOWEN)}、"
   f"鲛族 {sum(len(pool) for pool in RACE_EXCLUSIVE_DAOWEN.values())}、"
   f"初拥 {len(FIRST_EMBRACE_DAOWEN)}、"
@@ -396,13 +393,12 @@ A("## 道纹归属与学习规则")
 A("")
 A("1. **通用核心（四面体一·二）**：开局发现初始道纹的来源；人类侧基础概念。")
 A("2. **副本专属**：学习门槛=先经残韵从本副本怪物转化获得至少一种；其它副本专属不可学。")
-A("3. **怪物转化**：只能由自身已持有道纹经残韵变化获得（施法者同时获得）；原始⇄转化双向，反向可把转化道纹变回原始道纹。")
-A("4. **原始怪物**：可经残韵（含转化道纹反向）永久获得，局外【学习】亦可习得；怪物发动按条目支付代价（全力异变5X、必中异变X；减速／疯狂已是遗物，冷却类X≤1）；可作为【原初X】的借用对象，但原初不再仅限原始怪物道纹池。")
-A("5. **血族专属转换消耗品**：【逆命筹】当前尚无专属获取机制。")
-A("6. **初拥专属**：【真理】仅由初拥之夜选项5授予，不可通过局外学习、【典当】发现或残韵获得。")
-A("7. **角色道纹唯一**：同名道纹不重复存在；通过残韵获得的道纹X按自由规则（自由控X）自定义。")
-A("8. **道纹默认局内发动**；局外发动须条文明示，当前明示项为【真理】【唤潮】【蜃景】；【唤潮】【蜃景】仅作用于开放地图。")
-A("9. **自由控X（自由规则的下属条文，不单独成规）**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】的X还受合法目标数封顶；【共罪】的目标数随X（X个非自身目标），持续∞。")
+A("3. **通用道纹**：全力、必中、飞行、全速、压迫、弱化、强化均属于通用道纹，开放局外【学习】。")
+A("4. **血族专属转换消耗品**：【逆命筹】当前尚无专属获取机制。")
+A("5. **初拥专属**：【真理】仅由初拥之夜选项5授予，不可通过局外学习、【典当】发现或残韵获得。")
+A("6. **角色道纹唯一**：同名道纹不重复存在；通过残韵获得的道纹X按自由规则（自由控X）自定义。")
+A("7. **道纹默认局内发动**；局外发动须条文明示，当前明示项为【真理】【唤潮】【蜃景】；【唤潮】【蜃景】仅作用于开放地图。")
+A("8. **自由控X（自由规则的下属条文，不单独成规）**：发动时可自由指定 1 ≤ X ≤ 当前可用法力/代价上限；【波及】的X还受合法目标数封顶；【共罪】的目标数随X（X个非自身目标），持续∞。")
 A("")
 
 out = ROOT / "全道纹索引.md"
