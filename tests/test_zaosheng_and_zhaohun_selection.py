@@ -76,6 +76,15 @@ def test_zhaohun_exact_x_corpses_need_no_extra_choice():
     assert e.state.dead_monsters == []
 
 
+def test_zhaohun_can_select_same_named_characters_by_runtime_id():
+    e, p = _zhaohun_engine(["同名怪", "同名怪"])
+    ids = [str(e.runtime_id) for e in e.state.dead_monsters]
+    result = _cast(e, x=2, revive_character_ids=ids)
+    assert result["success"], result
+    assert [x.name for x in e.state.temp_friends] == ["同名怪（魂）", "同名怪（魂）"]
+    assert e.state.dead_monsters == []
+
+
 def test_zhaohun_rejects_wrong_count_or_unknown_character_before_payment():
     e, p = _zhaohun_engine(["甲怪", "乙怪", "丙怪"])
     mana = p.current_mana
