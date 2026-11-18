@@ -121,7 +121,7 @@ def test_zhaohun_without_corpse_is_refused_before_mana_payment():
     mana_before = player.current_mana
     result = _cast(engine, "招魂", 1, "player:0")
     assert result["success"] is False, result
-    assert "尸体" in result["error"], result
+    assert "已死亡角色" in result["error"], result
     assert player.current_mana == mana_before
     assert player.actions_used_this_round == 0
     assert engine.state.temp_friends == []
