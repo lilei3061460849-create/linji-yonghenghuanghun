@@ -80,3 +80,24 @@ def test_archetypes_have_equal_resource_counts(tmp_path):
         assert build['daowen_count'] == 4
         assert build['relic_count'] == 2
         assert set(profile['daowen']).issubset(engine.state.player.dao_wen)
+
+
+def test_cancer_death_is_not_counted_as_an_ordinary_kill():
+    result = classify_outcome({
+        "winner": "defender",
+        "rounds": 2,
+        "reason": "挑战者因癌变命零（累计恢复量达到致死阈值）",
+        "error": False,
+    })
+    assert result["winner"] == "defender"
+    assert result["outcome_status"] == "cancer_death"
+
+
+def test_ordinary_elimination_has_its_own_category():
+    result = classify_outcome({
+        "winner": "challenger",
+        "rounds": 3,
+        "reason": "守擂主将被击杀",
+        "error": False,
+    })
+    assert result["outcome_status"] == "other_elimination"
