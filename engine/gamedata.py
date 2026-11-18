@@ -27,6 +27,11 @@ RACE_EXCLUSIVE_DAOWEN = {
 # 血族专属道纹集合当前为空；原【消灾】已转换为消耗品【逆命筹】。
 BLOODLINE_EXCLUSIVE_DAOWEN = frozenset()
 
+# 兼容既有怪物生成、转换历史与旧存档读取的来源标记；不再作为道纹分类或学习门禁。
+ORIGINAL_MONSTER_DAOWEN = {"全力", "必中", "飞行"}
+MONSTER_TRANSFORM_DAOWEN = {"弱化", "强化", "全速", "压迫"}
+MONSTER_DAOWEN = ORIGINAL_MONSTER_DAOWEN | MONSTER_TRANSFORM_DAOWEN
+
 
 # 副本阶级（道纹递增机制已于 废止；阶级仍用于出怪公式上界等）
 REGION_TIERS = {
