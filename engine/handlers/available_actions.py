@@ -1133,14 +1133,14 @@ class AvailableActionsMixin:
 
     @staticmethod
     def _is_allowed_bound_spell_action(action_type: str, params: dict) -> bool:
-        """束缚允许施放瞬发法术，或定义/施展自定义法术；不允许直接发动道纹。"""
-        if action_type == "define_spell":
+        """束缚只放行施法：瞬发、自定义法术，以及规则定义中同属施法的单个道纹发动。"""
+        if action_type in {"define_spell", "use_daowen"}:
             return True
         if action_type != "cast":
             return False
         if "flow" in params or "huangfu_spell" in params:
             return params.get("kind") in (None, "flow", "instant")
-        return params.get("kind") == "spell"
+        return params.get("kind") in {"spell", "daowen"}
 
     def _is_bound_ally_spell_command(self, ally: Entity, params: dict) -> bool:
         """束缚的友方仅可被命令施放已由【黄符】授予的瞬发法术。"""
