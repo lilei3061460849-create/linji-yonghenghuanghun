@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "sim/audits/random_pvp_lab.py"
+      - "sim/random_pvp_support.py"
+      - "tests/test_random_pvp_lab.py"
       - ".github/workflows/random-pvp-lab.yml"
       - "engine/**"
       - "sim/duel_pvp.py"
