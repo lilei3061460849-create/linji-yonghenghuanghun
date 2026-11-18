@@ -575,8 +575,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     "error": "衍生道纹只能在战斗阶段发现／领取（局内0出手行动）"}
         if action_type == "battle_start" and phase != "pre_battle":
             return {"success": False, "error": "只有局外阶段可以进入战始"}
-        if action_type == "battle_start" and self.state.energy > 0 and not params.get("world_encounter_id"):
-            return {"success": False, "error": f"尚有{self.state.energy}点精力，耗尽后才能进入战斗"}
         if action_type == "use_daowen":
             name = params.get("daowen_name", "")
             # 默认局内；局外须条文明示（白名单见模块顶部 OUT_OF_COMBAT_DAOWEN）。
@@ -1299,24 +1297,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         result["world_time"] = {"elapsed_turns": elapsed, "world_turn": world.clock.turn}
         return result
 
-    def _execute_pre_battle_immediate(self, params: dict, *, world_mode: bool) -> dict:
-        """旧局外行动结算器；world_mode=True时复用效果但不再消耗旧精力。"""
+    def _execute_pre_battle_immediate(self, params: dict, *, world_mode: bool = True) -> dict:
+        """局外行动效果结算器；开放世界的时间消耗由调用方统一处理。"""
         action = params.get("sub_action", "")
-
-        if not world_mode:
-            if self.state.energy <= 0:
-                return {
-                    "success": False,
-                    "error": "精力已耗尽",
-                    "instruction": "精力耗尽，进入战斗阶段。请调用 battle_start。"
-                }
-
-            self.state.energy -= 1
-            # 旧战斗循环中的炼心精力惩罚仅适用于旧模式。
-            if self.state.pending_energy_penalty > 0:
-                self.state.energy -= self.state.pending_energy_penalty
-                self.state.pending_energy_penalty = 0
-
         result_map = {
             "休整": self._pre_battle_xiuzheng,
             "修行": self._pre_battle_xiuxing,
@@ -1328,34 +1311,16 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "炼心": self._pre_battle_lianxin,
             "造生": self._pre_battle_zaosheng,
             "唤醒": self._pre_battle_wake_yaoguai,
-            "献祭": self._pre_battle_sacrifice,
         }
-        # 2026-09-28：局外【忘忧】已删除，忘忧香效果为溢出回复转格挡。
-
-        # 副本专属行动门禁（规则正文：改造=扭曲都市、雇佣=罪孽都市、炼心=龙心谷专属）。
-        # 缺少该校验会让任意副本都能用他人专属行动，统计与平衡数据将失真。
         REGION_EXCLUSIVE = {"改造": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "造生": "乱葬岗"}
         need_region = REGION_EXCLUSIVE.get(action)
         if action == "造生" and has_yaoguai_banner(self.state):
             need_region = None
         if need_region and self.state.current_region != need_region:
-            if not world_mode:
-                self.state.energy += 1
-            return {"success": False,
-                    "error": f"【{action}】是{need_region}专属行动，当前副本为"
-                             f"{self.state.current_region or '未选择'}"}
-
+            return {"success": False, "error": f"【{action}】是{need_region}专属行动，当前副本为{self.state.current_region or '未选择'}"}
         if action in result_map:
-            energy_before = self.state.energy
-            result = result_map[action](params)
-            if world_mode:
-                # 旧处理器会在失败分支退款精力；开放世界不再使用旧精力经济。
-                self.state.energy = energy_before
-            return result
-        else:
-            if not world_mode:
-                self.state.energy += 1
-            return {"success": False, "error": f"未知局外行动: {action}"}
+            return result_map[action](params)
+        return {"success": False, "error": f"未知局外行动: {action}"}
 
     def _pre_battle_xiuzheng(self, params: dict) -> dict:
         """休整：产生恢复量，并按稳定引用在自己/朋友/员工间自由完整分配。"""
