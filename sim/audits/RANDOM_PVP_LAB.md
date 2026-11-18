@@ -71,7 +71,8 @@
 
 - `cancer_death`：死斗返回原因明确包含癌变。
 - `sculpture_loss`：因化雕塑离场判负，不计作被击杀。
-- `other_elimination`：其他明确判负结局；须结合原始原因判断是否为直接击杀。
+- `direct_kill`：原始归因明确标注击杀或攻击致死。
+- `other_elimination`：其他明确判负结局，保留原始原因供审计。
 - `round_limit` / `unresolved` / `simulation_error`：未决或程序问题，不计入胜负率。
 - 报告同时保留逐局原始 `reason`，分类只是统计分桶，不修改引擎规则。
 
