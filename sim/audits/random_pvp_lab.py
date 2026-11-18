@@ -19,6 +19,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_ROOT))
 
 from engine.api import GameEngine
+from engine.ai_tactics import TacticalAI
 from engine.enums import GamePhase
 from sim.duel_pvp import run_duel_pvp
 
@@ -163,10 +164,12 @@ def run_one(seed: int, max_rounds: int, max_wall_seconds: float) -> dict:
             max_steps=400,
             max_wall_seconds=max_wall_seconds,
             use_tactical=True,
+            ai_cls=TacticalAI,
             log=log,
         )
         return {
             "seed": seed,
+            "ai_policy": "TacticalAI (both sides use the same policy)",
             "attribute_point_budget": ATTRIBUTE_BUDGET,
             "first_mover": first,
             "challenger": challenger_build,
