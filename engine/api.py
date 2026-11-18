@@ -48,8 +48,8 @@ from .events import EventPool, TWISTED_TOOL_LIBRARY
 from .rule_repository import RuleRepository
 from .spell_execution import InterruptReason, SpellExecution
 from .dungeons import DEFAULT_INDEX
-from .gamedata import (REGION_EXCLUSIVE_DAOWEN, ORIGINAL_MONSTER_DAOWEN,
-                       MONSTER_TRANSFORM_DAOWEN, SHAFA_LOOP_DAOWEN,
+from .gamedata import (REGION_EXCLUSIVE_DAOWEN, MONSTER_MUTATION_COST_DAOWEN,
+                       SHAFA_LOOP_DAOWEN,
                        UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN, FIRST_EMBRACE_DAOWEN,
                        learnability_error)
 from .dm_rulings import DMRulingsDB, DMRuling, Interrupt
@@ -2755,7 +2755,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         """
         if source not in holder.dao_wen or self._conversion_capacity_error(holder, source, dest):
             return False
-        if holder.entity_type == "怪物" and source in ORIGINAL_MONSTER_DAOWEN:
+        if holder.entity_type == "怪物" and source in MONSTER_MUTATION_COST_DAOWEN:
             holder._had_monster_daowen = True
         old = holder.dao_wen[source]
         if dest not in holder.dao_wen:
