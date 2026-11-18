@@ -66,8 +66,6 @@ def test_bound_player_can_cast_but_cannot_use_other_active_actions(tmp_path):
 
     for action_type, params in (
         ("prepare_attack", {"actor_ref": "player:0"}),
-        ("use_daowen", {"daowen_name": "杀伐", "x": 1,
-                         "target_ref": "enemy:0"}),
         ("focus", {}),
         ("consume_item", {"name": "不存在的物品"}),
     ):
@@ -93,17 +91,18 @@ def test_prepare_monster_phase_is_offered_only_when_enemy_holds_priority(tmp_pat
         a["action_type"] for a in engine.get_available_actions()["actions"]}
 
 
-def test_custom_spell_actions_are_allowed_but_direct_daowen_is_blocked(tmp_path):
+def test_instant_custom_and_single_daowen_casts_are_allowed(tmp_path):
     engine, _player, _target = _bound_engine(tmp_path, "spell_actions")
     # 本用例连续定义/施展两次法术，按「阶数＝重数」各 2 次出手，先给足预算。
     grant_extra_actions(_player, 6)
 
-    blocked = engine.execute_action("cast", {
+    direct_daowen = engine.execute_action("cast", {
         "kind": "daowen", "daowen_name": "杀伐", "x": 1,
         "target_ref": "enemy:0",
     })
-    assert not blocked["success"]
-    assert "只能进行法术行动" in blocked["error"]
+    assert direct_daowen["success"], direct_daowen
+    back = opponent_passes(engine)
+    assert back.get("success"), back
 
     def spell(name):
         return {
