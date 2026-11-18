@@ -45,10 +45,16 @@ def _require_success(result: dict, step: str) -> dict:
     return result
 
 
-def create_random_character(seed: int, name: str, workdir: Path) -> tuple[GameEngine, dict]:
+def create_random_character(
+    seed: int, name: str, workdir: Path,
+    attribute_points: tuple[int, int, int] | None = None,
+) -> tuple[GameEngine, dict]:
     """使用公开开局 action 创建角色；随机只负责从合法发现候选中选取。"""
     rng = random.Random(seed)
-    blood_points, speed_points, mana_points = rng.choice(legal_attribute_splits())
+    blood_points, speed_points, mana_points = (
+        attribute_points if attribute_points is not None
+        else rng.choice(legal_attribute_splits())
+    )
     engine = GameEngine(
         db_path=str(workdir / f"{name}.sqlite"),
         rng_seed=seed,
@@ -152,10 +158,13 @@ def assemble_duel(challenger_engine: GameEngine, defender_engine: GameEngine,
 def run_one(seed: int, max_rounds: int, max_wall_seconds: float) -> dict:
     with tempfile.TemporaryDirectory(prefix=f"random-pvp-{seed}-") as tmp:
         workdir = Path(tmp)
+        # 同预算、不同三维：从全部合法分配中无放回抽两套，避免偶然抽成完全镜像。
+        split_rng = random.Random(seed ^ 0xB17)
+        challenger_points, defender_points = split_rng.sample(legal_attribute_splits(), 2)
         challenger_engine, challenger_build = create_random_character(
-            seed * 2 + 1, "随机挑战者", workdir)
+            seed * 2 + 1, "随机挑战者", workdir, challenger_points)
         defender_engine, defender_build = create_random_character(
-            seed * 2 + 2, "随机守擂者", workdir)
+            seed * 2 + 2, "随机守擂者", workdir, defender_points)
         first = assemble_duel(challenger_engine, defender_engine, seed)
         log: list[str] = []
         result = run_duel_pvp(
@@ -234,6 +243,7 @@ def main() -> None:
         d = row["duel"]
         lines += [
             f"## Seed {row['seed']}",
+            f"- AI：{row.get('ai_policy', '未指定')}",
             f"- 先手：{row['first_mover']}",
             f"- 胜者：{d.get('winner') or '未判定'}；回合：{d.get('rounds')}",
             f"- 结论：{d.get('reason', '')}",
