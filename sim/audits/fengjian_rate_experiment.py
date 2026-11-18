@@ -13,7 +13,7 @@ from engine.ai_tactics import TacticalAI
 from engine.daowen import DaoWenEngine
 from engine.models import DaoWen, DaoWenInstance, Entity
 from sim.alt_path_test import resolve_monster_turn
-from tests.setup_support import begin_battle, begin_round, finish_initial_daowen, grant_extra_actions, hand_priority_to_player
+from tests.setup_support import begin_battle, begin_round, finish_initial_daowen, grant_extra_actions, hand_priority_to_player, player_passes
 
 def one(seed: int, effect_rate: int) -> dict:
     old = dr.BY_NAME["献锋"]
@@ -66,11 +66,43 @@ def one(seed: int, effect_rate: int) -> dict:
         if not cast.get("success"): raise RuntimeError(f"献锋发动失败: {cast}")
         ai.used["献锋"]=1
         hp1=p.current_hp; power1=p.effective_attack_power()
-        actions=ai.take_turn()
+        # 交替出手：献锋施放后优先权交给敌方；敌方行动/跳过后玩家才能继续。
+        all_player_actions=[]
+        monster_results=[]
+        turn_errors=[]
+        for _ in range(12):
+            if e.state.combat_subphase == "await_round_end":
+                break
+            if e.state.duel_turn == "opponent_side":
+                mr=resolve_monster_turn(e,[])
+                monster_results.append(mr)
+                if not mr.get("success"):
+                    turn_errors.append({"stage":"monster_phase","result":mr})
+                    break
+            elif e.state.duel_turn == "player_side":
+                if p.actions_used_this_round >= p.action_count:
+                    passed=player_passes(e)
+                    if not passed.get("success"):
+                        turn_errors.append({"stage":"player_skip","result":passed})
+                        break
+                else:
+                    acts=ai.take_turn()
+                    all_player_actions.extend(acts)
+                    if not acts and e.state.duel_turn == "player_side":
+                        passed=player_passes(e)
+                        if not passed.get("success"):
+                            turn_errors.append({"stage":"player_skip_after_no_action","result":passed})
+                            break
+            else:
+                turn_errors.append({"stage":"unknown_priority","duel_turn":e.state.duel_turn})
+                break
         foe1=foe.current_hp
-        monster=resolve_monster_turn(e,[])
-        end=e.execute_action("round_end",{})
+        end=e.execute_action("round_end",{}) if e.state.combat_subphase == "await_round_end" else {
+            "success":False,"error":f"循环结束时子阶段为{e.state.combat_subphase}","turn_errors":turn_errors}
         power2=p.effective_attack_power()
+        actions=all_player_actions
+        monster={"success":bool(monster_results) and all(x.get("success") for x in monster_results),
+                 "phases":monster_results,"turn_errors":turn_errors}
         return {
             "seed":seed,"rate":f"1:{effect_rate}","effect_rate":effect_rate,
             "healing_requested":(cast.get("calculation") or {}).get("target_heal"),
