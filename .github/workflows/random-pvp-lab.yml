@@ -9,14 +9,6 @@ on:
       - "engine/**"
       - "sim/duel_pvp.py"
       - "sim/win_only_ai.py"
-  push:
-    branches: [feature/fengjian-1-4-random-pvp-20261118]
-    paths:
-      - "sim/audits/random_pvp_lab.py"
-      - ".github/workflows/random-pvp-lab.yml"
-      - "engine/**"
-      - "sim/duel_pvp.py"
-      - "sim/win_only_ai.py"
   workflow_dispatch:
     inputs:
       runs:
