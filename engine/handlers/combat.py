@@ -1468,7 +1468,7 @@ class CombatHandlersMixin:
         # 旧存档兼容：新版【增殖】是战斗内状态，不再有战终待决血限增长。
         modifiers.pop("zengzhi_pending", None)
         zengzhi_settled = []
-        modifiers.pop("pale_flower_active", False)   # 2026-10-11：旧战终精力+1 已随重做废弃
+        modifiers.pop("pale_flower_active", False)   # 2026-10-11：旧战终恢复效果已随重做废弃
         modifiers.pop("brand_nail_target_ref", None)
         modifiers.pop("huifeng_target_ref", None)
         modifiers.pop("huifeng_target_ref_opponent", None)
