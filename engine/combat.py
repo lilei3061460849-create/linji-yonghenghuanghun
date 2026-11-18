@@ -877,6 +877,26 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
         }
         # 万钧印（消耗品，按物品索引=持有者选择）：应对窗口显式请求（wanjunyin=True）
         # 才把这一击改为攻击者对自己发动，触发消耗1点耐久；默认不触发。
+        # 【束缚】禁止目标采取任何被动响应行动。必须先于血影与万钧印结算，
+        # 否则这两条防御旁路会绕过闪避/招架之后的束缚检查。
+        if target.has_status("束缚"):
+            if blood_shadow:
+                result["blood_shadow_success"] = False
+                result["blood_shadow_fail_reason"] = "受【束缚】影响，不能使用被动行动（血影）"
+                blood_shadow = False
+            if wanjunyin is True:
+                result["wanjunyin_success"] = False
+                result["wanjunyin_fail_reason"] = "受【束缚】影响，不能使用被动行动（万钧印改道）"
+                wanjunyin = False
+            if dodge:
+                result["dodge_success"] = False
+                result["dodge_fail_reason"] = "受【束缚】影响，只能施法，无法闪避"
+                dodge = False
+            if parry:
+                result["parry_success"] = False
+                result["parry_fail_reason"] = "受【束缚】影响，只能施法，无法招架"
+                parry = False
+
         # 被改道的一次自攻不会再被改道（_wanjunyin_converted 防 A→B→A 递归）。
         if (not _wanjunyin_converted and wanjunyin is True
                 and attacker is not target and attacker.is_alive
@@ -938,18 +958,6 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             result["blood_shadow_success"] = True
             result["note"] = "血影：支付生命10，本次判定被取消"
             return result
-
-        # 【束缚】限定只能施法：闪避、招架也是行动，同样不可选。
-        # 这不是新的旁路：束缚的旧闸门只管主动行动，零出手的响应行动原样沿用它。
-        if target.has_status("束缚"):
-            if dodge:
-                result["dodge_success"] = False
-                result["dodge_fail_reason"] = "受【束缚】影响，只能施法，无法闪避"
-            if parry:
-                result["parry_success"] = False
-                result["parry_fail_reason"] = "受【束缚】影响，只能施法，无法招架"
-            # 不能在这里返回：防御被封的本次攻击必须照常进入伤害结算。
-            dodge = parry = False
 
         # 闪避判定
         if dodge:
