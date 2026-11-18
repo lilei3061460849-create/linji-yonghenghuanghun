@@ -137,8 +137,8 @@ class Relic:
     name: str
     effect: str
     tags: list[str] = field(default_factory=list)
-    # 启用归类仍保留：enabled=False 的遗物仍持有并占页，只是不生效；不再另限生效数。
-    # 这是既有遗物对象上的一个状态，不是新品类；旧档缺此键一律默认 True。
+    # 遗物持有数量不受死者之页限制；enabled=False 表示仍持有、但暂不生效。
+    # 常规同时启用件数另受 Entity.enabled_relic_limit 限制；旧档缺此键一律默认 True。
     enabled: bool = True
 
     def __post_init__(self):
@@ -2321,7 +2321,7 @@ class GameState:
         """授予一件遗物；tag 用于标记 血族/龙族 等来源。"""
         r = Relic(name=name, effect=effect, tags=[tag] if tag else [])
         self.relics.append(r)
-        # 默认启用；正式行动由事务层统一检查死者之页，失败时整体回滚。
+# 默认启用；遗物不占死者之页，常规启用数量由授予归位逻辑按启用槽位上限处理。
         return r
 
     def remove_relic(self, name: str) -> bool:
