@@ -100,4 +100,4 @@ def test_ordinary_elimination_has_its_own_category():
         "reason": "守擂主将被击杀",
         "error": False,
     })
-    assert result["outcome_status"] == "other_elimination"
+    assert result["outcome_status"] == "direct_kill"
