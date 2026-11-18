@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """【献锋】1:1 / 1:4 真实引擎配对实验；只覆写进程内 effect_rate，不改正式事实源。"""
 from __future__ import annotations
-import argparse, json, os, tempfile
+import argparse, json, os, sys, tempfile
 from dataclasses import replace
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 from engine import derivatives as dr
 from engine.api import GameEngine
 from engine.ai_tactics import TacticalAI
