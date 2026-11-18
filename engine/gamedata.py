@@ -27,7 +27,6 @@ RACE_EXCLUSIVE_DAOWEN = {
 # 血族专属道纹集合当前为空；原【消灾】已转换为消耗品【逆命筹】。
 BLOODLINE_EXCLUSIVE_DAOWEN = frozenset()
 
-ORIGINAL_MONSTER_DAOWEN = {"全力", "必中", "飞行"}  # 2026-10-29：飞行恢复为冷却X道纹
 
 # 副本阶级（道纹递增机制已于 废止；阶级仍用于出怪公式上界等）
 REGION_TIERS = {
@@ -37,11 +36,6 @@ REGION_TIERS = {
     "巴别塔": 4,
 }
 
-MONSTER_TRANSFORM_DAOWEN = {
-    # 2026-10-03 删【兴奋】【滑翔】【坠落】；2026-10-08 删一条无残韵路径的孤儿转化道纹；
-    # 2026-10-11 删【无神】【借力】【衰败】；2026-10-27【愤怒】转为消耗品【怒火针】
-    "弱化", "强化", "全速", "压迫",
-}
 
 # 杀伐闭环的通用可获得道纹（固执、贯穿与迁往扭曲都市的增殖原位留空）；
 # 开局【发现】初始道纹只从这里抽。
@@ -56,8 +50,6 @@ SHAFA_LOOP_DAOWEN = (
     "操纵", "束缚", "迟滞", "封印",
 )
 
-# 原始 ∪ 转化。学习门禁与残韵归属用此并集。救赎不再以道纹种类为触发条件。
-MONSTER_DAOWEN = ORIGINAL_MONSTER_DAOWEN | MONSTER_TRANSFORM_DAOWEN
 
 # 所属副本尚未接入运行时，但计算已实现；局外学习仍按专属道纹拒绝。
 UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN = {
@@ -117,10 +109,6 @@ def learnability_error(name, *, owned, region, known) -> str | None:
             return f"【{name}】是{owner}专属道纹，当前副本无法习得"
         if not (REGION_EXCLUSIVE_DAOWEN[owner] & set(owned)):
             return f"【{name}】须先经残韵获得本副本一种专属道纹后才能学习"
-    if name in MONSTER_TRANSFORM_DAOWEN:
-        return f"【{name}】是怪物转化道纹，只能由自身已有道纹经残韵获得"
-    # 原始怪物道纹不再是人类禁区（残韵双向 + 可永久持有），
-    # 局外【学习】不再以「人类无法承受」为由拒绝。
     unimpl_owner = UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN.get(name)
     if unimpl_owner is not None:
         return f"【{name}】是{unimpl_owner}专属道纹，当前副本无法习得"
