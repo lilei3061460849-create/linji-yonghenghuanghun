@@ -79,7 +79,7 @@ class CostType(Enum):
 
 
 RESOURCE_TYPES = frozenset({"生命", "血限", "法力", "法限", "速度", "速限", "碎片", "假碎片"})
-OUT_OF_COMBAT_RESOURCE_TYPES = frozenset({"精力", "耐久", "残韵", "属性点"})
+OUT_OF_COMBAT_RESOURCE_TYPES = frozenset({"耐久", "残韵", "属性点"})
 SPECIAL_COST_TYPES = frozenset({"枯竭", "失忆", "异变", "冷却"})
 LEGACY_COST_ALIASES = {
     "流血": "生命", "衰老": "血限", "疲惫": "速度", "萎缩": "法限",
