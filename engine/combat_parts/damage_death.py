@@ -1085,12 +1085,12 @@ class DamageDeathMixin:
             ctx=entity._death_ctx, entity_type=entity.entity_type,
             cause=death_ctx.subtype,
         )
+        # 乱葬岗·招魂：记录本场所有已命零角色（旧字段名 dead_monsters 保持存档兼容）。
+        if not getattr(self.state, "dead_monsters", None):
+            self.state.dead_monsters = []
+        if entity not in self.state.dead_monsters:
+            self.state.dead_monsters.append(entity)
         if entity.entity_type == "怪物":
-            # 乱葬岗·招魂：记录本场已命零怪物尸体
-            if not getattr(self.state, "dead_monsters", None):
-                self.state.dead_monsters = []
-            if entity not in self.state.dead_monsters:
-                self.state.dead_monsters.append(entity)
             # 烬翼（消耗品，2026-10-23）：任意怪物［命零］时耐久+1（不超过上限）。
             ember = note_ember_wing_monster_death(self.state, entity)
             if ember:
