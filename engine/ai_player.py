@@ -540,7 +540,6 @@ class PlaceholderBackend(AIBackend):
                 return AIDecision("world_initialize", {"width": 21, "height": 21},
                                   "按默认模式初始化开放地图并在当前副本区域探索")
             engine = getattr(self, "engine", None)
-            # 精力耗尽时，可进入战始：按共享策略显式提交可选战始遗物（可以不用但不能不让用）。
             for action in available_actions.get("actions", []) or []:
                 if action.get("action_type") == "battle_start" and engine is not None:
                     return AIDecision("battle_start", {
