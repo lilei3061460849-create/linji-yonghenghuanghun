@@ -119,7 +119,7 @@ class DaowenHandlersMixin:
         if requires_target and not (target_ref or target_name):
             return {"success": False, "error": f"【{name}】需要显式指定目标target_ref；缺少[目标]时失效"}
 
-        if is_command and not (target_ref or target_name):
+        if is_command and name != "招魂" and not (target_ref or target_name):
             return {"success": False, "error": "听从指令发动道纹必须指定一个非自身的目标"}
 
         # 使用稳定引用定位目标；旧名称仅在唯一匹配时兼容。
@@ -147,7 +147,7 @@ class DaowenHandlersMixin:
         if tamper_rule is not None:
             params = dict(params, target_ref=next(ref for ref, entity in refs.items() if entity is target), target="")
             target_ref = params["target_ref"]
-        if is_command and target is actor:
+        if is_command and name != "招魂" and target is actor:
             return {"success": False, "error": "听从指令发动道纹必须指定一个非自身目标"}
         if name == "共罪":
             # 共罪选 X 个非自身目标（不再固定 2 个）。
