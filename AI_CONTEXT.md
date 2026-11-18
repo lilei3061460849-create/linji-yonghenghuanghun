@@ -32,7 +32,7 @@
 | 2 | AI 角色扮演约束（节选：职责、性格、扮演要求） | [AI_EXPERIENCE.md](AI_EXPERIENCE.md) | `dad2676040a459924d95562f418ce6a29f582b99d4be50f2fe01e0a2607b8e44` |
 | 3 | 机制速查·行动 | [规则正文.md](规则正文.md) | `c7c750f6d55e7e07e2388f19db576bc3493a21d36234a881d820c83bc04fdc54` |
 | 4 | 机制速查·法力结构 | [规则正文.md](规则正文.md) | `c7c750f6d55e7e07e2388f19db576bc3493a21d36234a881d820c83bc04fdc54` |
-| 5 | 机制速查·道纹 | [全道纹索引.md](全道纹索引.md) | `37ec0aabe892c9ae4cd8a8f2ef6bd114ce2dc159e168a844319637f0e5c2140c` |
+| 5 | 机制速查·道纹 | [全道纹索引.md](全道纹索引.md) | `775183cacd23ff511478dd7fffd028facb5ad4076b48879000b68c18b46add97` |
 | 6 | 机制速查·物品 | [物品索引.md](物品索引.md) | `544efc72f95efb8bae1c1f5a7e72fe3eab07cf76919602bc700582a20864cd93` |
 | 7 | 机制速查·法术 | [法术索引.md](法术索引.md) | `1e6beccf62647d851a00d64aa1ed9f3bee7820a6905f623e1b566abbb93435de` |
 | 8 | 机制速查·副本 | [副本索引.md](副本索引.md) | `975a32f319ceffb189e77bc3751e550b0eca126b61fa9414205a22fce891f366` |
@@ -316,7 +316,7 @@
 ### 来源 5：机制速查·道纹
 
 - 路径：`全道纹索引.md`
-- SHA-256：`37ec0aabe892c9ae4cd8a8f2ef6bd114ce2dc159e168a844319637f0e5c2140c`
+- SHA-256：`775183cacd23ff511478dd7fffd028facb5ad4076b48879000b68c18b46add97`
 
 ```markdown
 （共 87 条）
