@@ -12,7 +12,11 @@ import copy
 import json
 import random
 import tempfile
+import sys
 from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT))
 
 from engine.api import GameEngine
 from engine.enums import GamePhase
