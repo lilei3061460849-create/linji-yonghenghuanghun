@@ -9,6 +9,8 @@ def test_random_attribute_splits_all_use_same_25_point_budget():
     splits = legal_attribute_splits()
     assert splits
     assert all(sum(row) == 25 for row in splits)
+    assert all(blood >= 1 and speed >= 2 and mana >= 2
+               for blood, speed, mana in splits)
     assert all(speed % 2 == 0 and mana % 2 == 0
                for _blood, speed, mana in splits)
 
