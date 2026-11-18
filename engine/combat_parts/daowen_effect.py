@@ -2045,30 +2045,43 @@ class DaowenEffectMixin:
                 "names": [creation.name for creation in creations],
             })
         if name == "招魂" and calc.get("revive_temp_friend"):
-            # 唤回1具已击灭的怪物尸体作造物（生命20X）
-            dead = [e for e in self.state.dead_monsters if e.entity_type == "怪物"]
-            # 无尸体必须报错且不吞代价；有尸体时按调用方
-            # 显式指定的那一具（revive_monster_name），不再默认取最后一具。
-            if not dead:
+            # 招魂X：唤回本场已死亡的X个角色；每个造物固定12生命，持续∞（战终清除）。
+            dead = list(getattr(self.state, "dead_monsters", []) or [])
+            count = int(calc.get("revive_count", calc.get("x", 1)))
+            if len(dead) < count:
                 raise ValueError(
-                    "【招魂】场上没有可唤回的怪物尸体，本次发动不成立，不支付法力")
-            corpse_name = str(calc.get("revive_monster_name") or "")
-            corpse = None
-            if corpse_name:
-                corpse = next((e for e in reversed(dead) if e.name == corpse_name), None)
-                if corpse is None:
-                    raise ValueError(f"【招魂】没有名为「{corpse_name}」的怪物尸体")
+                    f"【招魂】本场只有{len(dead)}个已死亡角色，无法唤回{count}个，本次发动不成立")
+            selected_names = calc.get("revive_character_names")
+            if selected_names is None:
+                legacy_name = str(calc.get("revive_monster_name") or "")
+                selected_names = [legacy_name] if legacy_name else []
+            if selected_names:
+                if (not isinstance(selected_names, list) or len(selected_names) != count
+                        or len(set(selected_names)) != count):
+                    raise ValueError(f"【招魂】必须恰好选择{count}个不同的已死亡角色")
+                by_name = {e.name: e for e in dead}
+                missing = [name for name in selected_names if name not in by_name]
+                if missing:
+                    raise ValueError(f"【招魂】本场没有这些已死亡角色：{missing}")
+                chosen = [by_name[name] for name in selected_names]
+            elif len(dead) == count:
+                chosen = dead
+            elif caster is self.state.player:
+                raise ValueError(
+                    f"【招魂】本场有{len(dead)}个已死亡角色，发动X={count}，必须显式选择{count}个角色")
             else:
-                corpse = dead[-1]      # 非玩家调用方（怪物/旧接口）沿用兼容口径
-            if corpse is not None:
-                revived = Entity(name=f"{corpse.name}（魂）", entity_type="造物",
-                                 blood_limit=calc["temp_hp"], current_hp=calc["temp_hp"],
-                                 attack_count=corpse.attack_count, attack_power=corpse.attack_power)
-                for dw_name, dw_inst in corpse.dao_wen.items():
+                chosen = dead[-count:]
+            for character in chosen:
+                revived = Entity(name=f"{character.name}（魂）", entity_type="造物",
+                                 blood_limit=12, current_hp=12,
+                                 attack_count=character.attack_count, attack_power=character.attack_power)
+                for dw_name, dw_inst in character.dao_wen.items():
                     revived.dao_wen[dw_name] = dw_inst
                 self.state.temp_friends.append(revived)
                 result["effects"].append({"type": "zhaohun", "name": revived.name,
-                                          "hp": calc["temp_hp"], "corpse": corpse.name})
+                                          "hp": 12, "corpse": character.name})
+                if character in self.state.dead_monsters:
+                    self.state.dead_monsters.remove(character)
 
         # ---- 特殊 ----
         # 当前没有任何已注册道纹产出 self_attack_count，本分支暂时无人触发。
