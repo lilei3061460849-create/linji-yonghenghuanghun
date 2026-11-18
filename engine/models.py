@@ -2321,7 +2321,7 @@ class GameState:
         """授予一件遗物；tag 用于标记 血族/龙族 等来源。"""
         r = Relic(name=name, effect=effect, tags=[tag] if tag else [])
         self.relics.append(r)
-# 默认启用；遗物不占死者之页，常规启用数量由授予归位逻辑按启用槽位上限处理。
+        # 默认启用；遗物不占死者之页，常规启用数量由授予归位逻辑按启用槽位上限处理。
         return r
 
     def remove_relic(self, name: str) -> bool:
