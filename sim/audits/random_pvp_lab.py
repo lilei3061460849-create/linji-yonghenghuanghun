@@ -49,6 +49,8 @@ def classify_outcome(duel: dict) -> dict:
         result["outcome_status"] = "cancer_death"
     elif "化雕塑" in reason:
         result["outcome_status"] = "sculpture_loss"
+    elif "击杀" in reason or "攻击致死" in reason:
+        result["outcome_status"] = "direct_kill"
     elif result.get("winner") in {"challenger", "defender"}:
         result["outcome_status"] = "other_elimination"
     else:
