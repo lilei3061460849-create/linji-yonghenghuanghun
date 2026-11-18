@@ -15,7 +15,7 @@ from engine.models import DaoWen, DaoWenInstance, Entity
 from sim.alt_path_test import resolve_monster_turn
 from tests.setup_support import begin_battle, begin_round, finish_initial_daowen, grant_extra_actions, hand_priority_to_player, player_passes
 
-def one(seed: int, effect_rate: int) -> dict:
+def one(seed: int, effect_rate: int, extra_actions: int) -> dict:
     old = dr.BY_NAME["献锋"]
     if effect_rate:
         dr.BY_NAME["献锋"] = replace(old, effect_rate=effect_rate)
@@ -56,7 +56,7 @@ def one(seed: int, effect_rate: int) -> dict:
         if not rs.get("success"): raise RuntimeError(f"round_start: {rs}")
         hand_priority_to_player(e)
         e.combat._bind_existing_hp_hooks()
-        grant_extra_actions(p,2)
+        grant_extra_actions(p,extra_actions)
 
         ai=TacticalAI(e,verbose=True); ai.new_round()
         hp0=p.current_hp; power0=p.effective_attack_power()
@@ -109,7 +109,9 @@ def one(seed: int, effect_rate: int) -> dict:
         monster={"success":bool(monster_results) and all(x.get("success") for x in monster_results),
                  "phases":monster_results,"turn_errors":turn_errors}
         return {
-            "seed":seed,"rate":f"1:{effect_rate}" if effect_rate else "no-cast",
+            "seed":seed,"extra_actions":extra_actions,
+            "action_budget":1+extra_actions,
+            "rate":f"1:{effect_rate}" if effect_rate else "no-cast",
             "effect_rate":effect_rate,"healing_requested":(cast.get("calculation") or {}).get("target_heal"),
             "healing_actual":hp1-hp0,"attack_power_before":power0,
             "attack_power_after_cast":power1,"attack_power_cost":power0-power1,
@@ -131,13 +133,15 @@ def main():
     seeds=[10,6,7,11,13,17,19,23,29,31,37,41][:args.runs]
     samples=[]; issues=[]
     for seed in seeds:
-        for rate in (0,1,4):
+        for extra_actions in (0,2):
+          for rate in (0,1,4):
             try:
-                s=one(seed,rate); samples.append(s)
+                s=one(seed,rate,extra_actions); samples.append(s)
                 label=f"1:{rate}" if rate else "no-cast"
-                print(f"[OK] seed={seed} {label} heal={s['healing_actual']} "
-                      f"power={s['attack_power_before']}->{s['attack_power_after_cast']} "
-                      f"damage={s['player_damage']} restored={s['attack_power_restored']}")
+                print(f"[OK] seed={seed} actions={s['action_budget']} {label} "
+                      f"heal={s['healing_actual']} power={s['attack_power_before']}->"
+                      f"{s['attack_power_after_cast']} damage={s['player_damage']} "
+                      f"restored={s['attack_power_restored']}")
                 if not s["attack_power_restored"]:
                     issues.append({"seed":seed,"rate":f"1:{rate}","problem":"round-end attack power did not restore"})
                 if not s["round_end"].get("success"):
@@ -148,12 +152,13 @@ def main():
                 issue={"seed":seed,"rate":f"1:{rate}","problem":f"{type(exc).__name__}: {exc}"}
                 issues.append(issue); print("[ERROR]",issue)
     paired={}
-    for s in samples: paired.setdefault(s["seed"],{})[s["effect_rate"]]=s
+    for s in samples:
+        paired.setdefault((s["seed"],s["extra_actions"]),{})[s["effect_rate"]]=s
     pairs=[]
-    for seed,arms in sorted(paired.items()):
+    for (seed,extra_actions),arms in sorted(paired.items()):
         if all(rate in arms for rate in (0,1,4)):
             control,a,b=arms[0],arms[1],arms[4]
-            pairs.append({"seed":seed,
+            pairs.append({"seed":seed,"action_budget":1+extra_actions,
                           "extra_healing_1_to_4":b["healing_actual"]-a["healing_actual"],
                           "attack_power_cost_1_to_1":a["attack_power_cost"],
                           "attack_power_cost_1_to_4":b["attack_power_cost"],
@@ -163,7 +168,7 @@ def main():
                           "damage_loss_1_to_1":control["player_damage"]-a["player_damage"],
                           "damage_loss_1_to_4":control["player_damage"]-b["player_damage"],
                           "damage_delta_1_to_4_vs_1_to_1":b["player_damage"]-a["player_damage"]})
-    summary={"samples":len(samples),"planned":args.runs*3,"paired_seeds":len(pairs),
+    summary={"samples":len(samples),"planned":args.runs*3*2,"paired_seeds":len(pairs),
              "pairs":pairs,"issues":issues,
              "all_attack_power_restored":bool(samples) and all(s["attack_power_restored"] for s in samples),
              "all_round_ends_succeeded":bool(samples) and all(s["round_end"].get("success") for s in samples)}
@@ -175,12 +180,12 @@ def main():
     (out/"results.json").write_text(json.dumps(payload,ensure_ascii=False,indent=2,default=repr),encoding="utf-8")
     (out/"issues.json").write_text(json.dumps(issues,ensure_ascii=False,indent=2),encoding="utf-8")
     lines=["# 献锋 1:1 / 1:4 / 不施放 对照实验报告","",
-           f"- 样本：{len(samples)}/{args.runs*3}；三臂配对种子：{len(pairs)}；问题：{len(issues)}",
+           f"- 样本：{len(samples)}/{args.runs*3*2}；行动预算分层配对数：{len(pairs)}；问题：{len(issues)}",
            f"- 所有样本回终恢复攻击力：{summary['all_attack_power_restored']}",
            f"- 所有样本回终成功：{summary['all_round_ends_succeeded']}","",
-           "|种子|不施放伤害|1:1伤害|1:4伤害|1:1伤害损失|1:4伤害损失|1:4额外治疗|",
-           "|---:|---:|---:|---:|---:|---:|---:|"]
-    lines += [f"|{p['seed']}|{p['damage_no_cast']}|{p['damage_1_to_1']}|{p['damage_1_to_4']}|"
+           "|种子|行动预算|不施放伤害|1:1伤害|1:4伤害|1:1伤害损失|1:4伤害损失|1:4额外治疗|",
+           "|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    lines += [f"|{p['seed']}|{p['action_budget']}|{p['damage_no_cast']}|{p['damage_1_to_1']}|{p['damage_1_to_4']}|"
               f"{p['damage_loss_1_to_1']}|{p['damage_loss_1_to_4']}|{p['extra_healing_1_to_4']}|" for p in pairs]
     lines += ["","## 问题记录"]+[f"- {json.dumps(i,ensure_ascii=False)}" for i in issues]
     (out/"report.md").write_text("\n".join(lines)+"\n",encoding="utf-8")
