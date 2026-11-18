@@ -31,6 +31,28 @@ from sim.random_pvp_support import (
 )
 
 
+def classify_outcome(duel: dict) -> dict:
+    """Separate real elimination/sculpture outcomes from capped or failed simulations."""
+    result = dict(duel)
+    reason = str(result.get("reason", ""))
+    if reason == "回合上限":
+        # run_duel_pvp's legacy fallback names the defender as winner at the cap.
+        # That is not a rules victory and must not bias experiment win rates.
+        result["legacy_winner"] = result.get("winner")
+        result["winner"] = None
+        result["unresolved"] = True
+        result["outcome_status"] = "round_limit"
+    elif result.get("error"):
+        result["outcome_status"] = "simulation_error"
+    elif "化雕塑" in reason:
+        result["outcome_status"] = "sculpture_loss"
+    elif result.get("winner") in {"challenger", "defender"}:
+        result["outcome_status"] = "elimination"
+    else:
+        result["outcome_status"] = "unresolved"
+    return result
+
+
 def run_one(seed: int, max_rounds: int, max_wall_seconds: float) -> dict:
     with tempfile.TemporaryDirectory(prefix=f"random-pvp-{seed}-") as tmp:
         workdir = Path(tmp)
@@ -52,6 +74,7 @@ def run_one(seed: int, max_rounds: int, max_wall_seconds: float) -> dict:
             ai_cls=TacticalAI,
             log=log,
         )
+        result = classify_outcome(result)
         return {
             "seed": seed,
             "ai_policy": "TacticalAI (both sides use the same policy)",
@@ -102,6 +125,8 @@ def main() -> None:
     report = {
         "runs": args.runs,
         "completed": sum(1 for x in results if "duel" in x),
+        "decisive": sum(1 for x in results if x.get("duel", {}).get("winner")),
+        "unresolved": sum(1 for x in results if x.get("duel", {}).get("unresolved")),
         "errors": [x for x in results if x.get("error")],
         "results": results,
     }
@@ -110,6 +135,8 @@ def main() -> None:
     lines = ["# 随机轮回者 PvP 实验报告", "",
              f"- 请求对局：{args.runs}",
              f"- 完成对局：{report['completed']}",
+             f"- 有明确胜者：{report['decisive']}",
+             f"- 未决对局（回合上限等）：{report['unresolved']}",
              f"- 程序异常：{len(report['errors'])}", ""]
     for row in results:
         if "duel" not in row:
@@ -122,6 +149,7 @@ def main() -> None:
             f"- AI：{row.get('ai_policy', '未指定')}",
             f"- 先手：{row['first_mover']}",
             f"- 胜者：{d.get('winner') or '未判定'}；回合：{d.get('rounds')}",
+            f"- 结果分类：{d.get('outcome_status', '未分类')}",
             f"- 结论：{d.get('reason', '')}",
             f"- 挑战者：{row['challenger']['stats']}；属性点：{row['challenger']['attribute_points']}；"
             f"遗物：{row['challenger']['relic']}；道纹：{row['challenger']['daowen']}",
