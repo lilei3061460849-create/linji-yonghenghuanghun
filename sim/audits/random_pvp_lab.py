@@ -44,10 +44,13 @@ def classify_outcome(duel: dict) -> dict:
         result["outcome_status"] = "round_limit"
     elif result.get("error"):
         result["outcome_status"] = "simulation_error"
+    elif "癌变" in reason:
+        # 癌变是规则触发的特殊死亡，不能混入普通击杀统计。
+        result["outcome_status"] = "cancer_death"
     elif "化雕塑" in reason:
         result["outcome_status"] = "sculpture_loss"
     elif result.get("winner") in {"challenger", "defender"}:
-        result["outcome_status"] = "elimination"
+        result["outcome_status"] = "other_elimination"
     else:
         result["outcome_status"] = "unresolved"
     return result
@@ -127,11 +130,16 @@ def main() -> None:
             results.append({"seed": seed, "error": True, "exception": repr(exc)})
             print(f"[ERROR] seed={seed}: {exc!r}")
 
+    outcome_counts = {}
+    for row in results:
+        status = row.get("duel", {}).get("outcome_status", "build_error")
+        outcome_counts[status] = outcome_counts.get(status, 0) + 1
     report = {
         "runs": args.runs,
         "completed": sum(1 for x in results if "duel" in x),
         "decisive": sum(1 for x in results if x.get("duel", {}).get("winner")),
         "unresolved": sum(1 for x in results if x.get("duel", {}).get("unresolved")),
+        "outcome_counts": outcome_counts,
         "errors": [x for x in results if x.get("error")],
         "results": results,
     }
@@ -142,7 +150,10 @@ def main() -> None:
              f"- 完成对局：{report['completed']}",
              f"- 有明确胜者：{report['decisive']}",
              f"- 未决对局（回合上限等）：{report['unresolved']}",
-             f"- 程序异常：{len(report['errors'])}", ""]
+             f"- 程序异常：{len(report['errors'])}", "",
+             "## 结局分类统计", ""]
+    lines.extend(f"- {status}：{count}" for status, count in sorted(outcome_counts.items()))
+    lines.append("")
     for row in results:
         if "duel" not in row:
             lines.append(f"## Seed {row['seed']}：构建/运行异常")
