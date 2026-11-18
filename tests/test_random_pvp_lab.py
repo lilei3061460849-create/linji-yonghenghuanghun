@@ -1,3 +1,5 @@
+import random
+
 from sim.audits.random_pvp_lab import (
     assemble_duel,
     create_random_character,
@@ -16,8 +18,11 @@ def test_random_attribute_splits_all_use_same_25_point_budget():
 
 
 def test_random_pvp_builds_two_real_opening_characters(tmp_path):
-    left, left_build = create_random_character(101, "随机挑战者", tmp_path)
-    right, right_build = create_random_character(202, "随机守擂者", tmp_path)
+    left_points, right_points = random.Random(303).sample(legal_attribute_splits(), 2)
+    left, left_build = create_random_character(
+        101, "随机挑战者", tmp_path, left_points)
+    right, right_build = create_random_character(
+        202, "随机守擂者", tmp_path, right_points)
 
     for build in (left_build, right_build):
         assert build["attribute_points"]["total"] == 25
