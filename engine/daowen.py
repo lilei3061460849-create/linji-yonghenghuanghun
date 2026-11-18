@@ -1126,12 +1126,12 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_zhaohun(x: int) -> dict:
-        """招魂X：支付：法力3X。唤回1具已击灭的怪物尸体作为[造物]，生命为20X。"""
+        """招魂X：支付：法力2X。唤回本场已死亡的X个角色作为[造物]，每个生命为12，持续∞。"""
         return {
             "dao_wen": "招魂", "x": x,
-            "cost_type": CostType.MANA.value, "cost": 3 * x,
-            "revive_temp_friend": True, "temp_hp": 20 * x,
-            "summary": f"支付：{3 * x}法力，唤回1具已灭怪物作为造物（生命{20*x}）"
+            "cost_type": CostType.MANA.value, "cost": 2 * x,
+            "revive_temp_friend": True, "revive_count": x, "temp_hp": 12,
+            "summary": f"支付：{2 * x}法力，唤回本场已死亡的{x}个角色作为造物（每个生命12，持续∞）"
         }
 
     @staticmethod
