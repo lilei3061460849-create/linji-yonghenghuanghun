@@ -3,6 +3,7 @@ import random
 from sim.audits.random_pvp_lab import classify_outcome
 from sim.random_pvp_support import (
     assemble_duel,
+    ARCHETYPES,
     create_random_character,
     legal_attribute_splits,
 )
@@ -68,3 +69,14 @@ def test_sculpture_loss_is_a_decisive_but_distinct_outcome():
     })
     assert result["winner"] == "challenger"
     assert result["outcome_status"] == "sculpture_loss"
+
+
+def test_archetypes_have_equal_resource_counts(tmp_path):
+    assert len(ARCHETYPES) == 2
+    for i, (name, profile) in enumerate(ARCHETYPES.items()):
+        engine, build = create_random_character(900+i, '流派'+str(i), tmp_path, profile['attribute_points'], name)
+        assert sum(profile['attribute_points']) == 25
+        assert len(profile['daowen']) == 3
+        assert build['daowen_count'] == 4
+        assert build['relic_count'] == 2
+        assert set(profile['daowen']).issubset(engine.state.player.dao_wen)

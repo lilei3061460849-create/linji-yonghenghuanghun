@@ -25,6 +25,7 @@ from engine.ai_tactics import TacticalAI
 from sim.duel_pvp import run_duel_pvp
 from sim.random_pvp_support import (
     ATTRIBUTE_BUDGET,
+    ARCHETYPES,
     assemble_duel,
     create_random_character,
     legal_attribute_splits,
@@ -56,13 +57,17 @@ def classify_outcome(duel: dict) -> dict:
 def run_one(seed: int, max_rounds: int, max_wall_seconds: float) -> dict:
     with tempfile.TemporaryDirectory(prefix=f"random-pvp-{seed}-") as tmp:
         workdir = Path(tmp)
-        # 同预算、不同三维：从全部合法分配中无放回抽两套，避免偶然抽成完全镜像。
+        # 固定不同流派对照，每场随机交换座位。
         split_rng = random.Random(seed ^ 0xB17)
-        challenger_points, defender_points = split_rng.sample(legal_attribute_splits(), 2)
+        archetype_names = list(ARCHETYPES)
+        split_rng.shuffle(archetype_names)
+        challenger_archetype, defender_archetype = archetype_names
+        challenger_points = ARCHETYPES[challenger_archetype]["attribute_points"]
+        defender_points = ARCHETYPES[defender_archetype]["attribute_points"]
         challenger_engine, challenger_build = create_random_character(
-            seed * 2 + 1, "随机挑战者", workdir, challenger_points)
+            seed * 2 + 1, "流派挑战者", workdir, challenger_points, challenger_archetype)
         defender_engine, defender_build = create_random_character(
-            seed * 2 + 2, "随机守擂者", workdir, defender_points)
+            seed * 2 + 2, "流派守擂者", workdir, defender_points, defender_archetype)
         first = assemble_duel(challenger_engine, defender_engine, seed)
         log: list[str] = []
         result = run_duel_pvp(
@@ -78,6 +83,7 @@ def run_one(seed: int, max_rounds: int, max_wall_seconds: float) -> dict:
         return {
             "seed": seed,
             "ai_policy": "TacticalAI (both sides use the same policy)",
+            "build_contract": {"attribute_points_each": 25, "relics_each": 2, "archetype_daowen_each": 3, "inherited_daowen_each": 1},
             "attribute_point_budget": ATTRIBUTE_BUDGET,
             "first_mover": first,
             "challenger": challenger_build,
@@ -112,9 +118,9 @@ def main() -> None:
             duel = row["duel"]
             print(f"[DUEL] seed={seed} winner={duel.get('winner')} "
                   f"rounds={duel.get('rounds')} error={duel.get('error', False)}")
-            print(f"       challenger={row['challenger']['attribute_points']} "
+            print(f"       challenger={row['challenger']['archetype']} {row['challenger']['attribute_points']} "
                   f"{row['challenger']['relic']} / {row['challenger']['daowen']}")
-            print(f"       defender={row['defender']['attribute_points']} "
+            print(f"       defender={row['defender']['archetype']} {row['defender']['attribute_points']} "
                   f"{row['defender']['relic']} / {row['defender']['daowen']}")
             if duel.get("error"):
                 print(f"[ISSUE] seed={seed}: {duel.get('reason')}")
@@ -151,9 +157,9 @@ def main() -> None:
             f"- 胜者：{d.get('winner') or '未判定'}；回合：{d.get('rounds')}",
             f"- 结果分类：{d.get('outcome_status', '未分类')}",
             f"- 结论：{d.get('reason', '')}",
-            f"- 挑战者：{row['challenger']['stats']}；属性点：{row['challenger']['attribute_points']}；"
+            f"- 挑战者（{row['challenger']['archetype']}）：{row['challenger']['stats']}；属性点：{row['challenger']['attribute_points']}；"
             f"遗物：{row['challenger']['relic']}；道纹：{row['challenger']['daowen']}",
-            f"- 守擂者：{row['defender']['stats']}；属性点：{row['defender']['attribute_points']}；"
+            f"- 守擂者（{row['defender']['archetype']}）：{row['defender']['stats']}；属性点：{row['defender']['attribute_points']}；"
             f"遗物：{row['defender']['relic']}；道纹：{row['defender']['daowen']}",
             f"- 对局错误：{d.get('error', False)}",
             "",

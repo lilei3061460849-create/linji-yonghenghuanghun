@@ -10,11 +10,14 @@ import random
 from pathlib import Path
 
 from engine.api import GameEngine
+from engine.daowen import DaoWenEngine
 from engine.enums import GamePhase
 
 ATTRIBUTE_BUDGET = 25
 REGION = "龙心谷"
 RESONANCES = ("转换", "反转", "曲解")
+
+ARCHETYPES = {"高速爆发": {"attribute_points": (5, 14, 6), "daowen": ("连击", "超频", "弱化")}, "持续续航": {"attribute_points": (13, 6, 6), "daowen": ("自愈", "献锋", "疯长")}}
 
 
 def legal_attribute_splits() -> list[tuple[int, int, int]]:
@@ -37,6 +40,7 @@ def _require_success(result: dict, step: str) -> dict:
 def create_random_character(
     seed: int, name: str, workdir: Path,
     attribute_points: tuple[int, int, int] | None = None,
+    archetype: str | None = None,
 ) -> tuple[GameEngine, dict]:
     """使用公开开局 action 创建角色；随机只负责从合法发现候选中选取。"""
     rng = random.Random(seed)
@@ -82,6 +86,24 @@ def create_random_character(
     }), f"{name}选择副本")
 
     player = engine.state.player
+    if archetype is not None:
+        profile = ARCHETYPES[archetype]
+        daowen_names = list(profile["daowen"])
+        registered = set(DaoWenEngine.list_all())
+        if any(name not in registered for name in daowen_names):
+            raise RuntimeError("流派配置包含未注册道纹")
+        player.dao_wen = {"透支": player.dao_wen["透支"]} if "透支" in player.dao_wen else {}
+        for name in daowen_names:
+            engine._grant_named_daowen(player, name)
+        engine._init_relic_pool()
+        relic_pool = list(engine.state.relics_pool)
+        if len(relic_pool) < 2:
+            raise RuntimeError("真实遗物池不足2件")
+        selected_relics = rng.sample(relic_pool, 2)
+        engine.state.relics = copy.deepcopy(selected_relics)
+        player.relics = copy.deepcopy(selected_relics)
+        relic_name = [r.name for r in selected_relics]
+        daowen_name = daowen_names
     # 兼容 PvP 双侧残韵读取：挑战者走 State 兼容账本，守擂者走 Entity 独立账本。
     player.resonance = dict(engine.state.resonance)
     build = {
@@ -103,6 +125,9 @@ def create_random_character(
         "daowen": daowen_name,
         "daowen_choices": daowen_choices,
         "resonance": resonance,
+        "archetype": archetype or "随机",
+        "daowen_count": len(player.dao_wen),
+        "relic_count": len(engine.state.relics),
     }
     return engine, build
 
