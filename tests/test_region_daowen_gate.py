@@ -101,7 +101,7 @@ def test_can_learn_same_region_after_owning_one():
 
 
 def test_all_seven_common_daowen_are_learnable_outside_battle():
-    """七种道纹已归入通用道纹，局外学习不再区分原始/转化来源。"""
+    """七种道纹已归入通用道纹，局外学习统一开放。"""
     e = _engine("龙心谷")
     e.state.energy = 100
     e.state.player.daowen_capacity = 100
