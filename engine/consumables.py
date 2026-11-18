@@ -60,19 +60,19 @@ def apply_battle_end_durability_recovery(items: list | None) -> list[dict]:
 
 # ==================== 翼类消耗品 ====================
 # 血翼（原血族遗物【鲜血之翼】）与烬翼（原龙族遗物【烬翼】）都是消耗品：
-# 主动使用获得【飞行】1 回合；耐久各有独立的回复触发。
+# 主动使用获得【飞行】持续1；耐久各有独立的回复触发。
 WING_BLOOD = "血翼"
 WING_EMBER = "烬翼"
 WING_ITEM_SPECS: dict[str, dict] = {
     WING_BLOOD: {
         "max_uses": 3,
-        "effect": ("主动使用（选一）：①本回合中你失去的生命改为回复；②获得【飞行】1回合；"
+        "effect": ("主动使用（选一）：①你失去的生命改为回复，持续1；②获得【飞行】持续1；"
                    "③立刻逃跑。你每累计失去等同于[血限]的生命，耐久+1"),
     },
     WING_EMBER: {
         "max_uses": 3,
-        "effect": ("主动使用（选一）：①本回合你不会触发任何特殊事件；"
-                   "②获得【飞行】1回合；③立刻逃跑。任意怪物［命零］时，耐久+1"),
+        "effect": ("主动使用（选一）：①你不会触发任何特殊事件，持续1；"
+                   "②获得【飞行】持续1；③立刻逃跑。任意怪物［命零］时，耐久+1"),
     },
 }
 
@@ -83,18 +83,18 @@ WING_MODE_LIFESTEAL = "lifesteal"   # 血翼专属
 WING_MODE_SUPPRESS = "suppress"     # 烬翼专属
 WING_MODES: dict[str, dict[str, str]] = {
     WING_BLOOD: {
-        WING_MODE_LIFESTEAL: "本回合中你失去的生命改为回复",
-        WING_MODE_FLY: "获得【飞行】1回合",
+        WING_MODE_LIFESTEAL: "你失去的生命改为回复，持续1",
+        WING_MODE_FLY: "获得【飞行】持续1",
         WING_MODE_FLEE: "立刻逃跑",
     },
     WING_EMBER: {
-        WING_MODE_SUPPRESS: "本回合你不会触发任何特殊事件",
-        WING_MODE_FLY: "获得【飞行】1回合",
+        WING_MODE_SUPPRESS: "你不会触发任何特殊事件，持续1",
+        WING_MODE_FLY: "获得【飞行】持续1",
         WING_MODE_FLEE: "立刻逃跑",
     },
 }
 
-# 模式生效时给持有者的状态名（「本回合」= remaining_rounds=1，回终到期）。
+# 模式生效时给持有者的状态名（「持续1」= remaining_rounds=1，回终到期）。
 WING_STATUS_LIFESTEAL = "噬血"
 WING_STATUS_SUPPRESS = "熄事"
 
