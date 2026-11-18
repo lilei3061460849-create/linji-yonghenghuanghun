@@ -100,25 +100,12 @@ def test_can_learn_same_region_after_owning_one():
         assert _learn(e, dw)["success"], f"同副本专属道纹{dw}应可学习"
 
 
-def test_transformed_monster_daowen_not_learnable_outside_battle():
-    """正常路径：怪物转化道纹须以自身已持有的道纹为起点经残韵获得，
-    不可通过局外【学习】直接习得（规则正文·局外系统·学习门槛）"""
+def test_all_seven_common_daowen_are_learnable_outside_battle():
+    """七种道纹已归入通用道纹，局外学习不再区分原始/转化来源。"""
     e = _engine("龙心谷")
-    for dw in ("弱化", "全速"):
+    for dw in ("全力", "必中", "飞行", "全速", "强化", "弱化", "压迫"):
         r = _learn(e, dw)
-        assert not r["success"], f"转化道纹{dw}不应能被局外直接学习"
-        assert "怪物转化道纹" in r["error"]
-
-
-def test_original_monster_daowen_learnable_after_lift():
-    """边界：原始怪物道纹不再是人类禁区（残韵双向 + 完全放开）。
-
-    旧断言「人类无法承受并获得」编码的是已被删除的门禁，本用例按新裁定重写。
-    """
-    e = _engine("龙心谷")
-    for dw in ("必中", "全力"):   # 2026-10-25：【疯狂】【减速】遗物化，不再是道纹
-        r = _learn(e, dw)
-        assert r["success"], f"原始怪物道纹{dw}应可经局外【学习】习得：{r.get('error')}"
+        assert r["success"], f"通用道纹{dw}应可通过局外【学习】习得：{r.get('error')}"
         assert dw in e.state.player.dao_wen
 
 
