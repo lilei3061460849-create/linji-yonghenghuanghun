@@ -1555,7 +1555,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         # 引擎早有实现（combat_hooks 的造物吸血），此前漏登记，补进遗物池。
         ("共生血囊", "由你创造的造物造成伤害时，造物按目标实际减少的生命回复；"
                      "超出造物生命上限的回复量改为回复创造者"),
-        # 两条原始怪物道纹遗物化，进通用遗物池。
+        # 两条旧怪物道纹遗物化，进通用遗物池。
         ("疯狂", "所有角色每回合出手次数+1"),
         ("减速", "［战始］所有敌人的当前速度减半"),
     ]
@@ -2016,20 +2016,20 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         blood_limit = blood_alloc * 12
         attack_count = atk_bundles
         attack_power = atk_bundles * 2
-        remaining = [candidate for candidate in DaoWenEngine.TRANSFORMED_DAOWEN
+        remaining = [candidate for candidate in DaoWenEngine.HIRE_COMMON_DAOWEN
                      if candidate in DaoWenEngine.list_all()]
         if not remaining:
             self.state.energy += 1
-            return {"success":False,"error":"当前没有可供雇佣发现的转化道纹"}
+            return {"success":False,"error":"当前没有可供雇佣发现的通用道纹"}
         emp = Entity(name=name, entity_type="员工", blood_limit=blood_limit, current_hp=blood_limit,
                      attack_count=attack_count, attack_power=attack_power, is_deployed=False)
         self.state.employees.append(emp)
 
-        # 发现最多3种不同的现行转化道纹；删纹后池子可能不足3，不能抽空池或复活废案补数。
+        # 发现最多3种不同的通用道纹；删纹后池子可能不足3，不能抽空池或复活废案补数。
         discovered = []
         for i in range(min(3,len(remaining))):
             roll = self.dice.auto_roll(f"hire_daowen_discovery_{name}_{i}", remaining,
-                                        context=f"雇佣{name}-发现转化道纹")
+                                        context=f"雇佣{name}-发现通用道纹")
             discovered.append(roll["selected"])
             remaining.remove(roll["selected"])
         self.state.pending_daowen_choices[name] = discovered
