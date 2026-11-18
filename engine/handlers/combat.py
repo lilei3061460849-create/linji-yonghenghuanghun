@@ -58,9 +58,9 @@ class CombatHandlersMixin:
         if not target_refs and attacker.effective_attack_count() > 0:
             return {"success": False, "error": "没有合法攻击目标"}
 
-        # 法力结构声明（2026-11-10 一期）：一次普通攻击只能构建一种结构。
+        # 构造术声明（2026-11-10 一期）：一次普通攻击只能构建一种结构。
         # 声明在 prepare 锁定并存进 pending 快照；逐击造成≥1点伤害时逐击 +1 层。
-        structure = str(params.get("blood_structure") or "").strip()
+        structure = str(params.get("construction") or "").strip()
         structure_error = self.combat.validate_structure_declaration(attacker, structure)
         if structure_error:
             return {"success": False, "error": structure_error}
@@ -89,9 +89,9 @@ class CombatHandlersMixin:
             # DM裁定 2026-09-10：轮回者的击数=当前速度（换算仅限轮回者）
             "hit_count": attacker.effective_attack_count(),
             "damage_budget": attacker.effective_attack_count() * attacker.effective_attack_power(),
-            # 法力结构（血液结构）：本次攻击构建的结构名；空串=不构建。
-            "blood_structure": structure,
-            "blood_structure_options": self.combat.blood_structure_options(attacker),
+            # 构造术：本次攻击构建的结构名；空串=不构建。
+            "construction": structure,
+            "construction_options": self.combat.construction_options(attacker),
             "target_options": target_options,
             "hits_schema": [{
                 "target_ref": [o["ref"] for o in target_options],
@@ -300,11 +300,11 @@ class CombatHandlersMixin:
                 wanjunyin=bool(hit.get("wanjunyin")),
             )
             result["hit_index"] = absolute
-            # 法力结构（血液结构）：本击实际造成≥1点伤害（生命真实下降）时
+            # 构造术：本击实际造成≥1点伤害（生命真实下降）时
             # 为目标 +1 层声明的结构。damage_dealt 是格挡/免疫前的伤害意图，
             # 不作数——被【庇护】整笔免疫、伤害全被格挡吸收、空刀、被闪避、
             # 被招架的击都没有真实降血，不构建；目标已死不挂层。
-            structure = str(options.get("blood_structure") or "")
+            structure = str(options.get("construction") or "")
             if (structure and target.is_alive
                     and not result.get("dodge_success")
                     and int(target.current_hp) < hp_before_hit):
