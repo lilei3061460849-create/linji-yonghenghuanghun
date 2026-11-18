@@ -28,7 +28,6 @@ from sim.random_pvp_support import (
     ARCHETYPES,
     assemble_duel,
     create_random_character,
-    legal_attribute_splits,
 )
 
 
