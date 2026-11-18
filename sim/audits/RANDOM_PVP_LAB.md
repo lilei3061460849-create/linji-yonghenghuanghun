@@ -54,6 +54,8 @@
 | P-013 | 两个独立随机源可能偶然抽到完全相同的三维分配 | 同一对局内从合法分配列表无放回抽取两套 |
 | P-014 | 默认 WinOnlyAI 对每手候选进行整局胜负推演，随机对局批次运行成本较高 | 当前实验双方统一使用 TacticalAI；保留 WinOnlyAI 作为后续高成本对照选项 |
 | P-015 | 仅保存 AI 文本日志不足以审计真实结算 | JSON 产物增加完整 GameEngine action history 与战斗事件数 |
+| P-016 | 从 sim/audits 子目录直接执行时 Python 找不到 engine 包 | 按仓库统一约定向上定位根目录并验证 engine/ 存在后再加入 sys.path |
+| P-017 | push 与 pull_request 双触发导致同一随机对局重复跑 | 随机 PvP 工作流保留 PR 与手动入口，移除分支 push 重复触发 |
 
 ## 当前边界
 
