@@ -101,3 +101,22 @@ def test_ordinary_elimination_has_its_own_category():
         "error": False,
     })
     assert result["outcome_status"] == "direct_kill"
+
+def test_self_inflicted_death_is_not_a_direct_kill():
+    result = classify_outcome({
+        "winner": "defender",
+        "rounds": 2,
+        "reason": "挑战者阵亡（自付【连击】代价命零，非对手击杀）",
+        "error": False,
+    })
+    assert result["outcome_status"] == "self_inflicted_death"
+
+
+def test_other_special_death_has_its_own_category():
+    result = classify_outcome({
+        "winner": "challenger",
+        "rounds": 4,
+        "reason": "守擂者阵亡（凡庸，非对手击杀）",
+        "error": False,
+    })
+    assert result["outcome_status"] == "other_special_death"
