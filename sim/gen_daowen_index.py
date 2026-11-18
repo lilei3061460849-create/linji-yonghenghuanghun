@@ -116,6 +116,8 @@ def target_label(name):
         return "X个非自身（显式提交）"
     if name == "超频":
         return "需显式选定"
+    if name == "招魂":
+        return "X个已死亡角色（显式选择）"
     if name == "唤潮":
         return "自身周围X个可用地图格"
     if name == "蜃景":
