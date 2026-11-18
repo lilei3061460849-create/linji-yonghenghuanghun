@@ -2051,26 +2051,37 @@ class DaowenEffectMixin:
             if len(dead) < count:
                 raise ValueError(
                     f"【招魂】本场只有{len(dead)}个已死亡角色，无法唤回{count}个，本次发动不成立")
-            selected_names = calc.get("revive_character_names")
-            if selected_names is None:
-                legacy_name = str(calc.get("revive_monster_name") or "")
-                selected_names = [legacy_name] if legacy_name else []
-            if selected_names:
-                if (not isinstance(selected_names, list) or len(selected_names) != count
-                        or len(set(selected_names)) != count):
+            selected_ids = calc.get("revive_character_ids")
+            if selected_ids is not None:
+                if (not isinstance(selected_ids, list) or len(selected_ids) != count
+                        or len(set(selected_ids)) != count):
                     raise ValueError(f"【招魂】必须恰好选择{count}个不同的已死亡角色")
-                by_name = {e.name: e for e in dead}
-                missing = [name for name in selected_names if name not in by_name]
+                by_id = {str(getattr(e, "runtime_id", "")): e for e in dead}
+                missing = [str(item) for item in selected_ids if str(item) not in by_id]
                 if missing:
-                    raise ValueError(f"【招魂】本场没有这些已死亡角色：{missing}")
-                chosen = [by_name[name] for name in selected_names]
-            elif len(dead) == count:
-                chosen = dead
-            elif caster is self.state.player:
-                raise ValueError(
-                    f"【招魂】本场有{len(dead)}个已死亡角色，发动X={count}，必须显式选择{count}个角色")
+                    raise ValueError(f"【招魂】本场没有这些已死亡角色ID：{missing}")
+                chosen = [by_id[str(item)] for item in selected_ids]
             else:
-                chosen = dead[-count:]
+                selected_names = calc.get("revive_character_names")
+                if selected_names is None:
+                    legacy_name = str(calc.get("revive_monster_name") or "")
+                    selected_names = [legacy_name] if legacy_name else []
+                if selected_names:
+                    if (not isinstance(selected_names, list) or len(selected_names) != count
+                            or len(set(selected_names)) != count):
+                        raise ValueError(f"【招魂】必须恰好选择{count}个不同的已死亡角色")
+                    by_name = {e.name: e for e in dead}
+                    missing = [name for name in selected_names if name not in by_name]
+                    if missing:
+                        raise ValueError(f"【招魂】本场没有这些已死亡角色：{missing}")
+                    chosen = [by_name[name] for name in selected_names]
+                elif len(dead) == count:
+                    chosen = dead
+                elif caster is self.state.player:
+                    raise ValueError(
+                        f"【招魂】本场有{len(dead)}个已死亡角色，发动X={count}，必须显式选择{count}个角色")
+                else:
+                    chosen = dead[-count:]
             for character in chosen:
                 revived = Entity(name=f"{character.name}（魂）", entity_type="造物",
                                  blood_limit=12, current_hp=12,
