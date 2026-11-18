@@ -766,8 +766,8 @@ class CostPaymentMixin:
             raise ValueError("支付量与名义支付量必须是非负整数")
         normalized = normalize_context(ctx if ctx is not None else cost_context)
         # 结算生命周期记账（engine/resolution.py）：代价也是「效果」，同样受限。
-        _cost_field = {"生命": "hp", "法力": "mana", "精力": "energy"}.get(cost_type, cost_type)
-        _before = {f: getattr(payer, f, None) for f in ("current_hp", "mana", "energy")}
+        _cost_field = {"生命": "hp", "法力": "mana"}.get(cost_type, cost_type)
+        _before = {f: getattr(payer, f, None) for f in ("current_hp", "mana")}
         # 嵌套支付（包括血契回声）加入最外层支付窗口；只释放本窗口持有的屏障。
         affected = (self._blood_pact_group(payer) if cost_type in RESOURCE_TYPES else []) or [payer]
         if payer not in affected:
@@ -802,8 +802,7 @@ class CostPaymentMixin:
                         payment["blood_pact_effects"] = self._trigger_xueqi_payment(
                             payer, cost_type, nominal, normalized)
                 finally:
-                    for attr, field in (("current_hp", "hp"), ("mana", "mana"),
-                                        ("energy", "energy")):
+                    for attr, field in (("current_hp", "hp"), ("mana", "mana")):
                         note_delta(self, field if attr != "current_hp" else _cost_field,
                                    _before[attr], getattr(payer, attr, None))
                 shared_details = payment.get("shared_with") or []
