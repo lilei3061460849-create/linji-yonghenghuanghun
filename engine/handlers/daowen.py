@@ -288,21 +288,50 @@ class DaowenHandlersMixin:
                 return {"success": False, "error": str(exc)}
 
         if name == "招魂":
-            # （修复6）：场上没有可唤回的怪物尸体时，必须在
-            # **扣法力前**拒绝，不能先付3X法力再记一句"没有可唤回的怪物尸体"。
-            # 2026-11-01 重构3.1：多具尸体时**允许**调用方用 revive_monster 指定
-            # 唤回哪一具；未指定（或只有一具）时默认取最近一具（dead_monsters[-1]）。
-            corpses = [e for e in self.state.dead_monsters
-                       if getattr(e, "entity_type", "") == "怪物"]
-            if not corpses:
+            # 招魂X必须在扣费前校验本场死亡角色数量与显式选择。
+            corpses = list(getattr(self.state, "dead_monsters", []) or [])
+            count = int(calc.get("revive_count", x))
+            if len(corpses) < count:
                 return {"success": False,
-                        "error": "【招魂】场上没有可唤回的怪物尸体，本次发动不成立，不支付法力"}
-            corpse_names = [e.name for e in corpses]
-            wanted = str(params.get("revive_monster") or "").strip()
-            if wanted and wanted not in corpse_names:
-                return {"success": False,
-                        "error": f"【招魂】没有名为「{wanted}」的怪物尸体，可选 {corpse_names}"}
-            calc["revive_monster_name"] = wanted or corpse_names[-1]
+                        "error": f"【招魂】本场只有{len(corpses)}个已死亡角色，无法唤回{count}个，不支付法力"}
+            selected_ids = params.get("revive_character_ids")
+            if selected_ids is not None:
+                if (not isinstance(selected_ids, list) or len(selected_ids) != count
+                        or not all(isinstance(item, (str, int)) for item in selected_ids)
+                        or len({str(item) for item in selected_ids}) != count):
+                    return {"success": False,
+                            "error": f"【招魂】必须恰好选择{count}个不同的已死亡角色"}
+                by_id = {str(getattr(e, "runtime_id", "")): e for e in corpses}
+                missing = [str(item) for item in selected_ids if str(item) not in by_id]
+                if missing:
+                    return {"success": False,
+                            "error": f"【招魂】本场没有这些已死亡角色ID：{missing}"}
+                calc["revive_character_ids"] = [str(item) for item in selected_ids]
+            else:
+                selected_names = params.get("revive_character_names")
+                if selected_names is None:
+                    legacy_name = str(params.get("revive_monster") or
+                                      params.get("revive_monster_name") or "").strip()
+                    selected_names = [legacy_name] if legacy_name else []
+                if selected_names:
+                    if (not isinstance(selected_names, list) or len(selected_names) != count
+                            or not all(isinstance(item, str) for item in selected_names)
+                            or len(set(selected_names)) != count):
+                        return {"success": False,
+                                "error": f"【招魂】必须恰好选择{count}个不同的已死亡角色；同名角色请用角色ID选择"}
+                    by_name = {e.name: e for e in corpses}
+                    missing = [item for item in selected_names if item not in by_name]
+                    if missing:
+                        return {"success": False,
+                                "error": f"【招魂】本场没有这些已死亡角色：{missing}"}
+                    calc["revive_character_names"] = list(selected_names)
+                elif len(corpses) > count and actor is self.state.player:
+                    return {"success": False,
+                            "error": f"【招魂】本场有{len(corpses)}个已死亡角色，发动X={count}，必须显式选择{count}个角色"}
+                elif len(corpses) > count:
+                    calc["revive_character_ids"] = [
+                        str(e.runtime_id) for e in corpses[-count:]
+                    ]
 
         if name == "豪夺":
             # 无可夺遗物必须在**扣费前**中止，禁止吞掉5X碎片空放；
