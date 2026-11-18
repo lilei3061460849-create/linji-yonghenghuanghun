@@ -666,8 +666,8 @@ class MonsterPhaseMixin:
             consumed = self.consume_resonance_rewrite(monster, name)
             if consumed != rewritten_as:
                 raise ValueError("残韵改写已变化，请重新prepare_monster_phase")
-        # 原始怪物道纹与封印照常支付异变；只有非怪物角色可能触发迷失。
-        elif ((name in self.ORIGINAL_MONSTER_DAOWEN and calc.get("cost_type") != "冷却")
+        # 三种异变代价道纹与封印照常支付异变；只有非怪物角色可能触发迷失。
+        elif ((name in self.MONSTER_MUTATION_COST_DAOWEN and calc.get("cost_type") != "冷却")
               or name == "封印"):
             mutation_cost = (self.YUANCHU_COST_RATE * effective_x
                              if name in self.ORIGINAL_MONSTER_DAOWEN else effective_x)
