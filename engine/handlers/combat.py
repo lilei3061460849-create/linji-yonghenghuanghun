@@ -575,7 +575,7 @@ class CombatHandlersMixin:
         前置：非最终死斗；未持有生效中的【不离】（所有角色无法离场）；
         本轮剩余出手≥本次出手价（原子消费，不足则一次不扣）。
         脱战清理口径沿用原【买路财】撤退：敌方清空、造物解散、员工撤部署、
-        朋友/员工撤退标记重置、精力回满、阶段回 pre_battle；不产生击杀碎片奖励。
+        朋友/员工撤退标记重置、阶段回 pre_battle；不产生击杀碎片奖励。
         """
         escaper = self.state.player
         if not escaper:
@@ -1611,9 +1611,7 @@ class CombatHandlersMixin:
                 ally.attack_power += 1
                 grown.append(f"{ally.name}:攻击力{ally.attack_power}")
 
-        # 恢复精力（无尽模式下基础值逐轮递减）。
-        # 2026-10-11：【苍白之花】重做为「当前法力可超出[法限]」的被动，战终精力+1 已废止。
-        self.state.energy = self.state.energy_budget
+        # 2026-10-11：【苍白之花】重做为「当前法力可超出[法限]」的被动。
 
         # 普通战斗清空敌人；开放世界遭遇则把存活参与者放回地图，并恢复未参战的敌方单位。
         if world_battle:
@@ -1675,7 +1673,6 @@ class CombatHandlersMixin:
             "event_bonuses": event_bonuses,       # 事件奖金，单独列项，不并入命零公式
             "event_bonus_shards": bonus_total,
             "total_shards": self.state.shards,
-            "energy_restored": self.state.energy_budget,
             "cleared_temp_friends": True,
             "ally_growth": grown,
             "removed_via_alt_path": removed,
