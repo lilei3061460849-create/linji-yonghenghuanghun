@@ -1305,7 +1305,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "修行": self._pre_battle_xiuxing,
             "学习": self._pre_battle_xuexi,
             "共鸣": self._pre_battle_gongming,
-            "探索": self._pre_battle_tansuo,
             "改造": self._pre_battle_gaizao,
             "雇佣": self._pre_battle_guyong,
             "炼心": self._pre_battle_lianxin,
@@ -1781,64 +1780,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "next_actions": ["choose_discovered_relic"],
         }
 
-
-    def _pre_battle_tansuo(self, params: dict) -> dict:
-        """探索：一档免费发现1个未遇事件；二档支付30碎片并依次发现2个不同未遇事件。"""
-        if self.state.endless_mode:
-            return {"success": False, "error": "无尽模式下无法探索：进入无尽模式后不再开放【探索】"}
-        if self.event_pool.current is not None or self.state.pending_event_queue:
-            pending = self.event_pool.current or self.state.pending_event_queue[0]
-            return {"success": False, "error": f"事件【{pending}】尚未结算，不能再次探索"}
-        tier = params.get("tier", 1)
-        tier_map = {1: (1, 0), 2: (2, 30)}
-        if not isinstance(tier, int) or isinstance(tier, bool) or tier not in tier_map:
-            return {"success": False, "error": "探索档位必须是1或2"}
-        draw_count, shard_cost = tier_map[tier]
-        region = self.state.current_region
-        pool = self.event_pool.build_pool(region)
-        if len(pool) < draw_count:
-            return {"success": False,
-                    "error": f"当前事件池只剩{len(pool)}个未遇事件，无法执行发现{draw_count}次"}
-        if shard_cost > 0 and self.state.shards < shard_cost:  # 负债口径：0费探索不属于支出
-            return {"success": False,
-                    "error": f"探索{tier}档需要{shard_cost}碎片，当前{self.state.shards}"}
-
-        self.state.shards -= shard_cost
-        remaining = list(pool)
-        discovered: list[str] = []
-        random_records: list[dict] = []
-        for index in range(draw_count):
-            # 保留一档既有审计池名；二档用带序号的池名区分两次无放回抽取。
-            pool_name = "event_pool" if tier == 1 else f"event_pool_{index + 1}"
-            roll = self.dice.auto_roll(
-                pool_name, remaining,
-                context=f"探索{tier}档（{region}）第{index + 1}次",
-            )
-            name = roll["selected"]
-            discovered.append(name)
-            random_records.append(roll["record"])
-            remaining.remove(name)
-        self.event_pool.current = discovered[0]
-        self.state.pending_event_queue = discovered[1:]
-        event = self.event_pool.events[discovered[0]]
-        return {
-            "success": True,
-            "action": f"探索{tier}档",
-            "result": {
-                "tier": tier,
-                "shard_cost": shard_cost,
-                "discovered_events": discovered,
-                "event": discovered[0],
-                "region": event["region"],
-                "desc": event["desc"],
-                "options": [{"id": option["id"], "text": option["text"]}
-                            for option in event["options"]],
-                "queued_events_remaining": len(self.state.pending_event_queue),
-                "random": random_records,
-            },
-            "instruction": (f"遭遇【{discovered[0]}】，请先结算；"
-                            f"其后还有{len(self.state.pending_event_queue)}个探索事件依次结算"),
-        }
 
     # 【改造】档位：合并的消耗品件数 → 碎片价目（沿用原【维修】1/2/3档的 0/5/12 阶梯）。
     GAIZAO_TIERS = {2: 0, 3: 5, 4: 12}
