@@ -1,5 +1,6 @@
 import random
 
+from sim.audits.random_pvp_lab import classify_outcome
 from sim.random_pvp_support import (
     assemble_duel,
     create_random_character,
@@ -42,3 +43,28 @@ def test_random_pvp_builds_two_real_opening_characters(tmp_path):
     assert left.state.duel_turn == first
     assert left.state.phase == "in_combat"
     assert left.state.combat_subphase == "await_round_start"
+
+
+
+def test_round_limit_is_not_counted_as_a_defender_win():
+    result = classify_outcome({
+        "winner": "defender",
+        "rounds": 40,
+        "reason": "回合上限",
+        "error": False,
+    })
+    assert result["winner"] is None
+    assert result["legacy_winner"] == "defender"
+    assert result["unresolved"] is True
+    assert result["outcome_status"] == "round_limit"
+
+
+def test_sculpture_loss_is_a_decisive_but_distinct_outcome():
+    result = classify_outcome({
+        "winner": "challenger",
+        "rounds": 4,
+        "reason": "守擂主将化雕塑（攻次与攻力双0离场，判负；非被击杀）",
+        "error": False,
+    })
+    assert result["winner"] == "challenger"
+    assert result["outcome_status"] == "sculpture_loss"
