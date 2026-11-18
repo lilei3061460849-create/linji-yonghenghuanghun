@@ -104,6 +104,15 @@ def test_instant_custom_and_single_daowen_casts_are_allowed(tmp_path):
     back = opponent_passes(engine)
     assert back.get("success"), back
 
+    direct_action = engine.execute_action("use_daowen", {
+        "daowen_name": "杀伐", "x": 1,
+        "target_ref": "enemy:0", "dodge": False,
+        "blood_shadow": False, "trigger_spell_choices": {},
+    })
+    assert direct_action["success"], direct_action
+    back = opponent_passes(engine)
+    assert back.get("success"), back
+
     def spell(name):
         return {
             "name": name,
