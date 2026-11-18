@@ -904,6 +904,14 @@ class WorldHandlersMixin:
         height = params.get("height", 21)
         if not isinstance(width, int) or isinstance(width, bool) or not isinstance(height, int) or isinstance(height, bool):
             return {"success": False, "error": "地图宽高必须是整数"}
+        # 可选：指定副本内轮回者总人数（包含当前玩家），用于多人冠冕争夺实验。
+        # 默认值沿用正式地图原有的人口规则；小地图仍不自动塞入NPC。
+        requested_reincarnator_count = params.get("reincarnator_count")
+        if requested_reincarnator_count is not None and (
+                not isinstance(requested_reincarnator_count, int)
+                or isinstance(requested_reincarnator_count, bool)
+                or not 4 <= requested_reincarnator_count <= 8):
+            return {"success": False, "error": "reincarnator_count必须是4～8的整数（包含当前玩家）"}
         # 地图种子通过引擎骰子产生并记录，不让AI直接伪造随机结果。
         seed_roll = self.dice.auto_roll("open_world_map_seed", list(range(10000)),
                                         context="开放世界地图生成种子")
@@ -925,7 +933,9 @@ class WorldHandlersMixin:
                 # 正式地图（面积至少150格）还会生成其他真实轮回者。
                 # 小地图主要用于测试/自定义场景，避免自动塞入额外单位破坏调用方布置。
                 if width * height >= 150:
-                    npc_count = min(4, max(2, self._current_tier() + 1))
+                    npc_count = (requested_reincarnator_count - 1
+                                 if requested_reincarnator_count is not None
+                                 else min(4, max(2, self._current_tier() + 1)))
                     used_names = {entity.name for entity in
                                   ([self.state.player] if self.state.player else [])
                                   + list(self.state.enemies)}
@@ -1106,6 +1116,8 @@ class WorldHandlersMixin:
                                "consumable_locations": scattered_count,
                                "spawned_monsters": len(spawned_monsters),
                                "spawned_reincarnators": len(spawned_reincarnators),
+                                "total_reincarnators": len(spawned_reincarnators) + 1,
+                                "requested_reincarnator_count": requested_reincarnator_count,
                                "event_locations": len(world.map.locations)}}
         except (ValueError, KeyError, TypeError) as exc:
             return {"success": False, "error": str(exc)}

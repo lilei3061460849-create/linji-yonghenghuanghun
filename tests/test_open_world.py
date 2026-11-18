@@ -549,6 +549,47 @@ def test_world_initialization_spawns_current_dungeon_monster_population_and_even
     assert "恶魔医务室" not in event_names
 
 
+def test_world_initialize_can_spawn_eight_total_reincarnators_for_crown_race(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-eight-rivals.db"),
+                        save_dir=str(tmp_path), rng_seed=731, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.current_region = "乱葬岗"
+    engine.state.phase = "pre_battle"
+
+    result = engine.execute_action(
+        "world_initialize", {"width": 21, "height": 21, "reincarnator_count": 8})
+    assert result["success"], result
+    assert result["result"]["spawned_reincarnators"] == 7
+    assert result["result"]["total_reincarnators"] == 8
+    assert result["result"]["requested_reincarnator_count"] == 8
+
+    world = WorldState.from_dict(engine.state.world_state)
+    rivals = [entity for entity in engine.state.enemies if entity.entity_type == "轮回者"]
+    assert len(rivals) == 7
+    assert sum(actor.kind == "player" for actor in world.actors.values()) == 1
+    assert sum(actor.kind == "enemy" for actor in world.actors.values()) >= 7
+    assert all(rival.runtime_id in world.actors for rival in rivals)
+
+
+def test_world_initialize_rejects_invalid_reincarnator_count(tmp_path):
+    from engine.api import GameEngine
+    from engine.models import Entity
+
+    engine = GameEngine(db_path=str(tmp_path / "world-invalid-rivals.db"),
+                        save_dir=str(tmp_path), rng_seed=732, autosave=False)
+    engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=30)
+    engine.state.current_region = "乱葬岗"
+    engine.state.phase = "pre_battle"
+
+    result = engine.execute_action(
+        "world_initialize", {"width": 21, "height": 21, "reincarnator_count": 9})
+    assert result["success"] is False
+    assert "4～8" in result["error"]
+
+
 def test_npc_only_world_encounters_use_combat_engine_and_do_not_stall(tmp_path):
     from engine.api import GameEngine
     from engine.models import Entity
@@ -2218,6 +2259,29 @@ def test_seeded_open_world_run_reaches_crown_ending_and_exports_engine_events():
             for battle in repeated["battles"]] == [
         (battle["round_count"], battle["event_count"], battle["outcome"])
         for battle in replay["battles"]]
+
+
+def test_eight_reincarnators_spawn_in_one_open_world_and_report_actual_outcome():
+    """八名轮回者确实同图入场；回放必须如实报告玩家死亡或真实冠冕终局。"""
+    replay = run_playthrough(seed=20261118, reincarnator_count=8)
+    final = replay["final_state"]
+
+    assert replay["run_config"]["reincarnator_count"] == 8
+    assert replay["initial_population"]["other_reincarnators"] == 7
+    assert len(final["living_reincarnators_at_end"]) <= 8
+
+    if final["stop_reason"] in {"crown carried out", "crown lost"}:
+        assert final["crown_exit"]["reason"] == "最终的冠冕"
+        assert final["crown_taken_by"]
+        assert any(event["type"] == "crown_taken"
+                   for event in replay["world_event_log"])
+        assert any(event["type"] in {"dungeon_exited", "crown_left_world"}
+                   for event in replay["world_event_log"])
+    else:
+        # 玩家死亡会结束当前驱动器，不得伪造 NPC 冠冕赢家。
+        assert final["stop_reason"] == "player died in map encounter"
+        assert final["crown_exit"] is None
+        assert final["crown_taken_by"] is None
 
 
 def test_replay_terminates_on_a_crown_ending_instead_of_hanging():

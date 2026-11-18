@@ -36,6 +36,7 @@ STICKY_LIBRARIES = (
     "common.py", "build_learner.py", "duel_common.py", "duel_dialogue.py",
     "monster_targets.py", "balance_sim.py", "win_only_ai.py",
     "alt_path_test.py", "duel_pvp.py", "duel_chronicle.py", "duel_diff_trace.py",
+    "random_pvp_support.py",
 )
 
 

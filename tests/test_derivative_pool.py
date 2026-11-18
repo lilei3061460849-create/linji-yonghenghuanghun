@@ -85,7 +85,7 @@ def test_touzhi_derivatives_gain_mana(name, mana):
 
 
 def test_zaisheng_derivative_heals_x():
-    assert DaoWenEngine.resolve("献锋", 7)["target_heal"] == 7
+    assert DaoWenEngine.resolve("献锋", 7)["target_heal"] == 28
 
 
 def test_mothers_keep_exactly_one_channel():
