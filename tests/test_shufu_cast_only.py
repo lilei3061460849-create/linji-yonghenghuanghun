@@ -150,3 +150,35 @@ def test_shackling_item_status_uses_the_same_cast_only_gate(tmp_path):
         "steps": [{"x": 1, "dodge": False, "trigger_spell_choices": {}}],
     })
     assert cast["success"], cast
+
+
+def test_bound_target_cannot_use_any_passive_attack_response(tmp_path):
+    engine, player, _target = _bound_engine(tmp_path, "passive_responses")
+    engine.state.consumables = [Consumable("应急药", "回复1", 1, 1)]
+    pending = {
+        "options": {
+            "actor_ref": "enemy:0",
+            "target_options": [{
+                "ref": "player:0", "name": player.name,
+                "can_dodge": True, "can_parry": True, "can_blood_shadow": True,
+                "blood_shadow_cost_share_target_options": [], "spell_options": {},
+            }],
+        },
+        "hit_index": 0,
+        "declared": {"target_ref": "player:0", "damage": 1},
+    }
+    engine.state.pending_attack = pending
+
+    options = engine._attack_defender_options(pending, "player:0")
+    assert options["can_tank"] is True
+    assert options["can_dodge"] is False
+    assert options["can_parry"] is False
+    assert options["can_blood_shadow"] is False
+    assert options["can_use_item"] is False
+    assert options["item_options"] == []
+    assert options["can_wanjunyin"] is False
+
+    for choice in ("dodge", "parry", "blood_shadow", "use_item", "wanjunyin"):
+        result = engine._action_attack_respond_hit({"choice": choice})
+        assert not result["success"], (choice, result)
+        assert "束缚" in result["error"], (choice, result)
