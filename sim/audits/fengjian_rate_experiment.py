@@ -146,8 +146,10 @@ def main():
                     issues.append({"seed":seed,"rate":f"1:{rate}","problem":"round-end attack power did not restore"})
                 if not s["round_end"].get("success"):
                     issues.append({"seed":seed,"rate":f"1:{rate}","problem":"round_end failed","detail":s["round_end"]})
-                if s["player_damage"]<=0:
-                    issues.append({"seed":seed,"rate":f"1:{rate}","problem":"TacticalAI made no observable attack damage"})
+                # 基础预算仅1次时，施放献锋会合法地消耗唯一行动；此时没有后续攻击是预期结果。
+                if s["player_damage"]<=0 and (rate==0 or extra_actions>0):
+                    issues.append({"seed":seed,"rate":f"1:{rate}","action_budget":1+extra_actions,
+                                   "problem":"TacticalAI made no observable attack damage"})
             except Exception as exc:
                 issue={"seed":seed,"rate":f"1:{rate}","problem":f"{type(exc).__name__}: {exc}"}
                 issues.append(issue); print("[ERROR]",issue)
