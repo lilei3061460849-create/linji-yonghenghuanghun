@@ -1,12 +1,14 @@
-name: Random reincarnator PvP lab
+name: Lethal-event threshold comparison lab
 
 on:
   pull_request:
     branches: [main]
     paths:
       - "sim/audits/random_pvp_lab.py"
+      - "sim/audits/lethal_threshold_lab.py"
       - "sim/random_pvp_support.py"
       - "tests/test_random_pvp_lab.py"
+      - "tests/test_lethal_threshold_lab.py"
       - ".github/workflows/random-pvp-lab.yml"
       - "engine/**"
       - "sim/duel_pvp.py"
@@ -14,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       runs:
-        description: "Number of randomized duels"
+        description: "Number of paired randomized duels per profile"
         required: true
         default: "30"
         type: string
@@ -28,9 +30,9 @@ permissions:
   contents: write
 
 jobs:
-  random-pvp:
+  lethal-threshold-lab:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -67,23 +69,23 @@ jobs:
           git commit -m "Regenerate derived DaoWen index and AI context"
           git push origin "HEAD:$BRANCH"
 
-      - name: Run real-engine randomized PvP
+      - name: Run paired real-engine lethal-threshold experiment
         env:
           RUNS: ${{ github.event.inputs.runs || '30' }}
           SEED: ${{ github.event.inputs.seed || '20261118' }}
         run: |
-          python sim/audits/random_pvp_lab.py \
+          python sim/audits/lethal_threshold_lab.py \
             --runs "$RUNS" \
             --seed "$SEED" \
             --max-rounds 40 \
-            --max-wall-seconds 30 \
-            --output-dir artifacts/random-pvp
+            --max-wall-seconds 12 \
+            --output-dir artifacts/lethal-threshold
 
-      - name: Upload battle reports
+      - name: Upload threshold reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: random-pvp-${{ github.run_number }}
-          path: artifacts/random-pvp/
+          name: lethal-threshold-${{ github.run_number }}
+          path: artifacts/lethal-threshold/
           if-no-files-found: warn
           retention-days: 30
