@@ -540,7 +540,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         phase = self.state.phase
         if self.state.pending_daowen_choices and action_type != "choose_hired_daowen":
             return {"success": False,
-                    "error": "雇佣后的转化道纹尚未选择，不能执行其它行动"}
+                    "error": "雇佣后的通用道纹尚未选择，不能执行其它行动"}
         # 衍生发现（局内0出手）必须显式领取／刷新／放弃。它是战斗内的 0 出手行动，
         # 不能因此把回合推进、怪物阶段、攻击提交等战斗流程动作一并锁死。
         if getattr(self.state, "pending_derivative_choices", []):
@@ -1722,7 +1722,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if not isinstance(tier, int) or isinstance(tier, bool):
             self.state.energy += 1
             return {"success": False, "error": "学习tier必须是整数"}
-        if sub not in ("daowen", "转化道纹"):
+        if sub != "daowen":
             self.state.energy += 1
             return {"success": False, "error": "学习sub必须是daowen"}
         cost_map = {1: 0, 2: 10}
@@ -2040,7 +2040,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                        "attack_power": attack_power, "is_deployed": False,
                        "discovered_daowen_choices": discovered,
                        "note": "已加入员工名单，默认待命不占场；战斗中需调用 deploy_employee 消耗1出手派遣出战后才会参战与计入战终工资结算。"
-                                "请从 discovered_daowen_choices 中调用 choose_hired_daowen(name, daowen) 选择1种转化道纹"},
+                                "请从 discovered_daowen_choices 中调用 choose_hired_daowen(name, daowen) 选择1种通用道纹"},
         }
 
     def _pre_battle_lianxin(self, params: dict) -> dict:
