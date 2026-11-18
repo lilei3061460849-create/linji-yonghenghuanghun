@@ -171,7 +171,7 @@ class RuleSync:
         lines = content.splitlines()
         # 2026-11-09：【衍生道纹】条文与通用道纹同写《规则正文》，但衍生不是通用
         # 道纹（不进学习/发现池、不占四面体节点、只能局外衍生获取）。抽取通用
-        # 道纹时必须按唯一事实源把它们排除，否则 common 19→29 且双事实源失配。
+        # 道纹时必须按唯一事实源把它们排除，否则 common 26→36 且双事实源失配。
         def is_common_only(name: str) -> bool:
             return not (full_path.name == COMMON_RULES_FILE
                         and derivative_rules.is_derivative(name))
