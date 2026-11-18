@@ -1,8 +1,8 @@
 """
-pytest 风格测试 - 里程碑2b：雇佣diy后置步骤(发现并选择转化道纹) + 龙心谷"追求者"事件补全
+pytest 风格测试 - 里程碑2b：雇佣diy后置步骤(发现并选择通用道纹) + 龙心谷"追求者"事件补全
 
 范围声明：
-1. 雇佣(罪孽都市)后，引擎自动"发现"3个未持有的转化道纹候选(DiceEngine.auto_roll抽取)，
+1. 雇佣(罪孽都市)后，引擎自动"发现"3个未持有的通用道纹候选(DiceEngine.auto_roll抽取)，
    玩家通过 choose_hired_daowen 从中选1个赋予该员工。
 2. 龙心谷专属事件"追求者"：选项1(雇佣)真正创建员工实体+固定面板+固定道纹；
    选项2(拿走口粮)登记state.forced_monsters_next_battle，供未来"出怪"逻辑读取
@@ -41,13 +41,13 @@ def _new_engine(db_suffix: str, region: str = "罪孽都市") -> GameEngine:
 # ========================================================================
 
 def test_hire_discovers_distinct_choices_from_current_transformed_pool():
-    """正常路径：雇佣后必须自动发现3个互不相同、且都属于19个转化道纹范畴的候选"""
+    """正常路径：雇佣后必须自动发现3个互不相同、且都属于七种通用道纹的候选"""
     engine = _new_engine("discover_ok")
     r = engine.execute_action("pre_battle_action", {
         "sub_action": "雇佣", "name": "小赵", "blood_alloc": 17, "atk_bundles": 1,
     })
     choices = r["result"]["discovered_daowen_choices"]
-    assert len(choices) == min(3,len(DaoWenEngine.TRANSFORMED_DAOWEN))
+    assert len(choices) == min(3,len(DaoWenEngine.HIRE_COMMON_DAOWEN))
     assert len(set(choices)) == len(choices), "现行候选必须互不相同，不得复活废案补数"
     assert all(c in DaoWenEngine.TRANSFORMED_DAOWEN for c in choices)
 
@@ -150,7 +150,7 @@ def test_choose_hired_daowen_rejects_option_outside_discovered_choices():
         "sub_action": "雇佣", "name": "小孙", "blood_alloc": 17, "atk_bundles": 1,
     })
     choices = set(r["result"]["discovered_daowen_choices"])
-    illegal = "愤怒"  # 已退役的旧转化节点，即使池已全展示仍必须拒绝。
+    illegal = "愤怒"  # 已退役的旧道纹节点，即使池已全展示仍必须拒绝。
     r2 = engine.execute_action("choose_hired_daowen", {"name": "小孙", "daowen": illegal})
     assert r2["success"] is False
     emp = next(e for e in engine.state.employees if e.name == "小孙")
