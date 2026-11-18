@@ -169,7 +169,7 @@ if __name__ == "__main__":
 
 
 def test_hire_with_one_available_transformed_choice_never_rolls_empty_pool(monkeypatch):
-    monkeypatch.setattr(DaoWenEngine,"TRANSFORMED_DAOWEN",["全速"])
+    monkeypatch.setattr(DaoWenEngine,"HIRE_COMMON_DAOWEN",["全速"])
     engine=_new_engine("single_pool")
     r=engine.execute_action("pre_battle_action",{"sub_action":"雇佣","name":"单候选",
         "blood_alloc":17,"atk_bundles":1})
@@ -178,7 +178,7 @@ def test_hire_with_one_available_transformed_choice_never_rolls_empty_pool(monke
 
 
 def test_empty_hiring_pool_rejects_before_creating_employee_and_refunds_energy(monkeypatch):
-    monkeypatch.setattr(DaoWenEngine,"TRANSFORMED_DAOWEN",[])
+    monkeypatch.setattr(DaoWenEngine,"HIRE_COMMON_DAOWEN",[])
     engine=_new_engine("empty_pool");before=engine.state.energy
     r=engine.execute_action("pre_battle_action",{"sub_action":"雇佣","name":"空候选",
         "blood_alloc":17,"atk_bundles":1})
