@@ -11,7 +11,7 @@ from tests.test_pozhang_crystal import setup
 def test_retired_registration_pool_and_resonance():
     assert "蒙蔽" not in DaoWenEngine.list_all()
     assert "蒙蔽" not in MONSTER_TRANSFORM_DAOWEN
-    assert "蒙蔽" not in DaoWenEngine.TRANSFORMED_DAOWEN
+    assert "蒙蔽" not in DaoWenEngine.HIRE_COMMON_DAOWEN
     with pytest.raises(ValueError): DaoWenEngine.resolve("蒙蔽", 2)
     # 2026-11-02：原始／转化分支树并入通用四面体三·四，占位整批撤销。
     assert all("蒙蔽" not in n for n in ResonanceEngine.nodes_of_region("通用"))
