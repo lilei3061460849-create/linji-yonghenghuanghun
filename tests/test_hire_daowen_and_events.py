@@ -49,7 +49,7 @@ def test_hire_discovers_distinct_choices_from_current_transformed_pool():
     choices = r["result"]["discovered_daowen_choices"]
     assert len(choices) == min(3,len(DaoWenEngine.HIRE_COMMON_DAOWEN))
     assert len(set(choices)) == len(choices), "现行候选必须互不相同，不得复活废案补数"
-    assert all(c in DaoWenEngine.TRANSFORMED_DAOWEN for c in choices)
+    assert all(c in DaoWenEngine.HIRE_COMMON_DAOWEN for c in choices)
 
 
 def test_choose_hired_daowen_attaches_to_employee():
@@ -135,7 +135,7 @@ def test_hire_multiple_employees_have_independent_discovery_pools():
     assert r2["success"] is True
     assert "甲员工" not in engine.state.pending_daowen_choices
     assert "乙员工" in engine.state.pending_daowen_choices
-    assert len(first_choices) == min(3,len(DaoWenEngine.TRANSFORMED_DAOWEN))
+    assert len(first_choices) == min(3,len(DaoWenEngine.HIRE_COMMON_DAOWEN))
     assert len(r2["result"]["discovered_daowen_choices"]) == len(first_choices)
 
 
