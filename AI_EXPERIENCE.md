@@ -769,7 +769,7 @@ python sim/audit_monsters.py
 - 门槛口径：按**加成前**的本次伤害判定是否≥10；不足 10 点不触发、层数保留等下一次。加成仍属于「受到的伤害」本身，在格挡/护盾与目标侧伤害修正之前并入。代价通道与直接失血照旧不触发。
 - 清空口径：触发时清空目标身上**全部**同名层（可能分散在多个状态条目里），X＝清空前的层数总和；一次触发只结算一次加成，不会因加成后数值变大而重复触发。
 - 实现坐标：`engine/combat_parts/construction.py::consume_cuihua_on_damage`（阈值/每层加成为类常量 `CUIHUA_THRESHOLD=10`、`CUIHUA_BONUS_PER_LAYER=5`），调用点 `engine/combat_parts/damage_death.py::_apply_hostile_damage_inner`。
-- 事实源同步：`规则正文.md`、`故事文档.md`，`AI_CONTEXT.md` 经 `sim/gen_ai_context.py` 重新生成；专项测试 `tests/test_blood_structures.py`（改版3例，全套 3239 passed）。
+- 事实源同步：`规则正文.md`、`故事文档.md`，`AI_CONTEXT.md` 经 `sim/gen_ai_context.py` 重新生成；专项测试 `tests/test_construction.py`（改版3例，全套 3239 passed）。
 
 ## 用户最新裁定（2026-11-01）：扭曲都市【维修】改为【改造】
 
