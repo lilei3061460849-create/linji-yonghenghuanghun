@@ -17,7 +17,8 @@ from tests.setup_support import begin_battle, begin_round, finish_initial_daowen
 
 def one(seed: int, effect_rate: int) -> dict:
     old = dr.BY_NAME["献锋"]
-    dr.BY_NAME["献锋"] = replace(old, effect_rate=effect_rate)
+    if effect_rate:
+        dr.BY_NAME["献锋"] = replace(old, effect_rate=effect_rate)
     DaoWenEngine.register_all()
     try:
         tmp = tempfile.mkdtemp(prefix=f"fengjian-{seed}-{effect_rate}-")
@@ -60,10 +61,14 @@ def one(seed: int, effect_rate: int) -> dict:
         ai=TacticalAI(e,verbose=True); ai.new_round()
         hp0=p.current_hp; power0=p.effective_attack_power()
         hits=p.effective_attack_count(); foe0=foe.current_hp
-        cast=e.execute_action("use_daowen",{
-            "daowen_name":"献锋","x":1,"target_ref":"player:0",
-            "dodge":False,"blood_shadow":False,"trigger_spell_choices":{}})
-        if not cast.get("success"): raise RuntimeError(f"献锋发动失败: {cast}")
+        if effect_rate:
+            cast=e.execute_action("use_daowen",{
+                "daowen_name":"献锋","x":1,"target_ref":"player:0",
+                "dodge":False,"blood_shadow":False,"trigger_spell_choices":{}})
+            if not cast.get("success"): raise RuntimeError(f"献锋发动失败: {cast}")
+        else:
+            # 无献锋对照：保留同样的持有道纹，但本回合不施放，AI 仍可使用全部行动。
+            cast={"success":True,"control":"no_cast"}
         ai.used["献锋"]=1
         hp1=p.current_hp; power1=p.effective_attack_power()
         # 交替出手：献锋施放后优先权交给敌方；敌方行动/跳过后玩家才能继续。
@@ -104,8 +109,8 @@ def one(seed: int, effect_rate: int) -> dict:
         monster={"success":bool(monster_results) and all(x.get("success") for x in monster_results),
                  "phases":monster_results,"turn_errors":turn_errors}
         return {
-            "seed":seed,"rate":f"1:{effect_rate}","effect_rate":effect_rate,
-            "healing_requested":(cast.get("calculation") or {}).get("target_heal"),
+            "seed":seed,"rate":f"1:{effect_rate}" if effect_rate else "no-cast",
+            "effect_rate":effect_rate,"healing_requested":(cast.get("calculation") or {}).get("target_heal"),
             "healing_actual":hp1-hp0,"attack_power_before":power0,
             "attack_power_after_cast":power1,"attack_power_cost":power0-power1,
             "attack_count":hits,"player_damage":foe0-foe1,
@@ -126,10 +131,11 @@ def main():
     seeds=[10,6,7,11,13,17,19,23,29,31,37,41][:args.runs]
     samples=[]; issues=[]
     for seed in seeds:
-        for rate in (1,4):
+        for rate in (0,1,4):
             try:
                 s=one(seed,rate); samples.append(s)
-                print(f"[OK] seed={seed} 1:{rate} heal={s['healing_actual']} "
+                label=f"1:{rate}" if rate else "no-cast"
+                print(f"[OK] seed={seed} {label} heal={s['healing_actual']} "
                       f"power={s['attack_power_before']}->{s['attack_power_after_cast']} "
                       f"damage={s['player_damage']} restored={s['attack_power_restored']}")
                 if not s["attack_power_restored"]:
@@ -145,12 +151,19 @@ def main():
     for s in samples: paired.setdefault(s["seed"],{})[s["effect_rate"]]=s
     pairs=[]
     for seed,arms in sorted(paired.items()):
-        if 1 in arms and 4 in arms:
-            a,b=arms[1],arms[4]
-            pairs.append({"seed":seed,"extra_healing":b["healing_actual"]-a["healing_actual"],
-                          "extra_attack_power_cost":b["attack_power_cost"]-a["attack_power_cost"],
-                          "actual_damage_delta":b["player_damage"]-a["player_damage"]})
-    summary={"samples":len(samples),"planned":args.runs*2,"paired_seeds":len(pairs),
+        if all(rate in arms for rate in (0,1,4)):
+            control,a,b=arms[0],arms[1],arms[4]
+            pairs.append({"seed":seed,
+                          "extra_healing_1_to_4":b["healing_actual"]-a["healing_actual"],
+                          "attack_power_cost_1_to_1":a["attack_power_cost"],
+                          "attack_power_cost_1_to_4":b["attack_power_cost"],
+                          "damage_no_cast":control["player_damage"],
+                          "damage_1_to_1":a["player_damage"],
+                          "damage_1_to_4":b["player_damage"],
+                          "damage_loss_1_to_1":control["player_damage"]-a["player_damage"],
+                          "damage_loss_1_to_4":control["player_damage"]-b["player_damage"],
+                          "damage_delta_1_to_4_vs_1_to_1":b["player_damage"]-a["player_damage"]})
+    summary={"samples":len(samples),"planned":args.runs*3,"paired_seeds":len(pairs),
              "pairs":pairs,"issues":issues,
              "all_attack_power_restored":bool(samples) and all(s["attack_power_restored"] for s in samples),
              "all_round_ends_succeeded":bool(samples) and all(s["round_end"].get("success") for s in samples)}
@@ -161,12 +174,14 @@ def main():
              "samples":samples,"summary":summary}
     (out/"results.json").write_text(json.dumps(payload,ensure_ascii=False,indent=2,default=repr),encoding="utf-8")
     (out/"issues.json").write_text(json.dumps(issues,ensure_ascii=False,indent=2),encoding="utf-8")
-    lines=["# 献锋 1:1 vs 1:4 实验报告","",
-           f"- 样本：{len(samples)}/{args.runs*2}；配对种子：{len(pairs)}；问题：{len(issues)}",
+    lines=["# 献锋 1:1 / 1:4 / 不施放 对照实验报告","",
+           f"- 样本：{len(samples)}/{args.runs*3}；三臂配对种子：{len(pairs)}；问题：{len(issues)}",
            f"- 所有样本回终恢复攻击力：{summary['all_attack_power_restored']}",
            f"- 所有样本回终成功：{summary['all_round_ends_succeeded']}","",
-           "|种子|1:4额外治疗|额外攻击力损失|实际伤害差|","|---:|---:|---:|---:|"]
-    lines += [f"|{p['seed']}|{p['extra_healing']}|{p['extra_attack_power_cost']}|{p['actual_damage_delta']}|" for p in pairs]
+           "|种子|不施放伤害|1:1伤害|1:4伤害|1:1伤害损失|1:4伤害损失|1:4额外治疗|",
+           "|---:|---:|---:|---:|---:|---:|---:|"]
+    lines += [f"|{p['seed']}|{p['damage_no_cast']}|{p['damage_1_to_1']}|{p['damage_1_to_4']}|"
+              f"{p['damage_loss_1_to_1']}|{p['damage_loss_1_to_4']}|{p['extra_healing_1_to_4']}|" for p in pairs]
     lines += ["","## 问题记录"]+[f"- {json.dumps(i,ensure_ascii=False)}" for i in issues]
     (out/"report.md").write_text("\n".join(lines)+"\n",encoding="utf-8")
     print(f"Samples={len(samples)} issues={len(issues)} artifacts={out}")
