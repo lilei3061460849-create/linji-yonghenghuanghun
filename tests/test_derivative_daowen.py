@@ -217,3 +217,18 @@ def test_fragile_is_not_consumed_by_fully_sheltered_loss(engine):
     player.current_hp -= 3
     assert player.current_hp == 80 - 3 * 3 == 71
     assert player.get_status_value("脆弱") == 0
+
+
+def test_fengjian_uses_user_ruled_four_to_one_healing_rate():
+    """【献锋】1点本回合攻击力换4点生命，代价仍为1:1。"""
+    spec = derivative_rules.spec_of("献锋")
+    assert spec.rate == 1
+    assert spec.effect_rate == 4
+    assert spec.effect_amount(3) == 12
+
+    DaoWenEngine.register_all()
+    calc = DaoWenEngine.resolve("献锋", 2)
+    assert calc["cost_attack"] == 2
+    assert calc["target_heal"] == 8
+    assert "本回合攻击力2" in calc["summary"]
+    assert "回复8点生命" in calc["summary"]
