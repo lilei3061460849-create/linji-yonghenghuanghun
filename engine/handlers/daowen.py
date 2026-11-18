@@ -325,7 +325,7 @@ class DaowenHandlersMixin:
                         return {"success": False,
                                 "error": f"【招魂】本场没有这些已死亡角色：{missing}"}
                     calc["revive_character_names"] = list(selected_names)
-                elif len(corpses) > count and actor is self.state.player:
+                elif len(corpses) > count and (actor is self.state.player or is_command):
                     return {"success": False,
                             "error": f"【招魂】本场有{len(corpses)}个已死亡角色，发动X={count}，必须显式选择{count}个角色"}
                 elif len(corpses) > count:
