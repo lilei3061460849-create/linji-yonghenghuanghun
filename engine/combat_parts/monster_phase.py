@@ -186,8 +186,7 @@ class MonsterPhaseMixin:
                     # 2026-11-01：没有可唤回尸体的【招魂】、目标身上没有可夺遗物的
                     # 【豪夺】都属于"发不动"——prepare 阶段就不再公布，否则驱动方
                     # 反复挑中同一张、每次都被跳过，回合永远结算不完。
-                    if effective_name == "招魂" and len(self.state.dead_monsters) < int(
-                            calc.get("revive_count", calc.get("x", 1))):
+                    if effective_name == "招魂" and len(self.state.dead_monsters) < effective_x:
                         continue
                     if effective_name == "豪夺":
                         legal_targets = [
