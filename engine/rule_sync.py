@@ -210,7 +210,7 @@ class RuleSync:
         """从《规则正文》【衍生道纹】节抽取衍生条文（与通用道纹分开计数）。
 
         衍生条文与通用道纹写在同一个文件里，但既不是通用道纹也不是副本道纹：
-        `extract_daowen_from_file` 必须继续只返回 19 条通用，差异检测则需要把
+        `extract_daowen_from_file` 必须继续只返回 26 条通用，差异检测则需要把
         这 10 条算进「正文已定义」，否则引擎注册会被误报成 engine-only 缺口。
         """
         full_path = Path(filepath) if Path(filepath).is_absolute() else Path(self.rules_dir) / filepath
