@@ -279,7 +279,8 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
                     *, region: str = "罪孽都市", player_name: str = PLAYER_NAME,
                     include_winner_snapshot: bool = False,
                     blood_points: int = 9, speed_points: int = 8,
-                    mana_points: int = 8) -> dict[str, Any]:
+                    mana_points: int = 8,
+                    reincarnator_count: int | None = None) -> dict[str, Any]:
     """Return the full machine-readable game record; no output files are written here."""
     with tempfile.TemporaryDirectory(prefix="open-world-replay-") as temp_dir:
         engine = GameEngine(
@@ -292,7 +293,10 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
         setup = _setup_player(engine, region=region, player_name=player_name,
                               blood_points=blood_points, speed_points=speed_points,
                               mana_points=mana_points)
-        init = call(engine, "world_initialize", {"width": 21, "height": 21})
+        world_params = {"width": 21, "height": 21}
+        if reincarnator_count is not None:
+            world_params["reincarnator_count"] = reincarnator_count
+        init = call(engine, "world_initialize", world_params)
         world = WorldState.from_dict(engine.state.world_state)
         timeline: list[dict[str, Any]] = [{
             "type": "world_initialized", "seed": seed, "setup": setup,
@@ -407,6 +411,7 @@ def _run_playthrough_impl(seed: int = SEED, max_world_turns: int = MAX_WORLD_TUR
             "schema_version": 1,
             "seed": seed,
             "run_config": {"region": region, "map_size": [21, 21],
+                            "reincarnator_count": init["result"].get("total_reincarnators"),
                             "max_world_turns": max_world_turns,
                             "max_world_turns_is_safety_only": True},
             "initial_population": {
@@ -435,7 +440,8 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
                     *, region: str = "罪孽都市", player_name: str = PLAYER_NAME,
                     include_winner_snapshot: bool = False,
                     blood_points: int = 9, speed_points: int = 8,
-                    mana_points: int = 8) -> dict[str, Any]:
+                    mana_points: int = 8,
+                    reincarnator_count: int | None = None) -> dict[str, Any]:
     """Seed Python's global random choices per run and restore the caller's RNG state."""
     previous_random_state = random.getstate()
     random.seed(seed)
@@ -444,6 +450,7 @@ def run_playthrough(seed: int = SEED, max_world_turns: int = MAX_WORLD_TURNS,
             seed=seed, max_world_turns=max_world_turns, region=region,
             player_name=player_name, include_winner_snapshot=include_winner_snapshot,
             blood_points=blood_points, speed_points=speed_points, mana_points=mana_points,
+            reincarnator_count=reincarnator_count,
         )
     finally:
         random.setstate(previous_random_state)
