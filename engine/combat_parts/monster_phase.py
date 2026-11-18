@@ -555,7 +555,7 @@ class MonsterPhaseMixin:
                 chosen = [by_name[n] for n in selected]
             else:
                 chosen = corpses[-count:]
-            calc["revive_character_names"] = [e.name for e in chosen]
+            calc["revive_character_ids"] = [str(e.runtime_id) for e in chosen]
         if effective_name == "豪夺":
             # 2026-11-01：目标没有可夺遗物 → 本次发不动（不付5X碎片，不占出手）。
             # 2026-11-07：候选扩为遗物/消耗品，怪物代选第一件并带种类。
