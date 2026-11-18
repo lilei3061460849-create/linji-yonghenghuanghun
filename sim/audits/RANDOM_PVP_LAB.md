@@ -56,6 +56,7 @@
 | P-015 | 仅保存 AI 文本日志不足以审计真实结算 | JSON 产物增加完整 GameEngine action history 与战斗事件数 |
 | P-016 | 从 sim/audits 子目录直接执行时 Python 找不到 engine 包 | 按仓库统一约定向上定位根目录并验证 engine/ 存在后再加入 sys.path |
 | P-017 | push 与 pull_request 双触发导致同一随机对局重复跑 | 随机 PvP 工作流保留 PR 与手动入口，移除分支 push 重复触发 |
+| P-018 | 测试直接 import sim/audits 下的 CLI 脚本，违反“子目录脚本不作为库 import”的布局约定 | 把角色构建与对局组装提取到 sim/random_pvp_support.py 根库；测试与 CLI 共用根库，并加入布局护栏和 README 目录表 |
 
 ## 当前边界
 
