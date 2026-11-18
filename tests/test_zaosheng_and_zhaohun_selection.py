@@ -104,6 +104,30 @@ def test_zhaohun_uses_fixed_12_hp_and_mana_2x():
     assert p.current_mana == 198
 
 
+def test_zhaohun_can_revive_a_dead_friend_not_only_a_monster():
+    e, p = _zhaohun_engine([])
+    friend = Entity("阵亡同伴", "朋友", blood_limit=40, current_hp=0,
+                    mana_limit=10, current_mana=0, speed_limit=2, current_speed=0)
+    friend.is_alive = False
+    e.state.dead_monsters = [friend]
+    result = _cast(e)
+    assert result["success"], result
+    assert e.state.temp_friends[0].name == "阵亡同伴（魂）"
+    assert e.state.temp_friends[0].current_hp == 12
+
+
+def test_death_ledger_tracks_non_monster_roles_and_resets_each_battle():
+    e, p = _zhaohun_engine([])
+    friend = Entity("阵亡同伴", "朋友", blood_limit=40, current_hp=0,
+                    mana_limit=10, current_mana=0, speed_limit=2, current_speed=0)
+    friend.is_alive = False
+    e.state.friends = [friend]
+    e.combat._on_entity_death(friend)
+    assert friend in e.state.dead_monsters
+    e.combat.reset_monster_activation()
+    assert e.state.dead_monsters == []
+
+
 # ---------------- 造生预检 ----------------
 
 def _zaosheng_engine(region="乱葬岗"):
