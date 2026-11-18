@@ -42,6 +42,8 @@ class MonsterPhaseMixin:
         self._monster_daowen_round_used = {}
         self._resonance_rewrites = {}
         self._spell_stack = []
+        # 招魂死亡名单按本场重置；字段名保留旧存档兼容。
+        self.state.dead_monsters = []
 
     def _monster_round_used(self, monster: Entity) -> set:
         """该怪物本回合已发动的道纹集合（换回合自动清空）。
@@ -184,9 +186,9 @@ class MonsterPhaseMixin:
                     # 2026-11-01：没有可唤回尸体的【招魂】、目标身上没有可夺遗物的
                     # 【豪夺】都属于"发不动"——prepare 阶段就不再公布，否则驱动方
                     # 反复挑中同一张、每次都被跳过，回合永远结算不完。
-                    if effective_name == "招魂" and not any(
-                            getattr(dead, "entity_type", "") == "怪物"
-                            for dead in self.state.dead_monsters):
+                    required_revives = (1 if getattr(inst, "x_free", False)
+                                        else max(1, int(getattr(inst, "x_value", 0) or 1)))
+                    if effective_name == "招魂" and len(self.state.dead_monsters) < required_revives:
                         continue
                     if effective_name == "豪夺":
                         legal_targets = [
@@ -532,18 +534,29 @@ class MonsterPhaseMixin:
             return {"monster": monster.name, "daowen_skipped": name,
                     "resolves_as": effective_name, "reason": "无法支付代价"}
         if effective_name == "招魂":
-            # 2026-11-01：没有可唤回尸体时本次发不动（不付3X法力、不占出手）。
-            corpses = [e for e in self.state.dead_monsters
-                       if getattr(e, "entity_type", "") == "怪物"]
-            if not corpses:
+            # 怪物施法者按自身决策选择X个本场死亡角色；未提交名单时取最近死亡的X个。
+            corpses = list(self.state.dead_monsters)
+            count = int(calc.get("revive_count", calc.get("x", 1)))
+            if len(corpses) < count:
                 return {"monster": monster.name, "daowen_skipped": name,
                         "resolves_as": effective_name,
-                        "reason": "场上没有可唤回的怪物尸体"}
-            wanted = str(choice.get("revive_monster") or "")
-            names = [e.name for e in corpses]
-            if wanted and wanted not in names:
-                raise ValueError(f"【招魂】没有名为「{wanted}」的怪物尸体，可选 {names}")
-            calc["revive_monster_name"] = wanted or names[-1]
+                        "reason": f"本场已死亡角色不足{count}个"}
+            selected = choice.get("revive_character_names")
+            if selected is None:
+                legacy_name = str(choice.get("revive_monster") or "")
+                selected = [legacy_name] if legacy_name else []
+            if selected:
+                if (not isinstance(selected, list) or len(selected) != count
+                        or len(set(selected)) != count):
+                    raise ValueError(f"【招魂】必须选择{count}个不同的已死亡角色")
+                by_name = {e.name: e for e in corpses}
+                missing = [n for n in selected if n not in by_name]
+                if missing:
+                    raise ValueError(f"【招魂】没有这些已死亡角色：{missing}")
+                chosen = [by_name[n] for n in selected]
+            else:
+                chosen = corpses[-count:]
+            calc["revive_character_ids"] = [str(e.runtime_id) for e in chosen]
         if effective_name == "豪夺":
             # 2026-11-01：目标没有可夺遗物 → 本次发不动（不付5X碎片，不占出手）。
             # 2026-11-07：候选扩为遗物/消耗品，怪物代选第一件并带种类。
@@ -666,11 +679,11 @@ class MonsterPhaseMixin:
             consumed = self.consume_resonance_rewrite(monster, name)
             if consumed != rewritten_as:
                 raise ValueError("残韵改写已变化，请重新prepare_monster_phase")
-        # 原始怪物道纹与封印照常支付异变；只有非怪物角色可能触发迷失。
-        elif ((name in self.ORIGINAL_MONSTER_DAOWEN and calc.get("cost_type") != "冷却")
+        # 三种异变代价道纹与封印照常支付异变；只有非怪物角色可能触发迷失。
+        elif ((name in self.MONSTER_MUTATION_COST_DAOWEN and calc.get("cost_type") != "冷却")
               or name == "封印"):
             mutation_cost = (self.YUANCHU_COST_RATE * effective_x
-                             if name in self.ORIGINAL_MONSTER_DAOWEN else effective_x)
+                             if name in self.MONSTER_MUTATION_COST_DAOWEN else effective_x)
             paid = monster.add_mutation(mutation_cost)
             mutation_cost_paid = mutation_cost > 0
             if paid.get("lost"):

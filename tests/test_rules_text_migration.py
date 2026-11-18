@@ -66,10 +66,8 @@ def test_rule_sync_extracts_same_common_daowen_after_migration():
     """瘦身 README 后通用道纹同步仍完整，避免错误迁移成 0 条的静默退化。"""
     sync = RuleSync(db_path="data/test_rule_sources.db")
     names = {item["name"] for item in sync.extract_daowen_from_file(COMMON_RULES_FILE)}
-    # 当前通用正文16条；强化已进入转化道纹节，波及/增殖仍属副本。
-    # 2026-11-01：新增【操纵】【迟滞】→ 19；2026-11-02：篡改移入通用 → 20。
-    # 2026-11-02 效果正文补全：净化是荒疫古城专属，通用区不再留重复条文 → 19。
+    # 通用正文仍为19条；七种道纹已包含在其中，衍生道纹单独计数。
     assert len(names) == 19
-    assert {"杀伐", "共罪", "封印", "飞行", "压迫"} <= names
+    assert {"杀伐", "共罪", "封印", "飞行", "压迫", "全力", "必中", "全速", "强化", "弱化"} <= names
     assert {"寄生", "波及", "增殖"}.isdisjoint(names)
     assert sync.extract_daowen_from_file(README_FILE) == []

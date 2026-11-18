@@ -38,9 +38,10 @@ def test_liudong_yiwang_are_runtime_implementations():
 
 
 def test_retired_anger_is_not_granted_as_transformed_daowen():
-    from engine.gamedata import MONSTER_TRANSFORM_DAOWEN
     DaoWenEngine.register_all()
-    assert set(DaoWenEngine.TRANSFORMED_DAOWEN) == MONSTER_TRANSFORM_DAOWEN
-    assert "愤怒" not in DaoWenEngine.TRANSFORMED_DAOWEN
+    assert set(DaoWenEngine.HIRE_COMMON_DAOWEN) == {
+        "全力", "必中", "飞行", "全速", "强化", "弱化", "压迫"
+    }
+    assert "愤怒" not in DaoWenEngine.HIRE_COMMON_DAOWEN
     assert "愤怒" not in DaoWenEngine._registry
     assert "### 怒火针" in Path("物品索引.md").read_text()

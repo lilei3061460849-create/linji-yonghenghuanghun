@@ -128,13 +128,9 @@ def display_resonance_node(name):
 class DaoWenEngine:
     """道纹计算引擎"""
 
-    # 怪物转化道纹（原始怪物道纹经残韵变化后的分支，与规则正文《原始怪物道纹与转化道纹》一致）
-    # 用于"雇佣"后"发现并选择一种转化道纹"等需要从此类别中随机抽取的场景
-    # 2026-10-08 清理：原孤儿转化道纹已移除（曾挂在【狂暴】的反转分支下）。
-    TRANSFORMED_DAOWEN = [
-        # 与 gamedata.MONSTER_TRANSFORM_DAOWEN、全道纹索引「转化」行保持同一份名单。
-        "弱化", "强化", "全速", "压迫",  # 愤怒已转消耗品怒火针，不得由转化授予入口复活。
-        # （A14）：【无神】【借力】【衰败】整条删除，不补位。
+    # 雇佣发现池：七种原怪物道纹已统一归入通用道纹；雇佣仍从这七种中发现候选。
+    HIRE_COMMON_DAOWEN = [
+        "全力", "必中", "飞行", "全速", "强化", "弱化", "压迫",
     ]
 
     # 波及X：选择X个目标建立/解除无限期效果分摊关系；X决定目标数与法力消耗。
@@ -1126,12 +1122,12 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_zhaohun(x: int) -> dict:
-        """招魂X：支付：法力3X。唤回1具已击灭的怪物尸体作为[造物]，生命为20X。"""
+        """招魂X：支付：法力2X。唤回本场已死亡的X个角色作为[造物]，每个生命为12，持续∞。"""
         return {
             "dao_wen": "招魂", "x": x,
-            "cost_type": CostType.MANA.value, "cost": 3 * x,
-            "revive_temp_friend": True, "temp_hp": 20 * x,
-            "summary": f"支付：{3 * x}法力，唤回1具已灭怪物作为造物（生命{20*x}）"
+            "cost_type": CostType.MANA.value, "cost": 2 * x,
+            "revive_temp_friend": True, "revive_count": x, "temp_hp": 12,
+            "summary": f"支付：{2 * x}法力，唤回本场已死亡的{x}个角色作为造物（每个生命12，持续∞）"
         }
 
     @staticmethod

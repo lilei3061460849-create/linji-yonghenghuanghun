@@ -48,8 +48,8 @@ from .events import EventPool, TWISTED_TOOL_LIBRARY
 from .rule_repository import RuleRepository
 from .spell_execution import InterruptReason, SpellExecution
 from .dungeons import DEFAULT_INDEX
-from .gamedata import (REGION_EXCLUSIVE_DAOWEN, ORIGINAL_MONSTER_DAOWEN,
-                       MONSTER_TRANSFORM_DAOWEN, SHAFA_LOOP_DAOWEN,
+from .gamedata import (REGION_EXCLUSIVE_DAOWEN, MONSTER_MUTATION_COST_DAOWEN,
+                       SHAFA_LOOP_DAOWEN,
                        UNIMPLEMENTED_REGION_EXCLUSIVE_DAOWEN, FIRST_EMBRACE_DAOWEN,
                        learnability_error)
 from .dm_rulings import DMRulingsDB, DMRuling, Interrupt
@@ -540,7 +540,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         phase = self.state.phase
         if self.state.pending_daowen_choices and action_type != "choose_hired_daowen":
             return {"success": False,
-                    "error": "雇佣后的转化道纹尚未选择，不能执行其它行动"}
+                    "error": "雇佣后的通用道纹尚未选择，不能执行其它行动"}
         # 衍生发现（局内0出手）必须显式领取／刷新／放弃。它是战斗内的 0 出手行动，
         # 不能因此把回合推进、怪物阶段、攻击提交等战斗流程动作一并锁死。
         if getattr(self.state, "pending_derivative_choices", []):
@@ -1555,7 +1555,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         # 引擎早有实现（combat_hooks 的造物吸血），此前漏登记，补进遗物池。
         ("共生血囊", "由你创造的造物造成伤害时，造物按目标实际减少的生命回复；"
                      "超出造物生命上限的回复量改为回复创造者"),
-        # 两条原始怪物道纹遗物化，进通用遗物池。
+        # 两条旧怪物道纹遗物化，进通用遗物池。
         ("疯狂", "所有角色每回合出手次数+1"),
         ("减速", "［战始］所有敌人的当前速度减半"),
     ]
@@ -1722,7 +1722,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         if not isinstance(tier, int) or isinstance(tier, bool):
             self.state.energy += 1
             return {"success": False, "error": "学习tier必须是整数"}
-        if sub not in ("daowen", "转化道纹"):
+        if sub != "daowen":
             self.state.energy += 1
             return {"success": False, "error": "学习sub必须是daowen"}
         cost_map = {1: 0, 2: 10}
@@ -2016,20 +2016,20 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         blood_limit = blood_alloc * 12
         attack_count = atk_bundles
         attack_power = atk_bundles * 2
-        remaining = [candidate for candidate in DaoWenEngine.TRANSFORMED_DAOWEN
+        remaining = [candidate for candidate in DaoWenEngine.HIRE_COMMON_DAOWEN
                      if candidate in DaoWenEngine.list_all()]
         if not remaining:
             self.state.energy += 1
-            return {"success":False,"error":"当前没有可供雇佣发现的转化道纹"}
+            return {"success":False,"error":"当前没有可供雇佣发现的通用道纹"}
         emp = Entity(name=name, entity_type="员工", blood_limit=blood_limit, current_hp=blood_limit,
                      attack_count=attack_count, attack_power=attack_power, is_deployed=False)
         self.state.employees.append(emp)
 
-        # 发现最多3种不同的现行转化道纹；删纹后池子可能不足3，不能抽空池或复活废案补数。
+        # 发现最多3种不同的通用道纹；删纹后池子可能不足3，不能抽空池或复活废案补数。
         discovered = []
         for i in range(min(3,len(remaining))):
             roll = self.dice.auto_roll(f"hire_daowen_discovery_{name}_{i}", remaining,
-                                        context=f"雇佣{name}-发现转化道纹")
+                                        context=f"雇佣{name}-发现通用道纹")
             discovered.append(roll["selected"])
             remaining.remove(roll["selected"])
         self.state.pending_daowen_choices[name] = discovered
@@ -2040,7 +2040,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                        "attack_power": attack_power, "is_deployed": False,
                        "discovered_daowen_choices": discovered,
                        "note": "已加入员工名单，默认待命不占场；战斗中需调用 deploy_employee 消耗1出手派遣出战后才会参战与计入战终工资结算。"
-                                "请从 discovered_daowen_choices 中调用 choose_hired_daowen(name, daowen) 选择1种转化道纹"},
+                                "请从 discovered_daowen_choices 中调用 choose_hired_daowen(name, daowen) 选择1种通用道纹"},
         }
 
     def _pre_battle_lianxin(self, params: dict) -> dict:
@@ -2755,7 +2755,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         """
         if source not in holder.dao_wen or self._conversion_capacity_error(holder, source, dest):
             return False
-        if holder.entity_type == "怪物" and source in ORIGINAL_MONSTER_DAOWEN:
+        if holder.entity_type == "怪物" and source in MONSTER_MUTATION_COST_DAOWEN:
             holder._had_monster_daowen = True
         old = holder.dao_wen[source]
         if dest not in holder.dao_wen:
@@ -2784,7 +2784,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
     def _grant_transformed_daowen(self, player: Entity, dest: str) -> bool:
         """残韵获得变化后道纹。X不从原道纹拷贝；同名不重复。
 
-        残韵路径双向 + 完全放开——变化结果是原始怪物道纹时
+        残韵路径双向 + 完全放开——变化结果为任一道纹时
         施法者同样永久获得（旧版在此处直接拒绝授予，与「双向 + 可永久持有」冲突）。
         """
         if dest in player.dao_wen:

@@ -1664,7 +1664,7 @@ class GameState:
     # 龙心谷"炼心"：待生效标记；下一次玩家实际支付数值型代价后转化为对应类型的【××龙心】消耗品
     pending_lianxin: bool = False
     pending_sha_qi_choices: list = field(default_factory=list)  # 旧存档兼容字段，不再由任何动作写入
-    dead_monsters: list = field(default_factory=list)  # 乱葬岗招魂：本场已命零的怪物尸体
+    dead_monsters: list = field(default_factory=list)  # 旧字段名兼容：本场已命零且尚未被招魂的角色
     # 战斗事件流（唯一事实源，只增不改）。CombatEngine.event_stream 是它的别名视图。
     # 只登记“发生了什么”，每条事件的 ctx 字段挂 EffectContext 快照回答“为什么发生”。
     # 纯观测用：任何战斗规则都不得依赖本列表做判定。
