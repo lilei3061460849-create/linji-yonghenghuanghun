@@ -190,7 +190,7 @@ class RuleSync:
                         "line": line_number,
                     })
 
-            # 规则正文的原始/转化道纹使用“名称X（消耗/代价与效果）”内联格式。
+            # 规则正文的七种通用道纹使用“名称X（消耗/代价与效果）”内联格式。
             for name, description in re.findall(
                     r"([\u4e00-\u9fff]{2})X（([^（）]+)）", line):
                 if not any(label in description for label in ("消耗", "代价", "支付")):
