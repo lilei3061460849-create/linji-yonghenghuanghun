@@ -29,3 +29,17 @@
 - 不改 engine/derivatives.py 正式数据或规则正文。
 - 不自动合并 PR。
 - Actions 只上传 JSON、Markdown、日志和问题清单。
+
+### P-005：首次云端运行的 Python 导入路径缺失（已定位）
+
+- 现象：Actions 日志报错 ModuleNotFoundError: No module named 'engine'。
+- 原因：脚本位于 sim/audits，直接执行时 Python 的首要搜索目录是脚本目录，不是仓库根目录。
+- 修复：显式把脚本路径向上两级得到的仓库根目录加入 sys.path。
+- 状态：已提交修复，待重跑验证。
+
+### P-006：工作流表达式被转义，导致参数和产物名错误（已定位）
+
+- 现象：runs 环境变量带反斜杠，上传 artifact 报文件名包含非法反斜杠。
+- 原因：生成 workflow YAML 时把 GitHub Actions 的表达式转义符也写进了文件。
+- 修复：移除多余反斜杠，并在执行命令中启用 pipefail，避免 Python 失败被 tee 的成功状态掩盖。
+- 状态：已提交修复，待重跑验证。
