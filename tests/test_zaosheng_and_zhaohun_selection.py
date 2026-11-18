@@ -36,46 +36,63 @@ def _zhaohun_engine(corpse_names):
         monster = Entity(name, "怪物", blood_limit=40, current_hp=0,
                          mana_limit=10, current_mana=10, speed_limit=2, current_speed=2,
                          attack_count=1, attack_power=3)
+        monster.is_alive = False
         dead.append(monster)
     e.state.dead_monsters = dead
     return e, player
 
 
-def _cast(e, **extra):
+def _cast(e, x=1, **extra):
     return e.execute_action("use_daowen", {
-        "daowen_name": "招魂", "x": 1, "target_ref": "player:0",
+        "daowen_name": "招魂", "x": x, "target_ref": "player:0",
         "dodge": False, "blood_shadow": False, "trigger_spell_choices": {},
         **extra})
 
 
-def test_zhaohun_defaults_to_most_recent_corpse():
+def test_zhaohun_requires_caster_to_choose_when_more_than_x_are_dead():
     e, p = _zhaohun_engine(["甲怪", "乙怪", "丙怪"])
-    result = _cast(e)
-    assert result["success"], result
-    assert [x.name for x in e.state.temp_friends] == ["丙怪（魂）"], "缺省取最近一具"
-
-
-def test_zhaohun_can_pick_which_corpse_explicitly():
-    e, p = _zhaohun_engine(["甲怪", "乙怪", "丙怪"])
-    result = _cast(e, revive_monster="甲怪")
-    assert result["success"], result
-    assert [x.name for x in e.state.temp_friends] == ["甲怪（魂）"]
-
-
-def test_zhaohun_unknown_corpse_name_is_refused_before_payment():
-    e, p = _zhaohun_engine(["甲怪", "乙怪"])
     mana = p.current_mana
-    result = _cast(e, revive_monster="不存在的怪")
+    result = _cast(e)
     assert result["success"] is False
-    assert "没有名为" in result["error"], result
+    assert "必须显式选择1个角色" in result["error"]
     assert p.current_mana == mana and p.actions_used_this_round == 0
 
 
-def test_zhaohun_single_corpse_also_works_without_name():
+def test_zhaohun_can_revive_x_selected_characters():
+    e, p = _zhaohun_engine(["甲怪", "乙怪", "丙怪"])
+    result = _cast(e, x=2, revive_character_names=["甲怪", "丙怪"])
+    assert result["success"], result
+    assert [x.name for x in e.state.temp_friends] == ["甲怪（魂）", "丙怪（魂）"]
+    assert all(x.current_hp == 12 and x.blood_limit == 12 for x in e.state.temp_friends)
+    assert [x.name for x in e.state.dead_monsters] == ["乙怪"]
+    assert p.current_mana == 196
+
+
+def test_zhaohun_exact_x_corpses_need_no_extra_choice():
+    e, p = _zhaohun_engine(["甲怪", "乙怪"])
+    result = _cast(e, x=2)
+    assert result["success"], result
+    assert [x.name for x in e.state.temp_friends] == ["甲怪（魂）", "乙怪（魂）"]
+    assert e.state.dead_monsters == []
+
+
+def test_zhaohun_rejects_wrong_count_or_unknown_character_before_payment():
+    e, p = _zhaohun_engine(["甲怪", "乙怪", "丙怪"])
+    mana = p.current_mana
+    result = _cast(e, x=2, revive_character_names=["不存在", "丙怪"])
+    assert result["success"] is False
+    assert "没有这些已死亡角色" in result["error"]
+    assert p.current_mana == mana and p.actions_used_this_round == 0
+
+
+def test_zhaohun_uses_fixed_12_hp_and_mana_2x():
     e, p = _zhaohun_engine(["独苗怪"])
     result = _cast(e)
     assert result["success"], result
-    assert [x.name for x in e.state.temp_friends] == ["独苗怪（魂）"]
+    revived = e.state.temp_friends[0]
+    assert revived.name == "独苗怪（魂）"
+    assert revived.current_hp == 12 and revived.blood_limit == 12
+    assert p.current_mana == 198
 
 
 # ---------------- 造生预检 ----------------
