@@ -111,7 +111,7 @@ python3 sim/duels/manual_handplay.py              # 例：手动死斗
 | `perf_bench.py` | 性能基准：GameEngine 初始化 / ActionPreview / TacticalAI 单次决策。 |
 | `stress_test.py` | 压力测试驱动器（2026-08-19，禁止修改战斗逻辑阶段）。 |
 
-## `sim/`（根）—— 库与 CI/文档入口（38 个）
+## `sim/`（根）—— 库与 CI/文档入口（39 个）
 
 | 文件 | 说明 |
 | --- | --- |
@@ -130,6 +130,7 @@ python3 sim/duels/manual_handplay.py              # 例：手动死斗
 | `duel_dialogue.py` | PvP 死斗对白渲染（2026-08-30）。 |
 | `duel_diff_trace.py` | 死斗逐次 diff 追踪器（诊断工具）。 |
 | `duel_pvp.py` | 真正的 PvP 死斗驱动（守擂方按轮回者规则行动）。 |
+| `random_pvp_support.py` | 随机轮回者 PvP 构筑与对局组装助手；供审计 CLI 与测试共用。 |
 | `duel_records.py` | 死斗详细过程记录器：把每一局死斗的逐手过程 + 双方终局账面写成 markdown（报告.md 数据源）。 |
 | `event_exploration_audit.py` | 事件探索收益审计(2026-08-26)——只读审计,不修改任何生产代码。 |
 | `format_trace.py` | 按 推演规范《六、战斗推演格式》生成合规战报。 |
