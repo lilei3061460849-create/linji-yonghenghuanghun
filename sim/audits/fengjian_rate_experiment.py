@@ -35,11 +35,6 @@ def one(seed: int, effect_rate: int) -> dict:
         ):
             result=e.execute_action(action,params)
             if not result.get("success"): raise RuntimeError(f"{action}: {result}")
-            if action=="setup_choose_region":
-                choices=(result.get("result") or {}).get("relic_choices") or []
-                if choices:
-                    picked=e.execute_action("choose_discovered_relic",{"relic_name":choices[0]})
-                    if not picked.get("success"): raise RuntimeError(f"relic: {picked}")
         started=begin_battle(e)
         if not started.get("success"): raise RuntimeError(f"battle_start: {started}")
         p=e.state.player
