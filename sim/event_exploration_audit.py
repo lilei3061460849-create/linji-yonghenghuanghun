@@ -46,7 +46,6 @@ def _snapshot(e) -> dict:
     p = st.player
     return {
         "battle": st.current_battle,
-        "energy": st.energy,
         "hp": p.current_hp if p else 0, "bl": p.blood_limit if p else 0,
         "mana_limit": p.mana_limit if p else 0, "speed_limit": p.speed_limit if p else 0,
         "shards": st.shards, "fake_shards": st.fake_shards,
