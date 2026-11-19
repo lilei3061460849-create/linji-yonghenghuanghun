@@ -259,6 +259,7 @@ BUILD_SIZE = 3          # 每套 build 学习的道纹数量（有效维度；�
 STALL_LIMIT = 5
 # 仅用于构建学习器基准实验的局外行动采样上限，不是游戏规则或角色资源。
 # 该限制只控制模拟样本长度，不映射到 GameState，也不代表玩家行动上限。
+# 游戏本体的世界时间与局外行动结算仍由 engine 规则处理。
 SIM_PRE_BATTLE_ACTION_LIMIT = 3
 
 
