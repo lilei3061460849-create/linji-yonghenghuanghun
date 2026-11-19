@@ -35,8 +35,8 @@ MEDIOCRITY_ROUNDS = Entity.MEDIOCRITY_ROUNDS
 #  遗物结算 / 凡庸与目标合法性）。拆分不改变行为与对外契约：CombatEngine 仍是
 # 唯一入口，全部引用方（含 self.combat.X 与 CombatEngine.X）经 MRO 解析不变。
 # 新增分片时请同步 engine/validator.py 的机制护栏扫描范围。
-from .combat_parts.blood_structures import (BloodStructureMixin,
-                                            IMPLEMENTED_BLOOD_STRUCTURES)
+from .combat_parts.construction import (ConstructionMixin,
+                                            IMPLEMENTED_CONSTRUCTS)
 from .combat_parts.cost_payment import CostPaymentMixin
 from .combat_parts.damage_death import DamageDeathMixin
 from .combat_parts.daowen_effect import DaowenEffectMixin
@@ -45,7 +45,7 @@ from .combat_parts.monster_phase import MonsterPhaseMixin
 from .combat_parts.spells import SpellReactionMixin
 
 
-class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
+class CombatEngine(ConstructionMixin, DamageDeathMixin, CostPaymentMixin,
                    MonsterLifeMixin, DaowenEffectMixin, SpellReactionMixin,
                    MonsterPhaseMixin):
     """战斗计算引擎（门面；实现见 engine/combat_parts/*.py）"""
@@ -966,7 +966,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                 result["speed_after_dodge"] = target.current_speed
                 if extra:
                     result["dodge_extra"] = extra
-                # 法力结构【粘滞】：宣告闪避成功后额外支付X点速度并清空层数。
+                # 构造术【粘滞】：宣告闪避成功后额外支付X点速度并清空层数。
                 nianzhi_log = self.consume_nianzhi_on_dodge(target)
                 if nianzhi_log:
                     result["nianzhi"] = nianzhi_log
@@ -1006,7 +1006,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
                          "source_type": "action", "actor": target, "target": target,
                          "tags": {"parry", "active_payment"}})
                 result["speed_after_parry_cost"] = target.current_speed
-                # 法力结构【震爆】：宣告招架成立（速度已付）即引爆——清空层数
+                # 构造术【震爆】：宣告招架成立（速度已付）即引爆——清空层数
                 # 并受X点结构伤害；不属于被招架的这次攻击，不影响免疫与返还。
                 zhenbao_log = self.consume_zhenbao_on_parry(target, attacker)
                 if zhenbao_log:
@@ -1419,7 +1419,7 @@ class CombatEngine(BloodStructureMixin, DamageDeathMixin, CostPaymentMixin,
             # 机制的报告条目并入 effects，战报格式与迁移前一致。
             effects.extend(self._dispatch_phase(Phase.ROUND_START, target=entity))
 
-        # 法力结构【永焰】回始结算：每回始目标失去 X 点生命（X=层数；直接失血，
+        # 构造术【永焰】回始结算：每回始目标失去 X 点生命（X=层数；直接失血，
         # 走统一失血钩子，受【庇护】等失血规则约束）。独立循环自带去重（迷失
         # 变身时 player 可能同时出现在两侧列表），沉溺阻断的回合不经历、不烧灼。
         seen_yongyan: set[int] = set()

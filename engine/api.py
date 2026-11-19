@@ -575,8 +575,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                     "error": "衍生道纹只能在战斗阶段发现／领取（局内0出手行动）"}
         if action_type == "battle_start" and phase != "pre_battle":
             return {"success": False, "error": "只有局外阶段可以进入战始"}
-        if action_type == "battle_start" and self.state.energy > 0 and not params.get("world_encounter_id"):
-            return {"success": False, "error": f"尚有{self.state.energy}点精力，耗尽后才能进入战斗"}
         if action_type == "use_daowen":
             name = params.get("daowen_name", "")
             # 默认局内；局外须条文明示（白名单见模块顶部 OUT_OF_COMBAT_DAOWEN）。
@@ -1299,63 +1297,29 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         result["world_time"] = {"elapsed_turns": elapsed, "world_turn": world.clock.turn}
         return result
 
-    def _execute_pre_battle_immediate(self, params: dict, *, world_mode: bool) -> dict:
-        """旧局外行动结算器；world_mode=True时复用效果但不再消耗旧精力。"""
+    def _execute_pre_battle_immediate(self, params: dict, *, world_mode: bool = True) -> dict:
+        """局外行动效果结算器；开放世界的时间消耗由调用方统一处理。"""
         action = params.get("sub_action", "")
-
-        if not world_mode:
-            if self.state.energy <= 0:
-                return {
-                    "success": False,
-                    "error": "精力已耗尽",
-                    "instruction": "精力耗尽，进入战斗阶段。请调用 battle_start。"
-                }
-
-            self.state.energy -= 1
-            # 旧战斗循环中的炼心精力惩罚仅适用于旧模式。
-            if self.state.pending_energy_penalty > 0:
-                self.state.energy -= self.state.pending_energy_penalty
-                self.state.pending_energy_penalty = 0
-
         result_map = {
             "休整": self._pre_battle_xiuzheng,
             "修行": self._pre_battle_xiuxing,
             "学习": self._pre_battle_xuexi,
             "共鸣": self._pre_battle_gongming,
-            "探索": self._pre_battle_tansuo,
             "改造": self._pre_battle_gaizao,
             "雇佣": self._pre_battle_guyong,
             "炼心": self._pre_battle_lianxin,
             "造生": self._pre_battle_zaosheng,
             "唤醒": self._pre_battle_wake_yaoguai,
-            "献祭": self._pre_battle_sacrifice,
         }
-        # 2026-09-28：局外【忘忧】已删除，忘忧香效果为溢出回复转格挡。
-
-        # 副本专属行动门禁（规则正文：改造=扭曲都市、雇佣=罪孽都市、炼心=龙心谷专属）。
-        # 缺少该校验会让任意副本都能用他人专属行动，统计与平衡数据将失真。
         REGION_EXCLUSIVE = {"改造": "扭曲都市", "雇佣": "罪孽都市", "炼心": "龙心谷", "造生": "乱葬岗"}
         need_region = REGION_EXCLUSIVE.get(action)
         if action == "造生" and has_yaoguai_banner(self.state):
             need_region = None
         if need_region and self.state.current_region != need_region:
-            if not world_mode:
-                self.state.energy += 1
-            return {"success": False,
-                    "error": f"【{action}】是{need_region}专属行动，当前副本为"
-                             f"{self.state.current_region or '未选择'}"}
-
+            return {"success": False, "error": f"【{action}】是{need_region}专属行动，当前副本为{self.state.current_region or '未选择'}"}
         if action in result_map:
-            energy_before = self.state.energy
-            result = result_map[action](params)
-            if world_mode:
-                # 旧处理器会在失败分支退款精力；开放世界不再使用旧精力经济。
-                self.state.energy = energy_before
-            return result
-        else:
-            if not world_mode:
-                self.state.energy += 1
-            return {"success": False, "error": f"未知局外行动: {action}"}
+            return result_map[action](params)
+        return {"success": False, "error": f"未知局外行动: {action}"}
 
     def _pre_battle_xiuzheng(self, params: dict) -> dict:
         """休整：产生恢复量，并按稳定引用在自己/朋友/员工间自由完整分配。"""
@@ -1366,7 +1330,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         tier_pct = {1: 20, 2: 40, 3: 60}
         tier_cost = {1: 0, 2: 10, 3: 25}
         if not isinstance(tier, int) or isinstance(tier, bool) or tier not in tier_pct:
-            self.state.energy += 1
             return {"success": False, "error": "休整档位必须是1/2/3"}
         player = self.state.player
         base_heal = (math.ceil(player.blood_limit * tier_pct[tier] / 100)
@@ -1386,13 +1349,10 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                        or not isinstance(entry.get("amount"), int) or isinstance(entry.get("amount"), bool)
                        or entry["amount"] < 0 for entry in allocations)
                 or sum(entry["amount"] for entry in allocations) != heal):
-            self.state.energy += 1
             return {"success": False,
                     "error": f"休整必须用heal_allocations把{heal}点恢复量完整分配给合法目标"}
         # 负债口径：冻结的是碎片**支出**（cost>0）；
-        # 0费行动不属于支出，不得因负债被误拒（否则负债局pre_battle无法消耗精力=死锁）。
         if cost > 0 and self.state.shards < cost:
-            self.state.energy += 1
             return {"success": False, "error": f"碎片不足，需要{cost}，当前{self.state.shards}"}
 
         self.state.shards -= cost
@@ -1425,11 +1385,9 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         tier = params.get("tier", 1)
         tier_map = {1: (1, 0), 2: (2, 15), 3: (3, 35), 4: (4, 65), 5: (5, 100), 6: (6, 150)}
         if not isinstance(tier, int) or isinstance(tier, bool) or tier not in tier_map:
-            self.state.energy += 1
             return {"success": False, "error": "修行档位必须是1~6"}
         points, cost = tier_map[tier]
         if cost > 0 and self.state.shards < cost:  # 负债口径同休整：0费不属于支出
-            self.state.energy += 1
             return {"success": False, "error": f"碎片不足，需要{cost}"}
         alloc_keys = ("blood_points", "speed_points", "mana_points")
         allocations = params.get("allocations")
@@ -1445,7 +1403,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 break
             vals[key] = v
         if vals is None or sum(vals.values()) > points + self.state.attribute_points:
-            self.state.energy += 1
             return {"success": False,
                     "error": f"修行{tier}档给{points}属性点（池内现有{self.state.attribute_points}），"
                              f"allocations 分配总数不能超过 {points + self.state.attribute_points}；"
@@ -1486,7 +1443,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         "扭曲都市": [
             ("体外心脏", "[战始]，自身[血限]与当前生命临时翻倍"),
             ("羔羊之泪", "[战始]，场上所有角色与怪物立刻失去50%当前生命"),
-            ("红头绳", "局外【行动】永久新增\"献祭\"（血限3，换取精力+2）"),
             ("猩红尖牙", "获得该法器，并立刻强制触发特殊事件\"初拥之夜\""),
         ],
         "罪孽都市": [
@@ -1647,7 +1603,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         规则只有一处，禁止两条路径各自校验。
 
         返回 {"spell": Spell, "parsed": parsed} 成功；失败返回 {"error": str}。
-        不改动任何状态（不扣精力/出手/碎片），由调用方决定代价与写入时机。
+        不改动任何状态（不扣资源/出手/碎片），由调用方决定代价与写入时机。
         """
         name = definition.get("name")
         required = definition.get("required_daowen")
@@ -1715,19 +1671,15 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         """学习取得普通道纹；可直接分配给角色，也可暂存等待未来朋友。"""
         player = self.state.player
         if not player:
-            self.state.energy += 1
             return {"success": False, "error": "没有玩家"}
         sub = params.get("sub", "daowen")
         tier = params.get("tier", 1)
         if not isinstance(tier, int) or isinstance(tier, bool):
-            self.state.energy += 1
             return {"success": False, "error": "学习tier必须是整数"}
         if sub != "daowen":
-            self.state.energy += 1
             return {"success": False, "error": "学习sub必须是daowen"}
         cost_map = {1: 0, 2: 10}
         if tier not in cost_map:
-            self.state.energy += 1
             return {"success": False, "error": "学习道纹档位必须是1/2"}
         cost = cost_map[tier]
         names = params.get("names")
@@ -1735,7 +1687,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             names = [params["name"]]
         if (not isinstance(names, list) or len(names) != tier or len(set(names)) != tier
                 or any(not isinstance(name, str) or not name for name in names)):
-            self.state.energy += 1
             return {"success": False, "error": f"学习{tier}档必须用names提交{tier}个不同名称"}
 
         recipient = str(params.get("recipient", "player") or "player")
@@ -1744,7 +1695,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             target_entity = None
             owned_names: set[str] = set()
             if any(name in getattr(self.state, "pending_learned_daowen", []) for name in names):
-                self.state.energy += 1
                 return {"success": False, "error": "该道纹已在待分配池中，不能重复暂存"}
         else:
             candidates = ([player] + self.state.friends + self.state.employees
@@ -1755,20 +1705,17 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 (entity for entity in candidates
                  if entity.is_alive and recipient in (entity.name, entity.runtime_id)), None)
             if target_entity is None:
-                self.state.energy += 1
                 return {"success": False,
                         "error": f"学习道纹的接收者【{recipient}】不存在或已离场；未来朋友可先选择recipient=pending"}
             owned_names = set(target_entity.dao_wen)
             new_names = [name for name in names if name not in owned_names]
             cap = target_entity.daowen_capacity
             if len(owned_names) + len(new_names) > cap:
-                self.state.energy += 1
                 return {"success": False,
                         "error": (f"道纹种类超出接收者死者之页承载：【{target_entity.name}】"
                                   f"当前允许{cap}种，已持有{len(owned_names)}种，"
                                   f"本次新增{len(new_names)}种")}
         if cost > 0 and self.state.shards < cost:
-            self.state.energy += 1
             return {"success": False, "error": f"碎片不足，需要{cost}"}
 
         def daowen_error(name: str) -> Optional[str]:
@@ -1778,7 +1725,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
 
         errors = [error for name in names if (error := daowen_error(name))]
         if errors:
-            self.state.energy += 1
             return {"success": False, "error": "；".join(errors)}
         if reserve:
             if not hasattr(self.state, "pending_learned_daowen"):
@@ -1803,32 +1749,23 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         self._init_relic_pool()
         tier = params.get("tier", 1)
         if not isinstance(tier, int) or isinstance(tier, bool) or tier not in (1, 2):
-            self.state.energy += 1
             return {"success": False, "error": "共鸣档位必须是1（发现）或2（自选）"}
         sub = params.get("sub", "choose" if tier == 2 else "discover")
         if sub not in ("discover", "choose") or (tier == 1 and sub != "discover") or (tier == 2 and sub != "choose"):
-            self.state.energy += 1
-            return {"success": False, "error": "共鸣1档=发现，2档=额外1精力并支付15碎片自选"}
+            return {"success": False, "error": "共鸣1档=发现，2档=支付15碎片自选"}
         if not self.state.relics_pool:
-            self.state.energy += 1
             return {"success": False, "error": "遗物池为空"}
         if sub == "choose":
-            # 自选在通用局外行动1精力之外再次消耗1精力，并支付15碎片。
-            if self.state.energy < 1:
-                self.state.energy += 1
-                return {"success": False, "error": "共鸣自选总共需要2点精力，当前不足"}
+            # 自选支付15碎片。
             name = params.get("name", "")
             idx = next((i for i,r in enumerate(self.state.relics_pool) if r.name == name), -1)
             if idx < 0:
-                self.state.energy += 1
                 return {"success": False, "error": f"遗物池无此遗物: {name}"}
             if self.state.shards < 15:
-                self.state.energy += 1
                 return {"success": False, "error": "碎片不足15"}
             # 2026-10-27：获得由事务层统一按死者之页校验，
             # 页数不足时整个行动回滚；合法获得默认启用。
             self.state.shards -= 15
-            self.state.energy -= 1
             relic = self.state.relics_pool.pop(idx)
             self.state.relics.append(relic)
             self.state.note_relic_gained(relic)
@@ -1844,70 +1781,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         }
 
 
-    def _pre_battle_tansuo(self, params: dict) -> dict:
-        """探索：一档免费发现1个未遇事件；二档支付30碎片并依次发现2个不同未遇事件。"""
-        if self.state.endless_mode:
-            # 无尽模式「无法探索」：调用方已扣的 1 点精力按失败原子性退回。
-            self.state.energy += 1
-            return {"success": False, "error": "无尽模式下无法探索：进入无尽模式后不再开放【探索】"}
-        if self.event_pool.current is not None or self.state.pending_event_queue:
-            self.state.energy += 1
-            pending = self.event_pool.current or self.state.pending_event_queue[0]
-            return {"success": False, "error": f"事件【{pending}】尚未结算，不能再次探索"}
-        tier = params.get("tier", 1)
-        tier_map = {1: (1, 0), 2: (2, 30)}
-        if not isinstance(tier, int) or isinstance(tier, bool) or tier not in tier_map:
-            self.state.energy += 1
-            return {"success": False, "error": "探索档位必须是1或2"}
-        draw_count, shard_cost = tier_map[tier]
-        region = self.state.current_region
-        pool = self.event_pool.build_pool(region)
-        if len(pool) < draw_count:
-            self.state.energy += 1
-            return {"success": False,
-                    "error": f"当前事件池只剩{len(pool)}个未遇事件，无法执行发现{draw_count}次"}
-        if shard_cost > 0 and self.state.shards < shard_cost:  # 负债口径：0费探索不属于支出
-            self.state.energy += 1
-            return {"success": False,
-                    "error": f"探索{tier}档需要{shard_cost}碎片，当前{self.state.shards}"}
-
-        self.state.shards -= shard_cost
-        remaining = list(pool)
-        discovered: list[str] = []
-        random_records: list[dict] = []
-        for index in range(draw_count):
-            # 保留一档既有审计池名；二档用带序号的池名区分两次无放回抽取。
-            pool_name = "event_pool" if tier == 1 else f"event_pool_{index + 1}"
-            roll = self.dice.auto_roll(
-                pool_name, remaining,
-                context=f"探索{tier}档（{region}）第{index + 1}次",
-            )
-            name = roll["selected"]
-            discovered.append(name)
-            random_records.append(roll["record"])
-            remaining.remove(name)
-        self.event_pool.current = discovered[0]
-        self.state.pending_event_queue = discovered[1:]
-        event = self.event_pool.events[discovered[0]]
-        return {
-            "success": True,
-            "action": f"探索{tier}档",
-            "result": {
-                "tier": tier,
-                "shard_cost": shard_cost,
-                "discovered_events": discovered,
-                "event": discovered[0],
-                "region": event["region"],
-                "desc": event["desc"],
-                "options": [{"id": option["id"], "text": option["text"]}
-                            for option in event["options"]],
-                "queued_events_remaining": len(self.state.pending_event_queue),
-                "random": random_records,
-            },
-            "instruction": (f"遭遇【{discovered[0]}】，请先结算；"
-                            f"其后还有{len(self.state.pending_event_queue)}个探索事件依次结算"),
-        }
-
     # 【改造】档位：合并的消耗品件数 → 碎片价目（沿用原【维修】1/2/3档的 0/5/12 阶梯）。
     GAIZAO_TIERS = {2: 0, 3: 5, 4: 12}
 
@@ -1915,7 +1788,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         """改造（扭曲都市专属）：选择2/3/4件不同名消耗品，把全部效果叠加到其中一件。
 
         口径（，原【维修】撤销；同日补正：耐久同样叠加、被动效果照常携带）：
-        - 档位＝参与件数：2件（0碎片）／3件（5碎片）／4件（12碎片），另耗1点精力；
+        - 档位＝参与件数：2件（0碎片）／3件（5碎片）／4件（12碎片）；
         - names 必须互不同名且都在持有中，target 必须是 names 之一；
         - 被并入条目的**当前耐久与耐久上限一并叠加**到目标条目，目标条目成为唯一的耐久池；
         - 效果文本变为各条目效果之和；使用它时按原顺序逐条结算全部来源效果，
@@ -1927,33 +1800,26 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         tier = params.get("tier", 2)
         if (not isinstance(tier, int) or isinstance(tier, bool)
                 or tier not in self.GAIZAO_TIERS):
-            self.state.energy += 1
             return {"success": False, "error": "改造档位必须是2/3/4（对应合并2/3/4件）"}
         cost = self.GAIZAO_TIERS[tier]
         names = params.get("names")
         if not isinstance(names, list) or any(not isinstance(n, str) for n in names):
-            self.state.energy += 1
             return {"success": False, "error": "改造必须用names提交消耗品名列表"}
         if len(names) != tier:
-            self.state.energy += 1
             return {"success": False, "error": f"改造{tier}档必须恰好选择{tier}件消耗品"}
         if len(set(names)) != len(names):
-            self.state.energy += 1
             return {"success": False, "error": "改造只能合并不同名的消耗品"}
         target_name = params.get("target", "")
         if target_name not in names:
-            self.state.energy += 1
             return {"success": False, "error": "改造的target必须是names中的一个"}
 
         resolved: dict[str, Consumable] = {}
         for name in names:
             item = next((c for c in self.state.consumables if c.name == name), None)
             if item is None:
-                self.state.energy += 1
                 return {"success": False, "error": f"未持有消耗品【{name}】"}
             resolved[name] = item
         if cost > 0 and self.state.shards < cost:  # 负债口径：0费档不属于支出
-            self.state.energy += 1
             return {"success": False, "error": f"碎片不足，需要{cost}"}
 
         target = resolved[target_name]
@@ -1996,14 +1862,11 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         受出战支援/黑名单机制全局约束（is_blacklisted 时禁止本动作）。
         """
         if self.state.is_blacklisted:
-            self.state.energy += 1
             return {"success": False, "error": "已被列入失信黑名单，本次轮回无法再执行雇佣"}
         name = params.get("name", "")
         if not name:
-            self.state.energy += 1
             return {"success": False, "error": "必须指定员工名称(name)"}
         if any(e.name == name for e in self.state.employees):
-            self.state.energy += 1
             return {"success": False, "error": f"已存在同名员工: {name}，请更换名称"}
         blood_alloc = params.get("blood_alloc", 0)
         atk_bundles = params.get("atk_bundles", 0)
@@ -2019,7 +1882,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         remaining = [candidate for candidate in DaoWenEngine.HIRE_COMMON_DAOWEN
                      if candidate in DaoWenEngine.list_all()]
         if not remaining:
-            self.state.energy += 1
             return {"success":False,"error":"当前没有可供雇佣发现的通用道纹"}
         emp = Entity(name=name, entity_type="员工", blood_limit=blood_limit, current_hp=blood_limit,
                      attack_count=attack_count, attack_power=attack_power, is_deployed=False)
@@ -2044,7 +1906,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         }
 
     def _pre_battle_lianxin(self, params: dict) -> dict:
-        """炼心（龙心谷专属，局外版：已消耗1精力，见_action_pre_battle统一扣减）"""
+        """炼心（龙心谷专属，局外版）"""
         self.state.pending_lianxin = True
         return {
             "success": True,
@@ -2199,24 +2061,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                            "is_dormant": False, "is_alive": True}}
 
     # 旧附煞/煞气接口已删除；旧存档字段仅为兼容读取保留，不再参与结算。
-
-    def _pre_battle_sacrifice(self, params: dict) -> dict:
-        """献祭（需持有终音法器"红头绳"）：血限3，换取精力+2"""
-        if "红头绳" not in self.state.artifacts_owned:
-            self.state.energy += 1
-            return {"success": False, "error": "没有红头绳，无法执行献祭"}
-        player = self.state.player
-        if not player:
-            self.state.energy += 1
-            return {"success": False, "error": "没有玩家"}
-        payment = self.combat.pay_numeric_cost(
-            player, "血限", 3,
-            cost_share_target_ref=params.get("cost_share_target_ref", ""),
-            cost_context={"timing": "pre_battle_action", "source": "红头绳", "source_type": "artifact", "tags": {"active_payment"}})
-        self.state.energy += 2
-        return {"success": True, "action": "献祭",
-                "result": {"cost": payment, "blood_limit": player.blood_limit,
-                           "energy": self.state.energy}}
 
     # ==================== 员工经济系统（出战支援 / 工资 / 黑名单 / 解雇） ====================
     # 全局对所有[员工]生效；"还债"转化来的员工(is_debt_bound=True)独立走负债偿还轨道，不受此处约束。
@@ -3203,7 +3047,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 emp.deployed_at_round = 0
         for ally in self.state.friends + self.state.employees:
             ally.has_retreated = False
-        self.state.energy = self.state.energy_budget  # 无尽模式逐轮递减，见 GameState.energy_budget
         self.state.phase = "pre_battle"
         return {"note": "本场战斗结束，未击败任何怪物，不产生击杀碎片奖励", "reason": reason}
 
@@ -3967,7 +3810,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             "chizu_names": list(s.chizu_names),
             "dragon_cost_points": s.dragon_cost_points,
             "dragon_traits": list(s.dragon_traits),
-            "has_sacrifice_action": s.has_sacrifice_action,
         }
 
     def _restore_side_from_snapshot(self, snapshot: dict) -> list[Entity]:
@@ -4131,7 +3973,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         note = ""
         if self.state.unlocked_tier > before:
             note = (f"阶级推进：已解锁至{self.state.unlocked_tier}阶副本"
-                    + ("；无尽模式开启（怪物池=全部副本，精力递减，无法探索）" if entered_endless else ""))
+                    + ("；无尽模式开启（怪物池=全部副本，强度逐轮递增）" if entered_endless else ""))
         return {"unlocked_tier": self.state.unlocked_tier,
                 "advanced": self.state.unlocked_tier > before,
                 "endless_mode": self.state.endless_mode,
@@ -4150,7 +3992,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         self.state.endless_cycle = int(self.state.endless_cycle) + 1
         self._save_progression()
         return {"endless_cycle": self.state.endless_cycle,
-                "energy_budget": self.state.energy_budget}
+                }
 
     def unlocked_regions(self) -> list[str]:
         """当前可选副本：已实现（进入运行时）且阶级≤已解锁阶级；无尽模式不设限制。
@@ -4212,7 +4054,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "instruction": f"无{tier}阶封存候选，{sealed_name}已连同队伍完整封存入{tier}阶封存槽；"
                                "请调用 setup_attributes 开始新的轮回者"
                                + (("；" + f"无尽第{endless_update['endless_cycle']}轮开始，"
-                                           f"局外精力{endless_update['energy_budget']}点")
                                   if endless_update else ""),
             }
         candidate_snapshot = queue.pop(0)
@@ -4513,8 +4354,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         self.state.endless_mode = endless_mode
         self.state.endless_cycle = endless_cycle
         if endless_mode:
-            # 新轮回者的局外精力同样吃无尽递减（字段默认值 3 不适用于无尽轮次）
-            self.state.energy = self.state.energy_budget
         if was_duel:
             self.state.in_final_duel = True
             self.state.duel_tier = duel_tier

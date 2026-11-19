@@ -17,7 +17,6 @@
     [回终]：[回终]类效果结算→格挡清空→持续X剩余回合-1→本回合资源面板
 
     [战终]
-    死亡结算→[碎片]奖励计算→增益与减益清除→代价保留项→[朋友][员工]留存与[造物]消失→精力恢复
 
 设计约束（对应 推演铁律）：
 1. 本模块只做"排版"，不产生任何数值。所有数字均取自引擎返回的结果字典 /
@@ -416,7 +415,6 @@ def format_battle_end(be_result: dict) -> list[str]:
     for log in r.get("relic_end_logs", []) or []:
         lines.append(f"  → 遗物[战终]：{log}")
     lines.append("[朋友][员工]留存，[造物]消失")
-    lines.append(f"精力恢复：{r.get('energy_restored')}")
     return lines
 
 

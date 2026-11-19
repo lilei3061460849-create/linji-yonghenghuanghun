@@ -133,8 +133,7 @@ def handle_setup_choose_region(engine: Any, params: Dict[str, Any]) -> Dict[str,
     owned = [r.name for r in engine.state.relics]
     endless_note = ""
     if engine.state.endless_mode:
-        endless_note = (f"｜无尽模式第{engine.state.endless_cycle}轮：怪物池=全部已实现副本，"
-                        f"局外精力{engine.state.energy_budget}点，【探索】不开放")
+        endless_note = (f"｜无尽模式第{engine.state.endless_cycle}轮：怪物池=全部已实现副本，强度逐轮递增")
     return {
         "success": True,
         "action": "选择副本",
@@ -146,7 +145,7 @@ def handle_setup_choose_region(engine: Any, params: Dict[str, Any]) -> Dict[str,
         "next_actions": ["world_initialize"],
         "note": "副本已选择；开局配置完成（遗物与初始道纹均已在此前发现）。"
                 "默认从开放地图进入本副本，下一步先执行world_initialize；"
-                "仅在用户明确选择旧线性模式时，才继续旧线性局外行动并在精力耗尽后使用battle_start。" + endless_note,
+                "下一步先执行world_initialize进入开放地图。" + endless_note,
     }
 
 

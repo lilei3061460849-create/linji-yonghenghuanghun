@@ -919,16 +919,14 @@ class DaowenHandlersMixin:
 
     @ACTION_REGISTRY.action("lianxin_in_battle", group="daowen")
     def _action_lianxin_in_battle(self, params: dict) -> dict:
-        """炼心（战斗中版）：不消耗出手，改为下一次局外行动额外多消耗1点精力"""
+        """炼心（战斗中版）：不消耗出手，标记下一次数值型代价以生成龙心"""
         self.state.pending_lianxin = True
-        self.state.pending_energy_penalty += 1
         return {
             "success": True,
             "action": "炼心(战斗中)",
             "result": {
                 "pending_lianxin": True,
-                "pending_energy_penalty": self.state.pending_energy_penalty,
-                "instruction": "不消耗本回合出手；下一次局外行动将额外多消耗1点精力",
+                "instruction": "不消耗本回合出手；下一次实际支付数值型代价后获得对应类型的龙心",
             }
         }
 

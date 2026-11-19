@@ -204,7 +204,7 @@ class DaoWenEngine:
         旧版同时挂 duration=X（状态既按次数消耗又按回合递减），等于同一个 X
         被消费两遍：回合先到就白扔剩余次数，次数先用完则"持续X"毫无意义。
         现状只保留 shelter_charges，状态本身 remaining_rounds=-1（不按回合递减），
-        也不可被【回响】选中（回响只收正数持续回合的状态）。
+        也不可被【回响】选中（回响只收剩余回合数为正的状态）。
         """
         target_name = target.name if target is not None else "未选定目标"
         return {
@@ -316,7 +316,7 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_zengzhi(x: int, target: Entity = None) -> dict:
-        """增殖X：支付：冷却X。使[目标]的[血限]变为∞，持续X回合（战终清除）。"""
+        """增殖X：支付：冷却X。使[目标]的[血限]变为∞，持续X。"""
         # 代价由血限X 改为冷却X（原 cost_blood_limit 账本撤销，
         # 与【迟滞】【飞行】同走 COOLDOWN 支付通道）；效果（无限血限）不变。
         target_name = target.name if target is not None else "未选定目标"
@@ -327,7 +327,7 @@ class DaoWenEngine:
             "cost": x,
             "duration": x,
             "infinite_blood_limit": True,
-            "summary": f"支付：冷却{x}，使{target_name}的血限变为∞，持续{x}回合"
+            "summary": f"支付：冷却{x}，使{target_name}的血限变为∞，持续{x}"
         }
     
     @staticmethod
@@ -342,7 +342,7 @@ class DaoWenEngine:
             "duration": x,
             "effect": "只能施法（瞬发或自定义法术），其余主动行动不可用",
             "summary": (f"冷却{2 * x}场，使{target_name}只能施法（瞬发或自定义法术），"
-                        f"其余主动行动不可用，持续{x}回合")
+                        f"其余主动行动不可用，持续{x}")
         }
     
     @staticmethod
@@ -410,7 +410,7 @@ class DaoWenEngine:
             "cost_mutation": 5 * x,
             "attack_power_to_mana_limit": True,
             "duration": x,
-            "summary": f"异变+{5*x}，使{target_name}攻击力等同其法限，持续{x}回合"
+            "summary": f"异变+{5*x}，使{target_name}攻击力等同其法限，持续{x}"
         }
     
     @staticmethod
@@ -482,12 +482,12 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_feixing(x: int) -> dict:
-        """飞行X：支付：冷却X。非飞行者无法把飞行者选为[目标]，持续X回合。"""
+        """飞行X：支付：冷却X。非飞行者无法把飞行者选为[目标]，持续X。"""
         return {
             "dao_wen": "飞行", "x": x,
             "cost_type": CostType.COOLDOWN.value, "cost": x,
             "duration": x,
-            "summary": f"冷却{x}场，非飞行者无法把你选为[目标]，持续{x}回合",
+            "summary": f"冷却{x}场，非飞行者无法把你选为[目标]，持续{x}",
         }
 
     @staticmethod
@@ -648,7 +648,7 @@ class DaoWenEngine:
     # 涌潮为沉沦海新增道纹，效果与遗物【苍白之花】同域。
     @staticmethod
     def calculate_yongchao(x: int, target: Entity = None) -> dict:
-        """涌潮X：支付：法限X。使[目标]的[法限]变为无限，当前法力可以突破法限，持续X回合。
+        """涌潮X：支付：法限X。使[目标]的[法限]变为无限，当前法力可以突破法限，持续X。
 
         到期把当前法力压回原法限。
         """
@@ -662,7 +662,7 @@ class DaoWenEngine:
             "duration": x,
             "infinite_mana_limit": True,
             "summary": f"支付：法限{x}，使{target_name}的法限变为∞（法力可突破法限），"
-                       f"持续{x}回合",
+                       f"持续{x}",
         }
 
     @staticmethod
@@ -680,7 +680,7 @@ class DaoWenEngine:
             "cost": x,
             "duration": x,
             "action_cost_penalty": 1,
-            "summary": f"支付：冷却{x}，使{target_name}行动所需出手+1，持续{x}回合",
+            "summary": f"支付：冷却{x}，使{target_name}行动所需出手+1，持续{x}",
         }
 
     @staticmethod
@@ -706,7 +706,7 @@ class DaoWenEngine:
             "cost": x,
             "attack_count_to_speed_limit": True,
             "duration": x,
-            "summary": f"冷却{x}场，使{target_name}攻击次数等同其速限，持续{x}回合"
+            "summary": f"冷却{x}场，使{target_name}攻击次数等同其速限，持续{x}"
         }
     
 
@@ -745,7 +745,7 @@ class DaoWenEngine:
             "cost": x,
             "duration": x,
             "effect": "当前速度与当前法力互换",
-            "summary": f"支付：{x}法力，使[目标]当前速度与当前法力互换（超出上限部分蒸发），持续{x}回合"
+            "summary": f"支付：{x}法力，使[目标]当前速度与当前法力互换（超出上限部分蒸发），持续{x}"
         }
     
     @staticmethod
@@ -759,7 +759,7 @@ class DaoWenEngine:
             "cost": 2 * x,
             "duration": x,
             "effect": "攻击次数与攻击力无法被改变",
-            "summary": f"支付：{2 * x}法力，使{target_name}攻击次数与攻击力无法被改变，持续{x}回合"
+            "summary": f"支付：{2 * x}法力，使{target_name}攻击次数与攻击力无法被改变，持续{x}"
         }
     
 
@@ -806,7 +806,7 @@ class DaoWenEngine:
             "cost": 5 * x,
             "duration": x,
             "effect": "无法获得回复",
-            "summary": f"支付：{5 * x}法力，使{target_name}无法获得回复，持续{x}回合"
+            "summary": f"支付：{5 * x}法力，使{target_name}无法获得回复，持续{x}"
         }
     
 
@@ -849,9 +849,9 @@ class DaoWenEngine:
     # 原【抵扣】改名【豪夺】。
     @staticmethod
     def calculate_haoduo(x: int, target: Entity = None) -> dict:
-        """豪夺X：支付：5X碎片，夺取[目标]1件遗物或消耗品持续X回合。
+        """豪夺X：支付：5X碎片，夺取[目标]1件遗物或消耗品持续X。
 
-        夺取=把目标的一件遗物或消耗品转移到己方（施法者）临时持有，持续X回合，到期归还。
+        夺取=把目标的一件遗物或消耗品转移到己方（施法者）临时持有，持续X，到期归还。
         与旧【抵扣】（只封印）的区别：夺取期间施法者**真正持有**该遗物并能触发其被动，
         目标在这段时间里不能触发该遗物。
         加强：可夺对象由遗物扩为遗物/消耗品；消耗品夺取期间可使用，
@@ -864,7 +864,7 @@ class DaoWenEngine:
             # 不写 cost_type=MANA，避免被当成法力支付）。
             "cost_type": "代价", "cost_shards": 5 * x,
             "relic_steal": 1, "item_steal": 1, "duration": x,
-            "summary": f"支付：{5*x}碎片，夺取{target_name}一件遗物或消耗品，持续{x}回合"
+            "summary": f"支付：{5*x}碎片，夺取{target_name}一件遗物或消耗品，持续{x}"
         }
 
     # 【抢劫】【勒索】删除，补入主环四纹。
@@ -906,11 +906,11 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_jiaoyi(x: int) -> dict:
-        """交易X：支付：碎片15X。发现X件遗物（仅本场战斗有效）。"""
+        """交易X：支付：碎片15X。发现X件遗物，持续∞。"""
         return {
             "dao_wen": "交易", "x": x, "cost_type": "碎片", "cost_real_shards": 15 * x,
             "relic_discovery": x,
-            "summary": f"支付：{15 * x}碎片，发现{x}件遗物（仅本场战斗有效）",
+            "summary": f"支付：{15 * x}碎片，发现{x}件遗物，持续∞",
         }
 
     # 旧名 calculate_dikou 不再保留（避免注册时与"豪夺"双注册）。
@@ -1075,7 +1075,7 @@ class DaoWenEngine:
             "dao_wen": "压迫", "x": x,
             "cost_type": CostType.MANA.value, "cost": 10 * x,
             "duration": x,
-            "summary": f"支付：{10*x}法力；除{target_name}外，所有角色仅能显式选择自身为[目标]，持续{x}回合",
+            "summary": f"支付：{10*x}法力；除{target_name}外，所有角色仅能显式选择自身为[目标]，持续{x}",
         }
 
     @staticmethod
@@ -1135,7 +1135,7 @@ class DaoWenEngine:
         """真理X：支付：冷却2场。提出 X 句陈述，要求[目标]逐句言明真理。
 
         X 不再是固定值，改为「X 句话」——X 决定陈述句数，
-        每有一句无法言明真理，[目标]即无法开口，持续 X 回合（X 同时放大强度与持续）。
+        每有一句无法言明真理，[目标]即无法开口，持续 X（X 同时放大强度与持续）。
         任一句的真伪均由 DM 裁定。
         """
         target_name = target.name if target is not None else "未选定目标"
@@ -1146,7 +1146,7 @@ class DaoWenEngine:
             "truth_sentences": x,
             "silence_rounds": x,
             "summary": (f"冷却2场，向{target_name}提出{x}句陈述，要求其逐句言明真理；"
-                        f"任一句无法言明则无法开口，持续{x}回合；真伪由DM裁定"),
+                        f"任一句无法言明则无法开口，持续{x}；真伪由DM裁定"),
         }
 
     @staticmethod

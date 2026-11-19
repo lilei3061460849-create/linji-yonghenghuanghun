@@ -848,10 +848,7 @@ class WorldHandlersMixin:
                     continue
                 requested = min(candidates, key=lambda pos: (
                     abs(pos[0] - requested[0]) + abs(pos[1] - requested[1]), pos[1], pos[0]))
-            old_energy = self.state.energy
             hire_result = self._pre_battle_guyong(params)
-            # 雇佣已改为世界时间行动，不能恢复旧精力系统的“失败退款”副作用。
-            self.state.energy = old_energy
             if not hire_result.get("success"):
                 signal["status"] = "failed"
                 signal["resolved_turn"] = world.clock.turn

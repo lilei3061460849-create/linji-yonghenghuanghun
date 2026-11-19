@@ -19,7 +19,7 @@ from .resolution import KIND_EFFECT, resolution_frame
 EVENT_RELICS = {
     # 重做：旧「战始可选流血10 → 战终血限+2」移交道纹【增殖】，改为被动。
     "猩红果实": "你的当前生命可以超出[血限]",
-    # 重做：旧「战始可选疲惫5 → 战终精力+1」废止，改为被动。
+    # 重做：旧战始疲惫与战终恢复效果废止，改为被动。
     "苍白之花": "你的当前法力可以超出[法限]",
     "缄默面具": "无法再使用任何附带「代价」的道纹，每场[战终][法限]+X",
     "焦黑发丝": "每当场上有一个怪物死亡时，你的速度+2",
@@ -307,7 +307,7 @@ def resolve_option_effect(text: str, engine, event_name: str = "", params=None) 
 def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=None) -> dict:
     """
     结算事件选项效果（关键字解释器）。
-    自动扣除常见代价（生命/碎片/血限/法限/速度/枯竭/失去精力）与应用常见收益（获碎片/血限/残韵/遗物/法术）。
+    自动扣除常见代价（生命/碎片/血限/法限/速度/枯竭）与应用常见收益（获碎片/血限/残韵/遗物/法术）。
     无法解析的特殊效果返回 instruction 交DM。
     event_name不为空时，优先匹配需要精确具名结算的专属事件分支(如龙心谷"追求者")，
     这类事件的收益包含固定面板与固定道纹数值，无法用通用正则安全推断，需按事件名单独处理。
@@ -781,7 +781,6 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
                 "subtype": "event", "amount": entry["amount"], "tags": {"event", "pre_battle"},
             })
             applied.append(f"{heal_target.name}获得回复{detail['actual_heal']}")
-        engine.state.pending_energy_penalty += 1
         return {"applied": applied, "instructions": instructions}
     elif event_name == "回忆当铺" and text.startswith("典当"):
         engine.state.event_modifiers["memory_gain_locked"] = True
@@ -873,9 +872,6 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         for name in forgotten:
             player.forget_for_cost(name)
         applied.append(f"失忆{memory_cost}：失去{'、'.join(forgotten)}")
-    # 失去精力
-    if '失去1次精力' in text or '精力-1' in text:
-        engine.state.energy = max(0, engine.state.energy - 1); applied.append("失去1精力")
     # 支付碎片（“失去”与“消耗”同为支出）；赌局负债是唯一保留的直接透支路径。
     for m in re.finditer(r'(?:失去|消耗)\s*(\d+)\s*\[?碎片\]?', text):
         x = int(m.group(1))

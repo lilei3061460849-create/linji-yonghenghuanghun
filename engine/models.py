@@ -137,8 +137,8 @@ class Relic:
     name: str
     effect: str
     tags: list[str] = field(default_factory=list)
-    # 启用归类仍保留：enabled=False 的遗物仍持有并占页，只是不生效；不再另限生效数。
-    # 这是既有遗物对象上的一个状态，不是新品类；旧档缺此键一律默认 True。
+    # 遗物持有数量不受死者之页限制；enabled=False 表示仍持有、但暂不生效。
+    # 常规同时启用件数另受 Entity.enabled_relic_limit 限制；旧档缺此键一律默认 True。
     enabled: bool = True
 
     def __post_init__(self):
@@ -1451,7 +1451,6 @@ class GameState:
     world_enemy_reserve: list[Entity] = field(default_factory=list)
     world_encounter_entities: list[Entity] = field(default_factory=list)
     world_encounter_id: str = ""
-    energy: int = 3             # 局外精力
     
     # 轮回者
     player: Optional[Entity] = None
@@ -1601,7 +1600,7 @@ class GameState:
     # 后解锁下一阶（持久化在 data/progression.json，跨轮回有效——"胜者进入下一阶级副本"
     # 落在轮回者血脉上，而不是落在已被封存的单个角色身上）。
     # endless_mode/endless_cycle：通过五阶死斗后进入无尽模式；cycle 是第几轮无尽，
-    # 每轮结束时+1，用于强度递增与精力递减。
+    # 每轮结束时+1，用于强度递增。
     MAX_TIER = 5  # 阶级推进的终点（五阶·启示录）；再往上就是无尽模式
 
     # 默认值在引擎构造时被进一步处理：跨轮回持久文件不存在时视为当前已实现阶级都已解锁，
@@ -1670,8 +1669,6 @@ class GameState:
     # 纯观测用：任何战斗规则都不得依赖本列表做判定。
     combat_events: list = field(default_factory=list)
     pending_sha_qi_mode: str = ""  # 旧存档兼容字段，不再由任何动作写入
-    # 炼心在战斗中发动时不消耗出手，改为"下次局外行动多消耗1点精力"，此处累计待结算的额外精力消耗
-    pending_energy_penalty: int = 0
 
     # 熔谷终音"真龙之心"：代价累积账本（废除「龙性」货币）。
     # 不再是可支配资源——玩家实际支付的数值型【代价】自动累加，满 12 点换 1 件
@@ -1684,8 +1681,6 @@ class GameState:
 
     # 终音法器（三选一/四选一后获得的具名法器，跨副本共享同一个列表）
     artifacts_owned: list[str] = field(default_factory=list)
-    # 红头绳解锁的局外行动"献祭"
-    has_sacrifice_action: bool = False
     # 罪业金库/教父左轮等法器自身状态
     godfather_revolver_uses: int = 0
     # 死斗胜利后待选择的终音法器所属副本（非空=等待choose_terminal_artifact）
@@ -2321,7 +2316,7 @@ class GameState:
         """授予一件遗物；tag 用于标记 血族/龙族 等来源。"""
         r = Relic(name=name, effect=effect, tags=[tag] if tag else [])
         self.relics.append(r)
-        # 默认启用；正式行动由事务层统一检查死者之页，失败时整体回滚。
+        # 默认启用；遗物不占死者之页，常规启用数量由授予归位逻辑按启用槽位上限处理。
         return r
 
     def remove_relic(self, name: str) -> bool:
@@ -2331,17 +2326,6 @@ class GameState:
                 del self.relics[i]
                 return True
         return False
-
-    @property
-    def energy_budget(self) -> int:
-        """局外[精力]预算：常规 3 点；无尽模式逐轮递减。
-
-        递减口径（AI 拟定、可由用户一句话改数）：第 C 轮为 `max(1, 3-(C-1))`，
-        即 3→2→1 后封底 1 点。[战终]恢复与【逃跑】强制脱战的恢复都走这里。
-        """
-        if not self.endless_mode:
-            return 3
-        return max(1, 3 - max(0, int(self.endless_cycle) - 1))
 
     def to_dict(self) -> dict:
         return {
@@ -2357,7 +2341,6 @@ class GameState:
             "world_enemy_reserve": [e.to_dict() for e in getattr(self, "world_enemy_reserve", [])],
             "world_encounter_entities": [e.to_dict() for e in getattr(self, "world_encounter_entities", [])],
             "world_encounter_id": getattr(self, "world_encounter_id", ""),
-            "energy": self.energy,
             "shards": self.shards,
             "shards_peak": self.shards_peak,
             "fake_shards": self.fake_shards,
@@ -2403,7 +2386,6 @@ class GameState:
             "unlocked_tier": self.unlocked_tier,
             "endless_mode": self.endless_mode,
             "endless_cycle": self.endless_cycle,
-            "energy_budget": self.energy_budget,
             "attribute_points": self.attribute_points,
             "player": self.player.to_dict() if self.player else None,
             "friends": [f.to_dict() for f in self.friends],

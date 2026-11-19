@@ -58,9 +58,9 @@ class CombatHandlersMixin:
         if not target_refs and attacker.effective_attack_count() > 0:
             return {"success": False, "error": "没有合法攻击目标"}
 
-        # 法力结构声明（2026-11-10 一期）：一次普通攻击只能构建一种结构。
+        # 构造术声明（2026-11-10 一期）：一次普通攻击只能构建一种结构。
         # 声明在 prepare 锁定并存进 pending 快照；逐击造成≥1点伤害时逐击 +1 层。
-        structure = str(params.get("blood_structure") or "").strip()
+        structure = str(params.get("construction") or "").strip()
         structure_error = self.combat.validate_structure_declaration(attacker, structure)
         if structure_error:
             return {"success": False, "error": structure_error}
@@ -89,9 +89,9 @@ class CombatHandlersMixin:
             # DM裁定 2026-09-10：轮回者的击数=当前速度（换算仅限轮回者）
             "hit_count": attacker.effective_attack_count(),
             "damage_budget": attacker.effective_attack_count() * attacker.effective_attack_power(),
-            # 法力结构（血液结构）：本次攻击构建的结构名；空串=不构建。
-            "blood_structure": structure,
-            "blood_structure_options": self.combat.blood_structure_options(attacker),
+            # 构造术：本次攻击构建的结构名；空串=不构建。
+            "construction": structure,
+            "construction_options": self.combat.construction_options(attacker),
             "target_options": target_options,
             "hits_schema": [{
                 "target_ref": [o["ref"] for o in target_options],
@@ -300,11 +300,11 @@ class CombatHandlersMixin:
                 wanjunyin=bool(hit.get("wanjunyin")),
             )
             result["hit_index"] = absolute
-            # 法力结构（血液结构）：本击实际造成≥1点伤害（生命真实下降）时
+            # 构造术：本击实际造成≥1点伤害（生命真实下降）时
             # 为目标 +1 层声明的结构。damage_dealt 是格挡/免疫前的伤害意图，
             # 不作数——被【庇护】整笔免疫、伤害全被格挡吸收、空刀、被闪避、
             # 被招架的击都没有真实降血，不构建；目标已死不挂层。
-            structure = str(options.get("blood_structure") or "")
+            structure = str(options.get("construction") or "")
             if (structure and target.is_alive
                     and not result.get("dodge_success")
                     and int(target.current_hp) < hp_before_hit):
@@ -575,7 +575,7 @@ class CombatHandlersMixin:
         前置：非最终死斗；未持有生效中的【不离】（所有角色无法离场）；
         本轮剩余出手≥本次出手价（原子消费，不足则一次不扣）。
         脱战清理口径沿用原【买路财】撤退：敌方清空、造物解散、员工撤部署、
-        朋友/员工撤退标记重置、精力回满、阶段回 pre_battle；不产生击杀碎片奖励。
+        朋友/员工撤退标记重置、阶段回 pre_battle；不产生击杀碎片奖励。
         """
         escaper = self.state.player
         if not escaper:
@@ -1468,7 +1468,7 @@ class CombatHandlersMixin:
         # 旧存档兼容：新版【增殖】是战斗内状态，不再有战终待决血限增长。
         modifiers.pop("zengzhi_pending", None)
         zengzhi_settled = []
-        modifiers.pop("pale_flower_active", False)   # 2026-10-11：旧战终精力+1 已随重做废弃
+        modifiers.pop("pale_flower_active", False)   # 2026-10-11：旧战终恢复效果已随重做废弃
         modifiers.pop("brand_nail_target_ref", None)
         modifiers.pop("huifeng_target_ref", None)
         modifiers.pop("huifeng_target_ref_opponent", None)
@@ -1611,9 +1611,7 @@ class CombatHandlersMixin:
                 ally.attack_power += 1
                 grown.append(f"{ally.name}:攻击力{ally.attack_power}")
 
-        # 恢复精力（无尽模式下基础值逐轮递减）。
-        # 2026-10-11：【苍白之花】重做为「当前法力可超出[法限]」的被动，战终精力+1 已废止。
-        self.state.energy = self.state.energy_budget
+        # 2026-10-11：【苍白之花】重做为「当前法力可超出[法限]」的被动。
 
         # 普通战斗清空敌人；开放世界遭遇则把存活参与者放回地图，并恢复未参战的敌方单位。
         if world_battle:
@@ -1675,7 +1673,6 @@ class CombatHandlersMixin:
             "event_bonuses": event_bonuses,       # 事件奖金，单独列项，不并入命零公式
             "event_bonus_shards": bonus_total,
             "total_shards": self.state.shards,
-            "energy_restored": self.state.energy_budget,
             "cleared_temp_friends": True,
             "ally_growth": grown,
             "removed_via_alt_path": removed,

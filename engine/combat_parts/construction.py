@@ -1,6 +1,6 @@
-"""法力结构（血液结构）：普通攻击构建、层数累积的持续效果（2026-11-10 一期）。
+"""构造术：普通攻击构建、层数累积的持续效果（2026-11-10 一期）。
 
-规则事实源：《规则正文·法力结构（血液结构）》。
+规则事实源：《规则正文·构造术》。
 
 - 构建入口：`handlers/combat.py` 的 prepare_attack 声明结构名（每击造成≥1点
   伤害时 +1 层，走 `apply_structure_layer`）；
@@ -25,7 +25,7 @@ from ..models import Entity, StatusEffect
 
 # 一期实装的四张结构（名 → 承载点数/材料/效果摘要）。
 # 承载＝构建时攻击者当前[血限]的**门槛校验**（2026-11-10 裁定：只校验、不扣减）。
-BLOOD_STRUCTURES: dict[str, dict] = {
+CONSTRUCTS: dict[str, dict] = {
     "永焰": {"carry": 10, "material": "白磷四面体",
              "desc": "每回合（回始）目标生命-X"},
     "脆化": {"carry": 10, "material": "超低温液氮",
@@ -35,14 +35,14 @@ BLOOD_STRUCTURES: dict[str, dict] = {
     "粘滞": {"carry": 15, "material": "瞬干高分子链",
              "desc": "目标下一次宣告闪避时需额外支付X点速度，触发后清空"},
 }
-IMPLEMENTED_BLOOD_STRUCTURES = frozenset(BLOOD_STRUCTURES)
+IMPLEMENTED_CONSTRUCTS = frozenset(CONSTRUCTS)
 
 # 二期条文（正文已先行，引擎未实装）：致幻/致盲/剧痛/蚀灵/流血/麻痹。
-UNIMPLEMENTED_BLOOD_STRUCTURES = ("致幻", "致盲", "剧痛", "蚀灵", "流血", "麻痹")
+UNIMPLEMENTED_CONSTRUCTS = ("致幻", "致盲", "剧痛", "蚀灵", "流血", "麻痹")
 
 
-class BloodStructureMixin:
-    """法力结构结算：宿主类 CombatEngine。"""
+class ConstructionMixin:
+    """构造术结算：宿主类 CombatEngine。"""
 
     # ---------------------------------------------------------------- 查询
     @staticmethod
@@ -57,12 +57,12 @@ class BloodStructureMixin:
         """【粘滞】：下一次宣告闪避需额外支付的速度点数。"""
         return self.structure_layers(target, "粘滞")
 
-    def blood_structure_options(self, attacker: Entity) -> list[dict]:
+    def construction_options(self, attacker: Entity) -> list[dict]:
         """按攻击者当前血限给出的可声明结构清单（prepare_attack 用）。"""
         if getattr(attacker, "entity_type", "") != "轮回者":
             return []
         options = []
-        for name, meta in BLOOD_STRUCTURES.items():
+        for name, meta in CONSTRUCTS.items():
             options.append({
                 "name": name, "carry": meta["carry"],
                 "material": meta["material"], "desc": meta["desc"],
@@ -74,11 +74,11 @@ class BloodStructureMixin:
         """构建声明的门槛校验；返回错误消息或 None。"""
         if not name:
             return None
-        if name not in IMPLEMENTED_BLOOD_STRUCTURES:
-            return f"未实装的法力结构「{name}」，可选：{sorted(IMPLEMENTED_BLOOD_STRUCTURES)}"
+        if name not in IMPLEMENTED_CONSTRUCTS:
+            return f"未实装的构造术「{name}」，可选：{sorted(IMPLEMENTED_CONSTRUCTS)}"
         if getattr(attacker, "entity_type", "") != "轮回者":
-            return f"{attacker.name}不是轮回者，不能构建法力结构"
-        carry = BLOOD_STRUCTURES[name]["carry"]
+            return f"{attacker.name}不是轮回者，不能构建构造术"
+        carry = CONSTRUCTS[name]["carry"]
         if int(attacker.blood_limit) < carry:
             return f"构建【{name}】需要当前[血限]≥{carry}（{attacker.name}当前{attacker.blood_limit}）"
         return None
@@ -86,8 +86,8 @@ class BloodStructureMixin:
     # ---------------------------------------------------------------- 构建
     def apply_structure_layer(self, builder: Entity, target: Entity, name: str) -> dict:
         """命中结算：给目标 +1 层结构；返回层结果（供战报与测试断言）。"""
-        if name not in IMPLEMENTED_BLOOD_STRUCTURES:
-            raise ValueError(f"未实装的法力结构「{name}」")
+        if name not in IMPLEMENTED_CONSTRUCTS:
+            raise ValueError(f"未实装的构造术「{name}」")
         before = self.structure_layers(target, name)
         target.add_status(StatusEffect(
             name=name, remaining_rounds=-1, value=1, source=builder.name,

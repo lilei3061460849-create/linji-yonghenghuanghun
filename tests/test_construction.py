@@ -1,6 +1,6 @@
-"""法力结构（血液结构）一期：构建门槛、逐击挂层与永焰/脆化/震爆/粘滞结算。
+"""构造术一期：构建门槛、逐击挂层与永焰/脆化/震爆/粘滞结算。
 
-规则事实源：《规则正文·法力结构（血液结构）》（2026-11-10）。
+规则事实源：《规则正文·构造术》（2026-11-10）。
 - 构建声明在 prepare_attack 锁定（一次攻击一种结构，轮回者限定）；
 - 承载＝攻击者当前[血限]的门槛校验（不扣减）；
 - 每击造成≥1点伤害才 +1 层（空刀/闪避/招架/全吸收不构建）；
@@ -41,7 +41,7 @@ def _prepare(engine, structure=""):
     # 这里先清残留再开新手（每手攻击照常占一次出手）。
     engine.state.pending_attack = {}
     result = engine.execute_action("prepare_attack", {
-        "actor_ref": "player:0", "blood_structure": structure})
+        "actor_ref": "player:0", "construction": structure})
     assert result["success"], result
     token = result["result"]["token"]
     return token, result["result"]
@@ -77,23 +77,23 @@ def test_structure_declaration_threshold_and_eligibility():
     # 血限11点×6=66，四张承载（10/10/15/15）全部可构建
     assert p.blood_limit >= 15
     token, options = _prepare(engine, "永焰")
-    assert options["blood_structure"] == "永焰"
-    names = {o["name"]: o for o in options["blood_structure_options"]}
+    assert options["construction"] == "永焰"
+    names = {o["name"]: o for o in options["construction_options"]}
     assert set(names) == {"永焰", "脆化", "震爆", "粘滞"}
     assert all(o["eligible"] for o in names.values()), names
     # 未实装结构拒绝（先清掉上一次的 pending 攻击）
     engine.state.pending_attack = {}
-    r = engine.execute_action("prepare_attack", {"blood_structure": "流血"})
+    r = engine.execute_action("prepare_attack", {"construction": "流血"})
     assert not r["success"] and "未实装" in r["error"]
     # 门槛不足拒绝：压低血限到承载以下
     engine.state.pending_attack = {}
     p.blood_limit = 9
-    r = engine.execute_action("prepare_attack", {"blood_structure": "永焰"})
+    r = engine.execute_action("prepare_attack", {"construction": "永焰"})
     assert not r["success"] and "血限" in r["error"]
     # 门槛恰好等于承载：放行（只校验不扣减，血限不变）
     engine.state.pending_attack = {}
     p.blood_limit = 10
-    r = engine.execute_action("prepare_attack", {"blood_structure": "永焰"})
+    r = engine.execute_action("prepare_attack", {"construction": "永焰"})
     assert r["success"], r
     assert p.blood_limit == 10
 
@@ -104,7 +104,7 @@ def test_structure_rejected_for_non_reincarnator():
     _spiky_monster(engine)
     m = engine.state.enemies[0]
     assert engine.combat.validate_structure_declaration(m, "永焰") is not None
-    assert engine.combat.blood_structure_options(m) == []
+    assert engine.combat.construction_options(m) == []
 
 
 # ---------------------------------------------------------------- 逐击挂层

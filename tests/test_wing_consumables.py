@@ -84,7 +84,7 @@ def test_blood_wing_lifesteal_boundary_inactive_without_mode(tmp_path):
 
 
 def test_blood_wing_lifesteal_expires_at_round_end(tmp_path):
-    """边界：「本回合」= 状态 remaining_rounds 1 且回终到期。"""
+    """边界：「持续1」= 状态 remaining_rounds 1 且回终到期。"""
     e = _in_battle(tmp_path)
     player = e.state.player
     e.execute_action("consume_item", {"name": "血翼", "mode": "lifesteal"})
@@ -123,7 +123,7 @@ def test_ember_wing_suppress_boundary_events_fire_without_it(tmp_path):
 
 
 def test_ember_wing_suppress_expires_at_round_end(tmp_path):
-    """边界：熄事只持续本回合，回终到期后特殊事件恢复触发。"""
+    """边界：熄事持续1，回终到期后特殊事件恢复触发。"""
     e = _in_battle(tmp_path)
     player = e.state.player
     e.execute_action("consume_item", {"name": "烬翼", "mode": "suppress"})
