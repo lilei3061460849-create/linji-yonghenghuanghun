@@ -108,8 +108,6 @@ def test_battle_end_applies_recovery_through_engine(tmp_path):
         "name": "肉块持有者", "blood_points": 9, "speed_points": 8, "mana_points": 8})
     finish_initial_daowen(engine)
     _open(engine)
-    while engine.state.energy > 0:
-        engine.execute_action("pre_battle_action", {"sub_action": "修行", "tier": 1})
     assert begin_battle(engine)["success"]
 
     meat = Consumable(name="无限肉块", effect="使用后恢复10生命；战终恢复80%已损耐久",
