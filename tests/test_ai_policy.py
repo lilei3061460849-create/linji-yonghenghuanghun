@@ -43,17 +43,17 @@ def test_ai_knowledge_base_contains_all_core_sections_and_scenarios():
         assert sub in text, f"AI协作规范缺少小节：{sub}"
 
     # 六大典型场景（去重后：1-3 正本是本文件，4-6 正本是《法术索引》
-    # 「四、反应型法术战斗流程示例」；本文件只留指针，不得再抄一份回来）
+    # 「五、反应型法术战斗流程示例」；本文件只留指针，不得再抄一份回来）
     assert "场景 1：基础攻防" in text
     assert "场景 2：闪避交互" in text
     assert "场景 3：残韵插队逆转" in text
     spells = SPELLS_INDEX_FILE.read_text(encoding="utf-8")
-    assert "## 四、反应型法术战斗流程示例" in spells
+    assert "## 五、反应型法术战斗流程示例" in spells
     assert "### 场景：防御型反应法术" in spells
     assert "### 场景：交错反击型法术" in spells
     assert "### 场景：循环自伤法术" in spells
     # 指针必须真实存在，否则正本被搬走后没人找得到
-    assert "法术索引.md#四反应型法术战斗流程示例" in text
+    assert "法术索引.md#五反应型法术战斗流程示例" in text
 
 
 def test_readme_is_a_clean_entry_and_playbook_keeps_execution_format():
