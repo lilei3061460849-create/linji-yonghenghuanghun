@@ -33,7 +33,7 @@
 | 3 | 机制速查·行动 | [规则正文.md](规则正文.md) | `69c8c0a2e4aefc4008df7d352ab3b6704512119c64effaf76d9db28ecfbcb17f` |
 | 4 | 机制速查·构造术 | [规则正文.md](规则正文.md) | `69c8c0a2e4aefc4008df7d352ab3b6704512119c64effaf76d9db28ecfbcb17f` |
 | 5 | 机制速查·道纹 | [全道纹索引.md](全道纹索引.md) | `973060cc2549aacb73cef0aefe72778c4aab9921fee2c8e50578a80a249a0fad` |
-| 6 | 机制速查·物品 | [物品索引.md](物品索引.md) | `ae7135d7a3a5a15f217841efb20bee3775204be5ee37e25648be7b4f75cff745` |
+| 6 | 机制速查·物品 | [物品索引.md](物品索引.md) | `09bb64e07d595ccd335557cdf03280aea4e7478cb92dc1c4ed4e35cfd4129fd4` |
 | 7 | 机制速查·法术 | [法术索引.md](法术索引.md) | `3773d1f6e23be09d3b10bef433d21b5a2095f5642536ed0f1adc32cbeead7ef2` |
 | 8 | 机制速查·副本 | [副本索引.md](副本索引.md) | `975a32f319ceffb189e77bc3751e550b0eca126b61fa9414205a22fce891f366` |
 | 9 | 角色名单（只列身份，不含记忆） | 角色记忆/（目录） | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
@@ -476,7 +476,7 @@
 ### 来源 6：机制速查·物品
 
 - 路径：`物品索引.md`
-- SHA-256：`ae7135d7a3a5a15f217841efb20bee3775204be5ee37e25648be7b4f75cff745`
+- SHA-256：`09bb64e07d595ccd335557cdf03280aea4e7478cb92dc1c4ed4e35cfd4129fd4`
 
 ```markdown
 （共 81 件）
