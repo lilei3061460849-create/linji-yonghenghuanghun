@@ -531,7 +531,7 @@ class DaowenHandlersMixin:
 
         if self.state.phase == "in_combat":
             # 道纹施放属于法术行动；束缚下必须沿用 use_daowen 门禁，而非普通主动行动门禁。
-        budget_error = self._consume_action_or_error(actor, action_type="use_daowen")
+            budget_error = self._consume_action_or_error(actor, action_type="use_daowen")
             if budget_error:
                 return budget_error
 
