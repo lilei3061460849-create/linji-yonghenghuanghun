@@ -83,28 +83,36 @@ def test_define_relic_triggers_passively_on_round_start():
     assert engine.execute_action("define_resource", {"spec": spec})["success"]
     assert any(r.name == "残烛" for r in engine.state.relics)
 
-    # 当前法力不得超过[法限]，故取低于上限的值观察增量。
+    # 从0开始验证固定+2，而不是只验证法力被封顶后的结果。
     limit = engine.state.player.mana_limit
-    engine.state.player.current_mana = max(0, limit - 2)
+    engine.state.player.current_mana = 0
     engine.state.combat_subphase = "await_round_start"
     logs = engine.execute_action("round_start", {"relic_choices": {}})
     assert logs["success"], logs
-    assert engine.state.player.current_mana == limit, logs
+    assert engine.state.player.current_mana == 2, logs
+    assert engine.state.player.current_mana <= limit
     assert engine.state.player.actions_used_this_round == 0
 
 
 def test_define_artifact_activates_via_action():
-    """法器：主动激活，默认不占出手。"""
+    """法器：主动激活，默认不占出手；用内联测试声明，不依赖演示道具。"""
     engine = _engine()
     _enemy(engine)
-    spec = json.loads((EXAMPLES / "artifact_huixiang.json").read_text(encoding="utf-8"))
+    engine.state.player.current_hp = 40
+    spec = {
+        "name": "测试法器", "category": "法器",
+        "uniqueness": "覆盖自定义法器的主动激活入口",
+        "summary": "为自身回复3点生命",
+        "costs_action": False,
+        "effects": [{"verb": "heal", "target": "self", "amount": 3}],
+    }
     assert engine.execute_action("define_resource", {"spec": spec})["success"]
-    assert "回响铃" in engine.state.artifacts_owned
+    assert "测试法器" in engine.state.artifacts_owned
 
     before = engine.state.player.actions_used_this_round
-    used = engine.execute_action("activate_resource", {"name": "回响铃"})
+    used = engine.execute_action("activate_resource", {"name": "测试法器"})
     assert used["success"], used
-    assert engine.state.player.has_status("回响")
+    assert engine.state.player.current_hp == 43
     assert engine.state.player.actions_used_this_round == before
 
 
@@ -129,8 +137,8 @@ def test_examples_load_without_code_changes():
     """数据驱动：整个目录一次载入，四类资源各至少一件。"""
     registered = custom_resources.load_specs(EXAMPLES)
     categories = {resource.category for resource in registered}
-    assert categories == {"道纹", "遗物", "法器", "消耗品"}
-    assert len(registered) == 5
+    assert categories == {"道纹", "遗物", "消耗品"}
+    assert len(registered) == 4
 
 
 # ==================== 边界 ====================
