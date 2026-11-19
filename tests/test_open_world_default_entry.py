@@ -22,14 +22,12 @@ def test_selected_region_defaults_to_open_map_and_populates_world(tmp_path, regi
     assert region_result["success"], region_result
     assert region_result["next_actions"] == ["world_initialize"]
 
-    # Even when the legacy battle action is available, open-world initialization remains first.
-    engine.state.energy = 0
+    # 开放世界是默认入口；旧线性 battle_start 不再作为局外可选行动暴露。
     available = engine.get_available_actions()
     assert available["actions"][0]["action_type"] == "world_initialize"
     assert "默认副本入口" in available["actions"][0]["note"]
-    linear_battle = next(action for action in available["actions"]
-                         if action["action_type"] == "battle_start")
-    assert "旧线性副本入口" in linear_battle["note"]
+    assert not any(action["action_type"] == "battle_start"
+                   for action in available["actions"])
 
     decision = PlaceholderBackend().decide(
         {"state": engine.state.to_dict()}, available)

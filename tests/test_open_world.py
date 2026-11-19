@@ -354,7 +354,6 @@ def test_cultivation_consumes_world_time_without_legacy_energy_cost(tmp_path):
                         save_dir=str(tmp_path), rng_seed=53)
     engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=20)
     engine.state.phase = "pre_battle"
-    energy_before = engine.state.energy
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
 
     result = engine.execute_action("pre_battle_action", {
@@ -363,7 +362,6 @@ def test_cultivation_consumes_world_time_without_legacy_energy_cost(tmp_path):
     })
     assert result["success"], result
     assert engine.state.world_state["clock"]["turn"] == 1
-    assert engine.state.energy == energy_before
     assert any(event["type"] == "world_action_completed"
                for event in engine.state.world_state["event_log"])
 
@@ -1845,7 +1843,6 @@ def test_world_learning_action_advances_three_turns_before_granting_daowen(tmp_p
     engine.state.player = Entity("P", "轮回者", blood_limit=60, current_hp=60)
     engine.state.current_region = "罪孽都市"
     engine.state.phase = "pre_battle"
-    energy_before = engine.state.energy
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
     name = next(name for name in DaoWenEngine.list_all()
                 if not learnability_error(name, owned=set(),
@@ -1867,7 +1864,6 @@ def test_world_learning_action_advances_three_turns_before_granting_daowen(tmp_p
                      and event.get("details", {}).get("action") == "学习")
     assert started["details"]["duration"] == 3
     assert completed["details"]["elapsed_turns"] == 3
-    assert engine.state.energy == energy_before
 
 
 def test_timed_action_does_not_award_reward_after_the_crown_is_carried_out(tmp_path, monkeypatch):
