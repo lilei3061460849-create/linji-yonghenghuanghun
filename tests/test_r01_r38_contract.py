@@ -187,7 +187,6 @@ def test_r11_r17_boundary_relic_and_first_aid_require_explicit_choices(tmp_path)
     engine.state.relics = [Relic("炉心坠", "")]
     engine.state.consumables = [
         Consumable("衰老龙心", "", 3, 3, kind="dragon_heart", dragon_heart_type="衰老")]
-    engine.state.energy = 0
     missing = engine.execute_action("battle_start", {"relic_choices": {}})
     assert not missing["success"]
     assert engine.state.current_battle == 0

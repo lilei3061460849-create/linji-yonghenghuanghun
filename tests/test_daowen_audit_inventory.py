@@ -51,9 +51,34 @@ class DaoWenAuditInventoryTests(unittest.TestCase):
 
     def test_persistent_relations_are_not_misclassified_as_triggers(self):
         by_name = {r['name']: r for r in self.rows}
-        for name in ('共罪', '波及', '坏死', '勾魂'):
+        for name in ('共罪', '波及', '坏死', '勾魂', '血契'):
             self.assertEqual(by_name[name]['review'], '暂未发现结构违规')
             self.assertNotIn('后续事件触发/改写', by_name[name]['tags'])
+
+    def test_truth_is_immediate_adjudication_with_persistent_duration(self):
+        row = next(r for r in self.rows if r['name'] == '真理')
+        self.assertEqual(row['review'], '暂未发现结构违规')
+        self.assertNotIn('状态边界待裁定', row['tags'])
+        self.assertIn('发动时一次性提出', row['note'])
+        self.assertIn('未来发言监听', row['note'])
+
+    def test_mirage_is_a_map_entity_quantity_with_lifecycle_behavior(self):
+        row = next(r for r in self.rows if r['name'] == '蜃景')
+        self.assertEqual(row['review'], '暂未发现结构违规')
+        self.assertNotIn('状态边界待裁定', row['tags'])
+        calc = DaoWenEngine.resolve('蜃景', 3)
+        self.assertEqual(calc['map_illusions'], 3)
+        world = (ROOT / 'engine/world.py').read_text(encoding='utf-8')
+        for method in ('def _move_mirage_illusions', 'def _dispel_illusions_at',
+                       'def _clear_illusions_for_owner'):
+            self.assertIn(method, world)
+
+    def test_shelter_is_a_pure_count_based_protection(self):
+        by_name = {r['name']: r for r in self.rows}
+        self.assertEqual(by_name['庇护']['review'], '暂未发现结构违规')
+        calc = DaoWenEngine.resolve('庇护', 3)
+        self.assertEqual(calc['shelter_charges'], 3)
+        self.assertNotIn('duration', calc)
 
     def test_retired_kuizeng_is_only_an_archived_design(self):
         self.assertNotIn('馈赠', {r['name'] for r in self.rows})

@@ -178,23 +178,20 @@ def test_setup_choose_region_reproducible_across_two_engines_same_seed():
         "同种子的两局必须列出完全一致的3件开局候选"
 
 
-def test_explore_action_uses_engine_auto_roll():
-    """集成：局外【探索】抽取事件，必须经由 engine.dice.auto_roll，且历史可查"""
+def test_world_initialization_uses_engine_auto_roll():
+    """集成：开放世界初始化的随机生成必须经由 DiceEngine.auto_roll，且历史可查。"""
     engine = GameEngine(db_path="/tmp/linji_tests/test_rng_3.db", rng_seed=123)
     engine.execute_action("setup_attributes", {"blood_points": 11, "speed_points": 8, "mana_points": 6})
     finish_initial_daowen(engine)
     _choose_region(engine, "罪孽都市", finish_discovery=True)
-    engine.state.energy = 3
 
-    r = engine.execute_action("pre_battle_action", {"sub_action": "探索"})
-    assert r["success"] is True
-    ev_name = r["result"]["event"]
-    assert ev_name  # 必须真的选出了一个事件名
+    result = engine.execute_action("world_initialize", {"width": 7, "height": 7})
+    assert result["success"] is True, result
+    assert engine.state.world_state
 
     history = engine.dice.get_history()
-    assert any(h.get("auto") is True and h["pool_name"] == "event_pool" for h in history), \
-        "探索必须经由 DiceEngine.auto_roll(pool_name='event_pool') 完成"
-
+    assert any(h.get("auto") is True for h in history), \
+        "开放世界生成必须经由 DiceEngine.auto_roll 完成"
 
 def test_gongming_discover_uses_engine_auto_roll():
     """集成：局外【共鸣】(发现分支)获取遗物，必须经由 engine.dice.auto_roll"""

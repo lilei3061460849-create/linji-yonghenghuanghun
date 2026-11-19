@@ -36,7 +36,6 @@ def _engine(region="龙心谷"):
 
 
 def _learn(e, name):
-    e.state.energy = 3
     return e.execute_action("pre_battle_action",
                             {"sub_action": "学习", "sub": "daowen", "name": name})
 
@@ -104,19 +103,18 @@ def test_all_seven_common_daowen_are_learnable_outside_battle():
     """七种道纹已归入通用道纹，局外学习统一开放。"""
     for dw in ("全力", "必中", "飞行", "全速", "强化", "弱化", "压迫"):
         e = _engine("龙心谷")
-        e.state.energy = 100
         r = _learn(e, dw)
         assert r["success"], f"通用道纹{dw}应可通过局外【学习】习得：{r.get('error')}"
         assert dw in e.state.player.dao_wen
 
 
-def test_rejected_monster_daowen_refunds_energy():
-    """边界：被拒绝的学习必须退还精力，不能白扣"""
+def test_rejected_monster_daowen_does_not_mutate_player_state():
+    """边界：被拒绝的学习不得改动碎片或已持有道纹。"""
     e = _engine("龙心谷")
-    before = e.state.energy
+    before = (e.state.shards, set(e.state.player.dao_wen))
     r = _learn(e, "蒙蔽")
     assert not r["success"]
-    assert e.state.energy == before, "学习被拒后精力应原样退还"
+    assert (e.state.shards, set(e.state.player.dao_wen)) == before
 
 
 # ---------- 边界条件 ----------
@@ -130,13 +128,13 @@ def test_first_exclusive_cannot_be_learned_directly():
     assert "残韵" in r["error"]
 
 
-def test_energy_refunded_on_rejection():
-    """边界：被门禁拒绝时必须退还精力，否则玩家白白损失一次行动"""
+def test_rejected_learning_does_not_consume_or_change_state():
+    """边界：被门禁拒绝时不得改变碎片或玩家道纹。"""
     e = _engine("龙心谷")
-    e.state.energy = 3
+    before = (e.state.shards, set(e.state.player.dao_wen))
     e.execute_action("pre_battle_action",
                      {"sub_action": "学习", "sub": "daowen", "name": "退化"})
-    assert e.state.energy == 3, "被拒绝时精力应退还"
+    assert (e.state.shards, set(e.state.player.dao_wen)) == before
 
 
 def test_gate_applies_to_every_region():

@@ -355,10 +355,10 @@ def test_full_flow():
     _choose_region(engine, "扭曲都市")
     print("  ✓ 开局完成")
     
-    # 局外行动（【领悟】已于 2026-09-10 删除，残韵不再能凭精力白拿）
+    # 局外行动（【领悟】已删除，残韵不再能凭空获得）
     gone = engine.execute_action("pre_battle_action", {"sub_action": "领悟", "resonance_type": "曲解"})
     assert gone["success"] is False and "未知局外行动" in gone["error"], gone
-    print("  ✓ 领悟已删除：调用被拒且精力不泄漏")
+    print("  ✓ 领悟已删除：调用被拒")
 
     speed_before = engine.state.player.speed_limit
     # 2026-11-10：2属性点=1速限，tier2 的 2 点全砸速度即 +1 速限
@@ -376,19 +376,6 @@ def test_full_flow():
     assert result["success"]
     print(f"  ✓ 休整：{heal_amt}点恢复量")
     
-    # 开局3点精力：修行1 + 休整1 = 2。【领悟】已于 2026-09-10 删除、被拒不扣精力，
-    # 故此处余 1；进战斗要求精力耗尽，用【探索】把最后一点花掉。
-    assert engine.state.energy == 1, f"精力应为1（修行+休整各1，领悟已删不再扣），实际{engine.state.energy}"
-    # 用【休整】而非【探索】收尾：探索会随机触发事件（本种子抽到【血肉温室】），
-    # 未结算的事件会挡住后续所有行动。休整不触发事件，可安全重复。
-    result = engine.execute_action("pre_battle_action", {
-        "sub_action": "休整", "tier": 1,
-        "heal_allocations": [{"target_ref": "player:0",
-                              "amount": math.ceil(engine.state.player.blood_limit * 0.2)}],
-    })
-    assert result["success"], result
-    assert engine.state.energy == 0, f"精力应耗尽，实际{engine.state.energy}"
-    print("  ✓ 精力耗尽")
     
     # 进入战斗
     result = engine.execute_action("battle_start", {})
@@ -598,8 +585,7 @@ def test_out_of_combat_actions():
     engine.state.phase = "pre_battle"
     print("  ✓ 法术定义/移除：持道纹即可定义，定义耗1次出手")
 
-    # 共鸣：获得遗物（补满精力以便测试）
-    engine.state.energy = 3
+    # 共鸣：获得遗物
     n_before = len(engine.state.relics)
     r = engine.execute_action("pre_battle_action", {"sub_action":"共鸣","sub":"discover"})
     assert r["success"], f"共鸣失败: {r}"
@@ -792,13 +778,11 @@ def test_events_system():
     assert len(engine.event_pool.events) >= 25, f"应解析>=25事件，实{len(engine.event_pool.events)}"
     print(f"  ✓ 解析到{len(engine.event_pool.events)}个事件")
 
-    # 探索触发（补精力）
-    engine.state.energy = 3
-    r = engine.execute_action("pre_battle_action", {"sub_action":"探索"})
-    assert r["success"], f"探索失败: {r}"
-    ev_name = r["result"]["event"]
-    assert r["result"]["options"], "事件应有选项"
-    print(f"  ✓ 探索触发【{ev_name}】，{len(r['result']['options'])}个选项")
+    # 旧的局外独立探索入口已迁入开放世界；事件结算仍由统一事件入口处理。
+    initialized = engine.execute_action("world_initialize", {"width": 7, "height": 7})
+    assert initialized["success"], initialized
+    ev_name = "祭坛"
+    engine.event_pool.current = ev_name
 
     # R20：不能越过当前事件直接结算祭坛；随后显式构造祭坛为当前事件再测效果。
     wrong_name = "祭坛" if ev_name != "祭坛" else "无名冢"
@@ -1330,7 +1314,6 @@ def test_shuwu_codex_grants_20_shards():
     held = list(engine.state.player.dao_wen.keys())
     assert held, "玩家应持有初始道纹供失忆"
     pool_name = engine.state.relics_pool[0].name
-    engine.state.energy = 3
     engine.event_pool.current = "遗忘书屋"
     before = engine.state.shards
     r = engine.execute_action("resolve_event", {"event": "遗忘书屋", "option_id": 2,
