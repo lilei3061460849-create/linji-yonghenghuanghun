@@ -2,8 +2,8 @@
 
 设计定位
 --------
-「当场设计」＝把新资源现场装进战场再重打。道纹可以现场注册并真结算，遗物过去
-只能加牌子（`Relic` 只有 name/effect/tags，行为靠硬接线）。本模块把这条缝补上：
+「当场设计」＝把新资源现场装进战场再重打。道纹注册为可发动的计算函数；遗物与法器
+编译成 `Mechanism`，复用引擎已有触发分发；消耗品复用既有使用入口。
 声明式资源 → 编译成引擎已有的执行构件，而不是在 combat.py 里加新的 if。
 
 复用的现有机制（不新增结算管线）
@@ -21,7 +21,8 @@
 四条设计标准的机械校验
 ----------------------
 - 总纲：道纹/遗物/法器必须填 `uniqueness`（为什么现有资源做不到）；消耗品豁免。
-- 道纹：名称二字；必须有 X；X 必须改变至少一处数值；默认局内，局外须 `out_of_combat=True`。
+- 道纹：名称二字；必须选择一个非衍生 `base_daowen` 作为基础；效果设计必须遵循其法则领域；
+  名称/基础关系进入运行期衍生索引；必须有 X；X 必须改变至少一处数值；默认局内，局外须 `out_of_combat=True`。
 - 遗物：不得出现 X；必须有 `trigger`。
 - 法器：必须有 `effects` 与 `uniqueness`；不受遗物的 X/触发限制。
 - 消耗品：`uses ≥ 1`；`effects` 必填；可有 `trigger` 变为被动型。
@@ -34,12 +35,11 @@ v2 新增（2026-10-30）
   校验持有后走 `Entity.forget_for_cost` 的真实失忆账本；缺失或非法一律拒绝且不改状态。
 - 存档持久化：`export_specs()` / `restore_specs()` 让声明随存档往返，跨会话不必重声明。
 
-明确不做（仍未裁定，勿假装已支持）
---------------------------------
-- `唯一` 代价：本项目没有可支付的「唯一」资源账本（旧档遗留字段 `spent_unique` 已删除），
-  需要用户裁定其含义后才实现。
-- 残韵闭环：自定义道纹不进入任何闭环，不能被残韵转化/被转化出来，也不参与【典当】发现；
-  闭环位置与残韵边由用户裁定，不能由声明自行指定。
+明确不做（现行裁定）
+--------------------
+- `唯一` 代价：已删除，不实现，也不为其设计资源账本。
+- 残韵闭环：自定义道纹不进入残韵闭环；它直接作为所选非衍生基础道纹的衍生道纹登记，
+  不参与残韵转化。
 """
 from __future__ import annotations
 
@@ -53,9 +53,10 @@ from typing import Any, Callable, Iterable, Optional
 
 from .mechanisms import (
     MECHANISMS, Mechanism, Phase, Trigger,
-    apply_verb, relic_active, verb_names,
+    apply_verb, relic_active, entity_has_artifact, verb_names,
 )
 from .enums import normalize_payment_type, RESOURCE_TYPES
+from . import derivatives as derivative_rules
 
 CATEGORIES = ("道纹", "遗物", "法器", "消耗品")
 
@@ -193,6 +194,19 @@ def validate_spec(spec: dict) -> dict:
 
     if category == "道纹":
         _require(len(name) == 2, f"道纹名称仅二字，收到「{name}」（{len(name)} 字）")
+        base_daowen = spec.get("base_daowen")
+        _require(isinstance(base_daowen, str) and base_daowen.strip(),
+                 "自定义道纹必须指定 base_daowen（非衍生基础道纹）")
+        base_daowen = base_daowen.strip()
+        from .daowen import DaoWenEngine
+        DaoWenEngine.register_all()
+        _require(base_daowen in DaoWenEngine._registry,
+                 f"基础道纹【{base_daowen}】不存在")
+        _require(not derivative_rules.is_derivative(base_daowen),
+                 f"基础道纹【{base_daowen}】属于衍生道纹，不能作为自定义道纹母本")
+        _require(name not in DaoWenEngine._registry,
+                 f"自定义道纹【{name}】与现有道纹重名")
+        spec["base_daowen"] = base_daowen
         cost = spec.get("cost")
         _require(isinstance(cost, dict), "道纹必须声明 cost")
         _require(cost.get("type") in SUPPORTED_COST_TYPES,
@@ -412,8 +426,13 @@ def clear() -> None:
     for resource in list(_REGISTRY.values()):
         if resource.mechanism is not None:
             MECHANISMS.unregister(resource.mechanism.name)
+        if resource.category == "道纹":
+            derivative_rules.unregister_custom_derivative(resource.name)
     _REGISTRY.clear()
     _CUSTOM_DAOWEN.clear()
+    if _BRIDGED["installed"]:
+        from .daowen import DaoWenEngine
+        DaoWenEngine.register_all()
 
 
 # ---- 遗物 / 被动消耗品 → Mechanism ----
@@ -437,6 +456,8 @@ def _make_mechanism(spec: dict) -> Mechanism:
     condition = None
     if category == "遗物":
         condition = relic_active(name)
+    elif category == "法器":
+        condition = entity_has_artifact(name)
 
     trigger = spec["trigger"]
     return Mechanism(
@@ -474,6 +495,8 @@ def _daowen_calculator(spec: dict) -> Callable[..., dict]:
         cost_amount = evaluate(cost.get("amount", "X"), x)
         calc = {
             "dao_wen": name,
+            "derivative_of": spec["base_daowen"],
+            "custom_derivative": True,
             "x": x,
             "cost_type": "消耗" if cost["type"] == "法力" else cost["type"],
             "cost": cost_amount,
@@ -513,6 +536,7 @@ def register(spec: dict) -> CustomResource:
 
     resource = CustomResource(spec=spec)
     if spec["category"] == "道纹":
+        derivative_rules.register_custom_derivative(name, spec["base_daowen"])
         install_daowen_bridge()
         _CUSTOM_DAOWEN[name] = _daowen_calculator(spec)
         from .daowen import DaoWenEngine
