@@ -137,16 +137,11 @@ def test_merge_monster_pools_deduplicates():
     assert [m["name"] for m in merged] == ["a", "b", "c"], "同名怪只保留先出现的一份"
 
 
-def test_energy_budget_decreases_in_endless_mode():
-    s = GameState()
-    assert s.energy_budget == 3
-    s.endless_mode = True
-    s.endless_cycle = 1
-    assert s.energy_budget == 3
-    s.endless_cycle = 2
-    assert s.energy_budget == 2
-    s.endless_cycle = 5
-    assert s.energy_budget == 1, "无尽模式精力递减封底 1"
+def test_legacy_energy_budget_is_not_part_of_game_state():
+    """局外精力资源已删除；局外行动由各自规则和开放世界时间结算。"""
+    state = GameState()
+    assert not hasattr(state, "energy")
+    assert not hasattr(state, "energy_budget")
 
 
 # --------------------------------------------------------------------------- 引擎集成测试
@@ -253,7 +248,7 @@ def test_fifth_tier_victory_enters_endless_mode(tmp_path):
     注意：「五阶副本·启示录」正文/怪物池/终音法器目前尚未接入运行时，端到端
     7场→死斗→胜利→终音→封印路径要等启示录正文落地后才能走通；本测试锁定
     _advance_region_unlock(MAX_TIER) 的分支契约（接口点见 _finalize_victory_seal），
-    并验证持久化后的无尽模式行为（门禁、探索禁用、精力预算）。
+    并验证持久化后的无尽模式行为（门禁与旧探索入口禁用）。
     """
     sealed = tmp_path / "endless.json"
     if sealed.exists():
@@ -270,7 +265,7 @@ def test_fifth_tier_victory_enters_endless_mode(tmp_path):
     assert data["progression"]["endless_mode"] is True
     assert data["progression"]["endless_cycle"] == 1
 
-    # 新轮回者：无尽模式开启 → 不设阶级门禁、探索不可用、精力预算递减
+    # 新轮回者：无尽模式开启 → 不设阶级门禁、旧探索入口不可用
     e2 = _new_engine(sealed, region="扭曲都市", select_region=False)
     assert e2.state.endless_mode is True
     assert e2.state.endless_cycle == 1
@@ -281,13 +276,9 @@ def test_fifth_tier_victory_enters_endless_mode(tmp_path):
     actions = e2.get_available_actions()["actions"]
     sub_actions = {a.get("params_schema", {}).get("sub_action") for a in actions}
     assert "探索" not in sub_actions, "无尽模式下【探索】不出现在可用行动里"
-    e2.state.energy = 1
-    r_tan = e2.execute_action("pre_battle_action", {"sub_action": "探索", "tier": 1})
-    assert r_tan["success"] is False and "无尽" in r_tan["error"]
-    assert e2.state.energy == 1, "探索失败应原子性退还精力"
-    assert e2.state.energy_budget == 3  # 无尽第1轮精力不变
-    e2.state.endless_cycle = 3
-    assert e2.state.energy_budget == 1  # 第3轮起精力封底 1
+    legacy_explore = e2.execute_action("pre_battle_action", {"sub_action": "探索", "tier": 1})
+    assert legacy_explore["success"] is False and "未知局外行动" in legacy_explore["error"]
+    assert not hasattr(e2.state, "energy") and not hasattr(e2.state, "energy_budget")
 
 
 def test_endless_battle_start_draws_from_merged_pool_with_scaled_stats(tmp_path):
@@ -299,7 +290,6 @@ def test_endless_battle_start_draws_from_merged_pool_with_scaled_stats(tmp_path)
     assert e.state.endless_mode is True
     assert e._monster_pool_for_battle() == merge_monster_pools(e.monster_pool), \
         "无尽模式战始出怪池应合并所有已实现副本"
-    e.state.energy = 0
     r = e.execute_action("battle_start", {})
     assert r["success"] is True
     # 第3轮：面板应比基线高（血限×1.5、法/速+6）；基线扭曲都市怪物血限是 270/216

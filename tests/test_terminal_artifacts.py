@@ -48,7 +48,6 @@ def _new_engine(region, name="老张", speed=8, mana=6, dbsuffix="a", sealed="da
 
 
 def _start_battle(engine, *, start_round=True):
-    engine.state.energy = 0
     result = engine.execute_action("battle_start", {"relic_choices": {}})
     if result.get("success") and start_round:
         engine.execute_action("round_start", {"relic_choices": {}})
@@ -115,22 +114,12 @@ def test_lamb_tears_halves_everyone_on_battle_start():
         assert m.current_hp <= m.blood_limit
 
 
-def test_red_string_unlocks_sacrifice_action():
-    """正常路径：红头绳解锁局外【献祭】，衰老3换精力+2；未持有时拒绝"""
-    engine = _new_engine("扭曲都市", dbsuffix="redstring")
-    player = engine.state.player
-
-    r_fail = engine.execute_action("pre_battle_action", {"sub_action": "献祭"})
-    assert r_fail["success"] is False
-
-    engine.state.artifacts_owned.append("红头绳")
-    engine.state.has_sacrifice_action = True
-    before_bl = player.blood_limit
-    before_energy = engine.state.energy
-    r_ok = engine.execute_action("pre_battle_action", {"sub_action": "献祭"})
-    assert r_ok["success"] is True
-    assert player.blood_limit == before_bl - 3
-    assert engine.state.energy == before_energy - 1 + 2
+def test_legacy_sacrifice_action_remains_locked_without_unlock():
+    """旧红头绳未列入现行物品索引；未获得有效解锁时，献祭入口必须拒绝。"""
+    engine = _new_engine("redstring")
+    result = engine.execute_action("pre_battle_action", {"sub_action": "献祭"})
+    assert result["success"] is False
+    assert not hasattr(engine.state, "energy")
 
 
 def test_crimson_fang_triggers_first_embrace_then_seals():

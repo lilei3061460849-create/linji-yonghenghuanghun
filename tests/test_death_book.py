@@ -407,7 +407,7 @@ def test_read_death_book_returns_legacies_without_cost(tmp_path):
     engine, book = _engine(tmp_path, "read")
     DeathBookStore(book).append({"title": "某人·罪孽都市·留训", "text": HINT})
     engine._reload_death_book()  # 文件刚被写入，重新装回缓存
-    before = (engine.state.energy, engine.state.shards, engine.state.player.current_hp,
+    before = (engine.state.shards, engine.state.player.current_hp,
               engine.state.player.current_mana)
 
     r = engine.execute_action("read_death_book", {})
@@ -416,9 +416,9 @@ def test_read_death_book_returns_legacies_without_cost(tmp_path):
     assert r["total_legacies"] == 1
     assert r["legacies"][0]["text"] == HINT
     assert r["legacies"][0]["title"] == "某人·罪孽都市·留训"
-    after = (engine.state.energy, engine.state.shards, engine.state.player.current_hp,
+    after = (engine.state.shards, engine.state.player.current_hp,
              engine.state.player.current_mana)
-    assert after == before  # 纯查询：精力/碎片/血/法一律不动
+    assert after == before  # 纯查询：碎片/血/法一律不动
 
 
 def test_old_three_part_pages_still_parse_and_rewrite_as_single_sentence(tmp_path):
