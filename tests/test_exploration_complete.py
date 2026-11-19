@@ -39,7 +39,7 @@ def test_legacy_prebattle_explore_is_rejected_without_mutation(tmp_path):
     })
 
     assert not result["success"]
-    assert "开放世界已删除独立探索行动" in result["error"]
+    assert "未知局外行动" in result["error"]
     assert (engine.state.shards, engine.state.player.current_hp,
             engine.state.player.current_mana, len(engine.dice.get_history())) == before
 
