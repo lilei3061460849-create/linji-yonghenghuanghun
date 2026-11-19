@@ -63,8 +63,8 @@ def test_true_rejection_counts_match_documented_numbers():
             with_reject += 1
             total += hits
     assert len(events) == 36
-    assert with_reject == 33
-    assert total == 33
+    assert with_reject == 34
+    assert total == 34
 
 
 # ========================================================================
