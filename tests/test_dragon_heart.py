@@ -1,7 +1,7 @@
 """
 pytest 风格测试 - 里程碑9a：龙心谷"炼心"/【××龙心】消耗品系统（终音法器"共心环"的前置依赖）
 
-原文："龙心谷专属行动：【炼心】局外（消耗1精力）或战斗（下次行动精力-1）中均可发动：
+现行规则：龙心谷【炼心】局外耗时1世界回合；战斗中不消耗出手，下一次实际支付数值型代价后生成对应龙心。
 直到你下一次支付数值为X的代价后，获得对应类型的【××龙心】（消耗品（耐久X））。
 消耗【××龙心】Y点耐久，可抵消Y点同类型代价；未被抵消的剩余代价照常支付。"
 
@@ -38,12 +38,10 @@ def _new_engine(db_suffix: str) -> GameEngine:
     engine.state.relics = []
     engine.state.player.dao_wen["连击"] = DaoWenInstance(
         DaoWen(name="连击", formula="", cost_type="生命", cost_formula="X", effect_formula=""))
-    engine.state.energy = 3
     return engine
 
 
 def _start_with_enemy(engine):
-    engine.state.energy = 0
     engine.execute_action("battle_start", {"relic_choices": {}})
     engine.state.enemies.clear()
     engine.state.enemies.append(Entity(name="靶怪", entity_type="怪物", blood_limit=999, current_hp=999))
