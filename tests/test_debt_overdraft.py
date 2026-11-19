@@ -165,7 +165,7 @@ def test_debt_zero_cost_xiuzheng_and_world_entry_allowed(tmp_path):
 
     before = e.state.shards
     legacy = e.execute_action("pre_battle_action", {"sub_action": "探索", "tier": 1})
-    assert not legacy["success"] and "开放世界已删除独立探索行动" in legacy["error"]
+    assert not legacy["success"] and "未知局外行动" in legacy["error"]
     assert e.state.shards == before
 
 
