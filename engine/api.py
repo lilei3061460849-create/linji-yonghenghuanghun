@@ -1070,6 +1070,11 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
 
         # 沉沦海的【潮下基地】是开放地图上的3×3休整区域，不再走旧线性事件选项。
         if action == "休整" and self.state.current_region == "沉沦海":
+            try:
+                if self._ensure_sunken_sea_rescue_base(world):
+                    self.state.world_state = world.to_dict()
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
             player_actor = world.actors[player_id]
             in_rescue_base = any(
                 location.get("kind") == "rest_area"
