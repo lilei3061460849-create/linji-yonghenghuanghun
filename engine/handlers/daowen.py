@@ -209,7 +209,7 @@ class DaowenHandlersMixin:
         if duel_error:
             return duel_error
         if self.state.phase == "in_combat":
-            if not self.combat.can_act(actor):
+            if not self.combat.can_act(actor, action_type="use_daowen"):
                 return {"success": False, "error": f"{actor.name}当前无法出手"}
             budget = self._action_budget_of(actor)
             if actor.actions_used_this_round >= budget:
