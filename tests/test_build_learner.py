@@ -478,11 +478,12 @@ def test_region_exclusive_enforced_by_engine():
     finish_initial_daowen(e)
     e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
     _finish_region_setup(e, "龙心谷")
+    before = (e.state.shards, set(e.state.player.dao_wen))
     r = e.execute_action("pre_battle_action", {"sub_action": "改造", "tier": 2})
     assert not r["success"]
     assert "扭曲都市" in r["error"]
     # 被拒绝时碎片与已持有道纹必须保持不变
-    assert e.state.shards == 20
+    assert (e.state.shards, set(e.state.player.dao_wen)) == before
 
 
 def test_telemetry_records_action_choices():
