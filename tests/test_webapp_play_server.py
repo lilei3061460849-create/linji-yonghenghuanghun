@@ -170,7 +170,7 @@ def test_debug_console_reads_and_writes_engine_state(tmp_path):
     assert player["current_hp"] == 40 and player["blood_limit"] == 40
     assert state["global"]["phase"] == "pre_battle"
 
-    result = web._debug_set({"global": {"current_round": 7, "energy": 5},
+    result = web._debug_set({"global": {"current_round": 7},
                              "entity_ref": "enemy:0",
                              "fields": {"current_hp": 1, "current_speed": 9,
                                         "is_alive": False}})
@@ -225,7 +225,6 @@ def test_battle_view_exposes_coop_spells_and_fill_entries(tmp_path):
         __import__("engine.models", fromlist=["DaoWen"]).DaoWen(
             name="杀伐", formula="杀伐X", cost_type="法力", cost_formula="5X",
             effect_formula="造成X点伤害"))
-    engine.state.energy = 0
     assert web._execute("battle_start", {})["success"]
     assert web._execute("round_start", {"relic_choices": {}})["success"]
 
@@ -263,7 +262,6 @@ def test_battle_save_exit_and_load_roundtrip(tmp_path, monkeypatch):
     （回合、双方生命、可用行动都在），不用重开战斗重调三维。"""
     from engine.api import GameEngine
     engine, _, _ = _battle_engine(tmp_path)
-    engine.state.energy = 0
     assert web._execute("battle_start", {})["success"]
     assert web._execute("round_start", {"relic_choices": {}})["success"]
     player_hp = engine.state.player.current_hp
@@ -294,7 +292,6 @@ def test_action_menu_entries_are_single_source(tmp_path):
     prepare_attack 由菜单「攻击」承担；同伴行动只在 available 时出现；
     许愿/发现类不进菜单（许愿是叙事、发现走弹窗）。"""
     engine, _, _ = _battle_engine(tmp_path)
-    engine.state.energy = 0
     assert web._execute("battle_start", {})["success"]
     assert web._execute("round_start", {"relic_choices": {}})["success"]
     snapshot = web._snapshot(engine)
@@ -316,7 +313,6 @@ def test_dormant_diandang_entry_is_not_a_pending_discovery(tmp_path):
     界面的「待决」弹窗只认 available≠false 的条目——这里钉住引擎契约，防止
     占位条目哪天变成 available 缺省（那会让弹窗每次渲染都弹）。"""
     engine, _, _ = _battle_engine(tmp_path)
-    engine.state.energy = 0
     assert web._execute("battle_start", {})["success"]
     assert web._execute("round_start", {"relic_choices": {}})["success"]
     assert engine.state.pending_diandang_discoveries == []
