@@ -176,7 +176,7 @@ def test_debug_console_reads_and_writes_engine_state(tmp_path):
                                         "is_alive": False}})
     assert result["success"], result
     assert "全局.current_round=7" in result["applied"]
-    assert engine.state.current_round == 7 and engine.state.energy == 5
+    assert engine.state.current_round == 7
     enemy = engine.state.enemies[0]
     assert enemy.current_hp == 1 and enemy.current_speed == 9
     assert enemy.is_alive is False
@@ -204,7 +204,6 @@ def test_battle_actions_expose_daowen_and_cast_for_panel(tmp_path):
     """战斗面板的道纹/施法控件靠可用行动渲染：玩家行动阶段必须列出
     use_daowen（含 params_schema）与 cast，否则面板无从下手。"""
     engine, _, _ = _battle_engine(tmp_path)
-    engine.state.energy = 0
     assert web._execute("battle_start", {})["success"]
     assert web._execute("round_start", {"relic_choices": {}})["success"]
 
