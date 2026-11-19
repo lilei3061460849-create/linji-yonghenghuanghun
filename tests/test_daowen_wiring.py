@@ -330,7 +330,7 @@ def test_flight_rule_line_matches_the_engine():
     """
     rules = Path("规则正文.md").read_text(encoding="utf-8")
     section = rules.split("### 战斗行动", 1)[1].split("\n### ", 1)[0]
-    assert "飞行X：支付：冷却X。非飞行者无法把飞行者选为[目标]，持续X回合。" in section
+    assert "飞行X：支付：冷却X。非飞行者无法把飞行者选为[目标]，持续X。" in section
     assert "飞行" in DaoWenEngine._registry
 
     engine = _engine("flight_targeting")
