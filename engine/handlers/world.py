@@ -887,6 +887,48 @@ class WorldHandlersMixin:
                              "employee": name, "actor_id": actor_id})
         return resolved
 
+    def _ensure_sunken_sea_rescue_base(self, world: WorldState) -> bool:
+        """为旧版沉沦海存档补建潮下基地；已有区域不重复生成。"""
+        if self.state.current_region != "沉沦海":
+            return False
+        if any(location.get("area_id") == "rescue_base"
+               for location in world.map.locations.values()):
+            return False
+        occupied = {
+            (int(location.get("x", -1)), int(location.get("y", -1)))
+            for location in world.map.locations.values()
+        }
+        occupied.update(actor.position for actor in world.actors.values() if actor.alive)
+        origins = [
+            (x, y)
+            for y in range(world.map.height - 2)
+            for x in range(world.map.width - 2)
+            if all(
+                (x + dx, y + dy) not in occupied
+                and world.map.is_passable((x + dx, y + dy))
+                for dy in range(3) for dx in range(3)
+            )
+        ]
+        if not origins:
+            raise ValueError("旧版沉沦海地图没有可放置潮下基地3×3区域的连续空地")
+        roll = self.dice.auto_roll(
+            "open_world_rescue_base_migration", origins,
+            context="旧版沉沦海存档迁移：潮下基地3×3区域位置")
+        rescue_x, rescue_y = roll["selected"]
+        for dy in range(3):
+            for dx in range(3):
+                index = dy * 3 + dx
+                position = (rescue_x + dx, rescue_y + dy)
+                world.map.add_location(f"rescue_base_{index + 1}", {
+                    "kind": "rest_area", "area_id": "rescue_base",
+                    "name": "潮下基地" if index == 4 else "潮下基地范围",
+                    "description": "由废弃潜水舱、沉船残骸和密封管道拼成的水下基地。普通微光者在此生活，珍珠泪与碎片维持照明、过滤和药物；疫病仍在狭小舱室间蔓延。",
+                    "x": position[0], "y": position[1],
+                    "discovered": False, "active": True,
+                })
+        world.record("rescue_base_migrated", None, origin=[rescue_x, rescue_y])
+        return True
+
     @ACTION_REGISTRY.action("world_initialize", group="world",
                           allowed_phases=("pre_battle", "in_world"))
     def _action_world_initialize(self, params: dict) -> dict:
@@ -894,8 +936,12 @@ class WorldHandlersMixin:
         if self.state.player is None:
             return {"success": False, "error": "请先完成角色开局，再初始化开放世界"}
         if getattr(self.state, "world_state", {}):
+            existing_world = WorldState.from_dict(self.state.world_state)
+            migrated = self._ensure_sunken_sea_rescue_base(existing_world)
+            if migrated:
+                self.state.world_state = existing_world.to_dict()
             return {"success": True, "action": "world_initialize",
-                    "result": {"already_initialized": True,
+                    "result": {"already_initialized": True, "migrated": migrated,
                                "world_turn": self.state.world_state.get("clock", {}).get("turn", 0)}}
         width = params.get("width", 21)
         height = params.get("height", 21)
