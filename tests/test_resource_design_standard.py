@@ -147,6 +147,7 @@ X_EFFECT_FIELDS = {
     "map_terrain_count", "mark_targets", "merge_creations", "preserve_daowen_changes",
     "purified_layers", "recast_max", "recast_min", "reforge_discovery_uses",
     "relic_discovery", "relic_disable", "relic_enable", "relic_names", "relic_steal",
+    "revive_count",
     "remove_status_count", "replay_numeric", "shard_burn", "shard_gain",
     "share_slots", "shelter_charges", "silence_rounds", "speed_boost",
     "split_creations", "tamper_activations", "target_heal",
