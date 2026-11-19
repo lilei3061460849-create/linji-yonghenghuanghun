@@ -52,7 +52,7 @@ def test_true_rejection_matching(text, expected):
 
 
 def test_true_rejection_counts_match_documented_numbers():
-    """事件池统计：36 个事件；当前有33个事件含真拒绝，共33个真拒绝选项。"""
+    """事件池统计：36 个事件；当前有34个事件含真拒绝，共34个真拒绝选项。"""
     events = parse_events("副本索引.md")
     with_reject = 0
     total = 0
