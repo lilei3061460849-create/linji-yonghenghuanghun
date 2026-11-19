@@ -661,7 +661,7 @@ DaoWenEngine.register_all()
 
 ### 测试含义
 
-- 本项目所称“测试”默认指，默认含义是 AI 通过 `GameEngine` 逐步点选手操；脚本仅用于测试机制是否生效（数据效力见推演铁律 6）。测试结论和可复现证据写入相关 GitHub Issue/PR，自动化结果链接对应 Actions run；叙事正文按 `叙事/README.md` 的收录约定归档；战报只保留后台结算数据。
+- 本项目所称“测试”，默认指 AI 通过 `GameEngine` 逐步点选手操；脚本仅用于测试机制是否生效（数据效力见推演铁律 6）。测试结论和可复现证据写入相关 GitHub Issue/PR，自动化结果链接对应 Actions run；叙事正文按 `叙事/README.md` 的收录约定归档；战报只保留后台结算数据。
 - `TacticalAI`、`sim/pick_best_report.py` 等批量模拟是平衡工具，不得冒充手操测试；`pytest` 与引擎套件是回归验证，不等同于真实对局。
 - 常用回归命令如下；只有实际运行并看到结果后，才能报告通过数量：
 
