@@ -877,6 +877,26 @@ class CombatEngine(ConstructionMixin, DamageDeathMixin, CostPaymentMixin,
         }
         # 万钧印（消耗品，按物品索引=持有者选择）：应对窗口显式请求（wanjunyin=True）
         # 才把这一击改为攻击者对自己发动，触发消耗1点耐久；默认不触发。
+        # 【束缚】禁止目标采取任何被动响应行动。必须先于血影与万钧印结算，
+        # 否则这两条防御旁路会绕过闪避/招架之后的束缚检查。
+        if target.has_status("束缚"):
+            if blood_shadow:
+                result["blood_shadow_success"] = False
+                result["blood_shadow_fail_reason"] = "受【束缚】影响，不能使用被动行动（血影）"
+                blood_shadow = False
+            if wanjunyin is True:
+                result["wanjunyin_success"] = False
+                result["wanjunyin_fail_reason"] = "受【束缚】影响，不能使用被动行动（万钧印改道）"
+                wanjunyin = False
+            if dodge:
+                result["dodge_success"] = False
+                result["dodge_fail_reason"] = "受【束缚】影响，只能施法，无法闪避"
+                dodge = False
+            if parry:
+                result["parry_success"] = False
+                result["parry_fail_reason"] = "受【束缚】影响，只能施法，无法招架"
+                parry = False
+
         # 被改道的一次自攻不会再被改道（_wanjunyin_converted 防 A→B→A 递归）。
         if (not _wanjunyin_converted and wanjunyin is True
                 and attacker is not target and attacker.is_alive
@@ -938,18 +958,6 @@ class CombatEngine(ConstructionMixin, DamageDeathMixin, CostPaymentMixin,
             result["blood_shadow_success"] = True
             result["note"] = "血影：支付生命10，本次判定被取消"
             return result
-
-        # 【束缚】限定只能施法：闪避、招架也是行动，同样不可选。
-        # 这不是新的旁路：束缚的旧闸门只管主动行动，零出手的响应行动原样沿用它。
-        if target.has_status("束缚"):
-            if dodge:
-                result["dodge_success"] = False
-                result["dodge_fail_reason"] = "受【束缚】影响，只能施法，无法闪避"
-            if parry:
-                result["parry_success"] = False
-                result["parry_fail_reason"] = "受【束缚】影响，只能施法，无法招架"
-            # 不能在这里返回：防御被封的本次攻击必须照常进入伤害结算。
-            dodge = parry = False
 
         # 闪避判定
         if dodge:
@@ -2146,9 +2154,9 @@ class CombatEngine(ConstructionMixin, DamageDeathMixin, CostPaymentMixin,
     def can_act(self, entity: Entity, action_type: str | None = None) -> bool:
         """判断实体能否执行指定主动行动。
 
-        【束缚】期间仅放行法术行动（瞬发施法或自定义法术定义）；不传行动类型时按
-        普通行动判断，仍返回不可行动。被【封印】暂离者不在场上，任何行动都不可用。
-        反应选择与自动触发不通过此主动行动门禁。
+        【束缚】期间仅放行施法入口（瞬发、自定义法术及直接发动单个道纹）；不传行动类型时
+        按普通行动判断，仍返回不可行动。被【封印】暂离者不在场上，任何行动都不可用。
+        被动响应由受击结算的统一响应门禁处理。
         """
         # 2026-11-01：【必中】改口径为「目标无法行动」，任何行动都不可用。
         # 【束缚】放行施法；法术由道纹构成，直接发动单个道纹同属施法（基础定义·施法）。

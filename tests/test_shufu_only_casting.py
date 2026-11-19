@@ -75,3 +75,19 @@ def test_unbound_target_still_dodges_and_parries():
     r = engine.combat.resolve_attack(player, target, hit_index=0,
                                      is_must_hit=False, parry=True)
     assert r.get("parry_success") is True, r
+
+
+def test_shufu_blocks_blood_shadow_before_its_early_return():
+    """血影不能抢在束缚检查前结算；受束缚者只能硬扛本击。"""
+    engine, player, target = _engine()
+    _bind(target)
+    # 若没有束缚，模拟目标确实持有血影，确保测试命中原先的提前返回路径。
+    engine.state.side_has = lambda entity, name: name == "血影"
+    hp0 = target.current_hp
+
+    result = engine.combat.resolve_attack(
+        player, target, hit_index=0, is_must_hit=False, blood_shadow=True)
+
+    assert result.get("blood_shadow_success") is not True, result
+    assert "束缚" in result.get("blood_shadow_fail_reason", ""), result
+    assert target.current_hp < hp0, "血影被束缚封锁后，攻击仍应正常结算"

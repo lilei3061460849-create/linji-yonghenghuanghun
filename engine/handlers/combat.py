@@ -134,7 +134,8 @@ class CombatHandlersMixin:
         # 消耗品再选应对（不耗出手也不耗应对）。必中次数覆盖本击时被动行动被封锁。
         items_pool = (self.state.consumables if target is self.state.player
                       else getattr(target, "consumables", []) or [])
-        item_options = [
+        bound = bool(target and target.has_status("束缚"))
+        item_options = [] if bound else [
             {"name": c.name, "uses": int(c.current_uses), "effect": c.effect}
             for c in items_pool if not c.is_depleted and c.name != "万钧印"
         ]
@@ -142,11 +143,11 @@ class CombatHandlersMixin:
             "target_ref": ref,
             "target": entry.get("name"),
             "can_tank": True,
-            "can_parry": bool(entry.get("can_parry")) and speed > 0,
+            "can_parry": not bound and bool(entry.get("can_parry")) and speed > 0,
             # 【粘滞】承载期：闪避需额外支付X点速度，速度不足1+X时不可宣告。
-            "can_dodge": (bool(entry.get("can_dodge"))
+            "can_dodge": (not bound and bool(entry.get("can_dodge"))
                           and speed > self.combat.structure_dodge_extra(target)),
-            "can_blood_shadow": bool(entry.get("can_blood_shadow")),
+            "can_blood_shadow": not bound and bool(entry.get("can_blood_shadow")),
             # 【必中】剩余次数覆盖本击时，闪避无效（与结算同一判定）。
             "dodge_locked": bizhong > index,
             "speed_left": speed,
@@ -157,7 +158,7 @@ class CombatHandlersMixin:
             "item_locked": bizhong > index,
             # 万钧印（可选改道）：持有未耗尽的万钧印且攻击者不是自己时可用；
             # 同样是被选中的响应，【必中】覆盖本击时一并锁死。
-            "can_wanjunyin": (self.combat._wanjunyin_item(target) is not None
+            "can_wanjunyin": (not bound and self.combat._wanjunyin_item(target) is not None
                               and attacker is not target),
             "wanjunyin_uses": (getattr(self.combat._wanjunyin_item(target),
                                        "current_uses", 0) or 0),
@@ -388,6 +389,11 @@ class CombatHandlersMixin:
         legal = {entry["ref"]: entry for entry in pending["options"]["target_options"]}
         entry = legal.get(ref) or {}
         defender = self._attack_defender_options(pending, ref)
+        target = self.combat._combat_entity_refs().get(ref)
+        if (target is not None and target.has_status("束缚")
+                and choice in {"parry", "dodge", "blood_shadow", "use_item", "wanjunyin"}):
+            return {"success": False,
+                    "error": f"{target.name}受【束缚】影响，只能施法，不能进行任何被动响应行动"}
         if choice == "wanjunyin":
             # 万钧印（按物品索引=持有者选择）：把这一击改为攻击者对自己发动。
             if defender.get("item_locked"):
