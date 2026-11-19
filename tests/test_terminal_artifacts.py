@@ -116,7 +116,7 @@ def test_lamb_tears_halves_everyone_on_battle_start():
 
 def test_legacy_sacrifice_action_remains_locked_without_unlock():
     """旧红头绳未列入现行物品索引；未获得有效解锁时，献祭入口必须拒绝。"""
-    engine = _new_engine("redstring")
+    engine = _new_engine("扭曲都市", dbsuffix="legacy_sacrifice")
     result = engine.execute_action("pre_battle_action", {"sub_action": "献祭"})
     assert result["success"] is False
     assert not hasattr(engine.state, "energy")
@@ -146,7 +146,7 @@ def test_crimson_fang_triggers_first_embrace_then_seals():
     assert challenger.state.in_final_duel
     challenger.execute_action("resolve_final_duel", {"outcome": "victory"})
 
-    r = challenger.execute_action("choose_terminal_artifact", {"choice": 4})  # 猩红尖牙
+    r = challenger.execute_action("choose_terminal_artifact", {"choice": 3})  # 猩红尖牙
     assert r["success"] is True
     assert r["result"]["first_embrace_pending"] is True
     assert challenger.state.pending_first_embrace is True
