@@ -199,7 +199,6 @@ def test_gongming_discover_uses_engine_auto_roll():
     engine.execute_action("setup_attributes", {"blood_points": 11, "speed_points": 8, "mana_points": 6})
     finish_initial_daowen(engine)
     _choose_region(engine, "扭曲都市", finish_discovery=True)
-    engine.state.energy = 3
 
     before = len(engine.dice.get_history())
     r = engine.execute_action("pre_battle_action", {"sub_action": "共鸣"})
