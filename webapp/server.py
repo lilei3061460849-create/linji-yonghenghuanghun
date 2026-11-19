@@ -225,7 +225,6 @@ def _player_view(engine: GameEngine) -> dict[str, Any] | None:
         "attack_power": player.effective_attack_power(),
         "shards": engine.state.shards,
         "fake_shards": engine.state.fake_shards,
-        "energy": engine.state.energy,
         "region": engine.state.current_region,
         "relics": [relic.name for relic in engine.state.relics],
         "daowen": list(player.dao_wen),
@@ -872,7 +871,7 @@ _DEBUG_ENTITY_INT_FIELDS = (
 )
 _DEBUG_ENTITY_BOOL_FIELDS = ("is_alive", "is_departed")
 _DEBUG_GLOBAL_INT_FIELDS = (
-    "current_round", "current_battle", "energy", "shards", "fake_shards",
+    "current_round", "current_battle", "shards", "fake_shards",
 )
 
 
