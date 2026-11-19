@@ -314,7 +314,7 @@ def test_r43_all_implemented_event_options_have_a_runtime_route(tmp_path):
             player.death_page_count = 100
             engine.state.player = player; engine.state.phase = "pre_battle"
             engine.state.current_region = event["region"] if event["region"] != "通用" else "罪孽都市"
-            engine.state.shards = 1000; engine.state.energy = 20
+            engine.state.shards = 1000
             engine.state.friends = [Entity("F", "朋友", blood_limit=50, current_hp=50,
                                            attack_count=2, attack_power=2)]
             engine.state.relics = [Relic("测试遗物", "")]
@@ -497,12 +497,12 @@ def test_r46_event_relic_round_and_battle_end_effects(tmp_path):
 
     engine.state.enemies = []
     engine.state.event_modifiers["zengzhi_pending"] = [{"target_ref": "player:0", "amount": 4}]
-    before = (player.blood_limit, engine.state.energy)
+    before = (player.blood_limit,)
     ended = engine.execute_action("battle_end", {})
     assert ended["success"]
     assert ended["result"]["zengzhi_settled"] == []
     assert "zengzhi_pending" not in engine.state.event_modifiers
-    assert (player.blood_limit, engine.state.energy) == before
+    assert (player.blood_limit,) == before
 
 
 def test_r46_boundary_death_dodge_dragon_and_might_triggers(tmp_path):

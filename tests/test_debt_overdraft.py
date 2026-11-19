@@ -133,7 +133,6 @@ def _debt_engine(tmp_path, debt: int = -25) -> GameEngine:
     assert e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})["success"]
     assert e.execute_action("setup_choose_region", {"region": "罪孽都市"})["success"]
     e.state.shards = debt
-    e.state.energy = 3
     e.state.phase = "pre_battle"
     return e
 
@@ -150,26 +149,24 @@ def test_debt_zero_cost_xiuxing_allowed(tmp_path):
     assert e.state.shards == -25, "被拒的正费行动不得扣碎片"
 
 
-def test_debt_zero_cost_xiuzheng_and_tansuo_allowed(tmp_path):
-    """负债下 0费休整(tier1)/0费探索(tier1) 可执行（死锁链的另两段）。"""
+def test_debt_zero_cost_xiuzheng_and_world_entry_allowed(tmp_path):
+    """负债下 0费休整可执行；开放世界初始化不依赖局外精力资源。"""
     e = _debt_engine(tmp_path)
     e.state.player.current_hp = 30
-    # 2026-09-10 休整改制：额度=血限×20%（ceil）
     amt1 = math.ceil(e.state.player.blood_limit * 0.2)
     ok = e.execute_action("pre_battle_action", {
         "sub_action": "休整", "tier": 1,
         "heal_allocations": [{"target_ref": "player:0", "amount": amt1}]})
     assert ok["success"], ok
-    ok2 = e.execute_action("pre_battle_action", {"sub_action": "探索", "tier": 1})
-    assert ok2["success"], ok2
-    # 探索2档(30碎片)=支出，负债仍拒
-    if e.event_pool.current is None:   # 首个事件结算完才能再探索（门禁）
-        pass
-    e.event_pool.current = None
-    e.state.pending_event_queue.clear()
-    e.state.energy += 1
-    blocked = e.execute_action("pre_battle_action", {"sub_action": "探索", "tier": 2})
-    assert not blocked["success"] and "碎片" in blocked["error"]
+
+    initialized = e.execute_action("world_initialize", {"width": 7, "height": 7})
+    assert initialized["success"], initialized
+    assert e.state.world_state["clock"]["turn"] == 0
+
+    before = e.state.shards
+    legacy = e.execute_action("pre_battle_action", {"sub_action": "探索", "tier": 1})
+    assert not legacy["success"] and "未知局外行动" in legacy["error"]
+    assert e.state.shards == before
 
 
 def test_debt_zero_cost_learn_and_repair_allowed(tmp_path):
