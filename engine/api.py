@@ -4083,7 +4083,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                 "endless": (endless_update or None),
                 "instruction": f"无{tier}阶封存候选，{sealed_name}已连同队伍完整封存入{tier}阶封存槽；"
                                "请调用 setup_attributes 开始新的轮回者"
-                               + (("；" + f"无尽第{endless_update['endless_cycle']}轮开始，"
+                               + (f"；无尽第{endless_update['endless_cycle']}轮开始，"
                                   if endless_update else ""),
             }
         candidate_snapshot = queue.pop(0)
@@ -4383,7 +4383,6 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         self.state.unlocked_tier = unlocked_tier
         self.state.endless_mode = endless_mode
         self.state.endless_cycle = endless_cycle
-        if endless_mode:
         if was_duel:
             self.state.in_final_duel = True
             self.state.duel_tier = duel_tier
