@@ -144,6 +144,22 @@ BY_NAME: dict[str, DerivativeSpec] = {spec.name: spec for spec in DERIVATIVE_SPE
 DERIVED_DAOWEN: frozenset[str] = frozenset(BY_NAME)
 DERIVATIVE_PARENTS: tuple[str, ...] = tuple(dict.fromkeys(spec.parent for spec in DERIVATIVE_SPECS))
 
+# 运行期自定义衍生道纹：名称 → 所选非衍生母本。声明由 custom_resources 管理，
+# 此处只维护衍生身份索引，避免把动态资源写进静态事实源。
+_CUSTOM_DERIVATIVE_PARENTS: dict[str, str] = {}
+
+
+def register_custom_derivative(name: str, parent: str) -> None:
+    if not isinstance(name, str) or not name:
+        raise ValueError("自定义衍生道纹名称不能为空")
+    if not isinstance(parent, str) or not parent or is_derivative(parent):
+        raise ValueError(f"自定义衍生道纹母本必须是非衍生道纹：{parent!r}")
+    _CUSTOM_DERIVATIVE_PARENTS[name] = parent
+
+
+def unregister_custom_derivative(name: str) -> None:
+    _CUSTOM_DERIVATIVE_PARENTS.pop(name, None)
+
 # 旧名字 → 现名（只用于读档/授予/怪物面板的读入边界，不用于发动提交）。
 # 2026-11-09 第二轮改名：连珠→虚耗（并改收法限）、血伐→断脉、碎伐／伪伐→买命、
 # 燃血→燃命、折寿→折年、疾贷→搏命、舍力→献锋；竭伐（枯竭通道）与伪伐（假碎片
@@ -162,21 +178,25 @@ DERIVATIVE_ALIASES: dict[str, str] = {
 
 
 def is_derivative(name: str) -> bool:
-    return name in BY_NAME
+    return name in BY_NAME or name in _CUSTOM_DERIVATIVE_PARENTS
 
 
 def parent_of(name: str) -> str | None:
     spec = BY_NAME.get(name)
-    return spec.parent if spec else None
+    return spec.parent if spec else _CUSTOM_DERIVATIVE_PARENTS.get(name)
 
 
 def pool_of(parent: str) -> tuple[str, ...]:
-    """母本的衍生道纹池（按条文顺序，稳定可复现）。"""
-    return tuple(spec.name for spec in DERIVATIVE_SPECS if spec.parent == parent)
+    """母本的衍生道纹池（静态条目在前，自定义条目按名称稳定排序）。"""
+    static = tuple(spec.name for spec in DERIVATIVE_SPECS if spec.parent == parent)
+    custom = tuple(sorted(name for name, base in _CUSTOM_DERIVATIVE_PARENTS.items()
+                          if base == parent))
+    return static + custom
 
 
 def known_parents() -> tuple[str, ...]:
-    return DERIVATIVE_PARENTS
+    custom = tuple(sorted(set(_CUSTOM_DERIVATIVE_PARENTS.values()) - set(DERIVATIVE_PARENTS)))
+    return DERIVATIVE_PARENTS + custom
 
 
 def spec_of(name: str) -> DerivativeSpec:

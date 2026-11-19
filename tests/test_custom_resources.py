@@ -133,6 +133,109 @@ def test_examples_load_without_code_changes():
     assert len(registered) == 5
 
 
+def test_custom_resource_batch_rejects_all_items_without_partial_registration_or_grant():
+    engine = _engine()
+    monster = _enemy(engine)
+    valid = {
+        "name": "批量残烛", "category": "遗物", "uniqueness": "测试批量原子性",
+        "summary": "回始获得2点法力",
+        "trigger": {"kind": "phase", "key": "round_start"},
+        "effects": [{"verb": "mana", "target": "self", "amount": 2}],
+    }
+    invalid = {
+        "name": "批量坏器", "category": "法器", "uniqueness": "测试批量原子性",
+        "effects": [{"verb": "not_a_verb", "target": "self", "amount": 2}],
+    }
+
+    result = engine.execute_action("define_resource", {
+        "specs": [valid, invalid], "recipient_ref": monster.runtime_id})
+
+    assert not result["success"]
+    assert custom_resources.get("批量残烛") is None
+    assert custom_resources.get("批量坏器") is None
+    assert not any(r.name == "批量残烛" for r in monster.relics)
+    assert not any(r.name == "批量残烛" for r in engine.state.relics)
+
+
+def test_custom_resource_batch_rejects_duplicate_names_before_registration():
+    engine = _engine()
+    first = {
+        "name": "重名资源", "category": "遗物", "uniqueness": "测试批内重名",
+        "trigger": {"kind": "phase", "key": "round_start"},
+        "effects": [{"verb": "mana", "target": "self", "amount": 1}],
+    }
+    second = dict(first, summary="第二份同名声明")
+    result = engine.execute_action("define_resource", {"specs": [first, second]})
+    assert not result["success"]
+    assert custom_resources.get("重名资源") is None
+    assert not any(r.name == "重名资源" for r in engine.state.relics)
+
+
+def test_custom_relic_can_be_granted_to_and_trigger_on_monster():
+    engine = _engine()
+    monster = _enemy(engine)
+    spec = {
+        "name": "怪物残烛", "category": "遗物", "uniqueness": "测试怪物持有路径",
+        "summary": "回始获得2点法力",
+        "trigger": {"kind": "phase", "key": "round_start"},
+        "effects": [{"verb": "mana", "target": "self", "amount": 2}],
+    }
+    result = engine.execute_action("define_resource", {
+        "spec": spec, "recipient_ref": monster.runtime_id})
+    assert result["success"], result
+    assert any(r.name == "怪物残烛" for r in monster.relics)
+    assert not any(r.name == "怪物残烛" for r in engine.state.relics)
+
+    monster.current_mana = 0
+    engine.combat._dispatch_phase("round_start", target=monster)
+    assert monster.current_mana == 2
+
+
+def test_custom_passive_artifact_triggers_only_for_monster_holder():
+    engine = _engine()
+    monster = _enemy(engine)
+    spec = {
+        "name": "怪物潮铃", "category": "法器", "uniqueness": "测试怪物法器持有路径",
+        "trigger": {"kind": "phase", "key": "round_start"},
+        "effects": [{"verb": "mana", "target": "self", "amount": 2}],
+    }
+    result = engine.execute_action("define_resource", {
+        "spec": spec, "recipient_ref": monster.runtime_id})
+    assert result["success"], result
+    assert "怪物潮铃" in monster.artifacts
+    assert "怪物潮铃" not in engine.state.artifacts_owned
+
+    monster.current_mana = 0
+    engine.combat._dispatch_phase("round_start", target=monster)
+    assert monster.current_mana == 2
+
+
+def test_monster_resource_rejects_non_object_declaration_without_crashing():
+    engine = _engine()
+    monster = _enemy(engine)
+    result = engine.execute_action("define_resource", {
+        "specs": [None], "recipient_ref": monster.runtime_id})
+    assert not result["success"]
+    assert "怪物侧当前仅支持" in result["error"]
+
+
+def test_custom_active_artifact_can_be_activated_by_monster_holder():
+    engine = _engine()
+    monster = _enemy(engine)
+    monster.current_hp = 40
+    spec = {
+        "name": "怪物疗匣", "category": "法器", "uniqueness": "测试怪物主动法器路径",
+        "effects": [{"verb": "heal", "target": "self", "amount": 7}],
+    }
+    result = engine.execute_action("define_resource", {
+        "spec": spec, "recipient_ref": monster.runtime_id})
+    assert result["success"], result
+    used = engine.execute_action("activate_resource", {
+        "name": "怪物疗匣", "owner_ref": monster.runtime_id})
+    assert used["success"], used
+    assert monster.current_hp == 47
+
+
 # ==================== 边界 ====================
 
 def test_daowen_is_in_battle_only_unless_out_of_combat_true():
@@ -191,13 +294,16 @@ def test_triggered_consumable_cannot_be_used_manually():
 # ==================== 错误输入 ====================
 
 @pytest.mark.parametrize("bad_spec, keyword", [
-    ({"name": "三字名", "category": "道纹", "uniqueness": "x",
+    ({"name": "缺基", "category": "道纹", "uniqueness": "x",
+      "cost": {"type": "法力", "amount": "X"},
+      "effects": [{"verb": "damage", "amount": "X"}]}, "base_daowen"),
+    ({"name": "三字名", "category": "道纹", "base_daowen": "杀伐", "uniqueness": "x",
       "cost": {"type": "法力", "amount": "X"},
       "effects": [{"verb": "damage", "amount": "X"}]}, "二字"),
-    ({"name": "缺X", "category": "道纹", "uniqueness": "x",
+    ({"name": "缺X", "category": "道纹", "base_daowen": "杀伐", "uniqueness": "x",
       "cost": {"type": "法力", "amount": 1},
       "effects": [{"verb": "damage", "amount": 3}]}, "X"),
-    ({"name": "怪词", "category": "道纹", "uniqueness": "x",
+    ({"name": "怪词", "category": "道纹", "base_daowen": "杀伐", "uniqueness": "x",
       "cost": {"type": "法力", "amount": "X"},
       "effects": [{"verb": "not_a_verb", "amount": "X"}]}, "未注册"),
     ({"name": "无时机", "category": "遗物", "uniqueness": "x",
@@ -217,7 +323,7 @@ def test_illegal_declarations_are_rejected(bad_spec, keyword):
 def test_builtin_name_collision_is_rejected():
     """错误：与内建资源重名必须拒绝（命名全宇宙唯一）。"""
     engine = _engine()
-    spec = {"name": "杀伐", "category": "道纹", "uniqueness": "重名测试",
+    spec = {"name": "杀伐", "category": "道纹", "base_daowen": "杀伐", "uniqueness": "重名测试",
             "cost": {"type": "法力", "amount": "X"},
             "effects": [{"verb": "damage", "amount": "X"}]}
     result = engine.execute_action("define_resource", {"spec": spec})
@@ -229,6 +335,31 @@ def test_expression_engine_rejects_code_execution():
     for expression in ("__import__('os').system('true')", "open('/tmp/x')", "X.real"):
         with pytest.raises(custom_resources.CustomResourceError):
             custom_resources.evaluate(expression, 1)
+
+
+def test_custom_daowen_requires_existing_non_derived_base():
+    spec = json.loads((EXAMPLES / "dao_wen_shifeng.json").read_text(encoding="utf-8"))
+    for invalid_base, expected in (("不存在", "不存在"), ("连击", "衍生道纹")):
+        invalid = dict(spec, name="试验", base_daowen=invalid_base)
+        with pytest.raises(custom_resources.CustomResourceError, match=expected):
+            custom_resources.register(invalid)
+    custom_resources.register(spec)
+    invalid = dict(spec, name="试验", base_daowen="试锋")
+    with pytest.raises(custom_resources.CustomResourceError, match="衍生道纹"):
+        custom_resources.register(invalid)
+
+
+def test_custom_daowen_is_indexed_as_derivative_of_its_base():
+    spec = json.loads((EXAMPLES / "dao_wen_shifeng.json").read_text(encoding="utf-8"))
+    custom_resources.register(spec)
+    from engine import derivatives
+    assert derivatives.is_derivative("试锋")
+    assert derivatives.parent_of("试锋") == "杀伐"
+    assert "试锋" in derivatives.pool_of("杀伐")
+    assert "试锋" not in derivatives.pool_of("再生")
+    from engine.daowen import ResonanceEngine
+    for resonance in ("转换", "反转", "曲解"):
+        assert ResonanceEngine.find_transformations("试锋", resonance) == []
 
 
 def test_resources_survive_registry_rebuild():
