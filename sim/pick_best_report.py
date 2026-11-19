@@ -266,7 +266,8 @@ def play_and_record(region: str, seed: int, battles: int = 7):
 
         for battle_no in range(1, battles + 1):
             prep = []
-            while engine.state.energy > 0:
+            # 该旧线性推演入口不再读取已删除的局外精力资源；本脚本只模拟最多3次局外准备行动。
+            for _ in range(3):
                 if todo:
                     nm = todo[0]
                     rr = engine.execute_action(
@@ -297,7 +298,7 @@ def play_and_record(region: str, seed: int, battles: int = 7):
             enemies = list(engine.state.enemies)
             lines.append("")
             lines.append(f"### 第{battle_no}场")
-            lines.append(f"[局外]（3精力）：{'，'.join(prep)}")
+            lines.append(f"[局外]（模拟策略：最多3次准备行动）：{'，'.join(prep)}")
             lines.extend(BR.format_battle_start(
                 battle_no=battle_no,
                 draw_range=f"战斗场数{battle_no}，一阶副本-3最低为1，"
