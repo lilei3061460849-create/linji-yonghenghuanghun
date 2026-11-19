@@ -32,10 +32,6 @@ def test_monster_cooldown_daowen_sets_cooldown_and_cannot_repeat(tmp_path):
     """正常路径：怪物发动全速后，道纹进入冷却，后续回合不再列出，禁止复读。"""
     e = _setup_engine(tmp_path)
     p = e.state.player
-    while e.state.energy > 0:
-        e.execute_action("pre_battle_action", {
-            "sub_action": "修行", "tier": 1
-        })
     started = begin_battle(e)
     assert started["success"], started
     m = Entity("靶怪", "怪物", blood_limit=80, current_hp=80, attack_count=1, attack_power=1)
