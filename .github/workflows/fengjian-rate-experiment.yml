@@ -1,0 +1,59 @@
+name: Fengjian rate A-B real engine experiment
+
+on:
+  push:
+    branches: [experiment/fengjian-rate-ab-20261118]
+    paths:
+      - "sim/audits/fengjian_rate_experiment.py"
+      - ".github/workflows/fengjian-rate-experiment.yml"
+      - "engine/**"
+      - "tests/setup_support.py"
+      - "sim/alt_path_test.py"
+  pull_request:
+    paths:
+      - "sim/audits/fengjian_rate_experiment.py"
+      - ".github/workflows/fengjian-rate-experiment.yml"
+      - "engine/**"
+      - "tests/setup_support.py"
+      - "sim/alt_path_test.py"
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Paired fixed seeds for both rate arms"
+        required: false
+        default: "8"
+
+permissions:
+  contents: read
+
+jobs:
+  real-engine-ab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+      - name: Run paired real-engine matches
+        env:
+          EXPERIMENT_RUNS: ${{ github.event.inputs.runs || '8' }}
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/fengjian-rate
+          python sim/audits/fengjian_rate_experiment.py \
+            --runs "${EXPERIMENT_RUNS}" \
+            --output-dir artifacts/fengjian-rate \
+            2>&1 | tee artifacts/fengjian-rate/run.log
+      - name: Upload results and problem log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fengjian-rate-ab-${{ github.run_number }}
+          path: artifacts/fengjian-rate/**
+          if-no-files-found: warn
+          retention-days: 30
