@@ -92,7 +92,7 @@ def context_sources() -> list[ContextSource]:
         ContextSource(
             "世界观正典",
             ROOT / "世界观.md",
-            keep_headings=("世界观",),
+            keep_headings=("生命蓝图与《生物学》",),
             drop_headings=("收录规则", "待核查区", "正文区"),
             drop_phrases=("战报正文区", "待核查区", "独立性声明", "战报.md", "收录规则", "不随引擎数值调整"),
         ),
