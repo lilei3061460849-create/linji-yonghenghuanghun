@@ -81,3 +81,32 @@ def test_rescue_base_bonus_does_not_apply_outside_the_area_or_other_dungeons(tmp
     assert other_region["success"], other_region
     assert other_region["result"]["area_bonus"] == 0
     assert other_region["result"]["heal_amount"] == 20
+
+
+def test_old_sunken_sea_save_migrates_rescue_base_without_reinitializing_world(tmp_path):
+    from engine.world import WorldActorState, WorldState
+
+    engine = GameEngine(db_path=str(tmp_path / "rescue-migration.db"), rng_seed=77)
+    engine.state.player = Entity("测试者", "轮回者", blood_limit=100, current_hp=100)
+    engine.state.current_region = "沉沦海"
+    engine.state.phase = "pre_battle"
+    world = WorldState.create(width=21, height=21, seed=77)
+    world.add_actor(WorldActorState(
+        actor_id="player-runtime", name="测试者", kind="player", x=10, y=10,
+        alive=True, faction="player", mode="manual",
+    ))
+    engine.state.world_state = world.to_dict()
+
+    result = engine.execute_action("world_initialize", {})
+    assert result["success"], result
+    assert result["result"]["already_initialized"] is True
+    assert result["result"]["migrated"] is True
+
+    locations = [
+        value for value in engine.state.world_state["map"]["locations"].values()
+        if value.get("area_id") == "rescue_base"
+    ]
+    assert len(locations) == 9
+    positions = {(item["x"], item["y"]) for item in locations}
+    assert len({x for x, _ in positions}) == len({y for _, y in positions}) == 3
+    assert (10, 10) not in positions
