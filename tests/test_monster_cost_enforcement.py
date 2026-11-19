@@ -143,10 +143,6 @@ def test_monster_bleed_cost_daowen_deducts_monster_hp(tmp_path):
 def test_monster_cannot_cast_when_hp_insufficient_for_cost(tmp_path):
     """边界条件/错误输入：怪物当前生命不足以支付代价时，无法发动代价道纹。"""
     e = _setup_engine(tmp_path)
-    while e.state.energy > 0:
-        e.execute_action("pre_battle_action", {
-            "sub_action": "修行", "tier": 1
-        })
     started = begin_battle(e)
     assert started["success"], started
     # 低血夹具用高异变隔离救赎，专测生命代价不足。
