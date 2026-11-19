@@ -59,6 +59,7 @@ ARTIFACT_RANDOM = {
 DAOWEN_AMNESIA = {
     "name": "刻名",
     "category": "道纹",
+    "base_daowen": "杀伐",
     "uniqueness": "以失去指定道纹为代价发动，现有资源没有可选择的失忆代价通道。",
     "summary": "失忆1：对[目标]造成2X点伤害",
     "cost": {"type": "失忆", "amount": 1},
@@ -203,6 +204,7 @@ def test_restore_skips_already_registered_and_reports_bad_spec():
 DAOWEN_TOO_EXPENSIVE = {
     "name": "灼骨",
     "category": "道纹",
+    "base_daowen": "杀伐",
     "uniqueness": "以自损血限为代价造成固定伤害，现有资源没有可缩放的等价血限支付通道。",
     "summary": "血限5X：对[目标]造成3X点伤害",
     "cost": {"type": "血限", "amount": "5*X"},
