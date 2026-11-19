@@ -105,7 +105,7 @@ def test_r01_r10_boundary_converted_xiaozai_is_not_out_of_combat_daowen(tmp_path
 def test_r01_r10_illegal_phase_and_missing_target_are_atomic(tmp_path):
     engine = _full_setup(_engine(tmp_path))
     assert not engine.execute_action("attack", {"target_selections": []})["success"]
-    assert not engine.execute_action("battle_start", {"relic_choices": {}})["success"]
+    assert not engine.execute_action("round_end", {})["success"]
 
     player, monster = _controlled_combat(engine)
     _dw(player, "杀伐")
