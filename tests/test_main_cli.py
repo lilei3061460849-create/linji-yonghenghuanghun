@@ -23,3 +23,4 @@ def test_api_demo_completes_full_current_setup_flow() -> None:
     assert "API演示结束。" in result.stdout
     assert "[7] 当前状态" in result.stdout
     assert "【阶段】pre_battle" in result.stdout
+    assert "精力:" not in result.stdout

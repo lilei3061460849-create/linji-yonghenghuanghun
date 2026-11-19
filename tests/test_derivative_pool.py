@@ -163,8 +163,6 @@ def _setup_battle(tmp_path, daowen_name="连击"):
     e.execute_action("setup_choose_resonance", {"resonance_type": "反转"})
     s = e.execute_action("setup_choose_region", {"region": "龙心谷"})
     e.execute_action("choose_discovered_relic", {"relic_name": s["result"]["relic_choices"][0]})
-    while e.state.energy > 0:
-        e.execute_action("pre_battle_action", {"sub_action": "修行", "tier": 1})
     started = begin_battle(e)
     assert started["success"], started
     p = e.state.player

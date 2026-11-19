@@ -131,7 +131,6 @@ def print_state(engine: GameEngine):
         print(f"  道纹: {list(player.get('dao_wen', {}).keys())}")
     
     print(f"\n碎片: {state['state']['shards']}")
-    print(f"精力: {state['state']['energy']}")
     
     enemies = state["state"].get("enemies", [])
     if enemies:

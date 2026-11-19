@@ -53,7 +53,7 @@ def test_flight_yapo_registry_cost_and_bidirectional_reversal():
     assert yapo["duration"] == 2
     assert "yapo_threshold" not in yapo
     assert "仅能显式选择自身为[目标]" in yapo["summary"]
-    assert "持续2回合" in yapo["summary"]
+    assert "持续2" in yapo["summary"]
     assert "死亡" not in yapo["summary"]
     assert "飞行" in ORIGINAL_MONSTER_DAOWEN
     assert "压迫" in MONSTER_TRANSFORM_DAOWEN

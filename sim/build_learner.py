@@ -257,6 +257,9 @@ BUILD_SIZE = 3          # 每套 build 学习的道纹数量（有效维度；�
 # 门禁拒绝且兜底也被拒"时精力不退=原地死循环（实测20万步）。连续 STALL_LIMIT 步
 # 精力不退即回收为无效局，绝不允许挂死进程。
 STALL_LIMIT = 5
+# 仅用于构建学习器基准实验的局外行动采样上限，不是游戏规则或角色资源。
+# 该限制只控制模拟样本长度，不映射到 GameState，也不代表玩家行动上限。
+SIM_PRE_BATTLE_ACTION_LIMIT = 3
 
 
 def _resolve_pending_choices(e) -> None:
@@ -1215,34 +1218,16 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
     prev_gone = set()  # 离场旗标差集：跨战斗滚动（dead_monsters 跨战累积）
     for b in range(1, battles + 1):
         stalls = 0
-        explored_this_battle = False   # 本场是否已试过探索（每窗口一次机会）
+        remaining_actions = SIM_PRE_BATTLE_ACTION_LIMIT
         ev_mark = 0  # 战斗事件水位线（用于战后统计非伤害胜利路径）
-        while e.state.energy > 0:
-            _resolve_pending_choices(e)   # 先清门禁，否则一切行动被拒=原地死循环
-            before = e.state.energy
+        while remaining_actions > 0:
+            _resolve_pending_choices(e)
+            before = remaining_actions
             # 花碎片→战力（spend_shards）：与学习并行——每场优先修行1次保证法限成长，
             # 其余精力学道纹。
             if spend_shards:
                 p = e.state.player
-                # 探索优先（用户指令 2026-09-10 五审「去试就知道了」）：事件是
-                # 残韵唯一获取渠道（拒绝→随机残韵已实装），每场第一个局外窗口
-                # 先免费摸一个事件再谈修行/学习；事件池枯竭则不再重试。
-                if not explored_this_battle:
-                    explored_this_battle = True   # 每场只试一次
-                    r = e.execute_action("pre_battle_action",
-                                         {"sub_action": "探索", "tier": 1})
-                    if r.get("success"):
-                        _tag_behavior(behaviors, "探索", {"tier": 1}, e, b)
-                        # 探索发现的事件必须当场结算——continue 会跳过循环尾的
-                        # 公共事件结算块，未决事件会门禁后续一切局外行动
-                        # （精力不退→死锁哨兵收局，实测 24/24 速死）。
-                        if e.event_pool.current is not None:
-                            ev = _resolve_pending_event(e)
-                            if not ev.get("success"):
-                                return {"cleared": cleared, "won": False,
-                                        "invalid": True,
-                                        "reason": f"event: {ev.get('error')}"}
-                        continue
+                # 旧局外探索入口已退役；本基准只评估构筑行动，不模拟地图探索。
                 # 终点牌购置（训练 2026-09-10 六审）：透支=衰老换4X法力（破法力
                 # 预算）、封印=异变换移怪（无视血墙）——闭环终点直接可学，局外
                 # 白拿（每个学习行动第1种道纹0碎片），省掉 5 跳爬梯。各学一次。
@@ -1255,7 +1240,10 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
                         if r.get("success"):
                             _tag_behavior(behaviors, "学习", {"name": _tech}, e, b)
                             todo = [t for t in todo if t != _tech]
+                            remaining_actions -= 1
                             break
+                if remaining_actions <= 0:
+                    break
                 # 学习策略优先于花碎片（2026-09-14 修复）：此前 endpoint 技术纹之后
                 # 直接进入 tier 修行，把开局的20碎片和本场精力花光，todo 中的
                 # 杀伐/再生等永远学不到；封印起手因此在第一场只会叠异变并被凡庸。
@@ -1271,6 +1259,7 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
                         if r.get("success"):
                             _tag_behavior(behaviors, "学习", {"name": next_learn}, e, b)
                             todo.remove(next_learn)
+                            remaining_actions -= 1
                             continue
 
                 # 花光口径（用户指令 2026-09-10「局外为什么不把碎片花完」）：
@@ -1283,6 +1272,7 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
                         "sub_action": "附煞", "mode": "选择", "sha_qi": "冥煞", "daowen_name": held})
                     if r.get("success"):
                         _tag_behavior(behaviors, "附煞", {}, e, b)
+                        remaining_actions -= 1
                         continue
                 if p and e.state.shards >= 15:
                     tier = max(t for t, c in ((6, 150), (5, 100), (4, 65), (3, 35), (2, 15))
@@ -1297,6 +1287,7 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
                             else {"blood_points": tier})})
                     if r.get("success"):
                         _tag_behavior(behaviors, "修行", {"tier": tier}, e, b)
+                        remaining_actions -= 1
                         continue
             # 学法术：已有对应道纹且没学过的先学（免费1精力）。
             spell_next = None
@@ -1332,8 +1323,12 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
                     learned_spells.add(spell_next)
                     if behaviors is not None:
                         behaviors.append("备齐反应法术")
+                    remaining_actions -= 1
                     continue
             act, params = choose_pre_battle(e, todo, b, rng, policy)
+            # 旧探索策略不再对应现行行动；在此基准中退化为合法的低阶修行样本。
+            if act == "探索":
+                act, params = "修行", {"tier": 1, "to": "blood"}
             record("attempted", act)
             try:
                 r = e.execute_action("pre_battle_action", {"sub_action": act, **params})
@@ -1374,22 +1369,21 @@ def _play(starter: str, learn: list, region: str, seed=None, battles: int = 7,
                     return {"cleared": cleared, "won": False, "invalid": False, "final_daowen": (sorted(e.state.player.dao_wen) if getattr(e.state, "player", None) else []),
                                         "consumable_uses": sum(v for k2, v in getattr(ai, "used", {}).items() if str(k2).startswith("消耗品")),
                             "pm": _postmortem(e, cleared, todo), "death_trace": (_death_trace_payload(e, cleared, round_snapshots) if death_trace else None)}
+                remaining_actions -= 1
             else:
                 record("failed", act, str(r.get("error"))[:60])
-                # 失败必须退还精力，否则会死循环；引擎已退还，这里兜底防死锁
-                if e.state.energy >= before:
-                    # tier1 只给 1 属性点：速限/法限要偶数点，只能进血限，
-                    # 否则兜底自己也会被引擎拒（2026-10-03 修死锁）。
-                    e.execute_action("pre_battle_action",
-                                     {"sub_action": "修行", "tier": 1, "to": "blood"})
-            # 卡死哨兵：连续 STALL_LIMIT 步精力不退（门禁未清/兜底被拒），说明
-            # 存在驱动解不开的语义门禁——回收为无效局，绝不挂死进程。
-            if e.state.energy >= before:
+                if remaining_actions >= before:
+                    # 失败动作不消耗模拟预算；合法的低阶修行作为兜底尝试。
+                    fallback = e.execute_action("pre_battle_action",
+                                                 {"sub_action": "修行", "tier": 1, "to": "blood"})
+                    if fallback.get("success"):
+                        remaining_actions -= 1
+            # 连续无成功行动说明模拟策略被门禁卡住，按无效局回收。
+            if remaining_actions >= before:
                 stalls += 1
                 if stalls >= STALL_LIMIT:
                     return {"cleared": cleared, "won": False, "invalid": True,
-                            "reason": f"pre_battle死锁：连续{stalls}步精力不退"
-                                      f"（能量{e.state.energy}，按无效局回收）"}
+                            "reason": f"pre_battle模拟预算连续{stalls}步未消耗"}
             else:
                 stalls = 0
 

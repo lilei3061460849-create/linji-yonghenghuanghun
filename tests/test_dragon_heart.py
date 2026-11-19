@@ -1,7 +1,7 @@
 """
 pytest 风格测试 - 里程碑9a：龙心谷"炼心"/【××龙心】消耗品系统（终音法器"共心环"的前置依赖）
 
-原文："龙心谷专属行动：【炼心】局外（消耗1精力）或战斗（下次行动精力-1）中均可发动：
+现行规则：龙心谷【炼心】局外耗时1世界回合；战斗中不消耗出手，下一次实际支付数值型代价后生成对应龙心。
 直到你下一次支付数值为X的代价后，获得对应类型的【××龙心】（消耗品（耐久X））。
 消耗【××龙心】Y点耐久，可抵消Y点同类型代价；未被抵消的剩余代价照常支付。"
 
@@ -38,12 +38,10 @@ def _new_engine(db_suffix: str) -> GameEngine:
     engine.state.relics = []
     engine.state.player.dao_wen["连击"] = DaoWenInstance(
         DaoWen(name="连击", formula="", cost_type="生命", cost_formula="X", effect_formula=""))
-    engine.state.energy = 3
     return engine
 
 
 def _start_with_enemy(engine):
-    engine.state.energy = 0
     engine.execute_action("battle_start", {"relic_choices": {}})
     engine.state.enemies.clear()
     engine.state.enemies.append(Entity(name="靶怪", entity_type="怪物", blood_limit=999, current_hp=999))
@@ -109,29 +107,22 @@ def test_dragon_heart_merges_with_existing_same_name_consumable():
     assert hearts[0].current_uses == 10 and hearts[0].max_uses == 10  # 4+6
 
 
-def test_lianxin_in_battle_does_not_cost_action_but_defers_energy():
-    """正常路径：战斗中发动炼心不消耗出手，改为下一次局外行动多消耗1点精力"""
+def test_lianxin_in_battle_does_not_cost_action_and_banks_next_numeric_cost():
+    """战斗中炼心不消耗出手；下一次实际支付数值型代价后生成对应龙心。"""
     engine = _new_engine("in_battle_ok")
     _start_with_enemy(engine)
     actions_before = engine.state.player.actions_used_this_round
     r = engine.execute_action("lianxin_in_battle", {})
     assert r["success"] is True
-    assert engine.state.player.actions_used_this_round == actions_before, "不应消耗出手"
-    assert engine.state.pending_energy_penalty == 1
+    assert engine.state.player.actions_used_this_round == actions_before
+    assert engine.state.pending_lianxin is True
 
-    engine.state.phase = "pre_battle"  # 模拟该场战斗已合法结束
-    engine.state.energy = 3
-    # 【领悟】已于 2026-09-10 删除；本条测的是"炼心追加扣精力挂在任意局外行动上"，
-    # 换用仍在的【休整】承载同一断言（不用探索：它会随机触发事件挡住后续行动）。
-    probe = engine.execute_action("pre_battle_action", {
-        "sub_action": "休整", "tier": 1,
-        "heal_allocations": [{"target_ref": "player:0",
-                              "amount": math.ceil(engine.state.player.blood_limit * 0.2)}],
-    })
-    assert probe["success"], probe
-    assert engine.state.energy == 3 - 1 - 1, "应额外多扣1点精力(基础1点+炼心追加1点)"
-    assert engine.state.pending_energy_penalty == 0, "结算后应清零，不能重复扣"
-
+    # 连击X=1实际支付生命2，炼心应将这次实际支付转为2点生命龙心。
+    _use_daowen(engine, {"daowen_name": "连击", "x": 1, "target": "靶怪"})
+    heart = next(c for c in engine.state.consumables if c.kind == "dragon_heart")
+    assert heart.name == "生命龙心"
+    assert heart.current_uses == 2 and heart.max_uses == 2
+    assert engine.state.pending_lianxin is False
 
 
 def _register_aging_probe(engine, monkeypatch, name="血限样本", amount_per_x=1):

@@ -31,7 +31,6 @@ def _new_engine(db_suffix: str) -> GameEngine:
     engine.execute_action("choose_discovered_relic",
                           {"relic_name": setup["result"]["relic_choices"][0]})
     engine.state.relics.clear()   # 保留列表身份，让死者之页绑定同步看到空遗物栏
-    engine.state.energy = 3
     return engine
 
 
@@ -42,7 +41,6 @@ def _grant(engine: GameEngine, names):
 
 
 def _start_with_enemy(engine: GameEngine, enemy: Entity):
-    engine.state.energy = 0
     engine.execute_action("battle_start", {"relic_choices": {}})
     engine.state.enemies.clear()
     engine.state.enemies.append(enemy)
@@ -70,7 +68,6 @@ def test_escape_pays_three_atomically_and_forces_departure():
     assert player.actions_used_this_round == 3
     assert engine.state.enemies == []
     assert engine.state.phase == "pre_battle"
-    assert engine.state.energy == engine.state.energy_budget
     assert not getattr(engine.state, "pending_interrupts", []), "逃跑不再产生DM追击中断"
 
 
