@@ -127,26 +127,65 @@ def test_every_registered_daowen_name_is_exactly_two_chars():
     assert bad == [], f"索引里出现非二字道纹：{bad}"
 
 
-# ==================== 道纹：X 必须改变强度或持续时间 ====================
+# ==================== 道纹：X 必须改变强度、持续时间或目标数量 ====================
 
-def test_daowen_x_scales_strength_or_duration():
-    """X 必须至少改变一个效果字段；固定 X 等于没有 X，与条文冲突。"""
+# 只有这些字段代表已经识别的实际结算量/效果规模。摘要、目标对象、选择索引、
+# 资源支付、内部元数据即使随 X 变化，也不能单独证明 X 有效。
+X_EFFECT_FIELDS = {
+    "action_cost_penalty", "attack_bonus", "attack_count_to_speed_limit",
+    "attack_power_to_mana_limit", "attack_reduction", "bizhong_gain",
+    "blood_pact_multiplier", "block_target_rounds", "borrow_daowen_count",
+    "catalysis_count", "consumable_destroy_threshold", "consumable_durability_gain",
+    "consumable_durability_loss", "consumable_effect_multiplier", "consumable_forge_uses",
+    "corpse_copies", "creation_attack_count", "creation_attack_power",
+    "creation_blood_limit", "creation_mana_limit", "creation_speed_limit",
+    "damage", "target_damage", "others_life_loss", "total_damage", "delay_rounds", "diaoling_threshold",
+    "duration", "extend_duration", "extra_target_rounds", "fake_shards",
+    "fragile_repeats", "freeze_count", "heal_accumulation_doublings", "hits",
+    "hunger_blood_limit", "infect_daowen_count", "infect_daowen_names",
+    "item_steal", "mana_gain", "manipulation_uses", "map_illusions",
+    "map_terrain_count", "mark_targets", "merge_creations", "preserve_daowen_changes",
+    "purified_layers", "recast_max", "recast_min", "reforge_discovery_uses",
+    "relic_discovery", "relic_disable", "relic_enable", "relic_names", "relic_steal",
+    "remove_status_count", "replay_numeric", "shard_burn", "shard_gain",
+    "share_slots", "shelter_charges", "silence_rounds", "speed_boost",
+    "split_creations", "tamper_activations", "target_heal",
+    "target_life_loss", "targets", "temp_hp", "transfer_daowen_count",
+    "transfer_daowen_names", "transfer_status_count", "truth_sentences",
+    "convert_cost_layers", "cost_reductions", "layers", "demand_amount",
+    "discover_daowen",
+}
+
+
+def test_daowen_x_scales_strength_duration_or_target_count():
+    """X 必须改变已识别的实际效果字段；成本、摘要、索引和内部元数据不算。"""
     DaoWenEngine.register_all()
-    ignore = {"x", "y", "summary", "dao_wen", "cost_type", "cost", "cost_hp",
-              "cost_blood_limit", "cost_mana_limit", "cost_speed_limit", "cost_speed",
-              "cost_attack", "forget_daowen", "cost_choices"}
     flat = []
     for name in sorted(DaoWenEngine._registry):
         kwargs = {"cost_choices": [{"type": "异变"}]} if name == "净化" else {}
         kwargs["target"] = Entity("审查靶", "怪物", blood_limit=100, current_hp=100)
         if name == "净化":
             kwargs["target"].mutation_count = 100
-        low, high = DaoWenEngine.resolve(name, 1, **kwargs), DaoWenEngine.resolve(name, 3, **kwargs)
-        if all(low.get(k) == high.get(k) for k in low if k not in ignore):
+        low = DaoWenEngine.resolve(name, 1, **kwargs)
+        high = DaoWenEngine.resolve(name, 3, **kwargs)
+        changed_effects = {
+            key for key in X_EFFECT_FIELDS
+            if low.get(key) != high.get(key)
+        }
+        if not changed_effects:
             flat.append(name)
     assert set(flat) == X_DOES_NOT_SCALE, (
-        f"X 不改变任何效果的道纹集合应与已知例外一致：实际 {sorted(flat)}，"
-        f"已知 {sorted(X_DOES_NOT_SCALE)}")
+        f"X 不改变强度/持续时间/目标数量的道纹集合应与已知例外一致："
+        f"实际 {sorted(flat)}，已知 {sorted(X_DOES_NOT_SCALE)}")
+
+
+def test_wave_x_is_explicitly_counted_as_target_scaling():
+    """【波及】的 X 增加目标数量，属于现行基础定义允许的缩放维度。"""
+    low = DaoWenEngine.resolve("波及", 1)
+    high = DaoWenEngine.resolve("波及", 3)
+    assert low.get("mark_targets") == 1
+    assert high.get("mark_targets") == 3
+    assert "mark_targets" in X_EFFECT_FIELDS
 
 
 # ==================== 道纹：局外发动须明示 ====================
