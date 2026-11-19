@@ -1068,6 +1068,19 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
                for encounter in world.encounters.values()):
             return {"success": False, "error": "正在遭遇中，不能开始耗时行动；应先处理遭遇"}
 
+        # 沉沦海的【潮下基地】是开放地图上的3×3休整区域，不再走旧线性事件选项。
+        if action == "休整" and self.state.current_region == "沉沦海":
+            player_actor = world.actors[player_id]
+            in_rescue_base = any(
+                location.get("kind") == "rest_area"
+                and location.get("area_id") == "rescue_base"
+                and (int(location.get("x", -1)), int(location.get("y", -1))) == player_actor.position
+                for location in world.map.locations.values()
+            )
+            if not in_rescue_base:
+                return {"success": False,
+                        "error": "沉沦海的【休整】只能在地图上的【潮下基地】3×3区域内进行"}
+
         # 开放世界共鸣：耗时一回合，把一件真实遗物投放到可通行路径距离10以内。
         # 发动者知道坐标但不直接获得遗物；遭遇打断时不会消耗遗物池。
         if action == "共鸣":
@@ -1335,8 +1348,24 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
         base_heal = (math.ceil(player.blood_limit * tier_pct[tier] / 100)
                      if player is not None else 0)
         cost = tier_cost[tier]
-        # 癌变不再为【休整】提供额外恢复量，恢复额度=档位基础值。
-        heal = base_heal
+        # 癌变不再为【休整】提供额外恢复量；沉沦海潮下基地仅额外增加本次总恢复量12。
+        rescue_base_bonus = 0
+        if self.state.current_region == "沉沦海" and isinstance(self.state.world_state, dict):
+            world_data = self.state.world_state
+            player_id = next((actor_id for actor_id, actor in
+                              (world_data.get("actors") or {}).items()
+                              if actor.get("kind") == "player"), None)
+            player_actor = (world_data.get("actors") or {}).get(player_id, {}) if player_id else {}
+            player_position = (player_actor.get("x"), player_actor.get("y"))
+            rescue_cells = {
+                (int(location.get("x", -1)), int(location.get("y", -1)))
+                for location in (world_data.get("map") or {}).get("locations", {}).values()
+                if location.get("kind") == "rest_area"
+                and location.get("area_id") == "rescue_base"
+            }
+            if player_position in rescue_cells:
+                rescue_base_bonus = 12
+        heal = base_heal + rescue_base_bonus
         refs = ({"player:0": self.state.player}
                 if self.state.player and self.state.player.is_alive else {})
         refs.update({f"friend:{index}": entity for index, entity in enumerate(self.state.friends)
@@ -1372,6 +1401,7 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
             healed.append({"target_ref": entry["target_ref"], "target": target.name,
                            "allocated": entry["amount"], **detail})
         payload = {"base_heal_amount": base_heal,
+                   "area_bonus": rescue_base_bonus,
                    "heal_amount": heal, "shard_cost": cost, "heals": healed,
                    "shards_remaining": self.state.shards}
         return {"success": True, "action": "休整", "result": payload}
