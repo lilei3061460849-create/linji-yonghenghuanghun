@@ -66,8 +66,6 @@ def test_bound_player_can_cast_but_cannot_use_other_active_actions(tmp_path):
 
     for action_type, params in (
         ("prepare_attack", {"actor_ref": "player:0"}),
-        ("use_daowen", {"daowen_name": "杀伐", "x": 1,
-                         "target_ref": "enemy:0"}),
         ("focus", {}),
         ("consume_item", {"name": "不存在的物品"}),
     ):
@@ -93,17 +91,27 @@ def test_prepare_monster_phase_is_offered_only_when_enemy_holds_priority(tmp_pat
         a["action_type"] for a in engine.get_available_actions()["actions"]}
 
 
-def test_custom_spell_actions_are_allowed_but_direct_daowen_is_blocked(tmp_path):
+def test_instant_custom_and_single_daowen_casts_are_allowed(tmp_path):
     engine, _player, _target = _bound_engine(tmp_path, "spell_actions")
     # 本用例连续定义/施展两次法术，按「阶数＝重数」各 2 次出手，先给足预算。
     grant_extra_actions(_player, 6)
 
-    blocked = engine.execute_action("cast", {
+    direct_daowen = engine.execute_action("cast", {
         "kind": "daowen", "daowen_name": "杀伐", "x": 1,
         "target_ref": "enemy:0",
     })
-    assert not blocked["success"]
-    assert "只能进行法术行动" in blocked["error"]
+    assert direct_daowen["success"], direct_daowen
+    back = opponent_passes(engine)
+    assert back.get("success"), back
+
+    direct_action = engine.execute_action("use_daowen", {
+        "daowen_name": "杀伐", "x": 1,
+        "target_ref": "enemy:0", "dodge": False,
+        "blood_shadow": False, "trigger_spell_choices": {},
+    })
+    assert direct_action["success"], direct_action
+    back = opponent_passes(engine)
+    assert back.get("success"), back
 
     def spell(name):
         return {
@@ -150,3 +158,35 @@ def test_shackling_item_status_uses_the_same_cast_only_gate(tmp_path):
         "steps": [{"x": 1, "dodge": False, "trigger_spell_choices": {}}],
     })
     assert cast["success"], cast
+
+
+def test_bound_target_cannot_use_any_passive_attack_response(tmp_path):
+    engine, player, _target = _bound_engine(tmp_path, "passive_responses")
+    engine.state.consumables = [Consumable("应急药", "回复1", 1, 1)]
+    pending = {
+        "options": {
+            "actor_ref": "enemy:0",
+            "target_options": [{
+                "ref": "player:0", "name": player.name,
+                "can_dodge": True, "can_parry": True, "can_blood_shadow": True,
+                "blood_shadow_cost_share_target_options": [], "spell_options": {},
+            }],
+        },
+        "hit_index": 0,
+        "declared": {"target_ref": "player:0", "damage": 1},
+    }
+    engine.state.pending_attack = pending
+
+    options = engine._attack_defender_options(pending, "player:0")
+    assert options["can_tank"] is True
+    assert options["can_dodge"] is False
+    assert options["can_parry"] is False
+    assert options["can_blood_shadow"] is False
+    assert options["can_use_item"] is False
+    assert options["item_options"] == []
+    assert options["can_wanjunyin"] is False
+
+    for choice in ("dodge", "parry", "blood_shadow", "use_item", "wanjunyin"):
+        result = engine._action_attack_respond_hit({"choice": choice})
+        assert not result["success"], (choice, result)
+        assert "束缚" in result["error"], (choice, result)
