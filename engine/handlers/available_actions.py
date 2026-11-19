@@ -262,7 +262,8 @@ class AvailableActionsMixin:
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "休整", "tier": [1, 2, 3],
                 "heal_allocations": {"target_options": heal_targets,
-                                     "constraint": "amount总和=档位基础恢复量"}}},
+                                     "constraint": ("amount总和=档位基础恢复量；若当前位于沉沦海潮下基地3×3区域，"
+                                                    "则总恢复量额外增加12")}}},
             {"action_type": "pre_battle_action", "params_schema": {
                 "sub_action": "修行", "tier": [1, 2, 3, 4, 5, 6],
                 "allocations": {"blood_points": "nonnegative integer",
