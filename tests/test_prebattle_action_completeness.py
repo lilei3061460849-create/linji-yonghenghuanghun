@@ -37,7 +37,7 @@ def test_available_prebattle_schemas_use_real_executable_parameter_names(tmp_pat
     assert "custom_spell" not in learning["sub"], "局外自创法术入口已取消"
     assert {"heal_allocations", "tier"} <= set(by_sub_action["休整"])
     assert {"allocations", "tier"} <= set(by_sub_action["修行"])
-    assert "tier" in by_sub_action["探索"]
+    assert "探索" not in by_sub_action, "探索已迁入开放世界行动，不再属于局外行动"
     assert {"tier", "names", "target"} <= set(by_sub_action["改造"])
     assert "维修" not in by_sub_action, "维修已按 改为【改造】"
     assert "additional" not in by_sub_action["改造"]
@@ -71,25 +71,25 @@ def test_spell_learning_sub_is_retired_but_daowen_still_works(tmp_path):
 
 
 
-def test_resonance_choose_requires_second_energy_and_applies_cost(tmp_path):
+def test_resonance_tier_two_requires_fifteen_shards_and_applies_cost(tmp_path):
     engine = _engine(tmp_path)
     engine._init_relic_pool()
     choice = engine.state.relics_pool[0].name
-    engine.state.energy = 1
-    before = (engine.state.energy, engine.state.shards, len(engine.state.relics))
+    engine.state.shards = 14
+    before = (engine.state.shards, len(engine.state.relics))
 
     insufficient = engine.execute_action("pre_battle_action", {
         "sub_action": "共鸣", "tier": 2, "name": choice,
     })
     assert not insufficient["success"]
-    assert (engine.state.energy, engine.state.shards, len(engine.state.relics)) == before
+    assert (engine.state.shards, len(engine.state.relics)) == before
 
-    engine.state.energy = 3
+    engine.state.shards = 100
     success = engine.execute_action("pre_battle_action", {
         "sub_action": "共鸣", "tier": 2, "name": choice,
     })
     assert success["success"]
-    assert engine.state.energy == 1 and engine.state.shards == 85
+    assert engine.state.shards == 85
     assert any(relic.name == choice for relic in engine.state.relics)
 
 
@@ -100,7 +100,6 @@ def test_gaizao_merges_effects_into_target_and_charges_shards(tmp_path):
     second = Consumable("乙", "获得3格挡", current_uses=2, max_uses=3)
     third = Consumable("丙", "造成4伤害", current_uses=1, max_uses=1)
     engine.state.consumables = [first, second, third]
-    engine.state.energy = 3
 
     merged = engine.execute_action("pre_battle_action", {
         "sub_action": "改造", "tier": 3, "names": ["甲", "乙", "丙"], "target": "乙",
@@ -116,7 +115,7 @@ def test_gaizao_merges_effects_into_target_and_charges_shards(tmp_path):
 
 
 def test_gaizao_rejects_duplicate_names_and_foreign_target_atomically(tmp_path):
-    """改造：同名、目标不在名单、件数与档位不符都在消耗精力前拒绝并退款。"""
+    """改造：同名、目标不在名单、件数与档位不符都在消耗前拒绝且保持原子性。"""
     engine = _engine(tmp_path)
     engine.state.consumables = [Consumable("甲", "a"), Consumable("乙", "b")]
     engine.state.energy = 3
@@ -133,7 +132,6 @@ def test_gaizao_rejects_duplicate_names_and_foreign_target_atomically(tmp_path):
         "sub_action": "改造", "tier": 4, "names": ["甲", "乙"], "target": "甲"})
     assert not wrong_tier["success"]
 
-    assert engine.state.energy == 3, "被拒绝的改造必须退还精力"
     assert [item.name for item in engine.state.consumables] == ["甲", "乙"]
 
 
@@ -173,14 +171,14 @@ def test_rest_freely_splits_full_amount_without_combat_heal_tracking(tmp_path):
 def test_rest_requires_exact_valid_allocation_and_is_atomic(tmp_path):
     engine = _engine(tmp_path)
     engine.state.player.current_hp = 10
-    before = (engine.state.player.current_hp, engine.state.energy, engine.state.shards)
+    before = (engine.state.player.current_hp, engine.state.shards)
 
     incomplete = engine.execute_action("pre_battle_action", {
         "sub_action": "休整", "tier": 1,
         "heal_allocations": [{"target_ref": "player:0", "amount": 7}],
     })
     assert not incomplete["success"]
-    assert (engine.state.player.current_hp, engine.state.energy, engine.state.shards) == before
+    assert (engine.state.player.current_hp, engine.state.shards) == before
 
     unknown_target = engine.execute_action("pre_battle_action", {
         "sub_action": "休整", "tier": 1,
@@ -228,14 +226,14 @@ def test_training_banks_points_when_no_allocations(tmp_path):
     assert engine.state.attribute_points == bank_before + 2
 
     # 攒到 2 点后随时兑换（自由动作，不耗精力/碎片）
-    energy_before, shards_before = engine.state.energy, engine.state.shards
+    shards_before = engine.state.shards
     d = engine.execute_action("redeem_attribute_points",
                               {"allocations": {"speed_points": 2, "mana_points": 0}})
     assert d["success"], d
     assert player.speed_limit == panel_before[0] + 1
     assert engine.state.attribute_points == bank_before
-    assert (engine.state.energy, engine.state.shards) == (energy_before, shards_before), \
-        "兑换不该消耗精力或碎片"
+    assert engine.state.shards == shards_before, \
+        "兑换不该消耗碎片"
 
 
 def test_redeem_rejects_odd_mana_and_overspend_and_in_combat(tmp_path):
@@ -271,7 +269,7 @@ def test_training_rejects_invalid_split_atomically(tmp_path):
     engine = _engine(tmp_path)
     player = engine.state.player
     before = (player.speed_limit, player.mana_limit, player.current_speed,
-              player.current_mana, engine.state.energy, engine.state.shards)
+              player.current_mana, engine.state.shards)
 
     mismatch = engine.execute_action("pre_battle_action", {
         "sub_action": "修行", "tier": 3,
@@ -279,7 +277,7 @@ def test_training_rejects_invalid_split_atomically(tmp_path):
     })
     assert not mismatch["success"]
     assert (player.speed_limit, player.mana_limit, player.current_speed,
-            player.current_mana, engine.state.energy, engine.state.shards) == before
+            player.current_mana, engine.state.shards) == before
 
     boolean = engine.execute_action("pre_battle_action", {
         "sub_action": "修行", "tier": 1,
