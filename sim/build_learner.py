@@ -257,6 +257,8 @@ BUILD_SIZE = 3          # 每套 build 学习的道纹数量（有效维度；�
 # 门禁拒绝且兜底也被拒"时精力不退=原地死循环（实测20万步）。连续 STALL_LIMIT 步
 # 精力不退即回收为无效局，绝不允许挂死进程。
 STALL_LIMIT = 5
+# 仅用于构建学习器基准实验的局外行动采样上限，不是游戏规则或角色资源。
+SIM_PRE_BATTLE_ACTION_LIMIT = 3
 
 
 def _resolve_pending_choices(e) -> None:
