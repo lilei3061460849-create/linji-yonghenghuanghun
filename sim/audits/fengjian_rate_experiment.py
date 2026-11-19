@@ -5,7 +5,10 @@ import argparse, json, os, sys, tempfile
 from dataclasses import replace
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+_ROOT = os.path.abspath(__file__)
+while not os.path.isdir(os.path.join(_ROOT, "engine")):
+    _ROOT = os.path.dirname(_ROOT)
+ROOT = Path(_ROOT)
 sys.path.insert(0, str(ROOT))
 from engine import derivatives as dr
 from engine.api import GameEngine
