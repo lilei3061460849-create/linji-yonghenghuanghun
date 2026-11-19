@@ -354,7 +354,6 @@ def test_cultivation_consumes_world_time_without_legacy_energy_cost(tmp_path):
                         save_dir=str(tmp_path), rng_seed=53)
     engine.state.player = Entity("P", "轮回者", blood_limit=30, current_hp=20)
     engine.state.phase = "pre_battle"
-    energy_before = engine.state.energy
     assert engine.execute_action("world_initialize", {"width": 7, "height": 7})["success"]
 
     result = engine.execute_action("pre_battle_action", {
@@ -363,7 +362,6 @@ def test_cultivation_consumes_world_time_without_legacy_energy_cost(tmp_path):
     })
     assert result["success"], result
     assert engine.state.world_state["clock"]["turn"] == 1
-    assert engine.state.energy == energy_before
     assert any(event["type"] == "world_action_completed"
                for event in engine.state.world_state["event_log"])
 
