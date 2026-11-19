@@ -118,7 +118,6 @@ def test_gaizao_rejects_duplicate_names_and_foreign_target_atomically(tmp_path):
     """改造：同名、目标不在名单、件数与档位不符都在消耗前拒绝且保持原子性。"""
     engine = _engine(tmp_path)
     engine.state.consumables = [Consumable("甲", "a"), Consumable("乙", "b")]
-    engine.state.energy = 3
 
     duplicated = engine.execute_action("pre_battle_action", {
         "sub_action": "改造", "tier": 2, "names": ["甲", "甲"], "target": "甲"})
@@ -185,7 +184,7 @@ def test_rest_requires_exact_valid_allocation_and_is_atomic(tmp_path):
         "heal_allocations": [{"target_ref": "friend:99", "amount": 8}],
     })
     assert not unknown_target["success"]
-    assert (engine.state.player.current_hp, engine.state.energy, engine.state.shards) == before
+    assert (engine.state.player.current_hp, engine.state.shards) == before
 
 
 def test_training_splits_tier_points_between_speed_and_mana(tmp_path):
@@ -285,7 +284,7 @@ def test_training_rejects_invalid_split_atomically(tmp_path):
     })
     assert not boolean["success"]
     assert (player.speed_limit, player.mana_limit, player.current_speed,
-            player.current_mana, engine.state.energy, engine.state.shards) == before
+            player.current_mana, engine.state.shards) == before
 
 
 def test_training_can_raise_blood_limit(tmp_path):
