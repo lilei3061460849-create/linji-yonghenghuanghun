@@ -530,7 +530,7 @@ class DaowenHandlersMixin:
                 return {"success": False, "error": custom_cost_error}
 
         if self.state.phase == "in_combat":
-            budget_error = self._consume_action_or_error(actor)
+            budget_error = self._consume_action_or_error(actor, action_type="use_daowen")
             if budget_error:
                 return budget_error
 
