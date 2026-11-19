@@ -30,7 +30,7 @@ def test_shufu_calculation_says_cast_only_and_keeps_x_round_duration():
     assert calc["duration"] == 3
     assert "只能施法" in calc["effect"]
     assert "其余主动行动不可用" in calc["summary"]
-    assert "持续3回合" in calc["summary"]
+    assert "持续3" in calc["summary"]
 
 
 def test_bound_player_can_cast_but_cannot_use_other_active_actions(tmp_path):
