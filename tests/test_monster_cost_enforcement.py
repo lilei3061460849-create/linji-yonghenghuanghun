@@ -93,10 +93,6 @@ def test_monster_cooldown_daowen_sets_cooldown_and_cannot_repeat(tmp_path):
 def test_monster_bleed_cost_daowen_deducts_monster_hp(tmp_path):
     """正常路径：怪物发动连击必须扣除自身生命（支付流血代价）。"""
     e = _setup_engine(tmp_path)
-    while e.state.energy > 0:
-        e.execute_action("pre_battle_action", {
-            "sub_action": "修行", "tier": 1
-        })
     started = begin_battle(e)
     assert started["success"], started
     m = Entity("靶怪", "怪物", blood_limit=80, current_hp=80, attack_count=1, attack_power=1)
