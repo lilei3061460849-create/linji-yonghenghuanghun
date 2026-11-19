@@ -191,18 +191,20 @@ class RuleSync:
                     })
 
             # 规则正文的七种通用道纹使用“名称X（消耗/代价与效果）”内联格式。
-            for name, description in re.findall(
-                    r"([\u4e00-\u9fff]{2})X（([^（）]+)）", line):
-                if not any(label in description for label in ("消耗", "代价", "支付")):
-                    continue
-                if not is_common_only(name):
-                    continue
-                definitions.setdefault(name, {
-                    "name": name,
-                    "description": description.strip(),
-                    "source": filepath,
-                    "line": line_number,
-                })
+            # 只识别行首的“道纹X（支付/代价/消耗…）”定义。
+            # 不扫描普通效果说明中的“持续X（……含消耗品……）”，否则会把“持续”
+            # 误识别成道纹名（例如【豪夺】的持续期限说明）。
+            inline = re.match(r"^([\u4e00-\u9fff]{2})X（([^（）]+)）", line)
+            if inline:
+                name, description = inline.groups()
+                if (any(label in description for label in ("消耗", "代价", "支付"))
+                        and is_common_only(name)):
+                    definitions.setdefault(name, {
+                        "name": name,
+                        "description": description.strip(),
+                        "source": filepath,
+                        "line": line_number,
+                    })
 
         return list(definitions.values())
 
