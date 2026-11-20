@@ -2872,8 +2872,8 @@ class GameEngine(AvailableActionsMixin, WorldHandlersMixin, ResourceHandlersMixi
 
         语义：
         - 提交结构非法（句式/步数/X/目标）= 契约错误：返回 success=False，不扣出手；
-        - 结构合法则扣 1 次出手（整次 cast 只扣一次，与步骤数无关），
-          然后按步骤顺序逐步执行；每一步都以执行时真实法力/速度判定；
+        - 结构合法后逐步施展；每个实际效果步骤开始前各扣 1 次主动出手，
+          并以执行时真实法力/速度判定；步骤之间及最后一步后保留相应行动空档；
         - 资源不足等正常中断：已结算步骤保留，execution.status=interrupted，
           返回 success=True（施法动作本身发生了）；
         - lifecycle=instant：不写入 entity.spells，不留任何绑定。
