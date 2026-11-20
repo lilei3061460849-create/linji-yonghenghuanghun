@@ -14,7 +14,6 @@ from engine.combat_events import CombatEvent, CombatEventType
 from engine.combat_hooks import (
     CombatHookManager,
     QianjingjiaHook,
-    BifenglingHook,
 )
 
 
