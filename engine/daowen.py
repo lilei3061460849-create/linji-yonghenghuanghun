@@ -1132,11 +1132,11 @@ class DaoWenEngine:
 
     @staticmethod
     def calculate_zhenli(x: int, target: Entity = None) -> dict:
-        """真理X：支付：冷却2场。提出 X 句陈述，要求[目标]逐句言明真理。
+        """真理X：支付：冷却2场。提出 X 句陈述，由 DM 逐句裁定真伪；任一句被判定为说谎，目标立即命零。
 
-        X 不再是固定值，改为「X 句话」——X 决定陈述句数，
-        每有一句无法言明真理，[目标]即无法开口，持续 X（X 同时放大强度与持续）。
-        任一句的真伪均由 DM 裁定。
+        X 决定陈述句数。拒绝回答或无法回答不等于说谎；不附带禁言效果。
+        注意：当前计算结果仍含旧版 silence_rounds 字段，DM 说谎裁定到统一死亡管线尚未接入；
+        该字段只反映旧实现，不代表现行规则。实现缺口跟踪于 Issue #102。
         """
         target_name = target.name if target is not None else "未选定目标"
         return {
