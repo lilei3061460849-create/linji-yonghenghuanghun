@@ -143,7 +143,7 @@ def test_worldview_context_includes_both_creation_and_biology():
 
 
 def test_readme_exposes_the_one_url_external_ai_entry_and_context_contract():
-    """README 暴露 raw 入口；上下文说明剧情优先、事实源边界与按需查询。"""
+    """README 暴露 raw 入口；上下文说明事实源边界与按需查询。"""
     readme = README.read_text(encoding="utf-8")
     assert "[AI_CONTEXT.md](AI_CONTEXT.md)" in readme
     assert ("https://raw.githubusercontent.com/lilei3061460849-create/"
