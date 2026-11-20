@@ -160,7 +160,10 @@ class MonsterPhaseMixin:
                 and self.state.are_hostile(monster, refs[target["ref"]])
                 and self.is_targetable(monster, refs[target["ref"]])
             ]
-            if not monster.has_status("干扰"):
+            is_seal_reentry_whiteboard = (
+                getattr(monster, "seal_reentered_round", None) == self.state.current_round
+            )
+            if not monster.has_status("干扰") and not is_seal_reentry_whiteboard:
                 for name, inst in monster.dao_wen.items():
                     # 【唯一】（2026-11-02 修复1）：锁死的道纹不再公布为可选行动
                     if (name in round_used or not monster.can_use_daowen(name)
@@ -248,9 +251,6 @@ class MonsterPhaseMixin:
                     else:
                         if cooldown_limited:
                             effective_x = 1
-                        if (name == "消灾" and monster.fake_shards < 50 * inst.x_value
-                                and monster.shards < 5 * inst.x_value):
-                            continue
                         effective_x = inst.x_value
                     # 面板 X 不合法（0/负数）＝这道纹此刻没有可结算的 X：
                     # 不能先把 0 递进 prepare 让 resolve 抛「X必须为正整数」。
