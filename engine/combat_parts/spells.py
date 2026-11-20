@@ -1625,7 +1625,7 @@ class SpellReactionMixin:
           - 目标为 any（任意目标）时无法静态定目标 → 本法术放弃自动触发。
           - 预测会走到的步骤里任一法力步骤付不起（X=1 都超出预算）→ 放弃触发。
           - 不一定会走到的分支槽位填 x=1（结构必须完整；真走到时按运行期判定）。
-          - 触发型法术最多自动跑一轮（max_iterations=1），保持旧行为。
+          - 循环次数由法术循环与中断规则决定，不附加自动反应单轮上限。
           - budget 为"本次共用法力预算"（同一次失血的多个反应法术共享）。
         """
         program = self._flow_program(flow)
@@ -1673,8 +1673,8 @@ class SpellReactionMixin:
         if not steps:
             return {"use": False}
         return {"use": True, "steps": steps,
-                # 通用循环法术默认由资源/条件/无进展终止；旧反应法术保留单轮保护。
-                "max_iterations": None if name == "徒劳无功" else 1,
+                # 自动反应与主动施法遵守同一循环规则；不按法术名称设置单轮例外。
+                "max_iterations": None,
                 "_cost": consumed, "_engine_automatic": True}
 
     def _fire_auto_reaction(self, holder: Entity, trigger: str,
