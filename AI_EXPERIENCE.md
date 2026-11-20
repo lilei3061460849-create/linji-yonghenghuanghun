@@ -614,7 +614,7 @@ python sim/audit_monsters.py
 
 ## 死斗模拟器防卡死边界
 
-- 死斗模拟器的面板僵持与墙钟超时保护只报告程序错误，不得代替规则判定胜负。
+- 单回合行动面板连续50步无变化时，模拟器结束当前行动阶段并等待回始回填法力；回填后仍连续僵持达到 `DEADLOCK_MIN_ROUNDS = MEDIOCRITY_ROUNDS + 1`，或触发墙钟超时，才报告程序错误。两种兜底都不得代替规则判定胜负。
 - 【凡庸】属于游戏规则，必须先获得完整结算机会；模拟器兜底阈值由 `MEDIOCRITY_ROUNDS + 1` 推导。
 - 探针用于决策的效果量与判定必须同源；伤害判断读取事件流中的 `damage_applied.raw_damage`，不能用被格挡后的面板净位移替代。
 - 相关实现与回归：`sim/duel_pvp.py`、`engine/ai_tactics.py`、`tests/test_ai_tactics.py`、`tests/test_duel_pvp_guards.py`。
