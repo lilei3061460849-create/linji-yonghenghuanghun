@@ -35,6 +35,11 @@ def test_ai_knowledge_base_contains_current_engineering_and_collaboration_policy
         "Arena 固定分支",
         "默认只保留 `main`",
         "最终死斗触发条件裁定的沿革",
+        "## 当前执行约束与已确认结论（2026-10-19）",
+        "## 实验与变更档案",
+        "## 实验灾备协议",
+        "seed=901",
+        "四项并行任务",
     ):
         assert marker not in text, marker
 
