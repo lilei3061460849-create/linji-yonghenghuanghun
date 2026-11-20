@@ -46,8 +46,8 @@ jobs:
       - name: Regenerate source-derived documents
         run: |
           python sim/gen_rules.py
-          python sim/gen_ai_context.py
           python sim/gen_daowen_index.py
+          python sim/gen_ai_context.py
       - name: Commit generated documents when changed
         run: |
           git add -- "死者之书.md" "AI_CONTEXT.md" "全道纹索引.md"
