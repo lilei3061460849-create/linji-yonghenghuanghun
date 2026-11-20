@@ -281,7 +281,7 @@ def test_cancer_still_caps_the_loop():
 
 def test_automatic_non_attack_reaction_uses_full_loop_and_no_trigger_action_cost():
     """自动事件监听按同一循环规则运行，不设单轮上限；触发本身不扣持有者出手。"""
-    engine = _engine_with_loop_spell("auto_loop", hp=40, mana=SEED_MANA)
+    engine = _engine_with_loop_spell("auto_loop", hp=40, mana=1)
     player = engine.state.player
     # define_spell 本身是主动行动，已支付1次；之后由事件自动触发不再扣出手。
     actions_after_definition = player.actions_used_this_round
