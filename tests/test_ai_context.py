@@ -132,7 +132,7 @@ def test_mechanics_digest_covers_daowen_relics_spells_and_regions():
 def test_obsolete_roleplay_and_simulation_constraints_are_not_packed():
     """旧角色扮演脚本与推演铁律不得重新进入单文件上下文。"""
     text = OUTPUT.read_text(encoding="utf-8")
-    for marker in ("外部推演守则", "角色性格塑造", "推演铁律", "行文十诫", "白刃战双操推演模式"):
+    for marker in ("外部推演守则", "角色性格塑造", "推演铁律", "行文十诫", "白刃战双操推演模式", "剧情优先", "单角色推演"):
         assert marker not in text, marker
 
 
