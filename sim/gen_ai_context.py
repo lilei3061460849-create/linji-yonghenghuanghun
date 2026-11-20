@@ -84,7 +84,7 @@ class DigestSource:
 
 
 def context_sources() -> list[ContextSource]:
-    """剧情优先：嵌入世界观正典与 AI 知识库扮演规范。
+    """嵌入造物学与生物学完整设定；其他机制按需查询或使用速查。
 
     完整规则、副本机制与战报不批量打包；机制速查见 digest_sources()。
     """
