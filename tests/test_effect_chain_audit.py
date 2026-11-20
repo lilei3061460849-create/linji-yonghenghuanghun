@@ -353,7 +353,6 @@ def test_f_hook_order_is_explicit_and_unchanged():
         "MechanismHookAdapter",  # 【叠鳞甲】：原 LonglinHook 位置（priority 30）
         "MechanismHookAdapter",  # 【固执】也接入同一伤害相位（priority 40）
         "QianjingjiaHook",
-        "BifenglingHook",
         "DamageRedirectionHook",
         "LethalMitigationHook",
         "AfterDamageEffectsHook",
