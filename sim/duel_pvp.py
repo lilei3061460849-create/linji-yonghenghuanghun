@@ -12,7 +12,7 @@
 本驱动让守擂方走与挑战者相同的玩家侧接口（use_daowen / prepare_attack /
 resolve_attack），引擎对 in_final_duel 的 opponent 侧已放行，且自动走：
   - 法力制（发动消耗道纹扣守擂主将法力）
-  - 轮回者出手次数按 action_count（当前固定2次）；朋友/员工 = 攻击次数/3
+  - 轮回者出手次数按 Entity.action_count（基础1次，统一应用疯狂／无力等修正）；朋友/员工 = 攻击次数/3
   - 道纹 X 自由控（由本驱动决策，与挑战者同策略）
   - 每次行动后 _advance_duel_turn 对称换边
 """
@@ -626,8 +626,8 @@ def run_duel_pvp(e, player_act=None, max_rounds=60, max_steps=400, log=None,
             # "对手共罪"校验事故)。显式报告提交错误并留因，不把程序错误算作规则败北。
             return {"winner": None, "rounds": rnd, "error": True, "error_kind": "contract",
                     "reason": f"回始提交失败: {str(rs.get('error', ''))[:80]}"}
-        # 死锁防护:连续 STALL_GUARD_STEPS 步双方面板零变化 → 判卫冕(双有效行动
-        # 枯竭的残局,如 1 血 0 法互瞪;不做 400 步 × 60 回合的无意义空转)。
+        # 死锁防护:连续 STALL_GUARD_STEPS 步双方面板零变化 → 结束当前行动阶段，等待回始回填法力；
+        # 回填后仍持续僵持则由 DEADLOCK_MIN_ROUNDS 报错，不得据此判定胜负。
         last_panel, panel_stall = None, 0
         for _ in range(max_steps):
             if _over_time():
