@@ -1,4 +1,4 @@
-"""外部 AI 单文件入口：规范源 → AI_CONTEXT.md 的可复现、剧情优先聚合。
+"""外部 AI 单文件入口：规范源 → AI_CONTEXT.md 的可复现聚合。
 
 外部 AI 常只会读取一个 GitHub raw URL，不能保证继续抓 README 的相对链接。AI_CONTEXT.md
 优先保留世界观、角色名单，并附机制速查：道纹／遗物／
@@ -153,7 +153,7 @@ def test_readme_exposes_the_one_url_external_ai_entry_and_context_contract():
     for marker in (
         "## 使用契约（先读）", "## 来源目录与校验指纹", "## 打包正文",
         "死者之书的遗言不是规则", "副本状态要区分", "禁止手改",
-        "剧情优先的混合上下文", "按需查询", "机制速查",
+        "世界观与机制速查上下文", "按需查询", "机制速查",
     ):
         assert marker in text
     assert len(text) < 25000, "AI_CONTEXT 应明显小于原先包含完整机制索引的版本"
