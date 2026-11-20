@@ -125,7 +125,7 @@ def validate_ai_knowledge_base(path: str | Path) -> dict:
             )
 
     collaboration = re.search(
-        rf"^##\\s+{re.escape(AI_COLLAB_HEADING)}\\s*$\\n(?P<body>.*?)(?=^##\\s|\\Z)",
+        rf"^##\s+{re.escape(AI_COLLAB_HEADING)}\s*$\n(?P<body>.*?)(?=^##\s|\Z)",
         text,
         re.MULTILINE | re.DOTALL,
     )
@@ -133,7 +133,7 @@ def validate_ai_knowledge_base(path: str | Path) -> dict:
     if collaboration is None:
         errors.append(f"缺少“## {AI_COLLAB_HEADING}”章节")
     else:
-        collab_numbers = re.findall(r"^(\\d+)\\.\\s", collaboration_body, re.MULTILINE)
+        collab_numbers = re.findall(r"^(\d+)\.\s", collaboration_body, re.MULTILINE)
         if collab_numbers != [str(number) for number in range(1, 7)]:
             errors.append(f"开发协作规范编号必须严格为1~6，实际为：{collab_numbers}")
         for marker in AI_COLLAB_RULE_MARKERS:
