@@ -32,6 +32,9 @@ def test_ai_knowledge_base_contains_current_engineering_and_collaboration_policy
         "手操铁律",
         "死锁判卫冕",
         "当前固定2次",
+        "Arena 固定分支",
+        "默认只保留 `main`",
+        "最终死斗触发条件裁定的沿革",
     ):
         assert marker not in text, marker
 
