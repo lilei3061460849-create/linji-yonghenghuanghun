@@ -67,17 +67,6 @@ class QianjingjiaHook:
         return amount * state.life_loss_multiplier(attacker)
 
 
-class BifenglingHook:
-    """避风铃（priority 50）：**占位登记**，不含任何实现。
-
-    避风铃的两个真实触发点都在 CombatEngine：
-    `_note_dodge()`（每次闪避后 +3 格挡）与 `_trigger_bifengling_zero()`（当前速度归零 +15）。
-    旧的 `on_dodge` 是一份从未被引擎调用的重复实现（`apply_dodge()` 无任何调用点），
-    2026-11-02 删除；本类保留只为在 `CombatHookManager.hooks()` 的顺序表里占住 50 这一格。
-    """
-    priority = 50
-
-
 class DamageRedirectionHook:
     """背负：伤害重定向逻辑（【嫁祸】2026-10-11 已删除，效果与遗物【贪婪契约】重复）"""
     priority = 70
@@ -415,7 +404,6 @@ class CombatHookManager:
         self._hooks: List[Any] = self._sorted([
             *mechanism_hooks,
             QianjingjiaHook(),
-            BifenglingHook(),
             self.redirection_hook,
             self.mitigation_hook,
             self.after_damage_hook,
