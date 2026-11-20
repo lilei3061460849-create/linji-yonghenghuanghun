@@ -1468,6 +1468,7 @@ class CombatEngine(ConstructionMixin, DamageDeathMixin, CostPaymentMixin,
                 monster.departure_reason = ""
                 monster.removed_without_kill = False
                 monster.spawned_round = self.state.current_round
+                monster.seal_reentered_round = self.state.current_round
                 # home/index 缺省视为旧存档：那只可能是怪物，回 enemies。
                 self.state.reattach_to_field(entry.get("home") or "enemies",
                                              entry.get("index"), monster)

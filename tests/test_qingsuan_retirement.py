@@ -5,7 +5,6 @@ from engine.daowen import (RELICIZED_DAOWEN_SLOTS, DaoWenEngine, ResonanceEngine
                            is_reserved_slot)
 from engine.gamedata import REGION_EXCLUSIVE_DAOWEN
 from engine.mechanisms import MECHANISMS
-from engine.mechanisms.ledger import ledger_names, ledger_of
 from engine.models import DaoWen, DaoWenInstance, StatusEffect
 from engine.monsters import make_monster_entity, parse_monster_pool
 from tests.test_world_consumables import engine
@@ -17,7 +16,9 @@ def test_registry_mechanisms_ledger_and_slot_retired():
     assert "清算" not in REGION_EXCLUSIVE_DAOWEN["罪孽都市"]
     assert MECHANISMS.get("清算·结算") is None
     assert MECHANISMS.get("清算·对账") is None
-    assert ledger_names() == []
+    with pytest.raises(ModuleNotFoundError):
+        import importlib
+        importlib.import_module("engine.mechanisms.ledger")
     assert MECHANISMS.get("灾厄轮盘·结算") is not None
     with pytest.raises(ValueError): DaoWenEngine.resolve("清算", 2)
     # 2026-10-31：环重画为八条实纹边，清算不再保留任何占位节点。
@@ -38,7 +39,6 @@ def test_even_unmigrated_legacy_status_and_ledger_cannot_drain_shield():
         result = c.round_start()
         assert m.shield == 50
         assert not any(e.get("type") == "qingsuan" for e in result["effects"])
-    with pytest.raises(ValueError): ledger_of(m, "清算")
 
 
 def test_save_migration_removes_daowen_status_and_residual_account(tmp_path):

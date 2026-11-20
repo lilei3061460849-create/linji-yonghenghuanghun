@@ -537,12 +537,8 @@ def _resolve_option_effect_impl(text: str, engine, event_name: str = "", params=
         if text.startswith("割血点唇"):
             _pay_numeric("生命", 18)
             applied.append("生命18")
-            # 使杀伐获得红煞（对格挡造成双倍伤害）
-            target_dw = next((n for n in ("杀伐",) if n in player.dao_wen), None)
-            if target_dw:
-                inst = player.dao_wen[target_dw]
-                inst.sha_qi = "红煞"
-                applied.append(f"{target_dw}获得红煞：对[目标]格挡造成双倍伤害")
+            engine.state.shards += 30
+            applied.append("获得30碎片")
             return {"applied": applied, "instructions": instructions}
         # 选项3默念心经：无事发生
 
