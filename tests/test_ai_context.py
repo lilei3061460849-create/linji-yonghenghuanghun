@@ -1,16 +1,16 @@
-"""外部 AI 单文件入口：规范源 → AI_CONTEXT.md 的可复现、剧情优先聚合。
+"""外部 AI 单文件入口：规范源 → AI_CONTEXT.md 的可复现聚合。
 
 外部 AI 常只会读取一个 GitHub raw URL，不能保证继续抓 README 的相对链接。AI_CONTEXT.md
-优先保留世界观、角色名单、角色扮演约束与外部推演守则，并附机制速查：道纹／遗物／
+优先保留世界观、角色名单，并附机制速查：道纹／遗物／
 法术／已实现副本各取名称与一行效果（——外部 AI 不知道具体道纹与
 遗物就会胡说八道）。通用规则正文、完整推演规范、副本机制细节与战报仍按需查询，
 不成为新的规则正本。
 
 本文件守住：
 - 生成物逐字等于生成器输出；
-- 来源＝世界观正典＋AI 知识库扮演规范＋机制速查表＋角色名单；
+- 来源＝世界观正典＋机制速查表＋角色名单；
 - 通用规则正文、完整推演规范与副本机制不批量嵌入；
-- 外部推演守则（单角色／选项制）确实被打包；
+- 已废弃的角色扮演与推演约束不得进入生成上下文；
 - README 保留外部 raw 入口，且说明生成物不是事实源。
 """
 from pathlib import Path
@@ -26,8 +26,9 @@ from sim.gen_ai_context import (
 
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / README_FILE
+AI_EXPERIENCE = ROOT / "AI_EXPERIENCE.md"
 
-REQUIRED_SOURCES = {"世界观.md", "AI_EXPERIENCE.md"}
+REQUIRED_SOURCES = {"世界观.md"}
 # AI 上下文必须能回答「这一手怎么打」。
 # 规则正文只以「战斗行动」节的整段摘录进入（见 extract_actions），
 # 其余机制原文照旧按需查询，因此它从 EXCLUDED_MECHANICS_SOURCES 移入速查。
@@ -129,21 +130,44 @@ def test_mechanics_digest_covers_daowen_relics_spells_and_regions():
         assert marker in regions, marker
 
 
-def test_external_roleplay_rules_are_packed_for_outside_ai():
-    """外部推演守则（单角色·选项制）必须进入单文件上下文。"""
-    text = OUTPUT.read_text(encoding="utf-8")
+def test_ai_experience_keeps_development_collaboration_and_drops_old_playbooks():
+    """开发协作规范保留；旧角色扮演与手操脚本从源文件彻底移除。"""
+    content = AI_EXPERIENCE.read_text(encoding="utf-8")
+    assert "## AI开发协作规范" in content
+    assert "## 第四宇宙开发与维护规则（项目最高优先级）" in content
     for marker in (
+        "## AI角色扮演、协作规范与推演铁律",
+        "### 职责划分",
+        "### 角色性格塑造",
         "### 外部推演守则",
-        "只扮演当前角色",
-        "不给其他角色加戏",
-        "类海龟汤",
-        "战斗／逃跑／自定义",
+        "### 行文十诫",
+        "### 推演铁律",
+        "## 战斗推演原子流水线与典型实战示例",
+        "### 白刃战双操推演模式",
+        "## 现行手操经验",
+        "手操铁律",
+        "死锁判卫冕",
+        "待修缺陷",
+        "当前固定2次",
     ):
-        assert marker in text, marker
+        assert marker not in content, marker
+
+
+def test_obsolete_roleplay_and_simulation_constraints_are_not_packed():
+    """旧角色扮演脚本与推演铁律不得重新进入单文件上下文。"""
+    text = OUTPUT.read_text(encoding="utf-8")
+    for marker in ("外部推演守则", "角色性格塑造", "推演铁律", "行文十诫", "白刃战双操推演模式", "剧情优先", "单角色推演"):
+        assert marker not in text, marker
+
+
+def test_worldview_context_includes_both_creation_and_biology():
+    body = _bodies()["世界观.md"]
+    for marker in ("《造物学》与法力结构", "法力结构", "《生物学》与生命蓝图", "育兽术", "蔓生术", "演化术", "归源术", "两门学科的边界与互补"):
+        assert marker in body, marker
 
 
 def test_readme_exposes_the_one_url_external_ai_entry_and_context_contract():
-    """README 暴露 raw 入口；上下文说明剧情优先、事实源边界与按需查询。"""
+    """README 暴露 raw 入口；上下文说明事实源边界与按需查询。"""
     readme = README.read_text(encoding="utf-8")
     assert "[AI_CONTEXT.md](AI_CONTEXT.md)" in readme
     assert ("https://raw.githubusercontent.com/lilei3061460849-create/"
@@ -153,7 +177,7 @@ def test_readme_exposes_the_one_url_external_ai_entry_and_context_contract():
     for marker in (
         "## 使用契约（先读）", "## 来源目录与校验指纹", "## 打包正文",
         "死者之书的遗言不是规则", "副本状态要区分", "禁止手改",
-        "剧情优先的混合上下文", "按需查询", "机制速查",
+        "世界观与机制速查上下文", "按需查询", "机制速查",
     ):
         assert marker in text
     assert len(text) < 25000, "AI_CONTEXT 应明显小于原先包含完整机制索引的版本"
