@@ -45,7 +45,7 @@ def choose_dodge(engine, per_hit_damage: int, *, budget_used: int = 0,
     2026-08-31 新增该参数，供引擎「道纹伤害 → 自动反应法术」路径指定任意被选定方
     （死斗里被反打的一方未必是 state.player），使闪避判定不再被跳过
     （DM 裁定：法术只是自定义触发条件的道纹，道纹要遵守的规则法术一样要遵守；
-    规则正文·推演铁律5 禁止跳过闪避判定）。
+    规则正文·战斗行动规定的目标防御选择）。
     """
     p = entity
     if p is None:
