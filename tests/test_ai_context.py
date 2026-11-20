@@ -146,6 +146,9 @@ def test_ai_experience_keeps_development_collaboration_and_drops_old_playbooks()
         "### 白刃战双操推演模式",
         "## 现行手操经验",
         "手操铁律",
+        "死锁判卫冕",
+        "待修缺陷",
+        "当前固定2次",
     ):
         assert marker not in content, marker
 
