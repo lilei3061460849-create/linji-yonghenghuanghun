@@ -26,6 +26,7 @@ from sim.gen_ai_context import (
 
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / README_FILE
+AI_EXPERIENCE = ROOT / "AI_EXPERIENCE.md"
 
 REQUIRED_SOURCES = {"世界观.md"}
 # AI 上下文必须能回答「这一手怎么打」。
@@ -127,6 +128,26 @@ def test_mechanics_digest_covers_daowen_relics_spells_and_regions():
 
     for marker in ("扭曲都市（一阶", "乱葬岗（二阶"):
         assert marker in regions, marker
+
+
+def test_ai_experience_keeps_development_collaboration_and_drops_old_playbooks():
+    """开发协作规范保留；旧角色扮演与手操脚本从源文件彻底移除。"""
+    content = AI_EXPERIENCE.read_text(encoding="utf-8")
+    assert "## AI开发协作规范" in content
+    assert "## 第四宇宙开发与维护规则（项目最高优先级）" in content
+    for marker in (
+        "## AI角色扮演、协作规范与推演铁律",
+        "### 职责划分",
+        "### 角色性格塑造",
+        "### 外部推演守则",
+        "### 行文十诫",
+        "### 推演铁律",
+        "## 战斗推演原子流水线与典型实战示例",
+        "### 白刃战双操推演模式",
+        "## 现行手操经验",
+        "手操铁律",
+    ):
+        assert marker not in content, marker
 
 
 def test_obsolete_roleplay_and_simulation_constraints_are_not_packed():
