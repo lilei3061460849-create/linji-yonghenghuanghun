@@ -457,7 +457,7 @@ python sim/audit_monsters.py
 
 ## 当前有效的工程约束
 
-- 致死类特殊事件必须随面板输出**进度**（致死进度要像迷失（10/50）那样标明，让 AI 不要自爆）：【迷失】异变X/50、【癌变】本场累计回复X/⌈血限×2⌉、【凡庸】连续空转X/5，统一由 `Entity.lethal_progress()` 渲染成「迷失（10/50）」这类串，出现在 `Entity.to_dict()["lethal_progress"/"lethal_counters"]`、战报资源面板（`battle_report.resource_line`）、`prepare_monster_phase` 每个 actor（仅输出各角色实际适用的致死进度，怪物不显示迷失倒计时）与手操驱动器面板里；阈值唯一事实源＝`Entity.MUTATION_COLLAPSE_THRESHOLD`／`Entity.CANCER_HEAL_MULTIPLIER`／`Entity.MEDIOCRITY_ROUNDS`，`CombatEngine` 的同名量一律引用，禁止再写死数字。
+- 致死类特殊事件必须随面板输出**进度**（致死进度以统一格式显示）：【迷失】异变X/50、【癌变】本场累计回复X/⌈血限×2⌉、【凡庸】连续空转X/5，统一由 `Entity.lethal_progress()` 渲染成「迷失（10/50）」这类串，出现在 `Entity.to_dict()["lethal_progress"/"lethal_counters"]`、战报资源面板（`battle_report.resource_line`）、`prepare_monster_phase` 每个 actor（仅输出各角色实际适用的致死进度，怪物不显示迷失倒计时）与手操驱动器面板里；阈值唯一事实源＝`Entity.MUTATION_COLLAPSE_THRESHOLD`／`Entity.CANCER_HEAL_MULTIPLIER`／`Entity.MEDIOCRITY_ROUNDS`，`CombatEngine` 的同名量一律引用，禁止再写死数字。
 - 出怪配方：`N=随机(1,上界), S=随机(1,N), R_i=随机(1,N-S-ΣR_j), T_i=随机(1,5)` 直到 `S+ΣR_i=N`；上界按阶级递增：一阶沿用 `max(1, 战斗场数-3)` 作为 N 的上界（旧七场序列 1/1/1/1/2/3/4 由「确定值」变为「随机上界」），二阶及以上上界固定为怪物池规模 12；[战始]放 S 只首发，其余每波间隔 T_i 回合增援 R_i 只直到全部入场（一波可进多只，旧的固定波次 R4/R7/R10 已废止）。唯一事实源：`engine/monsters.py::roll_spawn_plan`、`compute_draw_cap`、`engine/api.py::_action_battle_start`、`engine/combat.py::round_start`。
 - 阶级推进与无尽模式：通过某阶最终死斗后解锁下一阶级，持久化到 `data/sealed_candidate.json` 的 `progression` 段；跨轮回生效。五阶死斗胜利后进入无尽模式：怪物池=所有已实现副本合并（`engine/monsters.py::merge_monster_pools`）、强度逐轮递增（`scale_monster_def_for_endless`，每轮血限×1.25、法/速+3）、无尽模式只递增怪物强度，不限制开放地图行动。五阶副本「启示录」正文尚未落地，当前引擎只实现"分支契约+持久化+怪物强度递增"，端到端走 7 场→死斗→终音→封印路径需等启示录副本接入。唯一事实源：`engine/api.py::_advance_region_unlock`、`_advance_endless_cycle`、`unlocked_regions`、`_monster_pool_for_battle`，以及 `tests/test_progression_endless.py`。
 - 一阶怪物面板属性点60，按轮回者同口径审计：`ceil(血限/6) + 2×攻击次数 + 2×攻击力`；改面板后必须跑 `python sim/audit_monsters.py`。本次为**原样恢复 60 点时代的 36 只面板**（攻次/攻力回到 4×4、3×7、1×12 等），其中 9 只单段高攻怪在现行统一计价下超 1 分，血限各 −6（210→204／198→192／222→216／258→252／270→264），成本现为 52–60，全部合规。**口径只允许一处事实源**：测试/报告脚本禁止把面板预算写死成字面数字；现改为取常量 `TIER1_MONSTER_ATTRIBUTE_BUDGET`＋口径哨兵 `_assert_panel_budget_matches_docs()`，标注预算与真面板最大成本不符就直接拒绝跑。
@@ -473,7 +473,6 @@ python sim/audit_monsters.py
 - 死斗按阶级封存（先来后到队列），胜者进阶封存不得再与同阶死斗。
 - 【死者之页】必须经 DM 审核确认后方可记入《死者之书.md》（生平引擎自动生成、遗言本人自定义≤20字）；回音长廊涉及页面选择/写入同样必须停下来询问。
 - 负岳碑与断尾求生使用"预声明后命中条件消费"接口；当前 API 不支持伤害结算中途插入交互。
-- 阶段门禁以 `GameState.phase` 为准；道纹局外唯一例外是【消灾】。
 - 【发现】/雇佣转化先由 `DiceEngine` 列候选再显式选择；【探索】免费发现1件/30碎片发现2件，事件队首制，候选待决时锁定其它推进。
 - 局外【休整】用稳定引用分配；【修行】每点法力属性+2 法限；储能电池使用后立即 +12 法力。
 - 【还债】员工走独立债务轨道（立即参战、无工资、一次付清离队）；裁定D：无力支付部分记为负债，触发阈值负债≥20。
