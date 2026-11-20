@@ -24,7 +24,7 @@
 - 通用规则：`规则正文.md`
 - 世界观正典：`世界观.md`
 - 操作与战报规范：`推演规范.md`
-- AI 开发维护、协作和推演约束：`AI_EXPERIENCE.md`
+- AI 开发维护与协作规范：`AI_EXPERIENCE.md`
 - 引擎架构：`engine/README.md`，具体行为查 `engine/`
 - 结构化规则：`data/rules/*.toml`
 - 道纹、物品、法术、副本：`全道纹索引.md`、`物品索引.md`、`法术索引.md`、`副本索引.md` 及各副本文档
