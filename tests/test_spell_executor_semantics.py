@@ -112,6 +112,23 @@ def test_loop_re_evaluates_condition_every_round():
     assert [r.iteration for r in execution.results] == [1, 2, 3, 4]
 
 
+def test_loop_can_take_a_different_branch_on_each_round():
+    """循环轮次只要求回到同一入口；每轮按当前状态重新选分支，路径无需相同。"""
+    state, combat, player, enemy = _state(player_hp=100, mana=0)
+    _give(player, "燃命", "再生")
+    flow = (
+        "若自身 生命 大于 80 则 发动燃命X于自身 "
+        "否则（若自身 生命 大于 50 则 发动燃命X于自身 "
+        "否则 发动再生X于自身）→循环"
+    )
+    execution = _cast(combat, player, enemy, flow,
+                      [{"x": 10}, {"x": 5}, {"x": 5}], max_iterations=3)
+    assert _daowen_sequence(execution) == ["燃命", "燃命", "再生"]
+    assert [r.iteration for r in execution.results] == [1, 2, 3]
+    assert player.current_hp == 60
+    assert player.current_mana == 10
+    assert execution.status == ExecutionStatus.COMPLETED
+
 # ---------------------------------------------------------------------------
 # LOOP：执行器拥有迭代
 # ---------------------------------------------------------------------------

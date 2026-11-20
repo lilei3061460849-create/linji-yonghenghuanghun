@@ -8,7 +8,7 @@
 
 本文件守住：
 - 生成物逐字等于生成器输出；
-- 来源＝故事正典＋AI 知识库扮演规范＋四张机制速查表＋角色名单；
+- 来源＝世界观正典＋AI 知识库扮演规范＋机制速查表＋角色名单；
 - 通用规则正文、完整推演规范与副本机制不批量嵌入；
 - 外部推演守则（单角色／选项制）确实被打包；
 - README 保留外部 raw 入口，且说明生成物不是事实源。
@@ -27,7 +27,7 @@ from sim.gen_ai_context import (
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / README_FILE
 
-REQUIRED_SOURCES = {"故事文档.md", "AI_EXPERIENCE.md"}
+REQUIRED_SOURCES = {"世界观.md", "AI_EXPERIENCE.md"}
 # AI 上下文必须能回答「这一手怎么打」。
 # 规则正文只以「战斗行动」节的整段摘录进入（见 extract_actions），
 # 其余机制原文照旧按需查询，因此它从 EXCLUDED_MECHANICS_SOURCES 移入速查。
@@ -59,8 +59,8 @@ def test_ai_context_is_exactly_up_to_date_with_its_sources():
         "AI_CONTEXT.md 与当前来源不一致，请跑 python3 sim/gen_ai_context.py")
 
 
-def test_context_covers_story_sources_digests_and_excludes_bulk_mechanics():
-    """来源＝故事正典＋扮演规范＋机制速查＋角色名单；机制原文与副本机制仍按需查询。"""
+def test_context_covers_canonical_sources_digests_and_excludes_bulk_mechanics():
+    """来源＝世界观正典＋扮演规范＋机制速查＋角色名单；机制原文与副本机制仍按需查询。"""
     paths = {source.relative_path for source in context_sources()}
     paths |= {digest.path for digest in digest_sources()}
     assert paths == REQUIRED_SOURCES | DIGEST_SOURCES
@@ -122,6 +122,8 @@ def test_mechanics_digest_covers_daowen_relics_spells_and_regions():
 
     for marker in ("先发制人：所需道纹 杀伐", "镇魔印：所需道纹 封印", "血炼周天："):
         assert marker in spells, marker
+    assert "真理：支付：冷却2场。提出 X 句陈述，由 DM 逐句裁定真伪；任一句被判定为说谎，目标立即命零。" in daowen
+    assert "无法开口" not in daowen, "旧禁言描述不得重新进入派生上下文"
 
     for marker in ("扭曲都市（一阶", "乱葬岗（二阶"):
         assert marker in regions, marker

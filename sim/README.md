@@ -77,10 +77,10 @@ python3 sim/duels/manual_handplay.py              # 例：手动死斗
 | `inter_dungeon_duel.py` | 跨副本跨流派真实手操推演与死斗巅峰决战： |
 | `manual_handplay.py` | 真实手操推演引擎与战报生成器： |
 | `multi_reincarnation_duel.py` | 多世代真实手操推演与死斗胜者经验沉淀系统： |
-| `produce_duel_winners.py` | 产出「经历过死斗」的二阶候选人（用户要求）。 |
+| `produce_duel_winners.py` | 产出经历过死斗的二阶候选人。 |
 | `run_wen_duel.py` | 真实引擎七场清场与封存候选人死斗运行器。 |
 | `tactics_knowledge.py` | 战术知识库工具（战报驱动：根据对局结果持续更新优化战术，淘汰过时打法）。 |
-| `victory_path_tournament.py` | 胜利路径锦标赛（2026-08-22 DM裁定：把各种胜利方法的利弊和胜率都列出来）。 |
+| `victory_path_tournament.py` | 胜利路径锦标赛：比较不同胜利方法的利弊与胜率。 |
 | `wage_settlement.py` | 共享员工工资结算助手。 |
 
 ## `sim/audits/` —— 审计与实验（跑数据找异常、A/B 对照）（14 个）

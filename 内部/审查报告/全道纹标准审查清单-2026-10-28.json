@@ -674,9 +674,9 @@
       "runtime": true,
       "sources": [
         {
-          "path": "engine/daowen.py",
-          "line": 701,
-          "text": "真理X：支付：冷却2场。提出 X 句陈述，要求[目标]逐句言明真理。"
+          "path": "engine/api.py",
+          "line": 4238,
+          "text": "effect_formula=\"提出X句陈述，要求目标逐句言明真理；任一句无法言明则无法开口，持续X回合；真伪由DM裁定\","
         }
       ],
       "name": "真理",

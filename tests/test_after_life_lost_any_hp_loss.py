@@ -139,9 +139,10 @@ def test_after_life_lost_blood_debt_fires_at_zero_mana():
         lg.get("spell") == "不死不休" and lg.get("daowen") == "连击"
         for e in events for lg in (e.get("reaction_logs") or []))
     assert fired, "0 法力时连击类‘失去生命后’反应应照常触发（连击=流血代价，不耗法力）"
-    # 连击 X=1：玩家自流 2 血并对敌方造成 1 点；敌方仍存活。
-    assert enemy.current_hp == 100 - 1
-    assert player.current_hp == 100 - 6 - 2  # 6伤 + 连击自流2（生命2X）
+    # 自动事件监听不设单轮上限：连击每轮自流2血并造成1点伤害，
+    # 直到施法者命零这一规则中断条件出现。初始受伤6点后最多结算47轮。
+    assert player.current_hp == 0
+    assert enemy.current_hp == 100 - 47
 
 
 def test_after_life_lost_fires_on_blood_limit_pressure():

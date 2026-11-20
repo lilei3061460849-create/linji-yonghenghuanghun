@@ -279,6 +279,21 @@ def test_cancer_still_caps_the_loop():
         assert max_iterations == 11 or len(logs) == 22
 
 
+def test_automatic_non_attack_reaction_uses_full_loop_and_no_trigger_action_cost():
+    """自动事件监听按同一循环规则运行，不设单轮上限；触发本身不扣持有者出手。"""
+    engine = _engine_with_loop_spell("auto_loop", hp=40, mana=1)
+    player = engine.state.player
+    # define_spell 本身是主动行动，已支付1次；之后由事件自动触发不再扣出手。
+    actions_after_definition = player.actions_used_this_round
+    assert actions_after_definition == 1
+
+    logs = engine.combat._fire_after_life_lost(player, None)
+    spell_logs = [entry for entry in logs if entry.get("spell") == "周天自持"]
+    assert spell_logs
+    assert max(entry.get("cycle", 0) for entry in spell_logs) > 1
+    assert player.total_healed >= 24
+    assert player.actions_used_this_round == actions_after_definition
+
 def test_unaffordable_pure_cost_loop_interrupts_without_crashing():
     """没有产法力步骤的循环：法力不足时执行期中断，不吞成异常、不半途写状态。"""
     spell = {

@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from engine.combat_hooks import BifenglingHook, CombatHookManager
+from engine.combat_hooks import CombatHookManager
 from engine.daowen import DaoWenEngine
 from engine.models import (DaoWen, DaoWenInstance, Entity, Relic, Spell,
                            StatusEffect)
@@ -356,6 +356,6 @@ def test_dead_code_and_fields_are_gone():
     assert "缄默" not in DaoWenEngine.list_all(), "【缄默】已遗物化，不再是道纹"
     instance = DaoWenInstance(DaoWen("杀伐", "", "", "", ""))
     assert not hasattr(instance, "spent_unique")
-    assert not hasattr(BifenglingHook(), "on_dodge")
     manager = CombatHookManager()
+    assert all(type(hook).__name__ != "BifenglingHook" for hook in manager._hooks)
     assert manager.apply_dodge(Entity("甲", "轮回者"), None) == {}

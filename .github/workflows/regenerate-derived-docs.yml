@@ -2,7 +2,7 @@ name: Regenerate derived documentation
 
 on:
   push:
-    branches: [main, chore/github-native-backlog]
+    branches: [main, chore/github-native-backlog, docs/knowledge-base-cleanup-20261120]
     paths:
       - .github/workflows/regenerate-derived-docs.yml
       - AI_EXPERIENCE.md
@@ -14,7 +14,7 @@ on:
       - 法术索引.md
       - 副本索引.md
       - 副本/*.md
-      - 故事文档.md
+      - 世界观.md
       - sim/gen_rules.py
       - sim/gen_ai_context.py
       - sim/gen_daowen_index.py
@@ -46,8 +46,8 @@ jobs:
       - name: Regenerate source-derived documents
         run: |
           python sim/gen_rules.py
-          python sim/gen_ai_context.py
           python sim/gen_daowen_index.py
+          python sim/gen_ai_context.py
       - name: Commit generated documents when changed
         run: |
           git add -- "死者之书.md" "AI_CONTEXT.md" "全道纹索引.md"
