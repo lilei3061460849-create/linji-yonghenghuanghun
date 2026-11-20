@@ -2,7 +2,7 @@ name: Regenerate derived documentation
 
 on:
   push:
-    branches: [main, chore/github-native-backlog, docs/knowledge-base-cleanup-20261120, cleanup/remove-obsolete-ai-constraints-20261120]
+    branches: [main, chore/github-native-backlog, docs/knowledge-base-cleanup-20261120]
     paths:
       - .github/workflows/regenerate-derived-docs.yml
       - AI_EXPERIENCE.md
