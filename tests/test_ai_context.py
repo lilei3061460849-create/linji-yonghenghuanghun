@@ -1,14 +1,14 @@
 """外部 AI 单文件入口：规范源 → AI_CONTEXT.md 的可复现、剧情优先聚合。
 
 外部 AI 常只会读取一个 GitHub raw URL，不能保证继续抓 README 的相对链接。AI_CONTEXT.md
-优先保留世界观、角色名单、角色扮演约束与外部推演守则，并附机制速查：道纹／遗物／
+优先保留世界观、角色名单，并附机制速查：道纹／遗物／
 法术／已实现副本各取名称与一行效果（——外部 AI 不知道具体道纹与
 遗物就会胡说八道）。通用规则正文、完整推演规范、副本机制细节与战报仍按需查询，
 不成为新的规则正本。
 
 本文件守住：
 - 生成物逐字等于生成器输出；
-- 来源＝世界观正典＋AI 知识库扮演规范＋机制速查表＋角色名单；
+- 来源＝世界观正典＋机制速查表＋角色名单；
 - 通用规则正文、完整推演规范与副本机制不批量嵌入；
 - 外部推演守则（单角色／选项制）确实被打包；
 - README 保留外部 raw 入口，且说明生成物不是事实源。
@@ -27,7 +27,7 @@ from sim.gen_ai_context import (
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / README_FILE
 
-REQUIRED_SOURCES = {"世界观.md", "AI_EXPERIENCE.md"}
+REQUIRED_SOURCES = {"世界观.md"}
 # AI 上下文必须能回答「这一手怎么打」。
 # 规则正文只以「战斗行动」节的整段摘录进入（见 extract_actions），
 # 其余机制原文照旧按需查询，因此它从 EXCLUDED_MECHANICS_SOURCES 移入速查。
@@ -129,17 +129,17 @@ def test_mechanics_digest_covers_daowen_relics_spells_and_regions():
         assert marker in regions, marker
 
 
-def test_external_roleplay_rules_are_packed_for_outside_ai():
-    """外部推演守则（单角色·选项制）必须进入单文件上下文。"""
+def test_obsolete_roleplay_and_simulation_constraints_are_not_packed():
+    """旧角色扮演脚本与推演铁律不得重新进入单文件上下文。"""
     text = OUTPUT.read_text(encoding="utf-8")
-    for marker in (
-        "### 外部推演守则",
-        "只扮演当前角色",
-        "不给其他角色加戏",
-        "类海龟汤",
-        "战斗／逃跑／自定义",
-    ):
-        assert marker in text, marker
+    for marker in ("外部推演守则", "角色性格塑造", "推演铁律", "行文十诫", "白刃战双操推演模式"):
+        assert marker not in text, marker
+
+
+def test_worldview_context_includes_both_creation_and_biology():
+    body = _bodies()["世界观.md"]
+    for marker in ("《造物学》与法力结构", "法力结构", "《生物学》与生命蓝图", "育兽术", "蔓生术", "演化术", "归源术", "两门学科的边界与互补"):
+        assert marker in body, marker
 
 
 def test_readme_exposes_the_one_url_external_ai_entry_and_context_contract():
