@@ -122,6 +122,7 @@ def test_mechanics_digest_covers_daowen_relics_spells_and_regions():
 
     for marker in ("先发制人：所需道纹 杀伐", "镇魔印：所需道纹 封印", "血炼周天："):
         assert marker in spells, marker
+    assert "真理：支付：冷却2场。提出 X 句陈述，由 DM 逐句裁定真伪；任一句被判定为说谎，目标立即命零。" in daowen
 
     for marker in ("扭曲都市（一阶", "乱葬岗（二阶"):
         assert marker in regions, marker
